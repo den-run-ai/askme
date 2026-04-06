@@ -104,6 +104,7 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 | No seed files | No state.json/plan.json needed |
 | Failure recovery | Replan loop carries completed tasks forward; errors reset per replan |
 | Token efficiency | Executor gets slim state (~150-200 tok) vs full state; planner gets full context |
+| Observability | `log()` helper adds `[HH:MM:SS]` timestamps + `(Xs)` durations to all activities |
 
 ## Usage
 

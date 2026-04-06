@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import sys, json, subprocess, requests, re
+import sys, json, subprocess, requests, re, time
 from pathlib import Path
+
+
+def log(msg):
+    """Timestamped print for real-time monitoring."""
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 API = "http://localhost:8080/v1/chat/completions"
 MAX_REPLANS = 3
@@ -49,7 +54,7 @@ def ask_llm(messages, max_tokens=256, think=False):
             return json.loads(text)
         except json.JSONDecodeError:
             if attempt < MAX_LLM_RETRIES:
-                print(f"  [retry {attempt+1}] JSON parse failed, raw: {text[:120]}", flush=True)
+                log(f"  [retry {attempt+1}] JSON parse failed, raw: {text[:120]}")
             else:
                 raise
 
@@ -113,40 +118,45 @@ def execute(action, working_dir="."):
 
 def run(user_prompt):
     state = {"completed_tasks": [], "errors": []}
+    t_run = time.time()
+    log(f"Prompt: {user_prompt}")
 
     for replan in range(MAX_REPLANS):
-        print(f"\n{'='*40}")
-        print(f"Planning (attempt {replan + 1}/{MAX_REPLANS})...")
+        log("=" * 40)
+        t_plan = time.time()
+        log(f"Planning (attempt {replan + 1}/{MAX_REPLANS})...")
         plan = get_plan(user_prompt, state)
         state["errors"] = []  # reset errors each replan; planner already saw them
         tasks = plan.get("tasks", [])
-        print(f"Plan: {tasks}")
+        log(f"Plan ({time.time()-t_plan:.1f}s): {tasks}")
 
         all_done = True
         for i, task in enumerate(tasks):
             state["current_task"] = task
             state["task_index"] = f"{i + 1}/{len(tasks)}"
             state["last_steps"] = []
-            print(f"\n--- Task {i + 1}/{len(tasks)}: {task} ---")
+            t_task = time.time()
+            log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             task_done = False
             for step in range(MAX_STEPS):
+                t_step = time.time()
                 action = get_step(task, state, goal=user_prompt)
                 act = action.get("action", "")
-                print(f"  [{step + 1}] {act}: {action.get('arg', '')[:80]}")
+                log(f"  [{step + 1}] {act}: {action.get('arg', '')[:80]}")
 
                 if act == "done":
                     task_done = True
                     break
                 if act == "fail":
                     reason = action.get("reasoning", "no reason")
-                    print(f"  FAIL: {reason}")
+                    log(f"  FAIL ({time.time()-t_step:.1f}s): {reason}")
                     state["errors"].append(f"Task '{task}': {reason}")
                     break
 
                 result = execute(action)
                 ok_str = "OK" if result["ok"] else "FAIL"
-                print(f"  -> {ok_str}: {result['output'][:80]}")
+                log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
                 state["last_steps"].append({
                     "action": act,
@@ -160,17 +170,18 @@ def run(user_prompt):
 
             if task_done:
                 state["completed_tasks"].append(task)
-                print(f"  Task complete.")
+                log(f"  Task complete. ({time.time()-t_task:.1f}s)")
             else:
                 all_done = False
-                print(f"  Task failed, will replan.")
+                log(f"  Task failed, will replan. ({time.time()-t_task:.1f}s)")
                 break
 
         if all_done:
-            print(f"\nAll tasks complete.")
+            log(f"All tasks complete. ({time.time()-t_run:.1f}s total)")
             return
 
-    print(f"\nExhausted {MAX_REPLANS} replan attempts.")
+    log(f"Exhausted {MAX_REPLANS} replan attempts. ({time.time()-t_run:.1f}s total)")
+    log(f"Errors: {state['errors']}")
 
 
 if __name__ == "__main__":
