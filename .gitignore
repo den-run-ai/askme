@@ -210,3 +210,19 @@ __marimo__/
 log.jsonl
 state.json
 plan.json
+
+# Agent output artifacts
+data.txt
+test.txt
+main
+main.c
+
+# Local setup notes
+*.setup.local.md
+*.local.md
+run.py
+plan.md
+gemma4-e4b-setup.md
+
+# Claude Code local settings
+.claude/settings.local.json

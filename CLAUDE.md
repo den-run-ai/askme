@@ -74,10 +74,8 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 ## Files
 
 - `askme.py` — the agent (self-contained, ~336 lines)
-- `run.py` — older state-file-driven agent loop (legacy, uses `state.json` + `plan.json`)
 - `test_agent.py` — 56 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
-- `nanagent.md` — detailed architecture doc and design decisions
-- `plan.md` — setup history, model inventory, server config reference
+- `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `.env` — OPENROUTER_API_KEY (not committed)
 
 ## Testing Conventions

@@ -540,3 +540,48 @@ Same test structure as local (`TestOpenRouterEasy`, `TestOpenRouterMedium`, `Tes
 - Parallel/branching workflows
 - Interactive programs
 - Tasks needing >~30 LLM calls (too slow)
+
+## Server Configuration Reference
+
+### Model Inventory
+
+| Model | File | Size | Architecture | GPU | Status |
+|---|---|---|---|---|---|
+| **Gemma 4 E4B** Q4_K_M | `models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf` | ~5.0 GB | MoE 12B (4B active) | Full Metal | **Primary** |
+| Qwen 3.5 9B Q4_K_M | `models/qwen35-9b/Qwen3.5-9B-Q4_K_M.gguf` | 5.3 GB | Dense 9B | Full Metal | Legacy |
+| Qwen 3.5 35B-A3B UD-IQ3_S | `models/qwen35/Qwen3.5-35B-A3B-UD-IQ3_S.gguf` | 12.7 GB | MoE 35B (3B active) | CPU only | Legacy |
+
+### KV Cache & Prompt Caching
+
+Key flags for agentic use (defaults are suboptimal for sequential agent calls):
+
+| Flag | What it does | Default | Recommended |
+|---|---|---|---|
+| `--cache-prompt` | Prompt caching within a slot | Enabled | Keep |
+| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 |
+| `--slot-save-path DIR` | Persist KV cache to disk (survives restarts) | Off | `/tmp/llama-cache` |
+| `-np N` | Parallel slots (auto-detects 4 on M1, splits context) | Auto | 1 |
+| `--ctx-size N` | Context per slot (with -np 1, full context for agent) | 2048 | 16384 |
+| `--flash-attn on` | Saves GPU memory significantly | Off | On |
+
+### Save/Restore KV State via API
+
+```bash
+# Save slot 0 (e.g. after processing system prompt)
+curl http://localhost:8080/slots/0?action=save -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "agent-system-prompt"}'
+
+# Restore it later (instant — skips reprocessing)
+curl http://localhost:8080/slots/0?action=restore -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "agent-system-prompt"}'
+```
+
+### 16GB M1 Lessons Learned
+
+- **Gemma 4 E4B is the sweet spot** — MoE with 4B active params, ~5.0GB Q4_K_M, full Metal GPU
+- **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
+- **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
+- **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
+- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default)
