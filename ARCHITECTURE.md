@@ -35,11 +35,15 @@ python3 agent/askme.py "create hello.c, compile it, run it"
 ```
 
 **Key functions:**
+- `preflight_probe(working_dir)` — deterministic environment probe. Returns structured dict: platform, arch, working_dir, available/missing tools, package managers, dir listing. Called once before first plan.
+- `get_policy()` — returns execution policy dict (`allow_system_installs`, `allow_network`). Injected into both planner and executor state.
 - `ask_llm(messages, max_tokens, think)` — calls llama-server, strips `<think>` tags (closed and unclosed) as safety net, code fences, extracts JSON from mixed text, retries on parse failure (up to 2 retries).
-- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=PLANNER_MAX_TOKENS=768, think=True). Receives full state including completed tasks and errors.
-- `get_step(task, state, goal="")` — asks LLM for next action within a task (max_tokens=256). Receives a slim state: only current task, task index, and last 3 steps (sliding window). The original user prompt is passed as a `GOAL:` line for context (e.g., file paths, specifics) but completed task history and errors are excluded.
-- `execute(action, working_dir)` — runs shell/write/read/done/fail actions
-- `run(user_prompt)` — outer loop: plan → execute tasks → replan on failure. Resets errors after each replan.
+- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=PLANNER_MAX_TOKENS=768, think=True). Receives full state including completed tasks, typed/summarized errors, environment, and policy.
+- `get_step(task, state, goal="")` — asks LLM for next action within a task (max_tokens=256). Receives a slim state: current task, task index, last 3 steps, missing_tools, and policy. Goal-aware completion — executor must satisfy full task, not just one step.
+- `classify_error(output, action)` — categorizes errors as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`.
+- `summarize_errors(errors)` — groups raw errors by type, deduplicates, caps at 3 per type for planner.
+- `execute(action, working_dir)` — runs shell/write/read/done/fail actions. Uses command-aware timeouts.
+- `run(user_prompt)` — outer loop: preflight → plan → execute tasks → replan on failure. Resets errors after each replan.
 
 **State** is an in-memory dict (no files). Planner and executor see different views:
 
@@ -47,7 +51,9 @@ Planner (`get_plan`) receives full state:
 ```json
 {
   "completed_tasks": ["task1"],
-  "errors": ["Step failed: shell gcc: ..."]
+  "errors": ["[missing_tool] shell go run: /bin/sh: go: command not found"],
+  "environment": {"platform": "darwin", "arch": "arm64", "available_tools": ["python3", "gcc"], "missing_tools": ["go"], "package_managers": ["brew"], "dir_listing": ["main.go"]},
+  "policy": {"allow_system_installs": false, "allow_network": true}
 }
 ```
 
@@ -60,7 +66,9 @@ Executor (`get_step`) receives slim state (token-optimized):
   "completed_tasks": ["create hello.c"],
   "last_steps": [
     {"action": "write", "arg": "hello.c", "ok": true, "output": "Wrote hello.c"}
-  ]
+  ],
+  "missing_tools": ["go"],
+  "policy": {"allow_system_installs": false, "allow_network": true}
 }
 ```
 Key state design decisions:
@@ -85,7 +93,11 @@ Key state design decisions:
 | `MAX_STEP_HISTORY` | 3 | Sliding window of recent steps sent to executor |
 | `MAX_LLM_RETRIES` | 2 | Retries per LLM call on JSON parse failure |
 | `MAX_INPUT` | 300 | Max chars per field sent to executor |
-| Shell timeout | 30s | Per-command timeout |
+| `SHELL_TIMEOUT` | 30s | Default per-command timeout |
+| `SHELL_TIMEOUT_LONG` | 120s | Timeout for install/build commands |
+| `SHELL_TIMEOUT_MAX` | 300s | Hard cap for model-specified timeout hint |
+| `ALLOW_SYSTEM_INSTALLS` | false | Whether agent may install software |
+| `ALLOW_NETWORK` | true | Reserved for future use |
 | Step output | 100 chars | Max output stored per step in history |
 | Step tokens (local) | 256 | Max completion tokens for executor (local LLM) |
 | Step tokens (OpenRouter) | 512 | Max completion tokens for executor (remote LLM) |
@@ -506,9 +518,8 @@ if last and last[0]["action"] == act:
     if act == "write" and prev.get("arg", "") == action.get("arg", ""):
         # Write: compare content — same content = loop, different content = fix
         if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
-            log(f"  [{step + 1}] auto-done (duplicate write, same content)")
-            task_done = True
-            break
+            log(f"  [{step + 1}] skip (duplicate write, same content)")
+            continue
     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
         # Shell: same command — ok=loop, fail=stuck
         if prev.get("ok"):

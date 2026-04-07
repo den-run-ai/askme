@@ -23,6 +23,9 @@ python3 askme.py "your request here"
 # Run via OpenRouter (requires OPENROUTER_API_KEY in .env)
 LLM_BACKEND=openrouter python3 askme.py "your request here"
 
+# Allow the agent to install software (disabled by default)
+ALLOW_SYSTEM_INSTALLS=1 python3 askme.py "your request here"
+
 # Start llama-server (optimized for agentic use)
 cd /Users/macmone/code/llama.cpp
 mkdir -p /tmp/llama-cache
@@ -55,10 +58,11 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
 ## Architecture
 
-`askme.py` implements a **Plan → Execute → Replan** loop:
+`askme.py` implements a **Preflight → Plan → Execute → Replan** loop:
 
-1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, errors) and outputs `{"tasks": ["task1", "task2", ...]}`. Always uses thinking (`think=True`) with `PLANNER_MAX_TOKENS=768` — reasoning helps produce specific task descriptions with content hints, avoid overlapping tasks, and diagnose root causes on replans.
-2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover) and proposes one action at a time: `shell`, `write`, `read`, `done`, or `fail`.
+0. **Preflight** (`preflight_probe`) — Before the first plan, deterministically probes: platform, arch, working dir listing, available/missing tools (fixed allowlist: python3, go, node, gcc, cc, make, cargo, rustc, java, javac), and package managers (brew, apt-get, dnf, pacman, apk). Feeds structured dict + execution policy into planner state.
+1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, typed errors, environment, policy) and outputs `{"tasks": ["task1", "task2", ...]}`. Always uses thinking (`think=True`) with `PLANNER_MAX_TOKENS=768`. Errors are summarized into typed categories (`[missing_tool]`, `[timeout]`, etc.) before reaching the planner.
+2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `read`, `done`, or `fail`. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
 
 ### Working directory isolation
@@ -73,17 +77,30 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - Shell output: `r.stdout[:300] + r.stderr[-300:]` — tail-truncates stderr to keep actual error messages
 - Input caps: `MAX_INPUT=300` chars per field sent to executor — prevents path bloat eating context
 - Auto-done: if `get_step()` raises after a successful step, treat as implicit task completion
+- **Typed failure classification**: `classify_error()` categorizes errors as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Error types are stored in step entries and used for summarization.
+- **Error summarization**: `summarize_errors()` groups raw errors by type, deduplicates, and caps at 3 per type before passing to planner. Planner sees `[missing_tool] go: command not found` not raw strings.
+
+### Execution policy
+- `ALLOW_SYSTEM_INSTALLS` (env var, default `false`) — controls whether the agent may install software. When false, planner and executor are instructed to fail fast with a prerequisite message instead of attempting installation.
+- `ALLOW_NETWORK` (env var, default `true`) — reserved for future use.
+- Policy is injected into both planner and executor state so both see the constraints.
+
+### Command-aware timeouts
+- Default shell timeout: 30s (`SHELL_TIMEOUT`)
+- Install/build commands: 120s (`SHELL_TIMEOUT_LONG`) — matches patterns like `install`, `cmake`, `cargo build`, `brew`
+- Model-specified hint: `action.timeout` field, capped at 300s (`SHELL_TIMEOUT_MAX`), minimum 5s
+- Timeout failures are exempt from the duplicate guard's "same shell failed twice" rule — they get one retry with the longer timeout.
 
 ### State split
-- **Planner** sees: `completed_tasks`, `errors` (full context for replanning)
-- **Executor** sees: `task`, `task_index`, `step` counter, `completed_tasks[-3:]`, `last_steps[-3:]` with cross-task carryover (last step from previous task preserved)
+- **Planner** sees: `completed_tasks`, `errors` (typed/summarized), `environment` (platform, arch, tools, pkg managers, dir listing), `policy`
+- **Executor** sees: `task`, `task_index`, `step` counter, `completed_tasks[-3:]`, `last_steps[-3:]` with cross-task carryover, `missing_tools`, `policy`
 - Write/read args use **basename** in slim state (e.g. `main.c` not `/full/path/main.c`)
 - Write output says `"Wrote main.c"` (basename) — critical for LLM to recognize file was created
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~389 lines)
-- `test_agent.py` — 73 unit tests (mocked) + 4 server config tests + 12 local integration + 11 OpenRouter integration tests
+- `askme.py` — the agent (self-contained, ~579 lines)
+- `test_agent.py` — 112 unit tests (mocked) + 4 server config tests + 12 local integration + 11 OpenRouter integration tests
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
@@ -94,9 +111,15 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `TestCrossTaskState` — verifies completed_tasks and step carryover across tasks
 - `TestOutputFormatting` — verifies basename in write output and slim state args
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
-- `TestDuplicateGuard` — verifies per-action-type duplicate detection and loop prevention
+- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write duplicates skip and continue, shell duplicates auto-done/fail
 - `TestCacheWorkaround` — verifies slot save/restore lifecycle, non-fatal failure, backend gating
 - `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, system prompt includes specificity hints, null-content retry
+- `TestPreflightProbe` — verifies environment probing returns platform, arch, tools, dir listing, package managers; verifies run() injects into planner state
+- `TestExecutionPolicy` — verifies policy defaults, env override, planner/executor prompt rules, executor sees missing_tools and policy
+- `TestFailureClassification` — verifies error categorization (timeout, missing_tool, permission_denied, missing_file, compile_error, unknown), error_type in results
+- `TestCommandAwareTimeout` — verifies default/install/build/model-hint timeouts, timeout retry not blocked by duplicate guard
+- `TestErrorSummarization` — verifies typed grouping, deduplication, per-type caps, planner receives summarized errors
+- `TestCompletionSemantics` — verifies old "any successful step → done" rule removed, goal-aware completion rule present
 - Integration tests use `int_run()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
 - Local integration tests are skipped automatically if llama-server isn't running on `:8080`
 - OpenRouter integration tests are skipped automatically if `OPENROUTER_API_KEY` is not set
@@ -104,7 +127,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Safety Limits
 
-All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, shell timeout 30s. Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). These exist to prevent runaway loops with a slow local LLM.
+All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, `SHELL_TIMEOUT=30s` (default), `SHELL_TIMEOUT_LONG=120s` (install/build), `SHELL_TIMEOUT_MAX=300s` (hard cap). Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). `ALLOW_SYSTEM_INSTALLS=false` by default. These exist to prevent runaway loops with a slow local LLM.
 
 ## Known Limitations
 
@@ -112,7 +135,7 @@ All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=1
 Previously believed to be a model capability gap. Root cause was an **empty state bug** — executor received empty `completed_tasks` and `last_steps`, giving the model no context to recognize task completion. After fix, the local 12B model emits `{"action": "done"}` reliably. See local integration test results in [ARCHITECTURE.md](ARCHITECTURE.md#local-integration-test-results-2026-04-07).
 
 ### Action Looping (Gemma 4 26B via OpenRouter) — Mitigated
-The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → auto-done, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).
+The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → skip duplicate and continue, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).
 
 ### `--cache-reuse` Broken for Gemma 4 — No Viable Workaround
 [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) — iSWA shared KV layers break prefix matching. Server logs `cache_reuse is not supported by this context`. Manual slot save/restore workaround was implemented (`CACHE_WORKAROUND=1`) but is **counterproductive** — same iSWA bug affects slot restore too, making requests 40% slower. Code remains (off by default) for retesting when upstream fixes land. See [gemma4-setup.md](gemma4-setup.md) Phase 2.

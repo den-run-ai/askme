@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import sys, json, subprocess, requests, re, time, os, tempfile
+import sys, json, subprocess, requests, re, time, os, tempfile, shutil
 from pathlib import Path
 
 
@@ -28,6 +28,10 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 
 CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
+
+# Execution policy — controls what the agent is allowed to do
+ALLOW_SYSTEM_INSTALLS = os.environ.get("ALLOW_SYSTEM_INSTALLS", "0") == "1"
+ALLOW_NETWORK = os.environ.get("ALLOW_NETWORK", "1") == "1"
 
 if LLM_BACKEND == "openrouter":
     API = "https://openrouter.ai/api/v1/chat/completions"
@@ -76,6 +80,52 @@ def _restore_cache():
         pass
 
 
+PROBE_TOOLS = ["python3", "go", "node", "gcc", "cc", "make", "cargo", "rustc", "java", "javac"]
+PROBE_PKG_MANAGERS = ["brew", "apt-get", "dnf", "pacman", "apk"]
+
+
+def preflight_probe(working_dir="."):
+    """Deterministic environment probe. Returns structured dict for planner state."""
+    import platform
+    env = {
+        "platform": platform.system().lower(),  # "darwin", "linux", "windows"
+        "arch": platform.machine(),              # "arm64", "x86_64"
+        "working_dir": str(Path(working_dir).resolve()),
+    }
+    # Available tools (fixed allowlist, no prompt inference)
+    # Uses shutil.which() — cross-platform, works on Windows/macOS/Linux
+    available = []
+    missing = []
+    for tool in PROBE_TOOLS:
+        if shutil.which(tool):
+            available.append(tool)
+        else:
+            missing.append(tool)
+    env["available_tools"] = available
+    env["missing_tools"] = missing
+    # Package managers
+    pkg_managers = []
+    for pm in PROBE_PKG_MANAGERS:
+        if shutil.which(pm):
+            pkg_managers.append(pm)
+    env["package_managers"] = pkg_managers
+    # Dir listing (compact)
+    try:
+        entries = sorted(os.listdir(working_dir))[:20]
+        env["dir_listing"] = entries if entries else ["(empty)"]
+    except Exception:
+        env["dir_listing"] = ["(error reading dir)"]
+    return env
+
+
+def get_policy():
+    """Return execution policy dict for planner/executor state."""
+    return {
+        "allow_system_installs": ALLOW_SYSTEM_INSTALLS,
+        "allow_network": ALLOW_NETWORK,
+    }
+
+
 MAX_REPLANS = 3
 MAX_TASKS = 10
 MAX_STEPS = 10
@@ -90,15 +140,20 @@ Keep descriptions short (under 15 words each) but include key details:
 - File content hints: which includes, defines, or imports are needed
 - Use relative filenames (e.g. main.c not /full/path/main.c)
 - Never create a task for work already in completed_tasks
+POLICY RULES:
+- Check state.environment.missing_tools — if a required tool is missing and policy.allow_system_installs is false, do NOT plan installation tasks. Instead plan a single task that fails with a prerequisite message listing what is missing.
+- If policy.allow_system_installs is true, you may plan installation tasks using available package managers from state.environment.package_managers.
+- Respect state.environment.platform — do not use Linux commands on macOS or vice versa.
 Output ONLY valid JSON. No markdown, no explanation.
 Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 
 SYSTEM_STEP = """You are a task executor. Output ONLY valid JSON. No markdown, no explanation.
 Propose ONE action at a time. Use relative paths (e.g. main.c not /full/path/main.c).
 CRITICAL RULES:
-- If last_steps shows a write/shell with ok=true, that action SUCCEEDED. Emit {"action":"done"} immediately.
+- Emit {"action":"done"} ONLY when the FULL task description is satisfied, not after a single successful step. Example: if the task is "create, compile, and run X", writing the file is not done — you must also compile and run.
 - If last_steps shows the same error 2+ times, emit {"action":"fail"}.
 - completed_tasks are DONE — never redo their work.
+- If a required tool is in missing_tools and policy.allow_system_installs is false, emit {"action":"fail"} with reasoning explaining the missing prerequisite. Do NOT attempt to install software.
 Actions: shell, write, read, done, fail.
 Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"""
 
@@ -195,10 +250,69 @@ def ask_llm(messages, max_tokens=256, think=False):
                 raise
 
 
+_KNOWN_ERROR_TYPES = {"timeout", "missing_tool", "permission_denied", "missing_file",
+                      "compile_error", "stuck_loop", "unknown"}
+
+
+def _extract_error_type(err):
+    """Extract [type] prefix from error string if present, else classify by heuristic."""
+    # Check for existing [type] prefix from classify_error / run loop
+    if err.startswith("["):
+        bracket_end = err.find("]")
+        if bracket_end > 1:
+            candidate = err[1:bracket_end]
+            if candidate in _KNOWN_ERROR_TYPES:
+                return candidate, err[bracket_end + 2:]  # strip "[type] " prefix
+    # Fallback: heuristic classification
+    err_lower = err.lower()
+    if "timeout" in err_lower:
+        return "timeout", err
+    if "command not found" in err_lower:
+        return "missing_tool", err
+    if "permission denied" in err_lower:
+        return "permission_denied", err
+    if "no such file" in err_lower:
+        return "missing_file", err
+    if "stuck" in err_lower or "failed twice" in err_lower:
+        return "stuck_loop", err
+    if "error:" in err_lower or "syntax error" in err_lower:
+        return "compile_error", err
+    return "unknown", err
+
+
+def summarize_errors(errors):
+    """Compact error strings into typed summary for planner.
+    Preserves [type] prefixes from classify_error, groups by type, deduplicates."""
+    if not errors:
+        return []
+    summarized = {}
+    for err in errors:
+        etype, msg = _extract_error_type(err)
+        if etype not in summarized:
+            summarized[etype] = []
+        short = msg[:120]
+        if short not in summarized[etype]:
+            summarized[etype].append(short)
+    result = []
+    for etype, msgs in summarized.items():
+        for msg in msgs[:3]:  # max 3 per type
+            result.append(f"[{etype}] {msg}")
+    return result
+
+
 def get_plan(user_prompt, state):
+    # Include environment and policy in planner state
+    plan_state = dict(state)
+    if "environment" not in plan_state:
+        plan_state["environment"] = {}
+    if "policy" not in plan_state:
+        plan_state["policy"] = get_policy()
+    # Summarize errors for compact, typed diagnostics
+    if plan_state.get("errors"):
+        plan_state["errors"] = summarize_errors(plan_state["errors"])
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
-        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
+        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
     ], max_tokens=PLANNER_MAX_TOKENS, think=True)  # always think — replans need it more
 
 
@@ -229,6 +343,11 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
     completed = state.get("completed_tasks", [])
     if completed:
         slim["completed_tasks"] = [t[:80] for t in completed[-3:]]
+    # Include missing tools and policy so executor can fail fast on prerequisites
+    env = state.get("environment", {})
+    if env.get("missing_tools"):
+        slim["missing_tools"] = env["missing_tools"]
+    slim["policy"] = state.get("policy", get_policy())
     goal_line = f"GOAL:\n{goal[:MAX_INPUT]}\n\n" if goal else ""
     user_msg = f"{goal_line}TASK:\n{task[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(slim)}"
     # Use higher token budget for OpenRouter (faster model, needs room for write content + reasoning)
@@ -239,18 +358,60 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
     ], max_tokens=step_tokens, think=think)
 
 
+def classify_error(output, action="shell"):
+    """Classify an error output into a typed category for structured diagnostics."""
+    out = output.lower()
+    if "timeout" in out or output == "TIMEOUT":
+        return "timeout"
+    if "command not found" in out:
+        return "missing_tool"
+    if "permission denied" in out:
+        return "permission_denied"
+    if "no such file" in out or "no such file or directory" in out:
+        return "missing_file"
+    if "syntax error" in out or "error:" in out:
+        return "compile_error"
+    return "unknown"
+
+
+# Command patterns that need longer timeouts
+_LONG_TIMEOUT_PATTERNS = [
+    "install", "update", "upgrade",  # package managers
+    "cmake", "make", "cargo build", "go build",  # build tools
+    "npm install", "pip install", "brew ",  # specific installers
+]
+SHELL_TIMEOUT = 30       # default
+SHELL_TIMEOUT_LONG = 120  # for install/build commands
+SHELL_TIMEOUT_MAX = 300   # hard cap for model-specified timeout
+
+
+def _get_shell_timeout(cmd, hint=None):
+    """Return timeout for a shell command. Uses longer timeout for install/build patterns."""
+    if hint is not None:
+        return min(max(int(hint), 5), SHELL_TIMEOUT_MAX)
+    cmd_lower = cmd.lower()
+    for pattern in _LONG_TIMEOUT_PATTERNS:
+        if pattern in cmd_lower:
+            return SHELL_TIMEOUT_LONG
+    return SHELL_TIMEOUT
+
+
 def execute(action, working_dir="."):
     act = action.get("action", "")
     if act == "shell":
         try:
+            timeout = _get_shell_timeout(action["arg"], action.get("timeout"))
             r = subprocess.run(
                 action["arg"], shell=True, capture_output=True,
-                text=True, timeout=30, cwd=working_dir
+                text=True, timeout=timeout, cwd=working_dir
             )
             out = r.stdout[:MAX_RESULT] + r.stderr[-MAX_RESULT:]
-            return {"ok": r.returncode == 0, "output": out.strip() or "(no output)"}
+            result = {"ok": r.returncode == 0, "output": out.strip() or "(no output)"}
+            if not result["ok"]:
+                result["error_type"] = classify_error(result["output"], "shell")
+            return result
         except subprocess.TimeoutExpired:
-            return {"ok": False, "output": "TIMEOUT"}
+            return {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}
     elif act == "write":
         try:
             p = Path(action["arg"])
@@ -265,7 +426,8 @@ def execute(action, working_dir="."):
             p.write_text(content)
             return {"ok": True, "output": f"Wrote {p.name}"}
         except Exception as e:
-            return {"ok": False, "output": str(e)[:MAX_RESULT]}
+            out = str(e)[:MAX_RESULT]
+            return {"ok": False, "output": out, "error_type": classify_error(out, "write")}
     elif act == "read":
         try:
             p = Path(action["arg"])
@@ -273,7 +435,8 @@ def execute(action, working_dir="."):
                 p = Path(working_dir) / p
             return {"ok": True, "output": p.read_text()[:MAX_RESULT]}
         except Exception as e:
-            return {"ok": False, "output": str(e)[:MAX_RESULT]}
+            out = str(e)[:MAX_RESULT]
+            return {"ok": False, "output": out, "error_type": classify_error(out, "read")}
     elif act == "done":
         return {"ok": True, "output": "task_complete"}
     elif act == "fail":
@@ -289,6 +452,16 @@ def run(user_prompt, working_dir=None):
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
+    # Preflight: probe environment and set policy
+    env = preflight_probe(working_dir)
+    state["environment"] = env
+    state["policy"] = get_policy()
+    log(f"Environment: platform={env['platform']} arch={env['arch']}")
+    log(f"Available tools: {env['available_tools']}")
+    if env["missing_tools"]:
+        log(f"Missing tools: {env['missing_tools']}")
+    log(f"Package managers: {env['package_managers']}")
+    log(f"Policy: allow_system_installs={state['policy']['allow_system_installs']}")
     _warm_cache()
 
     for replan in range(MAX_REPLANS):
@@ -313,6 +486,7 @@ def run(user_prompt, working_dir=None):
 
             task_done = False
             use_think = False  # enable thinking after failed step execution
+            dup_skip_count = 0  # consecutive duplicate write skips
             for step in range(MAX_STEPS):
                 t_step = time.time()
                 try:
@@ -350,19 +524,36 @@ def run(user_prompt, working_dir=None):
                     prev = last[0]
                     if act == "write" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
-                            log(f"  [{step + 1}] auto-done (duplicate write, same content)")
-                            task_done = True
-                            break
+                            dup_skip_count += 1
+                            log(f"  [{step + 1}] skip (duplicate write, same content)")
+                            if dup_skip_count >= 2:
+                                # Break livelock: inject synthetic step so model sees new state
+                                state["last_steps"].append({
+                                    "action": "write", "arg": action.get("arg", ""),
+                                    "ok": True,
+                                    "output": f"Already written (skipped {dup_skip_count}x). Choose a different action or emit done."
+                                })
+                                use_think = True
+                            continue
                     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok"):
                             log(f"  [{step + 1}] auto-done (duplicate successful shell)")
                             task_done = True
                             break
+                        elif prev.get("error_type") == "timeout":
+                            # Bump timeout for retry: read actual timeout from previous step,
+                            # not from fresh action (which won't have prior bumps)
+                            prev_timeout = prev.get("_timeout",
+                                                    _get_shell_timeout(action.get("arg", "")))
+                            bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
+                            action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
+                            log(f"  [{step + 1}] retrying after timeout ({action['timeout']}s)")
                         else:
                             log(f"  [{step + 1}] auto-fail (same shell failed twice)")
                             state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
                             break
 
+                dup_skip_count = 0  # reset on any non-skipped action
                 result = execute(action, working_dir)
                 ok_str = "OK" if result["ok"] else "FAIL"
                 log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
@@ -373,12 +564,17 @@ def run(user_prompt, working_dir=None):
                     "ok": result["ok"],
                     "output": result["output"][:100]
                 }
+                if not result["ok"] and "error_type" in result:
+                    step_entry["error_type"] = result["error_type"]
+                if act == "shell" and "timeout" in action:
+                    step_entry["_timeout"] = action["timeout"]
                 if act == "write":
                     step_entry["_content"] = action.get("content", "")
                 state["last_steps"].append(step_entry)
 
                 if not result["ok"]:
-                    state["errors"].append(f"Step failed: {act} {action.get('arg','')}: {result['output'][:100]}")
+                    etype = result.get("error_type", "unknown")
+                    state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {result['output'][:100]}")
                     use_think = True  # think harder on next step after failure
                 else:
                     use_think = False

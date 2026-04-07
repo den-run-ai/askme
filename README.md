@@ -28,7 +28,7 @@ LLM_BACKEND=openrouter python3 askme.py "your task here"
 
 ## How It Works
 
-**Plan → Execute → Replan.** The LLM breaks your prompt into tasks, executes each one step-by-step (shell commands, file writes, file reads), and replans if something fails. Up to 3 replans.
+**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell commands, file writes, file reads), and replans if something fails. Up to 3 replans. By default, the agent will **not** install software — it fails fast with a prerequisite message. Set `ALLOW_SYSTEM_INSTALLS=1` to permit installs.
 
 ## Tests
 
@@ -42,6 +42,6 @@ python3 -m pytest test_agent.py -s -v -k "TestIntegration and not Medium and not
 
 ## Files
 
-- `askme.py` — the agent (~344 lines)
+- `askme.py` — the agent (~579 lines)
 - `test_agent.py` — unit + integration tests
 - [ARCHITECTURE.md](ARCHITECTURE.md) — design details, server config reference

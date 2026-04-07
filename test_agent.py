@@ -592,17 +592,39 @@ class TestWriteContentSerialization:
 class TestDuplicateGuard:
     """Verify duplicate action guard prevents loops without blocking legitimate retries."""
 
-    def test_write_same_content_triggers_auto_done(self, tmp_path):
-        """Same file + same content + ok → auto-done (true duplicate)."""
+    def test_write_same_content_skips_and_continues(self, tmp_path):
+        """Same file + same content + ok → skip duplicate, executor reaches follow-up shell."""
+        f = str(tmp_path / "data.txt")
+        responses = [
+            {"tasks": ["write data.txt and run it"]},
+            {"action": "write", "arg": f, "content": "hello"},
+            {"action": "write", "arg": f, "content": "hello"},  # duplicate — should skip
+            {"action": "shell", "arg": "cat data.txt"},          # post-skip shell step
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            ok = run("write data.txt and run it", working_dir=str(tmp_path))
+        assert ok is True
+        assert (tmp_path / "data.txt").read_text() == "hello"
+
+    def test_write_duplicate_skip_livelock_escape(self, tmp_path):
+        """After 2 consecutive duplicate write skips, synthetic step is injected so model sees new state."""
         f = str(tmp_path / "data.txt")
         responses = [
             {"tasks": ["write data.txt"]},
             {"action": "write", "arg": f, "content": "hello"},
-            {"action": "write", "arg": f, "content": "hello"},  # duplicate — should auto-done
+            {"action": "write", "arg": f, "content": "hello"},  # skip 1
+            {"action": "write", "arg": f, "content": "hello"},  # skip 2 — injects synthetic step
+            {"action": "done"},                                   # model now sees new state, emits done
         ]
-        with patch("askme.ask_llm", side_effect=responses):
-            run("write data.txt")
-        assert (tmp_path / "data.txt").read_text() == "hello"
+        with patch("askme.ask_llm", side_effect=responses) as mock_llm:
+            ok = run("write data.txt", working_dir=str(tmp_path))
+        assert ok is True
+        # Verify synthetic step was injected: the last get_step call should see
+        # a step with "Already written" in its output
+        last_call_args = mock_llm.call_args_list[-1]  # last ask_llm call (the done step)
+        user_msg = last_call_args[0][0][1]["content"]  # messages[1] = user msg
+        assert "Already written" in user_msg
 
     def test_write_different_content_allowed(self, tmp_path):
         """Same file + different content → allow (legitimate fix attempt)."""
@@ -954,6 +976,389 @@ class TestPlannerReasoning:
         assert result["tasks"] == ["recovered task"]
 
 
+# --- Preflight probe tests ---
+
+class TestPreflightProbe:
+    """Verify structured environment probing before first plan."""
+
+    def test_probe_returns_platform(self, work_dir):
+        from askme import preflight_probe
+        env = preflight_probe(work_dir)
+        assert "platform" in env
+        assert env["platform"] in ("darwin", "linux", "windows")
+
+    def test_probe_returns_arch(self, work_dir):
+        from askme import preflight_probe
+        env = preflight_probe(work_dir)
+        assert "arch" in env
+        assert len(env["arch"]) > 0
+
+    def test_probe_returns_tools(self, work_dir):
+        from askme import preflight_probe
+        env = preflight_probe(work_dir)
+        assert "available_tools" in env
+        assert "missing_tools" in env
+        # python3 should always be available (we're running it)
+        assert "python3" in env["available_tools"]
+
+    def test_probe_returns_dir_listing(self, work_dir):
+        from askme import preflight_probe
+        # Create a file so listing is non-empty
+        Path(work_dir, "test.txt").write_text("hi")
+        env = preflight_probe(work_dir)
+        assert "dir_listing" in env
+        assert "test.txt" in env["dir_listing"]
+
+    def test_probe_empty_dir(self, work_dir):
+        from askme import preflight_probe
+        env = preflight_probe(work_dir)
+        assert env["dir_listing"] == ["(empty)"]
+
+    def test_probe_returns_package_managers(self, work_dir):
+        from askme import preflight_probe
+        env = preflight_probe(work_dir)
+        assert "package_managers" in env
+        assert isinstance(env["package_managers"], list)
+
+    def test_probe_uses_shutil_which(self):
+        """Probe should use shutil.which (cross-platform), not subprocess which."""
+        from askme import preflight_probe
+        import shutil
+        with patch.object(shutil, "which", return_value="/usr/bin/python3") as mock_which:
+            env = preflight_probe("/tmp")
+        # shutil.which should have been called for each tool + package manager
+        assert mock_which.call_count > 0
+        tool_calls = [c[0][0] for c in mock_which.call_args_list]
+        assert "python3" in tool_calls
+
+    def test_run_includes_environment_in_state(self, work_dir):
+        """run() should call preflight_probe and include env in planner state."""
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            if "tasks" not in str(messages):
+                return {"tasks": []}
+            user_msg = messages[-1]["content"]
+            captured["user_msg"] = user_msg
+            return {"tasks": []}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            run("test", working_dir=work_dir)
+        assert "environment" in captured.get("user_msg", ""), \
+            "Planner should receive environment in state"
+        assert "platform" in captured["user_msg"]
+
+    def test_run_includes_policy_in_state(self, work_dir):
+        """run() should include policy in planner state."""
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            user_msg = messages[-1]["content"]
+            captured["user_msg"] = user_msg
+            return {"tasks": []}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            run("test", working_dir=work_dir)
+        assert "policy" in captured.get("user_msg", ""), \
+            "Planner should receive policy in state"
+        assert "allow_system_installs" in captured["user_msg"]
+
+
+# --- Execution policy tests ---
+
+class TestExecutionPolicy:
+    """Verify capability/permission policy enforcement."""
+
+    def test_policy_defaults(self):
+        from askme import get_policy
+        policy = get_policy()
+        assert policy["allow_system_installs"] is False
+        assert policy["allow_network"] is True
+
+    def test_policy_env_override(self):
+        import askme
+        old = askme.ALLOW_SYSTEM_INSTALLS
+        try:
+            askme.ALLOW_SYSTEM_INSTALLS = True
+            policy = askme.get_policy()
+            assert policy["allow_system_installs"] is True
+        finally:
+            askme.ALLOW_SYSTEM_INSTALLS = old
+
+    def test_executor_sees_policy(self):
+        """get_step should include policy in slim state sent to LLM."""
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            captured["messages"] = messages
+            return {"action": "done"}
+        state = {
+            "current_task": "test",
+            "task_index": "1/1",
+            "last_steps": [],
+            "completed_tasks": [],
+            "environment": {"missing_tools": ["go"]},
+            "policy": {"allow_system_installs": False, "allow_network": True},
+        }
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_step("test task", state, goal="test goal")
+        user_msg = captured["messages"][1]["content"]
+        assert "policy" in user_msg
+        assert "allow_system_installs" in user_msg
+
+    def test_executor_sees_missing_tools(self):
+        """get_step should include missing_tools in slim state when present."""
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            captured["messages"] = messages
+            return {"action": "done"}
+        state = {
+            "current_task": "test",
+            "task_index": "1/1",
+            "last_steps": [],
+            "completed_tasks": [],
+            "environment": {"missing_tools": ["go", "cargo"]},
+            "policy": {"allow_system_installs": False},
+        }
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_step("test task", state, goal="test goal")
+        user_msg = captured["messages"][1]["content"]
+        assert "missing_tools" in user_msg
+        assert "go" in user_msg
+
+    def test_system_plan_includes_policy_rules(self):
+        from askme import SYSTEM_PLAN
+        assert "allow_system_installs" in SYSTEM_PLAN
+        assert "missing_tools" in SYSTEM_PLAN
+        assert "package_managers" in SYSTEM_PLAN
+
+    def test_system_step_includes_policy_rules(self):
+        from askme import SYSTEM_STEP
+        assert "missing_tools" in SYSTEM_STEP
+        assert "allow_system_installs" in SYSTEM_STEP
+        assert "Do NOT attempt to install" in SYSTEM_STEP
+
+
+# --- Typed failure classification tests ---
+
+class TestFailureClassification:
+    """Verify error classification into typed categories."""
+
+    def test_classify_timeout(self):
+        from askme import classify_error
+        assert classify_error("TIMEOUT") == "timeout"
+
+    def test_classify_command_not_found(self):
+        from askme import classify_error
+        assert classify_error("/bin/sh: go: command not found") == "missing_tool"
+
+    def test_classify_permission_denied(self):
+        from askme import classify_error
+        assert classify_error("bash: ./script.sh: Permission denied") == "permission_denied"
+
+    def test_classify_missing_file(self):
+        from askme import classify_error
+        assert classify_error("cc: error: main.c: No such file or directory") == "missing_file"
+
+    def test_classify_compile_error(self):
+        from askme import classify_error
+        assert classify_error("main.c:1:10: error: expected ';'") == "compile_error"
+
+    def test_classify_unknown(self):
+        from askme import classify_error
+        assert classify_error("something unexpected happened") == "unknown"
+
+    def test_shell_failure_includes_error_type(self, work_dir):
+        """Shell command failure should include error_type in result."""
+        result = execute({"action": "shell", "arg": "nonexistent_command_xyz"}, work_dir)
+        assert result["ok"] is False
+        assert "error_type" in result
+
+    def test_shell_success_no_error_type(self, work_dir):
+        """Successful shell command should not include error_type."""
+        result = execute({"action": "shell", "arg": "echo hi"}, work_dir)
+        assert result["ok"] is True
+        assert "error_type" not in result
+
+    def test_error_type_in_step_entry(self, work_dir):
+        """Step entry should include error_type from failed execution."""
+        responses = [
+            {"tasks": ["run bad cmd"]},
+            {"action": "shell", "arg": "nonexistent_cmd_xyz"},
+            {"action": "fail", "reasoning": "cmd not found"},
+        ] * 3  # enough for MAX_REPLANS
+        with patch("askme.ask_llm", side_effect=responses):
+            run("run bad cmd", working_dir=work_dir)
+        # Test passes if no crash — error_type is stored internally
+
+
+# --- Command-aware timeout tests ---
+
+class TestCommandAwareTimeout:
+    """Verify longer timeouts for install/build commands."""
+
+    def test_default_timeout(self):
+        from askme import _get_shell_timeout, SHELL_TIMEOUT
+        assert _get_shell_timeout("echo hello") == SHELL_TIMEOUT
+
+    def test_install_timeout(self):
+        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG
+        assert _get_shell_timeout("brew install go") == SHELL_TIMEOUT_LONG
+        assert _get_shell_timeout("apt-get install python3") == SHELL_TIMEOUT_LONG
+        assert _get_shell_timeout("pip install requests") == SHELL_TIMEOUT_LONG
+
+    def test_build_timeout(self):
+        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG
+        assert _get_shell_timeout("cmake --build .") == SHELL_TIMEOUT_LONG
+        assert _get_shell_timeout("cargo build") == SHELL_TIMEOUT_LONG
+
+    def test_model_hint_timeout(self):
+        from askme import _get_shell_timeout, SHELL_TIMEOUT_MAX
+        assert _get_shell_timeout("some cmd", hint=60) == 60
+        assert _get_shell_timeout("some cmd", hint=999) == SHELL_TIMEOUT_MAX
+        assert _get_shell_timeout("some cmd", hint=1) == 5  # minimum 5s
+
+    def test_timeout_retry_not_blocked_by_duplicate_guard(self, work_dir, capsys):
+        """Shell timeout + retry should NOT trigger auto-fail (duplicate guard exception)."""
+        timeout_result = {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}
+        responses = [
+            {"tasks": ["install thing"]},
+            {"action": "shell", "arg": "long_cmd"},  # will "timeout"
+            {"action": "shell", "arg": "long_cmd"},  # retry after timeout — should be allowed
+            {"action": "fail", "reasoning": "still timing out"},
+        ] * 3  # enough for MAX_REPLANS
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.execute", return_value=timeout_result):
+                run("install thing", working_dir=work_dir)
+        out = capsys.readouterr().out
+        assert "retrying after timeout" in out
+        assert "same shell failed twice" not in out
+
+    def test_timeout_retry_bumps_timeout(self):
+        """After a timeout, the retry should inject a bumped timeout into the action."""
+        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG, SHELL_TIMEOUT_MAX
+        # A normal command that doesn't match install patterns gets 30s default
+        action = {"action": "shell", "arg": "some_slow_cmd"}
+        default_timeout = _get_shell_timeout(action["arg"])
+        assert default_timeout == 30  # would timeout at 30s
+        # After timeout retry, the duplicate guard should bump to at least SHELL_TIMEOUT_LONG
+        bumped = max(SHELL_TIMEOUT_LONG, default_timeout * 2)
+        expected = min(bumped, SHELL_TIMEOUT_MAX)
+        assert expected == SHELL_TIMEOUT_LONG  # 120s, not 30s again
+
+    def test_timeout_escalation_through_run(self, work_dir, capsys):
+        """Drive run() through two timeout retries and verify timeout escalates each time."""
+        from askme import SHELL_TIMEOUT_LONG, SHELL_TIMEOUT_MAX
+        execute_calls = []
+        def tracking_execute(action, wd="."):
+            execute_calls.append(dict(action))
+            return {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}
+        responses = [
+            {"tasks": ["slow task"]},
+            {"action": "shell", "arg": "slow_cmd"},   # attempt 1: base timeout
+            {"action": "shell", "arg": "slow_cmd"},   # attempt 2: timeout retry 1
+            {"action": "shell", "arg": "slow_cmd"},   # attempt 3: timeout retry 2
+            {"action": "fail", "reasoning": "keeps timing out"},
+        ] * 3  # enough for MAX_REPLANS
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.execute", side_effect=tracking_execute):
+                run("slow task", working_dir=work_dir)
+        # Should have at least 3 execute calls for the first plan's task
+        shell_calls = [c for c in execute_calls if c.get("action") == "shell"]
+        assert len(shell_calls) >= 3, f"Expected >=3 shell calls, got {len(shell_calls)}"
+        # First call: no timeout key (uses default)
+        assert "timeout" not in shell_calls[0], \
+            f"First call should not have timeout key: {shell_calls[0]}"
+        # Second call: bumped to at least SHELL_TIMEOUT_LONG
+        t1 = shell_calls[1].get("timeout")
+        assert t1 is not None, f"Second call should have timeout: {shell_calls[1]}"
+        assert t1 >= SHELL_TIMEOUT_LONG, \
+            f"Second call timeout {t1} should be >= {SHELL_TIMEOUT_LONG}"
+        # Third call: should escalate further (double previous, capped)
+        t2 = shell_calls[2].get("timeout")
+        assert t2 is not None, f"Third call should have timeout: {shell_calls[2]}"
+        assert t2 >= t1, f"Third timeout {t2} should be >= second {t1}"
+        assert t2 <= SHELL_TIMEOUT_MAX, f"Third timeout {t2} should be <= {SHELL_TIMEOUT_MAX}"
+
+
+# --- Error summarization tests ---
+
+class TestErrorSummarization:
+    """Verify error summarization for planner replans."""
+
+    def test_summarize_empty(self):
+        from askme import summarize_errors
+        assert summarize_errors([]) == []
+
+    def test_summarize_types_errors(self):
+        from askme import summarize_errors
+        errors = [
+            "shell go run main.go: /bin/sh: go: command not found",
+            "Step failed: shell brew install: TIMEOUT",
+        ]
+        result = summarize_errors(errors)
+        assert any("[missing_tool]" in e for e in result)
+        assert any("[timeout]" in e for e in result)
+
+    def test_summarize_preserves_existing_type_prefix(self):
+        """Errors already tagged with [type] should preserve their type, not re-classify."""
+        from askme import summarize_errors
+        errors = [
+            "[compile_error] shell gcc main.c: main.c:1:10: error: expected ';'",
+            "[unknown] shell xyz: something weird",
+        ]
+        result = summarize_errors(errors)
+        assert any("[compile_error]" in e for e in result), f"compile_error lost: {result}"
+        assert any("[unknown]" in e for e in result), f"unknown lost: {result}"
+        # Should NOT collapse to [error]
+        assert not any(e.startswith("[error]") for e in result), f"type collapsed to [error]: {result}"
+
+    def test_summarize_deduplicates(self):
+        from askme import summarize_errors
+        errors = [
+            "/bin/sh: go: command not found",
+            "/bin/sh: go: command not found",
+            "/bin/sh: go: command not found",
+        ]
+        result = summarize_errors(errors)
+        assert len(result) == 1  # deduplicated
+
+    def test_summarize_caps_per_type(self):
+        from askme import summarize_errors
+        errors = [f"[compile_error] error {i}: something went wrong" for i in range(10)]
+        result = summarize_errors(errors)
+        assert len(result) <= 3  # max 3 per type
+        assert all("[compile_error]" in e for e in result)
+
+    def test_planner_gets_summarized_errors(self):
+        """get_plan should pass summarized (typed) errors, not raw strings."""
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            captured["user_msg"] = messages[-1]["content"]
+            return {"tasks": ["retry"]}
+        state = {
+            "completed_tasks": [],
+            "errors": ["[missing_tool] shell go run: /bin/sh: go: command not found"],
+            "environment": {},
+            "policy": {"allow_system_installs": False},
+        }
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_plan("test", state)
+        assert "[missing_tool]" in captured["user_msg"]
+
+
+# --- Updated completion semantics tests ---
+
+class TestCompletionSemantics:
+    """Verify that completion is goal-aware, not step-aware."""
+
+    def test_system_step_no_immediate_done_rule(self):
+        """SYSTEM_STEP should NOT contain the old 'ok=true => done immediately' rule."""
+        from askme import SYSTEM_STEP
+        assert "SUCCEEDED. Emit" not in SYSTEM_STEP
+        assert "ok=true, that action SUCCEEDED" not in SYSTEM_STEP
+
+    def test_system_step_has_goal_aware_rule(self):
+        """SYSTEM_STEP should require full task satisfaction for done."""
+        from askme import SYSTEM_STEP
+        assert "FULL task description" in SYSTEM_STEP
+
+
 # --- Integration tests (require llama-server on :8080) ---
 
 import time
@@ -1023,6 +1428,7 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
 
             task_done = False
             use_think = False  # enable thinking after failed step execution
+            dup_skip_count = 0  # consecutive duplicate write skips
             for step in range(max_steps):
                 # Debug: show slim state sent to LLM
                 recent = state["last_steps"][-3:]
@@ -1064,9 +1470,16 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                     prev = last[0]
                     if act == "write" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
-                            log(f"  STEP {step+1} auto-done (duplicate write, same content)")
-                            task_done = True
-                            break
+                            dup_skip_count += 1
+                            log(f"  STEP {step+1} skip (duplicate write, same content)")
+                            if dup_skip_count >= 2:
+                                state["last_steps"].append({
+                                    "action": "write", "arg": action.get("arg", ""),
+                                    "ok": True,
+                                    "output": f"Already written (skipped {dup_skip_count}x). Choose a different action or emit done."
+                                })
+                                use_think = True
+                            continue
                     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok"):
                             log(f"  STEP {step+1} auto-done (duplicate successful shell)")
@@ -1077,6 +1490,7 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                             state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
                             break
 
+                dup_skip_count = 0  # reset on any non-skipped action
                 try:
                     result = execute(action, work_dir)
                 except Exception as e:
