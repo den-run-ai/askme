@@ -160,7 +160,16 @@ def ask_llm(messages, max_tokens=256, think=False):
             if think_level:
                 tok_msg += f" thinking={think_level}"
             log(tok_msg)
-        text = rj["choices"][0]["message"]["content"] or ""
+        msg = rj["choices"][0]["message"]
+        text = msg.get("content") or ""
+        # OpenRouter reasoning: if content is null/empty, try reasoning_content
+        # (model may put JSON in reasoning when token budget is tight)
+        if not text.strip():
+            reasoning = msg.get("reasoning_content") or ""
+            if not reasoning:
+                r = msg.get("reasoning", "")
+                reasoning = r.get("content", "") if isinstance(r, dict) else (r or "")
+            text = reasoning
         # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
@@ -174,7 +183,10 @@ def ask_llm(messages, max_tokens=256, think=False):
         if not text.startswith("{") and "{" in text:
             text = text[text.index("{"):]
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
+            return parsed
         except json.JSONDecodeError:
             if attempt < MAX_LLM_RETRIES:
                 think_str = f" thinking={think_level}" if think_level else ""
@@ -316,8 +328,12 @@ def run(user_prompt, working_dir=None):
                     log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
                     state["errors"].append(f"LLM parse error on task '{task}'")
                     break
+                # Normalize None → "" for optional string fields (models emit "arg": null)
+                for _k in ("arg", "content", "reasoning"):
+                    if action.get(_k) is None:
+                        action[_k] = ""
                 act = action.get("action", "")
-                log(f"  [{step + 1}] {act}: {action.get('arg', '')[:80]}")
+                log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
                 if act == "done":
                     task_done = True

@@ -278,6 +278,33 @@ class TestThinkingRetry:
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
+    def test_null_content_recovers_json_from_reasoning(self, mock_post):
+        """When content is null but reasoning contains valid JSON, recover it directly."""
+        resp_null = MagicMock()
+        resp_null.json.return_value = {
+            "choices": [{"message": {"content": None, "reasoning": '{"action": "shell", "arg": "echo hi"}'}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        }
+        mock_post.return_value = resp_null
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "shell", "arg": "echo hi"}
+        # Should succeed on first attempt — no retry needed
+        assert mock_post.call_count == 1
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_non_dict_json_rejected(self, mock_post):
+        """json.loads returning non-dict (e.g. null, array) should retry, not pass through."""
+        mock_post.side_effect = [
+            mock_response_raw("null"),  # attempt 0: parses but not a dict
+            mock_response({"action": "done"}),  # attempt 1: valid
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        assert mock_post.call_count == 2
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
     def test_think_escalates_to_high(self, mock_post):
         """With think=True, retry should escalate to high effort."""
         mock_post.side_effect = [
@@ -672,6 +699,31 @@ class TestDuplicateGuard:
         # Verify _content is not anywhere in the user message sent to LLM
         user_msg = captured["messages"][1]["content"]
         assert "_content" not in user_msg, f"_content leaked into LLM message: {user_msg}"
+
+
+class TestNullArgNormalization:
+    """Verify that null/None values in action fields don't crash the agent."""
+
+    def test_done_with_null_arg(self, tmp_path):
+        """Model returns {"action":"done","arg":null} — should not crash."""
+        responses = [
+            {"tasks": ["do something"]},
+            {"action": "shell", "arg": "echo hi"},
+            {"action": "done", "arg": None, "reasoning": None},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            assert run("do something") is True
+
+    def test_write_with_null_reasoning(self, tmp_path):
+        """Write action with null reasoning field — should not crash."""
+        responses = [
+            {"tasks": ["write file"]},
+            {"action": "write", "arg": str(tmp_path / "f.txt"),
+             "content": "hello", "reasoning": None},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            assert run("write file") is True
 
 
 # --- Cache workaround tests ---

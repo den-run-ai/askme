@@ -159,7 +159,7 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 | Basename args | Slim step history uses basename for write/read `arg` fields — saves tokens, avoids confusion |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
 | Thinking-on-retry | Thinking enabled only after failure: zero cost on happy path, chain-of-thought on retry |
-| Null content | OpenRouter reasoning can return `content: null` — handled with `content or ""` fallback |
+| Null content | OpenRouter reasoning can return `content: null` — falls back to `reasoning_content` / `reasoning` fields to recover JSON, then requires result is a dict (non-dict like `null` or `[]` triggers retry) |
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models output objects instead of escaped strings |
 | Duplicate guard | Per-action-type loop detection: write(same content)→auto-done, shell(same+ok)→auto-done, shell(same+fail)→auto-fail |
 
