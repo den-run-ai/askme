@@ -167,6 +167,129 @@ class TestAskLlm:
         assert result == {"action": "done"}
 
 
+# --- Thinking-on-retry tests ---
+
+class TestThinkingRetry:
+    """Verify thinking-on-retry escalation in ask_llm()."""
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_thinking_retry_openrouter(self, mock_post):
+        """On retry, ask_llm should add reasoning params for OpenRouter."""
+        # First call returns bad JSON, second call returns valid JSON
+        mock_post.side_effect = [
+            mock_response_raw("not json"),  # attempt 0: no thinking, parse fails
+            mock_response({"action": "done"}),  # attempt 1: thinking=medium
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        # Check that the second call included reasoning params
+        second_call_body = mock_post.call_args_list[1][1]["json"]
+        assert "reasoning" in second_call_body
+        assert second_call_body["reasoning"]["enabled"] is True
+        assert second_call_body["reasoning"]["effort"] == "medium"
+        # First call should NOT have reasoning
+        first_call_body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" not in first_call_body
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "local")
+    def test_thinking_retry_local(self, mock_post):
+        """On retry, ask_llm should prepend <|think|> and bump max_tokens for local."""
+        mock_post.side_effect = [
+            mock_response_raw("not json"),  # attempt 0: fails
+            mock_response({"action": "done"}),  # attempt 1: thinking
+        ]
+        result = ask_llm([
+            {"role": "system", "content": "You are a helper."},
+            {"role": "user", "content": "test"}
+        ], max_tokens=256)
+        assert result == {"action": "done"}
+        # Second call should have <|think|> in system prompt and bumped max_tokens
+        second_call_body = mock_post.call_args_list[1][1]["json"]
+        sys_content = second_call_body["messages"][0]["content"]
+        assert sys_content.startswith("<|think|>\n"), f"Expected <|think|> prefix, got: {sys_content[:50]}"
+        assert second_call_body["max_tokens"] >= 512
+        # First call should NOT have <|think|>
+        first_call_body = mock_post.call_args_list[0][1]["json"]
+        first_sys = first_call_body["messages"][0]["content"]
+        assert not first_sys.startswith("<|think|>")
+
+    @patch("askme.requests.post")
+    def test_thinking_strips_channel_tags(self, mock_post):
+        """Local thinking output (<|channel>...<channel|>) should be stripped."""
+        mock_post.return_value = mock_response_raw(
+            '<|channel>thought\nlet me reason about this\n<channel|>{"action":"done"}'
+        )
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+
+    @patch("askme.requests.post")
+    def test_thinking_strips_unclosed_channel_tags(self, mock_post):
+        """Unclosed <|channel> blocks (truncated at max_tokens) should be stripped."""
+        mock_post.return_value = mock_response_raw(
+            '<|channel>thought\nstill thinking...'
+        )
+        # Should raise JSONDecodeError since no JSON remains after stripping
+        with pytest.raises(json.JSONDecodeError):
+            ask_llm([{"role": "user", "content": "test"}])
+
+    @patch("askme.requests.post")
+    def test_api_error_retries(self, mock_post):
+        """API error responses should be retried, not crash on missing 'choices'."""
+        resp_err = MagicMock()
+        resp_err.json.return_value = {"error": {"message": "rate limited", "code": 429}}
+        mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_no_thinking_on_first_attempt(self, mock_post):
+        """First attempt should never include reasoning params."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([{"role": "user", "content": "test"}])
+        call_body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" not in call_body
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_think_true_enables_from_first_attempt(self, mock_post):
+        """When think=True, reasoning should be enabled from attempt 0."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([{"role": "user", "content": "test"}], think=True)
+        call_body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" in call_body
+        assert call_body["reasoning"]["effort"] == "medium"
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_null_content_with_reasoning(self, mock_post):
+        """When reasoning exhausts tokens, content may be null — should retry, not crash."""
+        # First call: content is None (reasoning ate all tokens)
+        resp_null = MagicMock()
+        resp_null.json.return_value = {
+            "choices": [{"message": {"content": None, "reasoning": "thinking..."}}]
+        }
+        # Second call: valid response
+        mock_post.side_effect = [resp_null, mock_response({"action": "done"})]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_think_escalates_to_high(self, mock_post):
+        """With think=True, retry should escalate to high effort."""
+        mock_post.side_effect = [
+            mock_response_raw("bad"),  # attempt 0: medium, fails
+            mock_response({"action": "done"}),  # attempt 1: high
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}], think=True)
+        assert result == {"action": "done"}
+        second_body = mock_post.call_args_list[1][1]["json"]
+        assert second_body["reasoning"]["effort"] == "high"
+
+
 # --- Full agent loop tests ---
 
 class TestRunLoop:
@@ -352,6 +475,160 @@ class TestOutputFormatting:
             assert arg == "file.txt", f"Expected basename, got: {arg}"
 
 
+class TestWriteContentSerialization:
+    """Verify that dict/list content in write actions is auto-serialized to JSON."""
+
+    def test_write_dict_content(self, work_dir):
+        """Write action with dict content should auto-serialize to JSON string."""
+        result = execute({"action": "write", "arg": "config.json", "content": {"status": "SUCCESS"}}, work_dir)
+        assert result["ok"] is True
+        written = (Path(work_dir) / "config.json").read_text()
+        assert '"status"' in written
+        assert "SUCCESS" in written
+
+    def test_write_list_content(self, work_dir):
+        """Write action with list content should auto-serialize to JSON string."""
+        result = execute({"action": "write", "arg": "data.json", "content": [1, 2, 3]}, work_dir)
+        assert result["ok"] is True
+        written = (Path(work_dir) / "data.json").read_text()
+        import json as _json
+        assert _json.loads(written) == [1, 2, 3]
+
+    def test_write_string_content_unchanged(self, work_dir):
+        """Write action with string content should pass through unchanged."""
+        result = execute({"action": "write", "arg": "test.txt", "content": "hello world"}, work_dir)
+        assert result["ok"] is True
+        assert (Path(work_dir) / "test.txt").read_text() == "hello world"
+
+    def test_write_nested_json_dict(self, work_dir):
+        """Write action with nested dict should produce valid JSON file."""
+        content = {"database": {"host": "localhost", "port": 5432}, "debug": True}
+        result = execute({"action": "write", "arg": "config.json", "content": content}, work_dir)
+        assert result["ok"] is True
+        import json as _json
+        parsed = _json.loads((Path(work_dir) / "config.json").read_text())
+        assert parsed == content
+
+    def test_write_empty_dict_content(self, work_dir):
+        """Write action with empty dict should write '{}'."""
+        result = execute({"action": "write", "arg": "empty.json", "content": {}}, work_dir)
+        assert result["ok"] is True
+        import json as _json
+        assert _json.loads((Path(work_dir) / "empty.json").read_text()) == {}
+
+
+class TestDuplicateGuard:
+    """Verify duplicate action guard prevents loops without blocking legitimate retries."""
+
+    def test_write_same_content_triggers_auto_done(self, tmp_path):
+        """Same file + same content + ok → auto-done (true duplicate)."""
+        f = str(tmp_path / "data.txt")
+        responses = [
+            {"tasks": ["write data.txt"]},
+            {"action": "write", "arg": f, "content": "hello"},
+            {"action": "write", "arg": f, "content": "hello"},  # duplicate — should auto-done
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("write data.txt")
+        assert (tmp_path / "data.txt").read_text() == "hello"
+
+    def test_write_different_content_allowed(self, tmp_path):
+        """Same file + different content → allow (legitimate fix attempt)."""
+        responses = [
+            {"tasks": ["write and fix"]},
+            {"action": "write", "arg": str(tmp_path / "f.txt"), "content": "v1"},
+            {"action": "write", "arg": str(tmp_path / "f.txt"), "content": "v2"},  # different content
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("write and fix")
+        assert (tmp_path / "f.txt").read_text() == "v2"
+
+    def test_shell_same_success_triggers_auto_done(self, tmp_path):
+        """Same shell + ok → auto-done (true duplicate)."""
+        responses = [
+            {"tasks": ["run echo"]},
+            {"action": "shell", "arg": "echo hi"},
+            {"action": "shell", "arg": "echo hi"},  # duplicate — should auto-done
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("run echo")
+
+    def test_shell_same_failure_triggers_auto_fail(self, tmp_path):
+        """Same shell + fail twice → auto-fail, error recorded for replan."""
+        responses = [
+            {"tasks": ["run bad"]},
+            {"action": "shell", "arg": "false"},  # fails (exit 1)
+            {"action": "shell", "arg": "false"},  # same fail — auto-fail
+            # After auto-fail, should replan:
+            {"tasks": ["try something else"]},
+            {"action": "shell", "arg": "echo fixed"},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("run bad")
+
+    def test_shell_recompile_after_write_not_blocked(self, tmp_path):
+        """shell gcc (fail) → write fix → shell gcc (same cmd) should NOT be blocked."""
+        src = tmp_path / "main.c"
+        responses = [
+            {"tasks": ["compile"]},
+            {"action": "shell", "arg": f"cc -o main {src}"},  # fails (no file)
+            {"action": "write", "arg": str(src), "content": '#include <stdio.h>\nint main(){puts("ok");return 0;}'},
+            {"action": "shell", "arg": f"cc -o main {src}"},  # same cmd but last step is write, not shell
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("compile")
+
+    def test_read_same_file_twice_allowed(self, tmp_path):
+        """Read same file twice consecutively — allowed (read excluded from guard)."""
+        f = tmp_path / "data.txt"
+        f.write_text("hello")
+        responses = [
+            {"tasks": ["read data"]},
+            {"action": "read", "arg": str(f)},
+            {"action": "read", "arg": str(f)},  # should NOT be blocked
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("read data")
+
+    def test_different_action_type_not_duplicate(self, tmp_path):
+        """write then shell on same arg — different action types, no guard trigger."""
+        responses = [
+            {"tasks": ["write and run"]},
+            {"action": "write", "arg": str(tmp_path / "s.sh"), "content": "echo ok"},
+            {"action": "shell", "arg": f"bash {tmp_path / 's.sh'}"},  # different action type
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("write and run")
+
+    def test_content_not_in_slim_state(self):
+        """_content field should not appear in messages sent to LLM by get_step()."""
+        from askme import get_step
+        state = {
+            "current_task": "test",
+            "task_index": "1/1",
+            "last_steps": [
+                {"action": "write", "arg": "f.txt", "ok": True, "output": "Wrote f.txt",
+                 "_content": "should not appear in slim"},
+            ],
+            "completed_tasks": [],
+        }
+        # Mock ask_llm to capture the messages get_step sends
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            captured["messages"] = messages
+            return {"action": "done"}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_step("test task", state, goal="test goal")
+        # Verify _content is not anywhere in the user message sent to LLM
+        user_msg = captured["messages"][1]["content"]
+        assert "_content" not in user_msg, f"_content leaked into LLM message: {user_msg}"
+
+
 # --- Integration tests (require llama-server on :8080) ---
 
 import time
@@ -419,14 +696,15 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
             log(f"TASK {i+1}/{len(tasks)}: {task}")
 
             task_done = False
+            use_think = False  # enable thinking after failed step execution
             for step in range(max_steps):
                 # Debug: show slim state sent to LLM
                 recent = state["last_steps"][-3:]
                 slim_debug = [{"action": s["action"], "ok": s["ok"], "output": s.get("output","")[:60]} for s in recent]
-                log(f"  STEP {step+1}/{max_steps} state={json.dumps(slim_debug)}")
+                log(f"  STEP {step+1}/{max_steps} state={json.dumps(slim_debug)}{' [think]' if use_think else ''}")
                 t0 = time.time()
                 try:
-                    action = get_step(task, state, goal=user_prompt, step_num=step, max_steps=max_steps)
+                    action = get_step(task, state, goal=user_prompt, step_num=step, max_steps=max_steps, think=use_think)
                 except (json.JSONDecodeError, KeyError, Exception) as e:
                     elapsed = time.time() - t0
                     # Auto-done: if last step was successful, treat parse error as implicit completion
@@ -454,6 +732,25 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                     state["errors"].append(f"Task '{task}': {action.get('reasoning', '')}")
                     break
 
+                # Duplicate action guard — per-action-type loop detection
+                last = state["last_steps"][-1:] if state["last_steps"] else []
+                if last and last[0]["action"] == act:
+                    prev = last[0]
+                    if act == "write" and prev.get("arg", "") == action.get("arg", ""):
+                        if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                            log(f"  STEP {step+1} auto-done (duplicate write, same content)")
+                            task_done = True
+                            break
+                    elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+                        if prev.get("ok"):
+                            log(f"  STEP {step+1} auto-done (duplicate successful shell)")
+                            task_done = True
+                            break
+                        else:
+                            log(f"  STEP {step+1} auto-fail (same shell failed twice)")
+                            state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+                            break
+
                 try:
                     result = execute(action, work_dir)
                 except Exception as e:
@@ -461,12 +758,18 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                 ok_str = "OK" if result["ok"] else "FAIL"
                 log(f"  EXEC -> {ok_str}: {result['output'][:80]}")
 
-                state["last_steps"].append({
+                step_entry = {
                     "action": act, "arg": action.get("arg", ""),
                     "ok": result["ok"], "output": result["output"][:200]
-                })
+                }
+                if act == "write":
+                    step_entry["_content"] = action.get("content", "")
+                state["last_steps"].append(step_entry)
                 if not result["ok"]:
                     state["errors"].append(f"{act} failed: {result['output'][:100]}")
+                    use_think = True  # think harder on next step after failure
+                else:
+                    use_think = False
 
             if task_done:
                 state["completed_tasks"].append(task)

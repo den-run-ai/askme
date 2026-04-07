@@ -27,7 +27,7 @@ mkdir -p /tmp/llama-cache
   --port 8080
 
 # Unit tests (mocked, no LLM needed)
-python3 -m pytest agent/test_agent.py -v -k "not Integration and not OpenRouter and not ServerConfig"
+python3 -m pytest agent/test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"
 
 # Single test
 python3 -m pytest agent/test_agent.py -v -k "test_simple_success"
@@ -58,7 +58,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 Key design constraint: the local LLM (Gemma 4 E4B, 4B active params) is slow (~7 tok/s) with 16K context on M1. Everything is optimized for minimal token usage — short system prompts, JSON-only output, sliding window of step history, truncated outputs.
 
 ### `ask_llm` parsing pipeline
-LLM responses go through: strip `<think>` tags → strip markdown code fences → extract JSON object → retry up to 2 times on parse failure.
+LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks → strip markdown code fences → extract JSON object → retry up to 2 times on parse failure. Retries auto-escalate with thinking: attempt 1 = medium effort, attempt 2 = high effort. When `think=True` is passed (after a failed step execution), thinking starts from attempt 0.
 
 ### Error handling
 - Shell output: `r.stdout[:300] + r.stderr[-300:]` — tail-truncates stderr to keep actual error messages
@@ -73,9 +73,9 @@ LLM responses go through: strip `<think>` tags → strip markdown code fences �
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~270 lines)
+- `askme.py` — the agent (self-contained, ~336 lines)
 - `run.py` — older state-file-driven agent loop (legacy, uses `state.json` + `plan.json`)
-- `test_agent.py` — 34 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
+- `test_agent.py` — 56 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
 - `nanagent.md` — detailed architecture doc and design decisions
 - `plan.md` — setup history, model inventory, server config reference
 - `.env` — OPENROUTER_API_KEY (not committed)
@@ -85,6 +85,8 @@ LLM responses go through: strip `<think>` tags → strip markdown code fences �
 - Unit tests mock `ask_llm` or `requests.post` — no LLM needed
 - `TestCrossTaskState` — verifies completed_tasks and step carryover across tasks
 - `TestOutputFormatting` — verifies basename in write output and slim state args
+- `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
+- `TestDuplicateGuard` — verifies per-action-type duplicate detection and loop prevention
 - Integration tests use `int_run()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
 - Local integration tests are skipped automatically if llama-server isn't running on `:8080`
 - OpenRouter integration tests are skipped automatically if `OPENROUTER_API_KEY` is not set
@@ -99,8 +101,8 @@ All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=1
 ### "done" Emission (Local Gemma 4 E4B only)
 Local 12B model never emits `{"action": "done"}` — always needs auto-done heuristic. The larger 26B model via OpenRouter emits done reliably. This is a model capability gap, not a prompting issue.
 
-### Action Looping (Gemma 4 26B via OpenRouter)
-The 26B model occasionally writes the same file 2-3x before emitting done. Caused by the model generating full absolute paths (~90 tokens) in its response despite "use relative paths" instruction. Reduced but not eliminated by basename outputs.
+### Action Looping (Gemma 4 26B via OpenRouter) — Mitigated
+The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → auto-done, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).
 
 ## Models
 

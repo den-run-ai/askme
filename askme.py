@@ -61,6 +61,14 @@ MAX_LLM_RETRIES = 2
 
 def ask_llm(messages, max_tokens=256, think=False):
     for attempt in range(MAX_LLM_RETRIES + 1):
+        # Determine thinking level: caller-requested or auto-escalate on retry
+        if think:
+            think_level = "high" if attempt >= 1 else "medium"
+        elif attempt >= 1:
+            think_level = "high" if attempt >= 2 else "medium"
+        else:
+            think_level = None
+
         body = {
             "model": MODEL,
             "messages": messages,
@@ -69,19 +77,48 @@ def ask_llm(messages, max_tokens=256, think=False):
         }
         if LLM_BACKEND == "openrouter":
             body["provider"] = {"order": ["Parasail"]}
+            if think_level:
+                body["reasoning"] = {
+                    "enabled": True,
+                    "effort": think_level,
+                }
+                # Reasoning tokens count against max_tokens with Parasail provider,
+                # despite OpenRouter docs claiming they're separate. Bump to compensate.
+                body["max_tokens"] = max(max_tokens, 2048 if think_level == "high" else 1536)
+        elif think_level:
+            # Local llama-server: prepend <|think|> to system prompt, bump max_tokens
+            msgs = list(messages)
+            if msgs and msgs[0]["role"] == "system":
+                msgs[0] = dict(msgs[0])
+                msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
+            body["messages"] = msgs
+            body["max_tokens"] = max(max_tokens, 768 if think_level == "high" else 512)
+
         headers = {"Content-Type": "application/json"}
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
         resp = requests.post(API, json=body, headers=headers)
         rj = resp.json()
+        # Handle API error responses
+        if "error" in rj:
+            log(f"  API error: {rj['error'].get('message', rj['error'])}")
+            if attempt < MAX_LLM_RETRIES:
+                continue
+            raise KeyError(f"API error: {rj['error']}")
         # Log token usage if available
         usage = rj.get("usage", {})
         if usage:
-            log(f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}")
-        text = rj["choices"][0]["message"]["content"]
+            tok_msg = f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}"
+            if think_level:
+                tok_msg += f" thinking={think_level}"
+            log(tok_msg)
+        text = rj["choices"][0]["message"]["content"] or ""
         # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
+        # Strip <|channel>...<channel|> blocks (local llama-server thinking format)
+        text = re.sub(r"<\|channel\>.*?<channel\|>", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<\|channel\>.*", "", text, flags=re.DOTALL).strip()
         # Strip markdown code fences if present
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
@@ -92,7 +129,8 @@ def ask_llm(messages, max_tokens=256, think=False):
             return json.loads(text)
         except json.JSONDecodeError:
             if attempt < MAX_LLM_RETRIES:
-                log(f"  [retry {attempt+1}] JSON parse failed, raw: {text[:120]}")
+                think_str = f" thinking={think_level}" if think_level else ""
+                log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
                 raise
 
@@ -106,7 +144,7 @@ def get_plan(user_prompt, state):
 
 MAX_INPUT = 300  # max chars per field sent to executor
 
-def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS):
+def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -138,7 +176,7 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS):
     return ask_llm([
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
-    ], max_tokens=step_tokens)
+    ], max_tokens=step_tokens, think=think)
 
 
 def execute(action, working_dir="."):
@@ -159,7 +197,12 @@ def execute(action, working_dir="."):
             if not p.is_absolute():
                 p = Path(working_dir) / p
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(action.get("content", ""))
+            content = action.get("content", "")
+            # Auto-serialize dict/list content — models often output JSON as objects
+            # instead of escaped strings (e.g. "content": {"key": "val"} not "content": "{\"key\": \"val\"}")
+            if isinstance(content, (dict, list)):
+                content = json.dumps(content, indent=2)
+            p.write_text(content)
             return {"ok": True, "output": f"Wrote {p.name}"}
         except Exception as e:
             return {"ok": False, "output": str(e)[:MAX_RESULT]}
@@ -203,10 +246,11 @@ def run(user_prompt):
             log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             task_done = False
+            use_think = False  # enable thinking after failed step execution
             for step in range(MAX_STEPS):
                 t_step = time.time()
                 try:
-                    action = get_step(task, state, goal=user_prompt, step_num=step)
+                    action = get_step(task, state, goal=user_prompt, step_num=step, think=use_think)
                 except (json.JSONDecodeError, KeyError):
                     # Auto-done: if LLM can't produce valid JSON after a successful step,
                     # treat it as implicit task completion (common with small LLMs)
@@ -230,19 +274,44 @@ def run(user_prompt):
                     state["errors"].append(f"Task '{task}': {reason}")
                     break
 
+                # Duplicate action guard — per-action-type loop detection
+                last = state["last_steps"][-1:] if state["last_steps"] else []
+                if last and last[0]["action"] == act:
+                    prev = last[0]
+                    if act == "write" and prev.get("arg", "") == action.get("arg", ""):
+                        if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                            log(f"  [{step + 1}] auto-done (duplicate write, same content)")
+                            task_done = True
+                            break
+                    elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+                        if prev.get("ok"):
+                            log(f"  [{step + 1}] auto-done (duplicate successful shell)")
+                            task_done = True
+                            break
+                        else:
+                            log(f"  [{step + 1}] auto-fail (same shell failed twice)")
+                            state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+                            break
+
                 result = execute(action)
                 ok_str = "OK" if result["ok"] else "FAIL"
                 log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
-                state["last_steps"].append({
+                step_entry = {
                     "action": act,
                     "arg": action.get("arg", ""),
                     "ok": result["ok"],
                     "output": result["output"][:100]
-                })
+                }
+                if act == "write":
+                    step_entry["_content"] = action.get("content", "")
+                state["last_steps"].append(step_entry)
 
                 if not result["ok"]:
                     state["errors"].append(f"Step failed: {act} {action.get('arg','')}: {result['output'][:100]}")
+                    use_think = True  # think harder on next step after failure
+                else:
+                    use_think = False
 
             if task_done:
                 state["completed_tasks"].append(task)

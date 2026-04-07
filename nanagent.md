@@ -89,6 +89,10 @@ Key state design decisions:
 | Step output | 100 chars | Max output stored per step in history |
 | Step tokens (local) | 256 | Max completion tokens for executor (local LLM) |
 | Step tokens (OpenRouter) | 512 | Max completion tokens for executor (remote LLM) |
+| Thinking tokens (local, medium) | 512 | Max tokens when thinking enabled (local, medium effort) |
+| Thinking tokens (local, high) | 768 | Max tokens when thinking enabled (local, high effort) |
+| Thinking tokens (OpenRouter, medium) | 1536 | Max tokens when thinking enabled (OpenRouter, medium) |
+| Thinking tokens (OpenRouter, high) | 2048 | Max tokens when thinking enabled (OpenRouter, high) |
 
 ## Multi-Backend Support
 
@@ -154,6 +158,10 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 | Basename outputs | Write output says `"Wrote main.c"` not `"Wrote /full/path/main.c"` — LLM needs clear signal |
 | Basename args | Slim step history uses basename for write/read `arg` fields — saves tokens, avoids confusion |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
+| Thinking-on-retry | Thinking enabled only after failure: zero cost on happy path, chain-of-thought on retry |
+| Null content | OpenRouter reasoning can return `content: null` — handled with `content or ""` fallback |
+| Dict/list content | Write actions auto-serialize dict/list content to JSON — models output objects instead of escaped strings |
+| Duplicate guard | Per-action-type loop detection: write(same content)→auto-done, shell(same+ok)→auto-done, shell(same+fail)→auto-fail |
 
 ## Known LLM Limitations
 
@@ -186,6 +194,272 @@ Gemma 4 E4B (12B/4B active, local) reliably solves problems but struggles to emi
 
 The larger 26B model reliably emits `done` but occasionally loops on the same write action 2-3 times before stopping. This appears to be a model reasoning limitation — it sees `ok: true` in `last_steps` but writes again. The "use relative paths" instruction in SYSTEM_STEP reduces this but doesn't eliminate it.
 
+## Thinking-on-Retry (Implemented 2026-04-07)
+
+### Motivation
+
+The remaining hard test failure (`test_replan_build_with_dependency`) is a **code hallucination** — the 26B model generates incorrect C code for a `msg.h` + `main.c` pattern. Replanning doesn't help because:
+- At `temperature: 0.1`, the model regenerates the same wrong code each attempt
+- The error is in code generation quality, not plan structure
+- Strategy-level fixes (replan, more steps) can't fix a reasoning-level problem
+
+Thinking mode gives the model a chain-of-thought scratchpad before generating code, which directly addresses reasoning failures. But enabling thinking on every call wastes tokens and time on the happy path (26B already passes 8/9 hard tests without it).
+
+**Solution: enable thinking only on retry after a failed step.** Zero cost when things work, thinking budget only when the model already proved it needs help.
+
+### How Gemma 4 Thinking Works
+
+**Two different mechanisms depending on backend:**
+
+**OpenRouter API** — `reasoning` parameter:
+```json
+{
+  "model": "google/gemma-4-26b-a4b-it",
+  "messages": [...],
+  "reasoning": {
+    "enabled": true,
+    "effort": "medium"
+  },
+  "max_tokens": 1536
+}
+```
+- **IMPORTANT**: `effort` and `max_tokens` are mutually exclusive — cannot specify both (API returns 400)
+- **IMPORTANT**: Despite docs claiming reasoning tokens are separate, with Parasail/bf16 provider reasoning tokens **count against `max_tokens`**. Must bump `max_tokens` to compensate (1536 medium, 2048 high).
+- Response `content` may be **`null`** if reasoning exhausts all tokens — code must handle with `content or ""`
+- Response includes `reasoning_details` array (can be ignored)
+- Effort levels: `minimal`, `low`, `medium`, `high`, `xhigh`
+
+**Local llama-server** — `<|think|>` system prompt token:
+```json
+{
+  "model": "gemma-4-e4b",
+  "messages": [
+    {"role": "system", "content": "<|think|>\nYou are a task executor..."},
+    {"role": "user", "content": "..."}
+  ],
+  "max_tokens": 512
+}
+```
+- Thinking tokens count **against** `max_tokens` — must increase from 256 to 512+
+- Output contains `<|channel>thought\n...\<channel|>` blocks (stripped by existing regex)
+- Server-level flags: `--reasoning on`, `--reasoning-budget 2000`, `--reasoning-format deepseek`
+- Recommended params: temperature 1.0, top_p 0.95, top_k 64
+
+### Key Difference
+
+| Aspect | OpenRouter (Parasail) | Local llama-server |
+|---|---|---|
+| Thinking token budget | Shared with max_tokens (must bump: 1536/2048) | Shared with max_tokens (must increase: 512/768) |
+| How to enable | `"reasoning": {"enabled": true, "effort": "medium"}` | `<|think|>` in system prompt |
+| Output location | `reasoning_details` array, `content` may be `null` | Inline `<|channel>` blocks |
+| Speed impact | ~10-12s/step (vs ~1s normal) | Significant (~2x at 7 tok/s) |
+| Effort control | `effort: "medium"/"high"` (cannot combine with `max_tokens`) | `--reasoning-budget N` |
+
+### Implementation (Done)
+
+```
+ask_llm() attempt 0: normal call (no thinking)
+    ↓ JSON parse fails or step execution fails
+ask_llm() attempt 1: enable thinking (medium)
+    - OpenRouter: reasoning.enabled=true, effort="medium", max_tokens bumped to 1536
+    - Local: bump max_tokens 256→512, prepend <|think|> to system prompt
+    ↓ strip think tags, parse JSON
+ask_llm() attempt 2: thinking escalated (high)
+    - OpenRouter: effort="high", max_tokens bumped to 2048
+    - Local: max_tokens→768
+```
+
+When `think=True` is passed from caller (after failed step execution): medium from attempt 0, high from attempt 1+.
+
+Changes to `ask_llm()`:
+- `think` parameter enables thinking from first attempt
+- Auto-escalation on retries: no thinking → medium → high
+- OpenRouter: `reasoning` dict with `effort` only (not `max_tokens` — they're mutually exclusive)
+- OpenRouter: `max_tokens` bumped to 1536/2048 (reasoning tokens shared with Parasail)
+- Local: `<|think|>` prepended to system prompt, `max_tokens` bumped to 512/768
+- `content or ""` handles `null` content when reasoning exhausts token budget
+- `<|channel>...<channel|>` stripping regex added for local thinking output
+- API error responses (`"error"` key) are retried instead of crashing on missing `"choices"`
+
+Changes to `run()` / `int_run()`:
+- `use_think` flag set to `True` after any failed step execution, `False` after success
+- Passed through `get_step()` → `ask_llm()` — thinking activates on the step after failure
+
+### Bugs Found During Implementation
+
+1. **`effort` + `max_tokens` mutually exclusive** — OpenRouter returns 400 if both specified in `reasoning` dict. Fixed: use `effort` only.
+2. **`content: null` with reasoning** — Parasail provider's reasoning tokens count against `max_tokens`. At original 512 max_tokens, reasoning used ~484 tokens leaving nothing for content. Fixed: bump to 1536/2048.
+3. **API error → KeyError** — When OpenRouter returns `{"error": {...}}` instead of `{"choices": [...]}`, code crashed on `rj["choices"]`. Fixed: check for `"error"` key, log and retry.
+
+### Test Results (2026-04-07)
+
+**Unit tests: 9 tests in `TestThinkingRetry`, all pass:**
+1. `test_thinking_retry_openrouter` — reasoning params added on retry
+2. `test_thinking_retry_local` — `<|think|>` prepended + max_tokens bumped
+3. `test_thinking_strips_channel_tags` — closed `<|channel>` blocks stripped
+4. `test_thinking_strips_unclosed_channel_tags` — unclosed blocks stripped
+5. `test_api_error_retries` — API error responses retried gracefully
+6. `test_no_thinking_on_first_attempt` — no reasoning on first attempt
+7. `test_think_true_enables_from_first_attempt` — caller can force thinking
+8. `test_null_content_with_reasoning` — `content: null` handled (retries)
+9. `test_think_escalates_to_high` — medium → high escalation
+
+**OpenRouter hard tests: 3/3 pass:**
+- `test_replan_build_with_dependency` — **PASSES** (code hallucination fixed by thinking)
+- `test_replan_fix_wrong_command` — **PASSES** (thinking helped debug, replanned successfully)
+- `test_replan_multi_step_recovery` — **PASSES** (was failing — model output dict content `{"status": "SUCCESS"}` instead of escaped string; fixed by auto-serialization in `execute()`)
+
+### References
+
+- [OpenRouter reasoning tokens docs](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) — `reasoning.enabled`, `reasoning.max_tokens`, `reasoning.effort`
+- [OpenRouter API parameters](https://openrouter.ai/docs/api/reference/parameters) — full parameter reference
+- [llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) — `--reasoning on`, `--reasoning-budget`, `--reasoning-format`
+- [Unsloth Gemma 4 guide](https://unsloth.ai/docs/models/gemma-4) — `<|think|>` token usage, recommended sampling params
+- [Google Gemma 4 blog](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/) — thinking is opt-in (not always-on like Qwen 3.5)
+
+## Duplicate Action Guard (Implemented 2026-04-07)
+
+### Motivation
+
+The remaining action looping issue: the model occasionally repeats the same successful action 2-3 times (write loops) or the same failed action up to 8 times (failure loops) before emitting `done` or `fail`. Thinking-on-retry helps with code quality after failures but doesn't prevent repetition of identical actions.
+
+**Multi-turn conversation was considered and rejected** for this agent. Multi-turn accumulates raw LLM output (full absolute paths, verbose reasoning, file content in write actions) as prior assistant turns. Three turns easily hits 500-800 prompt tokens — vs the current slim state at ~150-200 tokens. This would bloat context for the local 4B model (256 max_tokens, 16K context, ~7 tok/s) where every token matters. The curated slim state gives us precise control over prompt size; multi-turn hands that control to the model's own verbosity. Multi-turn makes sense later with a stronger local model and more context headroom.
+
+**Solution: programmatic duplicate action detection.** Zero token cost, eliminates loops at the framework level regardless of model capability.
+
+### How It Works
+
+Detection is **per-action-type** because different actions have different false-positive risks:
+
+```
+After get_step() returns an action, before execute():
+
+last = state["last_steps"][-1:]
+if not last:
+    → no guard (first step)
+
+prev = last[0]
+
+WRITE: must compare content, not just arg
+    Same file + same content + prev ok → auto-done (true duplicate)
+    Same file + different content → allow (legitimate fix attempt)
+
+SHELL: compare command string
+    Same command + prev ok → auto-done (true duplicate)
+    Same command + prev fail → auto-fail (stuck, escalate to replan)
+
+READ: no guard (re-reads are legitimate after modifying a file)
+
+DONE/FAIL: no guard (terminal actions, already handled)
+```
+
+**Why content matters for write:** The error-recovery pattern is write → compile (fail) → write same file with fix → compile. Matching only on `(action, arg)` would auto-done the second write, killing the fix. This was the critical bug in the original plan.
+
+**Why auto-fail is safe for shell:** If the model runs the exact same command twice consecutively and both fail, no intervening action changed the environment — the model is stuck. But if there's an intervening write/shell between the two attempts, `last_steps[-1]` is that intervening action, not the first failed shell, so the guard doesn't trigger.
+
+**Why read is excluded:** Re-reading a file after modifying it (read → write fix → read to verify) is a legitimate pattern. The last step before the second read is a write, so `last_steps[-1]` wouldn't match anyway in most cases. But even consecutive reads (read → read same file) are harmless — the model might have missed info on first read. The cost of a false positive (skipping a needed re-read) outweighs the cost of an extra read action.
+
+### State change: store write content for comparison
+
+`last_steps` entries for write actions gain a `_content` field (the written content). This is:
+- Stored in the in-memory step dict for duplicate detection
+- **Not** included in the slim state sent to the LLM (no token cost)
+- Only compared against the immediately previous step
+
+```python
+# In the step-append block, after execute():
+step_entry = {
+    "action": act, "arg": action.get("arg", ""),
+    "ok": result["ok"], "output": result["output"][:100]
+}
+if act == "write":
+    step_entry["_content"] = action.get("content", "")
+state["last_steps"].append(step_entry)
+```
+
+The slim state construction in `get_step()` already selects only `action`, `arg`, `ok`, `output` keys — `_content` is automatically excluded.
+
+### Impact
+
+| Scenario | Before | After |
+|---|---|---|
+| Write main.c loop (same content) | 5 writes → exhausted steps → replan | 1 write → auto-done |
+| Write main.c then fix (different content) | N/A (would have been false positive) | allowed (content differs) |
+| Shell datex failure loop | 8 attempts → exhausted steps → replan | 2 attempts → auto-fail → replan |
+| Shell gcc after fixing source | N/A (would have been false positive) | allowed (last step is write, not shell) |
+| Read same file twice | N/A (would have been false positive) | allowed (read excluded from guard) |
+| data.txt write loop (same content) | 3 writes → done on step 4 | 1 write → auto-done |
+| Normal execution (no loops) | No change | No change (guard never triggers) |
+
+### Implementation Plan
+
+Changes to `run()` and `int_run()` step loops, after `get_step()` returns but before `execute()`:
+
+```python
+# Duplicate action guard — per-action-type loop detection
+last = state["last_steps"][-1:] if state["last_steps"] else []
+if last and last[0]["action"] == act:
+    prev = last[0]
+    if act == "write" and prev.get("arg", "") == action.get("arg", ""):
+        # Write: compare content — same content = loop, different content = fix
+        if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+            log(f"  [{step + 1}] auto-done (duplicate write, same content)")
+            task_done = True
+            break
+    elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+        # Shell: same command — ok=loop, fail=stuck
+        if prev.get("ok"):
+            log(f"  [{step + 1}] auto-done (duplicate successful shell)")
+            task_done = True
+            break
+        else:
+            log(f"  [{step + 1}] auto-fail (same shell failed twice)")
+            state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+            break
+    # read, done, fail: no guard
+```
+
+Changes to step-append block (both `run()` and `int_run()`):
+
+```python
+step_entry = {
+    "action": act, "arg": action.get("arg", ""),
+    "ok": result["ok"], "output": result["output"][:100]
+}
+if act == "write":
+    step_entry["_content"] = action.get("content", "")
+state["last_steps"].append(step_entry)
+```
+
+No changes to `ask_llm()`, `get_step()`, `get_plan()`, or system prompts. The guard is purely a loop-level check, and `_content` is invisible to the LLM.
+
+### Testing Approach
+
+**Unit tests (no LLM needed) — `TestDuplicateGuard`:**
+
+1. `test_write_same_content_triggers_auto_done` — mock LLM returns write main.c with identical content twice, verify auto-done on second and task completes without executing the duplicate write
+2. `test_write_different_content_allowed` — mock LLM returns write main.c with content "v1" then write main.c with content "v2" (fix), verify second write executes normally (NOT blocked by guard)
+3. `test_shell_same_success_triggers_auto_done` — mock LLM returns same shell command twice (both would succeed), verify auto-done on second
+4. `test_shell_same_failure_triggers_auto_fail` — mock LLM returns same shell command twice (both fail), verify auto-fail and error recorded for replan
+5. `test_shell_recompile_after_write_not_blocked` — mock: shell gcc (fail) → write main.c (fix) → shell gcc (same command), verify third step executes (last step is write, not shell, so guard doesn't trigger)
+6. `test_read_same_file_twice_allowed` — mock LLM returns read data.txt twice consecutively, verify second read executes normally (read excluded from guard)
+7. `test_different_action_type_not_duplicate` — write main.c then shell on main.c, verify no guard trigger (action types differ)
+8. `test_guard_with_thinking_active` — mock: shell fails → shell same (with use_think=True from failure), verify auto-fail fires even with thinking enabled (guard and thinking are independent mechanisms)
+9. `test_content_not_in_slim_state` — verify `_content` field is not included in the slim state sent to LLM (check that get_step's state construction excludes underscore-prefixed keys)
+
+**Integration tests (OpenRouter):**
+10. Run existing `TestOpenRouterEasy::test_multi_step_build` — verify zero write loops (was 2-3 before)
+11. Run existing `TestOpenRouterHard::test_replan_fix_wrong_command` — verify datex fails after 2 attempts not 8
+12. Run existing `TestOpenRouterMedium::test_fix_missing_include` — verify write-fix-recompile pattern still works (regression test for the false-positive bug)
+
+**What success looks like:**
+- Write loops: eliminated when content is identical, allowed when content differs
+- Shell loops: eliminated on success duplicates, auto-fail on consecutive failure duplicates
+- Read: never blocked by guard
+- Fix patterns (write → compile fail → write fix → recompile): unaffected
+- Medium tests pass: error recovery within tasks works (the false-positive regression test)
+- Token usage: unchanged (guard is programmatic, `_content` is not sent to LLM)
+
 ## Usage
 
 ```bash
@@ -212,15 +486,18 @@ python3 -m pytest agent/test_agent.py -v -k "not Integration"
 python3 -m pytest agent/test_agent.py -s -v -k "Integration"
 ```
 
-**Unit tests (34) + server config tests (4) = 38 non-integration tests:**
+**Unit tests (56) + server config tests (4) = 61 non-integration tests:**
 - `TestExecuteShell` — success, failure, timeout, stderr, truncation, cwd, empty output
 - `TestExecuteWrite` — file creation, relative paths, nested dirs, bad paths
 - `TestExecuteRead` — read file, absolute/relative paths, missing files, truncation
 - `TestExecuteDoneFail` — done/fail/unknown actions, missing keys
 - `TestAskLlm` — JSON parsing, think-tag stripping, code-fence stripping
+- `TestThinkingRetry` — thinking-on-retry: OpenRouter reasoning params, local `<|think|>` + max_tokens bump, `<|channel>` tag stripping, escalation from medium to high, think=True from caller
 - `TestRunLoop` — full loop: simple success, replan on failure, max replans, multi-task, error tracking, empty plans
 - `TestCrossTaskState` — verifies completed_tasks and last step carryover across tasks
 - `TestOutputFormatting` — verifies write output uses basename, slim state uses basename for args
+- `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON in write actions
+- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write loops, shell loops, legitimate retries allowed, read excluded
 - `TestServerConfig` — verifies optimized server config: single slot with full context, slot save/restore via API, cache file on disk
 
 **Integration tests (18 total, require live LLM) — local and OpenRouter tiers:**
@@ -246,7 +523,7 @@ OpenRouter integration (9 tests, require OPENROUTER_API_KEY in .env):
 Same test structure as local (`TestOpenRouterEasy`, `TestOpenRouterMedium`, `TestOpenRouterHard`) but uses Gemma 4 26B-A4B via Parasail/bf16 provider. These tests validate the larger model's behavior and confirmed that:
 - 26B model reliably emits `done` (no auto-done needed)
 - Cross-task state fixes eliminated redundant work
-- Hard tests: 2/3 pass (build_with_dependency fails due to code hallucination)
+- Hard tests: 3/3 pass (thinking-on-retry fixes code hallucination, content serialization fixes dict output, duplicate guard prevents loops)
 
 `int_run()` accepts configurable limits (replans, tasks, steps). Default: 1 replan, 3 tasks, 5 steps. Medium: 1 replan, 3 tasks, 8 steps. Hard: 2 replans, 5 tasks, 8 steps. Timestamped progress output for real-time monitoring via `tail -f`.
 
