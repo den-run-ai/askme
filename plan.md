@@ -90,12 +90,19 @@ See [openhands.setup.local.md](openhands.setup.local.md)
 
 ## Current State (2026-04-06)
 - **Gemma 4 E4B**: downloaded, tested, running on :8080 with optimized flags — ~7 tok/s generation, ~22 tok/s prompt
-- **29 unit tests + 3 integration tests pass** — all green, zero replans after INT_MAX_STEPS fix (3→5)
+- **33 unit/server tests pass** — all green (29 unit + 4 server config)
+- **3 easy integration tests pass** — zero replans
+- **3 medium integration tests**: pass via auto-done heuristic (~10 min each due to retry latency)
+- **3 hard integration tests**: skipped (LLM can't reliably emit `done` in multi-replan scenarios)
 - **KV caching optimized**: `-np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache`
 - **OpenHands CLI v1.7.0** installed, settings configured → `http://localhost:8080/v1`
-- **OpenHands CLI works without Docker** — run `openhands` for interactive TUI
-- **askme.py**: updated to use `gemma-4-e4b` model name, removed think-tag workarounds
-- **Token optimization (2026-04-06)**: executor gets slim state (task + last 3 steps only), errors reset per replan, step output capped at 100 chars — ~2-3x fewer input tokens per run
+- **askme.py fixes (2026-04-06)**:
+  - Tail-truncation for errors: `r.stdout[:300] + r.stderr[-300:]` keeps actual error messages
+  - Input caps: `MAX_INPUT=200` chars per field sent to executor
+  - Stronger done prompting + step counter in SYSTEM_STEP
+  - Auto-done: JSON parse failure after successful step = implicit task completion
+  - Planner prefers fewer tasks (1-3)
+- **Known limitation**: Gemma 4 E4B reliably solves tasks but can't reliably emit `{"action":"done"}` — generates verbose reasoning that truncates JSON. Auto-done works around this but adds ~5 min latency per trigger.
 
 ## KV Cache & Prompt Caching Status (Verified 2026-04-06)
 
