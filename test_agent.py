@@ -812,6 +812,96 @@ class TestCacheWorkaround:
         assert len(warm_calls) == 1, f"Expected 1 warm call, got {len(warm_calls)}"
 
 
+# --- Planner reasoning tests ---
+
+class TestPlannerReasoning:
+    """Verify planner always uses thinking and PLANNER_MAX_TOKENS."""
+
+    def test_first_plan_has_thinking(self):
+        """First plan (empty state) should pass think=True and max_tokens=PLANNER_MAX_TOKENS."""
+        from askme import PLANNER_MAX_TOKENS
+        captured = {}
+        def capture_llm(messages, max_tokens=256, think=False):
+            captured["max_tokens"] = max_tokens
+            captured["think"] = think
+            return {"tasks": ["do something"]}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_plan("test request", {"completed_tasks": [], "errors": []})
+        assert captured["think"] is True, "First plan should have think=True"
+        assert captured["max_tokens"] == PLANNER_MAX_TOKENS, \
+            f"Expected max_tokens={PLANNER_MAX_TOKENS}, got {captured['max_tokens']}"
+
+    def test_replan_has_thinking(self):
+        """Replan (state has errors) should pass think=True and max_tokens=PLANNER_MAX_TOKENS."""
+        from askme import PLANNER_MAX_TOKENS
+        captured = {}
+        def capture_llm(messages, max_tokens=256, think=False):
+            captured["max_tokens"] = max_tokens
+            captured["think"] = think
+            return {"tasks": ["retry something"]}
+        state = {"completed_tasks": [], "errors": ["Task 'build' failed: missing header"]}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_plan("test request", state)
+        assert captured["think"] is True
+        assert captured["max_tokens"] == PLANNER_MAX_TOKENS
+
+    def test_replan_with_completed_tasks_has_thinking(self):
+        """Partial completion replan should still use think=True and PLANNER_MAX_TOKENS."""
+        from askme import PLANNER_MAX_TOKENS
+        captured = {}
+        def capture_llm(messages, max_tokens=256, think=False):
+            captured["max_tokens"] = max_tokens
+            captured["think"] = think
+            return {"tasks": ["finish remaining"]}
+        state = {"completed_tasks": ["create header"], "errors": ["compile failed"]}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_plan("test request", state)
+        assert captured["think"] is True
+        assert captured["max_tokens"] == PLANNER_MAX_TOKENS
+
+    def test_system_plan_includes_hints(self):
+        """Updated SYSTEM_PLAN should contain specificity guidance."""
+        from askme import SYSTEM_PLAN
+        assert "File content hints" in SYSTEM_PLAN
+        assert "relative filenames" in SYSTEM_PLAN
+        assert "completed_tasks" in SYSTEM_PLAN
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "local")
+    def test_planner_thinking_local_uses_think_tag(self, mock_post):
+        """Local planner should prepend <|think|> to system prompt."""
+        mock_post.return_value = mock_response({"tasks": ["do thing"]})
+        get_plan("test", {"completed_tasks": [], "errors": []})
+        call_body = mock_post.call_args_list[0][1]["json"]
+        sys_content = call_body["messages"][0]["content"]
+        assert sys_content.startswith("<|think|>\n"), \
+            f"Expected <|think|> prefix, got: {sys_content[:50]}"
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_planner_thinking_openrouter_uses_reasoning(self, mock_post):
+        """OpenRouter planner should include reasoning params."""
+        mock_post.return_value = mock_response({"tasks": ["do thing"]})
+        get_plan("test", {"completed_tasks": [], "errors": []})
+        call_body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" in call_body
+        assert call_body["reasoning"]["enabled"] is True
+        assert call_body["reasoning"]["effort"] == "medium"
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_planner_null_content_with_reasoning(self, mock_post):
+        """Planner-specific: reasoning exhausts token budget, content=null → retry succeeds."""
+        resp_null = MagicMock()
+        resp_null.json.return_value = {
+            "choices": [{"message": {"content": None, "reasoning": "planning..."}}]
+        }
+        mock_post.side_effect = [resp_null, mock_response({"tasks": ["recovered task"]})]
+        result = get_plan("test", {"completed_tasks": [], "errors": []})
+        assert "tasks" in result
+        assert result["tasks"] == ["recovered task"]
+
+
 # --- Integration tests (require llama-server on :8080) ---
 
 import time
@@ -1385,6 +1475,119 @@ class TestOpenRouterHard:
             max_replans=HARD_MAX_REPLANS, max_tasks=HARD_MAX_TASKS, max_steps=HARD_MAX_STEPS,
         )
         assert_file(tmp_path / "config.json", "SUCCESS")
+
+
+@skip_no_openrouter
+class TestPlannerReasoningOpenRouter:
+    """Planner reasoning integration tests via OpenRouter (gemma-4-26b-a4b).
+    Validates that thinking produces better plans on the larger model."""
+
+    def test_build_with_dependency_fewer_replans(self, tmp_path):
+        """Build with header dependency — planner reasoning should reduce replans to <=1."""
+        result = or_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include \"msg.h\"' and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"REPLAN_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS, max_tasks=HARD_MAX_TASKS, max_steps=HARD_MAX_STEPS,
+        )
+        assert_file(tmp_path / "main.c", "msg.h")
+        assert_file(tmp_path / "msg.h", "REPLAN_OK")
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        # Count replans (plan events beyond the first)
+        plan_events = [e for e in result["log"] if e["event"] == "plan"]
+        replans = len(plan_events) - 1
+        assert replans <= 1, \
+            f"Expected <=1 replans with planner reasoning, got {replans}"
+
+    def test_plan_specificity(self, tmp_path):
+        """Planner reasoning should produce task descriptions mentioning key dependencies."""
+        result = or_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include <stdio.h>' and '#include \"msg.h\"' "
+            f"and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"SPEC_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS, max_tasks=HARD_MAX_TASKS, max_steps=HARD_MAX_STEPS,
+        )
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        # Check that plan tasks mention key details (stdio.h, #include, or msg.h)
+        plan_events = [e for e in result["log"] if e["event"] == "plan"]
+        first_plan_tasks = plan_events[0]["tasks"]
+        all_task_text = " ".join(first_plan_tasks).lower()
+        has_specifics = any(kw in all_task_text for kw in
+                          ["stdio", "include", "msg.h", "header", "define"])
+        assert has_specifics, \
+            f"Expected task descriptions to mention dependencies, got: {first_plan_tasks}"
+
+
+@skip_no_llm
+class TestPlannerReasoningIntegration:
+    """Planner reasoning integration tests (local, requires llama-server on :8080).
+    Validates that thinking produces better plans on the local 12B model."""
+
+    def test_build_with_dependency_fewer_replans(self, tmp_path):
+        """Build with header dependency — planner reasoning should reduce replans to <=1."""
+        result = int_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include \"msg.h\"' and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"REPLAN_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS, max_tasks=HARD_MAX_TASKS, max_steps=HARD_MAX_STEPS,
+        )
+        assert_file(tmp_path / "main.c", "msg.h")
+        assert_file(tmp_path / "msg.h", "REPLAN_OK")
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        plan_events = [e for e in result["log"] if e["event"] == "plan"]
+        replans = len(plan_events) - 1
+        assert replans <= 1, \
+            f"Expected <=1 replans with planner reasoning, got {replans}"
+
+    def test_no_overlapping_tasks(self, tmp_path):
+        """Fix python syntax — planner reasoning should avoid redundant tasks."""
+        broken = tmp_path / "greet.py"
+        broken.write_text('print("hello"\n')
+        result = int_run(
+            f"Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS, max_tasks=MED_MAX_TASKS, max_steps=MED_MAX_STEPS,
+        )
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        # Check plan doesn't have redundant fix tasks
+        plan_events = [e for e in result["log"] if e["event"] == "plan"]
+        first_plan_tasks = plan_events[0]["tasks"]
+        # Should have <=3 tasks (not bloated with overlapping fix steps)
+        assert len(first_plan_tasks) <= 3, \
+            f"Expected <=3 tasks, got {len(first_plan_tasks)}: {first_plan_tasks}"
+        # Check for actual overlap: no two tasks should both mention "fix" or "syntax"
+        # (a common pattern when the planner produces redundant repair tasks)
+        fix_tasks = [t for t in first_plan_tasks if any(
+            kw in t.lower() for kw in ["fix", "repair", "correct", "syntax error"]
+        )]
+        assert len(fix_tasks) <= 1, \
+            f"Expected at most 1 fix/repair task, got {len(fix_tasks)}: {fix_tasks}"
+
+    def test_plan_uses_relative_paths(self, tmp_path):
+        """Planner should use relative filenames, not absolute paths in task descriptions."""
+        result = int_run(
+            f"In {tmp_path}: create a file called output.txt containing 'hello', then read it.",
+            str(tmp_path),
+        )
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        plan_events = [e for e in result["log"] if e["event"] == "plan"]
+        first_plan_tasks = plan_events[0]["tasks"]
+        all_task_text = " ".join(first_plan_tasks)
+        # Task descriptions should not contain the full tmp_path
+        assert str(tmp_path) not in all_task_text, \
+            f"Expected relative paths in task descriptions, got absolute: {first_plan_tasks}"
 
 
 if __name__ == "__main__":

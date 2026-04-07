@@ -81,11 +81,15 @@ MAX_TASKS = 10
 MAX_STEPS = 10
 MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
+PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
 
 SYSTEM_PLAN = f"""You are a planner. Given a user request and current state, propose a list of tasks.
 If a previous plan failed, redesign it based on what went wrong.
 Prefer fewer tasks (1-3). Each task should be a complete goal, not a single command. Max {MAX_TASKS} tasks.
-Keep descriptions short (under 15 words each).
+Keep descriptions short (under 15 words each) but include key details:
+- File content hints: which includes, defines, or imports are needed
+- Use relative filenames (e.g. main.c not /full/path/main.c)
+- Never create a task for work already in completed_tasks
 Output ONLY valid JSON. No markdown, no explanation.
 Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 
@@ -183,7 +187,7 @@ def get_plan(user_prompt, state):
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
-    ], max_tokens=512)
+    ], max_tokens=PLANNER_MAX_TOKENS, think=True)  # always think — replans need it more
 
 
 MAX_INPUT = 300  # max chars per field sent to executor
@@ -282,7 +286,8 @@ def run(user_prompt, working_dir=None):
         plan = get_plan(user_prompt, state)
         state["errors"] = []  # reset errors each replan; planner already saw them
         tasks = plan.get("tasks", [])
-        log(f"Plan ({time.time()-t_plan:.1f}s): {tasks}")
+        plan_wall = time.time() - t_plan
+        log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
 
         all_done = True
         for i, task in enumerate(tasks):

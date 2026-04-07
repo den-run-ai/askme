@@ -36,7 +36,7 @@ python3 agent/askme.py "create hello.c, compile it, run it"
 
 **Key functions:**
 - `ask_llm(messages, max_tokens, think)` — calls llama-server, strips `<think>` tags (closed and unclosed) as safety net, code fences, extracts JSON from mixed text, retries on parse failure (up to 2 retries).
-- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=512). Receives full state including completed tasks and errors.
+- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=PLANNER_MAX_TOKENS=768, think=True). Receives full state including completed tasks and errors.
 - `get_step(task, state, goal="")` — asks LLM for next action within a task (max_tokens=256). Receives a slim state: only current task, task index, and last 3 steps (sliding window). The original user prompt is passed as a `GOAL:` line for context (e.g., file paths, specifics) but completed task history and errors are excluded.
 - `execute(action, working_dir)` — runs shell/write/read/done/fail actions
 - `run(user_prompt)` — outer loop: plan → execute tasks → replan on failure. Resets errors after each replan.
@@ -563,7 +563,7 @@ No changes to `ask_llm()`, `get_step()`, `get_plan()`, or system prompts. The gu
 - Medium tests pass: error recovery within tasks works (the false-positive regression test)
 - Token usage: unchanged (guard is programmatic, `_content` is not sent to LLM)
 
-## Planner Reasoning (Proposed)
+## Planner Reasoning (Implemented 2026-04-07)
 
 ### Motivation
 
@@ -586,7 +586,7 @@ Replans need reasoning *more* than first plans, not less. Errors provide raw dat
 
 ```
 get_plan() — all plans (first and replan):
-    ask_llm(messages, max_tokens=768, think=True)
+    ask_llm(messages, max_tokens=PLANNER_MAX_TOKENS, think=True)
     → Planner gets <|think|> (local) or reasoning.effort="medium" (OpenRouter)
     → First plan thinking used to:
       1. Identify task dependencies (which files need which includes)
@@ -599,14 +599,22 @@ get_plan() — all plans (first and replan):
       7. Design a recovery plan that avoids the same failure mode
 ```
 
+### Risks
+
+**Happy-path latency creep.** Planner thinking adds ~73s on local runs even when unnecessary. Track planner wall time separately in integration test results (not just total test time) so this cost stays visible and can be evaluated for future conditional-thinking optimization.
+
+**Fewer tasks ≠ better tasks.** The SYSTEM_PLAN changes could reduce overlap by producing fewer but vaguer tasks, moving failure from "redundant task" to "underspecified executor." Validate SYSTEM_PLAN against both overlap reduction *and* task quality — integration tests should check that task descriptions contain actionable specifics (content hints, filenames), not just that there are fewer tasks.
+
 ### Changes to `get_plan()`
 
 ```python
+PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
+
 def get_plan(user_prompt, state):
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
-    ], max_tokens=768, think=True)  # always think — replans need it more
+    ], max_tokens=PLANNER_MAX_TOKENS, think=True)  # always think — replans need it more
 ```
 
 ### Changes to `SYSTEM_PLAN`
@@ -641,11 +649,13 @@ Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 
 | Call | Current | Proposed |
 |---|---|---|
-| `get_plan()` max_tokens | 512 | 768 (all plans) |
+| `get_plan()` max_tokens | 512 | `PLANNER_MAX_TOKENS` = 768 (all plans) |
 | Thinking | None | medium (local: `<|think|>`, ~256 tokens for reasoning) — all plans |
 | Net new tokens per plan call | 0 | ~256 thinking + 256 headroom |
 
 The 768 max_tokens accounts for thinking tokens being shared with output (both local and Parasail/bf16 OpenRouter). Cost per replan: ~73s at 7 tok/s — justified by better error analysis.
+
+**Null-content risk:** With reasoning always on, `content: null` becomes more likely (reasoning exhausts shared token budget). The existing `ask_llm()` retry path already handles this (`content or ""` → JSON parse failure → retry with escalated thinking), but this scenario is now on the hot path rather than edge case. Add a planner-specific unit test to verify.
 
 ### Testing Approach
 
@@ -657,22 +667,26 @@ The 768 max_tokens accounts for thinking tokens being shared with output (both l
 4. `test_system_plan_includes_hints` — verify updated `SYSTEM_PLAN` contains "File content hints" and "relative filenames" guidance
 5. `test_planner_thinking_local_uses_think_tag` — mock `requests.post`, verify `<|think|>` prepended to system prompt in local mode when `think=True`
 6. `test_planner_thinking_openrouter_uses_reasoning` — mock `requests.post`, verify `reasoning.enabled=true` in OpenRouter mode when `think=True`
+7. `test_planner_null_content_with_reasoning` — mock `ask_llm` to return `content: null` on first call (reasoning exhausts budget), verify retry succeeds — planner-specific regression since reasoning is now always-on
 
 **Integration tests — `TestPlannerReasoningIntegration` (local, requires llama-server):**
 
-7. `test_build_with_dependency_no_replan` — same prompt as hard test but assert 0 replans (planner should produce specific enough tasks that executor doesn't need replan)
-8. `test_no_overlapping_tasks` — fix_python_syntax prompt, assert no task in plan duplicates work of a previous task (parse plan output, check for redundant tasks)
-9. `test_plan_uses_relative_paths` — prompt with long temp paths, assert task descriptions contain relative filenames not absolute paths
+Track `planner_wall_time` separately from total test time in results to keep happy-path overhead visible.
+
+8. `test_build_with_dependency_fewer_replans` — same prompt as hard test but assert `replans <= 1` (improvement over current, tighten to 0 once stable)
+9. `test_no_overlapping_tasks` — fix_python_syntax prompt, assert no task in plan duplicates work of a previous task (parse plan output, check for redundant tasks)
+10. `test_plan_uses_relative_paths` — prompt with long temp paths, assert task descriptions contain relative filenames not absolute paths
 
 **Integration tests — `TestPlannerReasoningOpenRouter` (requires OPENROUTER_API_KEY):**
 
-10. `test_build_with_dependency_no_replan_openrouter` — same as test 7 but on 26B model
-11. `test_plan_specificity` — build_with_dependency prompt, assert plan task descriptions mention `stdio.h` or `#include` (planner reasoning should identify the dependency)
+11. `test_build_with_dependency_fewer_replans_openrouter` — same as test 8 but on 26B model
+12. `test_plan_specificity` — build_with_dependency prompt, assert plan task descriptions mention `stdio.h` or `#include` (planner reasoning should identify the dependency)
 
 **What success looks like:**
-- Hard tests: 0 replans (currently 1), ~50% fewer steps, ~60% less total time
+- Hard tests: ≤1 replans (currently 1, target 0 once stable), ~50% fewer steps, ~60% less total time
 - Medium tests: 0 thinking retries on executor (currently 3-6x per test), similar total time (planner overhead offsets retry savings)
-- Easy tests: +~73s overhead (acceptable)
+- Easy tests: +~73s overhead (acceptable), planner wall time tracked separately
+- Task quality: fewer tasks *and* more specific descriptions (not fewer-but-vaguer)
 - No regression on unit tests (thinking is transparent to JSON parsing)
 
 ## Usage
@@ -701,7 +715,7 @@ python3 -m pytest agent/test_agent.py -v -k "not Integration"
 python3 -m pytest agent/test_agent.py -s -v -k "Integration"
 ```
 
-**Unit tests (66) + server config tests (4) = 70 non-integration tests:**
+**Unit tests (73) + server config tests (4) = 77 non-integration tests:**
 - `TestExecuteShell` — success, failure, timeout, stderr, truncation, cwd, empty output
 - `TestExecuteWrite` — file creation, relative paths, nested dirs, bad paths
 - `TestExecuteRead` — read file, absolute/relative paths, missing files, truncation
@@ -714,10 +728,11 @@ python3 -m pytest agent/test_agent.py -s -v -k "Integration"
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON in write actions
 - `TestDuplicateGuard` — verifies per-action-type duplicate detection: write loops, shell loops, legitimate retries allowed, read excluded
 - `TestServerConfig` — verifies optimized server config: single slot with full context, slot save/restore via API, cache file on disk
+- `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, SYSTEM_PLAN specificity hints, local/OpenRouter thinking modes, null-content retry
 
-**Integration tests (18 total, require live LLM) — local and OpenRouter tiers:**
+**Integration tests (23 total, require live LLM) — local and OpenRouter tiers:**
 
-Local integration (9 tests, require llama-server on :8080):
+Local integration (12 tests, require llama-server on :8080):
 
 Easy (3 tests, 0 replans expected — `TestIntegration`):
 - `test_create_and_read_file` — write + read hello.txt
@@ -734,11 +749,17 @@ Hard (3 tests, 1-2 replans expected — `TestIntegrationHard`):
 - `test_replan_fix_wrong_command` — try non-existent `datex`, replan with correct `date`
 - `test_replan_multi_step_recovery` — run script needing missing config.json, replan to create it
 
-OpenRouter integration (9 tests, require OPENROUTER_API_KEY in .env):
-Same test structure as local (`TestOpenRouterEasy`, `TestOpenRouterMedium`, `TestOpenRouterHard`) but uses Gemma 4 26B-A4B via Parasail/bf16 provider. These tests validate the larger model's behavior and confirmed that:
+Planner Reasoning (3 tests, validates thinking improves plans — `TestPlannerReasoningIntegration`):
+- `test_build_with_dependency_fewer_replans` — same as hard build_with_dependency, assert ≤1 replans
+- `test_no_overlapping_tasks` — fix_python_syntax prompt, assert no redundant tasks in plan
+- `test_plan_uses_relative_paths` — assert task descriptions use relative filenames, not absolute paths
+
+OpenRouter integration (11 tests, require OPENROUTER_API_KEY in .env):
+Same test structure as local (`TestOpenRouterEasy`, `TestOpenRouterMedium`, `TestOpenRouterHard`) plus planner reasoning tests (`TestPlannerReasoningOpenRouter`). Uses Gemma 4 26B-A4B via Parasail/bf16 provider. These tests validate the larger model's behavior and confirmed that:
 - 26B model reliably emits `done` (no auto-done needed)
 - Cross-task state fixes eliminated redundant work
 - Hard tests: 3/3 pass (thinking-on-retry fixes code hallucination, content serialization fixes dict output, duplicate guard prevents loops)
+- Planner reasoning: 0 replans on build_with_dependency, task descriptions include dependency hints (stdio.h, msg.h, #include)
 
 `int_run()` accepts configurable limits (replans, tasks, steps). Default: 1 replan, 3 tasks, 5 steps. Medium: 1 replan, 3 tasks, 8 steps. Hard: 2 replans, 5 tasks, 8 steps. Timestamped progress output for real-time monitoring via `tail -f`.
 

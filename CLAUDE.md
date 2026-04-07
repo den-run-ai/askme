@@ -33,7 +33,7 @@ mkdir -p /tmp/llama-cache
   --port 8080
 
 # Unit tests (mocked, no LLM needed)
-python3 -m pytest test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"
+python3 -m pytest test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
 
 # Single test
 python3 -m pytest test_agent.py -v -k "test_simple_success"
@@ -57,7 +57,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
 `askme.py` implements a **Plan → Execute → Replan** loop:
 
-1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, errors) and outputs `{"tasks": ["task1", "task2", ...]}`.
+1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, errors) and outputs `{"tasks": ["task1", "task2", ...]}`. Always uses thinking (`think=True`) with `PLANNER_MAX_TOKENS=768` — reasoning helps produce specific task descriptions with content hints, avoid overlapping tasks, and diagnose root causes on replans.
 2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover) and proposes one action at a time: `shell`, `write`, `read`, `done`, or `fail`.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
 
@@ -83,7 +83,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 ## Files
 
 - `askme.py` — the agent (self-contained, ~389 lines)
-- `test_agent.py` — 66 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
+- `test_agent.py` — 73 unit tests (mocked) + 4 server config tests + 12 local integration + 11 OpenRouter integration tests
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
@@ -96,6 +96,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
 - `TestDuplicateGuard` — verifies per-action-type duplicate detection and loop prevention
 - `TestCacheWorkaround` — verifies slot save/restore lifecycle, non-fatal failure, backend gating
+- `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, system prompt includes specificity hints, null-content retry
 - Integration tests use `int_run()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
 - Local integration tests are skipped automatically if llama-server isn't running on `:8080`
 - OpenRouter integration tests are skipped automatically if `OPENROUTER_API_KEY` is not set
@@ -103,7 +104,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Safety Limits
 
-All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, shell timeout 30s. Executor `max_tokens`: 256 (local) / 512 (OpenRouter). These exist to prevent runaway loops with a slow local LLM.
+All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, shell timeout 30s. Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). These exist to prevent runaway loops with a slow local LLM.
 
 ## Known Limitations
 

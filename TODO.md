@@ -28,7 +28,19 @@
 - Reconcile all stated test counts across `README.md`, `ARCHITECTURE.md`, `gemma4-setup.md`, and `CLAUDE.md`.
 - Reconcile the claim that "all tests pass" with the currently documented subsets actually verified.
 - Clarify the difference between broken `--cache-reuse` and working slot save/restore so "cache enabled" is not misleading.
-- Make command examples explicit about the assumed working directory (`llama.cpp` root vs `agent/` directory).
+- Working directory assumptions in command examples are now aligned across `README.md` and `CLAUDE.md`; keep them in sync if commands change again.
+
+## Cache Workaround State
+
+- Keep `CACHE_WORKAROUND=1` documented as implemented but currently counterproductive, not as an active optimization path.
+- Retest manual slot save/restore only after upstream fix for `#21468` lands.
+- If Phase 2 is revisited, document measured timings separately from implementation mechanics so outcome and mechanism are not conflated.
+
+## Planner Follow-Up — DONE (2026-04-07)
+
+- ~~If planner thinking is implemented, add coverage for planner `content: null` / reasoning-exhaustion responses.~~ → `test_planner_null_content_with_reasoning` in `TestPlannerReasoning`
+- ~~Track planner wall time separately from total integration time to catch happy-path regressions.~~ → `planner_wall_time` logged in `run()` at plan completion
+- ~~Prefer an explicit planner token-budget constant if planner `max_tokens` is increased.~~ → `PLANNER_MAX_TOKENS = 768` constant at top of `askme.py`
 
 ## Optional Follow-Up
 
