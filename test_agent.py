@@ -1358,6 +1358,26 @@ class TestCompletionSemantics:
         from askme import SYSTEM_STEP
         assert "FULL task description" in SYSTEM_STEP
 
+    def test_parse_error_after_success_does_not_auto_complete(self, tmp_path):
+        """Parse error after a successful step should fail the task, not auto-complete it."""
+        plan_resp = {"tasks": ["write and compile hello.c"]}
+        step_ok = {"action": "shell", "arg": "echo hi"}
+        # Second get_step call raises JSONDecodeError (simulating malformed LLM output)
+        def step_side_effect(*a, **kw):
+            if step_side_effect.call == 0:
+                step_side_effect.call += 1
+                return step_ok
+            raise json.JSONDecodeError("bad json", "", 0)
+        step_side_effect.call = 0
+
+        with patch("askme.get_plan", return_value=plan_resp), \
+             patch("askme.get_step", side_effect=step_side_effect), \
+             patch("askme.execute", return_value={"ok": True, "output": "hi"}), \
+             patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
+            result = run("write and compile hello.c", working_dir=str(tmp_path))
+        # Task should NOT succeed — parse error means we don't know if the task is done
+        assert result is False
+
 
 # --- Integration tests (require llama-server on :8080) ---
 
@@ -1439,14 +1459,8 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                     action = get_step(task, state, goal=user_prompt, step_num=step, max_steps=max_steps, think=use_think)
                 except (json.JSONDecodeError, KeyError, Exception) as e:
                     elapsed = time.time() - t0
-                    # Auto-done: if last step was successful, treat parse error as implicit completion
-                    last = state["last_steps"][-1:] if state["last_steps"] else []
-                    if last and last[0].get("ok"):
-                        log(f"  STEP {step+1} auto-done (parse error after success, {elapsed:.1f}s)")
-                        task_done = True
-                        break
                     log(f"  STEP {step+1} LLM error ({elapsed:.1f}s): {e}")
-                    state["errors"].append(f"LLM parse error on task '{task}': {str(e)[:100]}")
+                    state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
                     break
                 elapsed = time.time() - t0
                 act = action.get("action", "")

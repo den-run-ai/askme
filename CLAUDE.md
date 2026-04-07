@@ -76,7 +76,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 ### Error handling
 - Shell output: `r.stdout[:300] + r.stderr[-300:]` — tail-truncates stderr to keep actual error messages
 - Input caps: `MAX_INPUT=300` chars per field sent to executor — prevents path bloat eating context
-- Auto-done: if `get_step()` raises after a successful step, treat as implicit task completion
+- Parse-error-as-failure: if `get_step()` raises after a successful step, the task fails and replans (no false auto-completion)
 - **Typed failure classification**: `classify_error()` categorizes errors as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Error types are stored in step entries and used for summarization.
 - **Error summarization**: `summarize_errors()` groups raw errors by type, deduplicates, and caps at 3 per type before passing to planner. Planner sees `[missing_tool] go: command not found` not raw strings.
 

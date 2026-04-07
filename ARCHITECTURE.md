@@ -165,7 +165,7 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 | Observability | `log()` helper adds `[HH:MM:SS]` timestamps + `(Xs)` durations to all activities |
 | Error truncation | `r.stdout[:300] + r.stderr[-300:]` — tail-truncates to keep actual error messages |
 | Input caps | `MAX_INPUT=300` chars per field sent to executor — prevents path bloat eating context |
-| Auto-done | If `get_step()` raises JSONDecodeError and last step was successful, treat as implicit task completion |
+| Parse-error-as-failure | If `get_step()` raises after exhausting retries, task always fails and replans — no false auto-completion |
 | Cross-task state | Last step from previous task carries over; `completed_tasks` included in slim state |
 | Basename outputs | Write output says `"Wrote main.c"` not `"Wrote /full/path/main.c"` — LLM needs clear signal |
 | Basename args | Slim step history uses basename for write/read `arg` fields — saves tokens, avoids confusion |
@@ -183,7 +183,7 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 
 **Root cause:** The "never emits done" behavior was actually caused by the **cross-task state bug** (empty `last_steps` at task boundaries), not a model capability gap. When the executor received an empty state, the model had no context about what was accomplished and couldn't determine that the task was complete. Once the state bug was fixed (last step carryover + completed_tasks in slim state), done emission started working on all easy tests.
 
-**Auto-done heuristic retained** as safety net — it still fires occasionally on medium-difficulty tasks when the model enters verbose reasoning mode (see JSON Parse Failures below).
+**Auto-done heuristic removed** (2026-04-07) — previously treated parse errors after a successful step as implicit task completion. This was a false-success path: the prior step might have been partial (e.g. "write main.c" succeeded but task was "write and compile main.c"). Parse errors now always fail the task and trigger replan.
 
 ### JSON Parse Failures on Already-Solved Tasks (Local Gemma 4 E4B)
 

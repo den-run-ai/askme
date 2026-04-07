@@ -491,16 +491,9 @@ def run(user_prompt, working_dir=None):
                 t_step = time.time()
                 try:
                     action = get_step(task, state, goal=user_prompt, step_num=step, think=use_think)
-                except (json.JSONDecodeError, KeyError):
-                    # Auto-done: if LLM can't produce valid JSON after a successful step,
-                    # treat it as implicit task completion (common with small LLMs)
-                    last = state["last_steps"][-1:] if state["last_steps"] else []
-                    if last and last[0].get("ok"):
-                        log(f"  [{step + 1}] auto-done (LLM parse error after success, {time.time()-t_step:.1f}s)")
-                        task_done = True
-                        break
+                except (json.JSONDecodeError, KeyError) as e:
                     log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
-                    state["errors"].append(f"LLM parse error on task '{task}'")
+                    state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
                     break
                 # Normalize None → "" for optional string fields (models emit "arg": null)
                 for _k in ("arg", "content", "reasoning"):
