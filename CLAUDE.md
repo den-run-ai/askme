@@ -6,16 +6,19 @@ IMPORTANT: Ensure you've thoroughly reviewed the [AGENTS.md](../AGENTS.md) file 
 
 ## What This Is
 
-NanAgent — a minimal, self-contained agent that runs on local or remote LLMs (Gemma 4 via llama-server or OpenRouter). It takes a user prompt, plans tasks, executes them via shell/write/read actions, and replans on failure. Single file, no frameworks, no external dependencies beyond `requests`.
+NanAgent — a minimal, self-contained agent that runs on local or remote LLMs (Gemma 4 via llama-server or OpenRouter). It takes a user prompt, plans tasks, executes them via shell/write/read actions, and replans on failure. Single file, no frameworks, no external dependencies beyond `requests`. Each run gets an isolated temp directory — agent-created files never pollute the repo. Exits with code 1 on failure for script chaining.
 
 ## Commands
 
 ```bash
+# All commands below assume you're in the agent/ directory.
+# From the parent llama.cpp dir, prefix paths with agent/ (e.g. python3 agent/askme.py).
+
 # Run the agent (local, requires llama-server on :8080)
-python3 agent/askme.py "your request here"
+python3 askme.py "your request here"
 
 # Run via OpenRouter (requires OPENROUTER_API_KEY in .env)
-LLM_BACKEND=openrouter python3 agent/askme.py "your request here"
+LLM_BACKEND=openrouter python3 askme.py "your request here"
 
 # Start llama-server (optimized for agentic use)
 cd /Users/macmone/code/llama.cpp
@@ -27,22 +30,22 @@ mkdir -p /tmp/llama-cache
   --port 8080
 
 # Unit tests (mocked, no LLM needed)
-python3 -m pytest agent/test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"
+python3 -m pytest test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"
 
 # Single test
-python3 -m pytest agent/test_agent.py -v -k "test_simple_success"
+python3 -m pytest test_agent.py -v -k "test_simple_success"
 
 # Integration tests — local (requires llama-server on :8080)
-python3 -m pytest agent/test_agent.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~2min)
-python3 -m pytest agent/test_agent.py -s -v -k "IntegrationMedium"   # medium: error recovery (~3min)
-python3 -m pytest agent/test_agent.py -s -v -k "IntegrationHard"     # hard: replanning (~5min)
+python3 -m pytest test_agent.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~2min)
+python3 -m pytest test_agent.py -s -v -k "IntegrationMedium"   # medium: error recovery (~40min)
+python3 -m pytest test_agent.py -s -v -k "IntegrationHard"     # hard: replanning (~17min)
 
 # Integration tests — OpenRouter (requires OPENROUTER_API_KEY in .env)
-python3 -m pytest agent/test_agent.py -s -v -k "TestOpenRouterEasy"     # easy (~10s)
-python3 -m pytest agent/test_agent.py -s -v -k "TestOpenRouterMedium"   # medium (~2min)
-python3 -m pytest agent/test_agent.py -s -v -k "TestOpenRouterHard"     # hard (~2min)
+python3 -m pytest test_agent.py -s -v -k "TestOpenRouterEasy"     # easy (~10s)
+python3 -m pytest test_agent.py -s -v -k "TestOpenRouterMedium"   # medium (~2min)
+python3 -m pytest test_agent.py -s -v -k "TestOpenRouterHard"     # hard (~2min)
 
-# Rebuild llama.cpp (if needed)
+# Rebuild llama.cpp (if needed, from llama.cpp root)
 cmake -B build -DLLAMA_CURL=ON
 cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 ```
@@ -54,6 +57,9 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, errors) and outputs `{"tasks": ["task1", "task2", ...]}`.
 2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover) and proposes one action at a time: `shell`, `write`, `read`, `done`, or `fail`.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
+
+### Working directory isolation
+`run()` creates a temp directory per invocation (`/tmp/nanagent_*`), printed at start and end. All `execute()` calls use this dir as cwd. Shell commands run there; relative write/read paths resolve there. Callers can pass `working_dir=` to override (used by tests). `run()` returns `True`/`False`; `__main__` exits with code 1 on failure.
 
 Key design constraint: the local LLM (Gemma 4 E4B, 4B active params) is slow (~7 tok/s) with 16K context on M1. Everything is optimized for minimal token usage — short system prompts, JSON-only output, sliding window of step history, truncated outputs.
 
@@ -73,8 +79,8 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~336 lines)
-- `test_agent.py` — 56 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
+- `askme.py` — the agent (self-contained, ~344 lines)
+- `test_agent.py` — 59 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
@@ -102,6 +108,9 @@ Previously believed to be a model capability gap. Root cause was an **empty stat
 
 ### Action Looping (Gemma 4 26B via OpenRouter) — Mitigated
 The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → auto-done, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).
+
+### `--cache-reuse` Broken for Gemma 4 — Upstream, No Fix
+[#21468](https://github.com/ggml-org/llama.cpp/issues/21468) — iSWA shared KV layers break prefix matching. Server now explicitly logs `cache_reuse is not supported by this context` (previously silent). Every request re-evaluates full prompt. Manual slot save/restore workaround planned — see [gemma4-setup.md](gemma4-setup.md) Phase 2 (unblocked by #21510 checkpoint restore fix, now in build).
 
 ## Models
 

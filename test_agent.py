@@ -304,9 +304,10 @@ class TestRunLoop:
             # get_step: done
             {"action": "done", "reasoning": "finished"},
         ]
-        run("say hello")
+        result = run("say hello")
         out = capsys.readouterr().out
         assert "All tasks complete" in out
+        assert result is True
 
     @patch("askme.ask_llm")
     def test_task_failure_triggers_replan(self, mock_llm, capsys):
@@ -325,10 +326,11 @@ class TestRunLoop:
             {"action": "shell", "arg": "echo compiled", "reasoning": "compile"},
             {"action": "done", "reasoning": "compiled"},
         ]
-        run("compile my code")
+        result = run("compile my code")
         out = capsys.readouterr().out
         assert "will replan" in out
         assert "All tasks complete" in out
+        assert result is True
 
     @patch("askme.ask_llm")
     def test_max_replans_exhausted(self, mock_llm, capsys):
@@ -337,9 +339,10 @@ class TestRunLoop:
             {"tasks": ["do thing"]},
             {"action": "fail", "reasoning": "nope"},
         ] * 3  # 3 replan attempts
-        run("impossible task")
+        result = run("impossible task")
         out = capsys.readouterr().out
         assert "Exhausted" in out
+        assert result is False
 
     @patch("askme.ask_llm")
     def test_multi_task_plan(self, mock_llm, capsys):
@@ -353,9 +356,10 @@ class TestRunLoop:
             {"action": "read", "arg": "/tmp/test_askme.txt", "reasoning": "read"},
             {"action": "done", "reasoning": "read it"},
         ]
-        run("create and read a file")
+        result = run("create and read a file")
         out = capsys.readouterr().out
         assert "All tasks complete" in out
+        assert result is True
 
     @patch("askme.ask_llm")
     def test_step_errors_tracked_in_state(self, mock_llm, capsys):
@@ -368,10 +372,11 @@ class TestRunLoop:
             {"action": "shell", "arg": "echo ok", "reasoning": "retry"},
             {"action": "done", "reasoning": "done"},
         ]
-        run("run some commands")
+        result = run("run some commands")
         out = capsys.readouterr().out
         assert "FAIL" in out
         assert "All tasks complete" in out
+        assert result is True
 
     @patch("askme.ask_llm")
     def test_empty_plan(self, mock_llm, capsys):
@@ -379,9 +384,49 @@ class TestRunLoop:
         mock_llm.side_effect = [
             {"tasks": []},
         ]
-        run("do nothing")
+        result = run("do nothing")
         out = capsys.readouterr().out
         assert "All tasks complete" in out
+        assert result is True
+
+    @patch("askme.ask_llm")
+    def test_working_dir_isolation(self, mock_llm, capsys, tmp_path):
+        """run() creates isolated temp dir and shell commands execute there."""
+        mock_llm.side_effect = [
+            {"tasks": ["check dir"]},
+            {"action": "shell", "arg": "pwd", "reasoning": "check"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        result = run("check dir", working_dir=str(tmp_path))
+        out = capsys.readouterr().out
+        assert str(tmp_path) in out
+        assert "Working directory:" in out
+        assert "Output in:" in out
+        assert result is True
+
+    @patch("askme.ask_llm")
+    def test_working_dir_printed_on_failure(self, mock_llm, capsys, tmp_path):
+        """Working dir is printed even when agent fails."""
+        mock_llm.side_effect = [
+            {"tasks": ["fail"]},
+            {"action": "fail", "reasoning": "nope"},
+        ] * 3
+        result = run("fail", working_dir=str(tmp_path))
+        out = capsys.readouterr().out
+        assert "Output in:" in out
+        assert result is False
+
+    @patch("askme.ask_llm")
+    def test_auto_creates_temp_dir(self, mock_llm, capsys):
+        """run() without working_dir creates a temp directory automatically."""
+        mock_llm.side_effect = [
+            {"tasks": ["check"]},
+            {"action": "done", "reasoning": "done"},
+        ]
+        result = run("check")
+        out = capsys.readouterr().out
+        assert "nanagent_" in out
+        assert result is True
 
 
 # --- Tests for cross-task state and output formatting bugs ---

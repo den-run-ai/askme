@@ -1,6 +1,9 @@
 # Gemma 4 E4B — Setup, Configuration & Optimization
 
-Mac M1 16GB. Audited 2026-04-07 against `ggml-org/llama.cpp` master.
+Mac M1 16GB. Last updated 2026-04-07.
+
+**Current build:** `0d049d6a9` (build `b8695`) — up to date with master as of 2026-04-07.
+**Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 
 ## Model
 
@@ -60,7 +63,7 @@ mkdir -p /tmp/llama-cache
 | `--ctx-size 16384` | Full context for single slot | Working |
 | `--flash-attn on` | Memory-efficient attention | Working |
 | `-np 1` | Single slot (avoids 4-way context split on M1) | Working |
-| `--cache-reuse 256` | KV prefix reuse across requests | **Broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) |
+| `--cache-reuse 256` | KV prefix reuse across requests | **Broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468). Server now logs `cache_reuse is not supported by this context, it will be disabled` (previously silent). |
 | `--slot-save-path /tmp/llama-cache` | Disk persistence for KV state | Working (verified by `TestServerConfig`) |
 
 ### Interactive chat
@@ -98,7 +101,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 ## Critical Issue: `--cache-reuse` Broken for Gemma 4
 
-**[Issue #21468](https://github.com/ggml-org/llama.cpp/issues/21468)** — Gemma 4's shared KV layers (iSWA architecture) break the prefix matching assumptions in `--cache-reuse`. The flag is **silently ignored**. Every request re-evaluates the full prompt from scratch.
+**[Issue #21468](https://github.com/ggml-org/llama.cpp/issues/21468)** — Gemma 4's shared KV layers (iSWA architecture) break the prefix matching assumptions in `--cache-reuse`. As of build `b8695` (2026-04-07), the server now **explicitly logs** `cache_reuse is not supported by this context, it will be disabled` instead of silently ignoring the flag. Every request still re-evaluates the full prompt from scratch.
 
 **Impact on NanAgent:** The system prompt (~200 tokens) is re-processed on every `ask_llm()` call. For a medium integration test doing ~15 LLM calls, that's ~3000 wasted prompt tokens. On M1 at ~50 tok/s prompt eval, that's ~60s overhead per test — explaining why `fix_python_syntax` takes 520s and `fix_missing_include` takes 660s.
 
@@ -108,26 +111,21 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 ## Upstream Gemma 4 Commits
 
-Local HEAD: `941146b3f` (18 commits behind master as of 2026-04-07).
+Local HEAD: `0d049d6a9` (up to date with master as of 2026-04-07).
 
-### Already in local build
+### In local build
 
-| PR | Title | Impact |
-|----|-------|--------|
-| [#21309](https://github.com/ggml-org/llama.cpp/pull/21309) | Core Gemma 4 support (vision + MoE, no audio) | Foundation |
-| [#21326](https://github.com/ggml-org/llama.cpp/pull/21326) | Template parser fixes | Correct chat formatting |
-| [#21343](https://github.com/ggml-org/llama.cpp/pull/21343) | Tokenizer fix (newline grouping, BPE bypass) | Correct tokenization |
-| [#21418](https://github.com/ggml-org/llama.cpp/pull/21418) | Specialized parser (tool calling, interleaved thinking) | Tool use support |
-| [#21390](https://github.com/ggml-org/llama.cpp/pull/21390) | `final_logit_softcapping` read for Gemma 4 (was stuck at 30.0f) | Output quality |
-| [#21428](https://github.com/ggml-org/llama.cpp/pull/21428) | GGUF bool array fix (`sliding_window_pattern` loading) | Correct iSWA behavior |
-
-### Missing locally (in 18 commits behind master)
-
-| Commit | Title | Impact |
-|--------|-------|--------|
-| `4aa962e` / [#21488](https://github.com/ggml-org/llama.cpp/pull/21488) | Byte token handling in BPE detokenizer for Gemma4 | Tokenizer correctness — may fix edge cases in JSON output |
-| `e8f5082` / [#21510](https://github.com/ggml-org/llama.cpp/pull/21510) | Fix restore for checkpoints with `pos_min == 0` | **Affects slot save/restore** — needed before implementing manual cache workaround |
-| `15f786e` / [#21159](https://github.com/ggml-org/llama.cpp/pull/21159) | Optimized `flash_attn_stream_k_fixup` kernel | CUDA only, no M1 Metal impact |
+| PR | Title | Impact | Since |
+|----|-------|--------|-------|
+| [#21309](https://github.com/ggml-org/llama.cpp/pull/21309) | Core Gemma 4 support (vision + MoE, no audio) | Foundation | `941146b3f` |
+| [#21326](https://github.com/ggml-org/llama.cpp/pull/21326) | Template parser fixes | Correct chat formatting | `941146b3f` |
+| [#21343](https://github.com/ggml-org/llama.cpp/pull/21343) | Tokenizer fix (newline grouping, BPE bypass) | Correct tokenization | `941146b3f` |
+| [#21418](https://github.com/ggml-org/llama.cpp/pull/21418) | Specialized parser (tool calling, interleaved thinking) | Tool use support | `941146b3f` |
+| [#21390](https://github.com/ggml-org/llama.cpp/pull/21390) | `final_logit_softcapping` read for Gemma 4 (was stuck at 30.0f) | Output quality | `941146b3f` |
+| [#21428](https://github.com/ggml-org/llama.cpp/pull/21428) | GGUF bool array fix (`sliding_window_pattern` loading) | Correct iSWA behavior | `941146b3f` |
+| [#21488](https://github.com/ggml-org/llama.cpp/pull/21488) | Byte token handling in BPE detokenizer for Gemma4 | Tokenizer correctness — fixes edge cases in JSON output | `0d049d6a9` |
+| [#21510](https://github.com/ggml-org/llama.cpp/pull/21510) | Fix restore for checkpoints with `pos_min == 0` | **Unblocks Phase 2** — slot save/restore now works correctly | `0d049d6a9` |
+| [#21159](https://github.com/ggml-org/llama.cpp/pull/21159) | Optimized `flash_attn_stream_k_fixup` kernel | CUDA only, no M1 Metal impact | `0d049d6a9` |
 
 ### Not yet merged (watch list)
 
@@ -148,29 +146,55 @@ Local HEAD: `941146b3f` (18 commits behind master as of 2026-04-07).
 
 ## Implementation Plan
 
-### Phase 1: Update build (low risk, immediate)
+### Phase 1: Update build — COMPLETE (2026-04-07)
+
+Pulled 18 commits from `941146b3f` → `0d049d6a9`. Rebuilt successfully (build `b8695`).
+
+Picks up: Gemma4 byte token fix (#21488), checkpoint restore fix (#21510).
 
 ```bash
 cd /Users/macmone/code/llama.cpp
-git stash  # preserve local changes
 git pull origin master
-git stash pop
 cmake -B build -DLLAMA_CURL=ON
 cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 ```
 
-Picks up: Gemma4 byte token fix (#21488), checkpoint restore fix (#21510).
+#### Phase 1 Verification Results (2026-04-07)
 
-**Test:** Run unit tests + easy integration to verify no regressions.
+| Check | Result |
+|-------|--------|
+| HEAD includes `4aa962e` (byte token fix) | `0d049d6a9` — yes |
+| 59/59 unit tests | Pass (30.6s) |
+| Server starts with same flags | Yes — now logs `cache_reuse is not supported by this context` instead of silently ignoring |
+| 4/4 `TestServerConfig` | Pass (1.1s) |
+| 3/3 easy integration | Pass (2:12) |
+| 3/3 medium integration | Pass (39:08) |
 
-```bash
-python3 -m pytest agent/test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"
-python3 -m pytest agent/test_agent.py -s -v -k "TestIntegration and not Medium and not Hard"
-```
+**Easy integration (2:12 total):**
 
-### Phase 2: Manual slot save/restore workaround (medium effort)
+| Test | Tasks | Steps | Time |
+|------|-------|-------|------|
+| create_and_read_file | 2 | 5 (t1:3, t2:1) | ~41s |
+| shell_and_write | 2 | 4 (t1:3, t2:1) | ~36s |
+| multi_step_build | 3 | 6 (t1:2, t2:3, t3:1) | ~55s |
 
-Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the system prompt.
+**Medium integration (39:08 total):**
+
+| Test | Replans | Tasks | Steps | Thinking Retries | Time |
+|------|---------|-------|-------|------------------|------|
+| fix_python_syntax | 0 | 3 | 10 | 5x (med+high+med+med+med) | ~19min |
+| fix_missing_include | 1 | 3+3 | 5+4 | 4x | ~19min |
+| create_missing_file | 0 | 2 | 4 | 0 | ~15s |
+
+**Observations vs pre-update baseline:**
+- Easy tests: ~2:12 vs ~3:20 — **~35% faster** (likely byte token fix improving JSON output)
+- Medium tests: ~39min vs ~20min — **slower** on fix_python_syntax (19min vs 8.7min), similar on fix_missing_include. JSON parse retries dominate — the `</s>` EOS fix (#21492, not yet merged) may help.
+- Server now explicitly disables cache_reuse for Gemma 4 instead of silently ignoring
+- Checkpoint restore fix (#21510) is confirmed working (`TestServerConfig::test_slot_restore` passes)
+
+### Phase 2: Manual slot save/restore workaround — READY (unblocked by Phase 1)
+
+Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the system prompt. The checkpoint restore fix (#21510) from Phase 1 unblocks this — it fixes restore when `pos_min == 0`, which is exactly our case (system prompt starts at position 0).
 
 **Changes to `askme.py`:**
 
@@ -200,7 +224,7 @@ Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the
 
 3. Gate behind `CACHE_WORKAROUND=1` env var (off by default until validated).
 
-**Risk:** The checkpoint restore fix (#21510) in Phase 1 may be needed first — it fixes restore when `pos_min == 0`, which is exactly our case (system prompt starts at position 0).
+**Risk:** ~~The checkpoint restore fix (#21510) in Phase 1 may be needed first~~ — Phase 1 is complete, #21510 is in the build. `TestServerConfig::test_slot_restore` confirms save/restore works correctly.
 
 **Test plan:**
 - Verify `TestServerConfig` still passes (save/restore mechanics)
@@ -242,12 +266,13 @@ Watch these PRs — when merged, pull and rebuild:
 
 ## Verification Checklist
 
-After Phase 1 (build update):
-- [ ] `git log --oneline -1` shows commit after `4aa962e` (Gemma4 byte token fix)
-- [ ] Unit tests pass: `pytest agent/test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry)"`
-- [ ] Server starts cleanly with same flags
-- [ ] `TestServerConfig` passes (4 tests)
-- [ ] Easy integration tests pass (3 tests)
+After Phase 1 (build update) — **ALL PASS (2026-04-07)**:
+- [x] `git log --oneline -1` shows `0d049d6a9` (after `4aa962e` Gemma4 byte token fix)
+- [x] 59/59 unit tests pass (30.6s)
+- [x] Server starts — now explicitly logs `cache_reuse is not supported by this context`
+- [x] `TestServerConfig` passes (4 tests, 1.1s)
+- [x] 3/3 easy integration tests pass (2:12)
+- [x] 3/3 medium integration tests pass (39:08)
 
 After Phase 2 (cache workaround):
 - [ ] `TestCacheWorkaround` unit test passes
@@ -262,7 +287,7 @@ After Phase 2 (cache workaround):
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — flag is silently ignored. Manual slot save/restore is the workaround until upstream fixes it.
+- **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — as of build `b8695`, server now explicitly logs `cache_reuse is not supported by this context, it will be disabled` (previously silent). Manual slot save/restore is the workaround (Phase 2, unblocked by #21510 fix).
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 
 ## References

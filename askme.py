@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import sys, json, subprocess, requests, re, time, os
+import sys, json, subprocess, requests, re, time, os, tempfile
 from pathlib import Path
 
 
@@ -221,10 +221,14 @@ def execute(action, working_dir="."):
     return {"ok": False, "output": f"unknown action: {act}"}
 
 
-def run(user_prompt):
+def run(user_prompt, working_dir=None):
+    # Create isolated temp directory per run unless caller provides one
+    if working_dir is None:
+        working_dir = tempfile.mkdtemp(prefix="nanagent_")
     state = {"completed_tasks": [], "errors": []}
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
+    log(f"Working directory: {working_dir}")
 
     for replan in range(MAX_REPLANS):
         log("=" * 40)
@@ -293,7 +297,7 @@ def run(user_prompt):
                             state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
                             break
 
-                result = execute(action)
+                result = execute(action, working_dir)
                 ok_str = "OK" if result["ok"] else "FAIL"
                 log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
@@ -323,14 +327,18 @@ def run(user_prompt):
 
         if all_done:
             log(f"All tasks complete. ({time.time()-t_run:.1f}s total)")
-            return
+            log(f"Output in: {working_dir}")
+            return True
 
     log(f"Exhausted {MAX_REPLANS} replan attempts. ({time.time()-t_run:.1f}s total)")
     log(f"Errors: {state['errors']}")
+    log(f"Output in: {working_dir}")
+    return False
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 askme.py 'your request here'")
         sys.exit(1)
-    run(sys.argv[1])
+    success = run(sys.argv[1])
+    sys.exit(0 if success else 1)

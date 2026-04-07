@@ -342,7 +342,7 @@ Changes to `run()` / `int_run()`:
 - `test_replan_fix_wrong_command` — **PASSES** (thinking helped debug, replanned successfully)
 - `test_replan_multi_step_recovery` — **PASSES** (was failing — model output dict content `{"status": "SUCCESS"}` instead of escaped string; fixed by auto-serialization in `execute()`)
 
-### Local Integration Test Results (2026-04-07)
+### Local Integration Test Results (2026-04-07, build `941146b3f`)
 
 **Easy: 3/3 pass (3:20 total):**
 
@@ -369,6 +369,32 @@ Key observations:
 - **fix_missing_include:** Path truncation was the root cause — model tried to reproduce long temp paths (`/private/var/folders/...`) in shell commands, exhausting max_tokens before closing JSON. After replan, the planner's simpler task descriptions let the model use relative paths (`cc -o fix_me fix_me.c`), which succeeded immediately. Total time dominated by thinking retries on truncated paths (~12 min of ~11 min total).
 - **create_missing_file:** Clean — no error recovery needed, same pattern as easy tests.
 - Duplicate guard saved fix_missing_include from infinite loops (auto-fail on same shell failing twice → triggered replan).
+
+### Local Integration Test Results (2026-04-07, build `0d049d6a9` — post Phase 1 update)
+
+Build updated from `941146b3f` → `0d049d6a9` (18 commits). Includes Gemma4 byte token fix (#21488) and checkpoint restore fix (#21510).
+
+**Easy: 3/3 pass (2:12 total) — ~35% faster than pre-update:**
+
+| Test | Tasks | Steps | Thinking | Dup Guard | Time |
+|------|-------|-------|----------|-----------|------|
+| create_and_read_file | 2 | 5 (t1:3, t2:1) | 0 | 0 | ~41s |
+| shell_and_write | 2 | 4 (t1:3, t2:1) | 0 | 0 | ~36s |
+| multi_step_build | 3 | 6 (t1:2, t2:3, t3:1) | 0 | 1x write | ~55s |
+
+**Medium: 3/3 pass (39:08 total):**
+
+| Test | Replans | Tasks | Steps | Thinking Retries | Time |
+|------|---------|-------|-------|------------------|------|
+| fix_python_syntax | 0 | 3 | 10 | 5x | ~19min |
+| fix_missing_include | 1 | 3+3 | 5+4 | 4x | ~19min |
+| create_missing_file | 0 | 2 | 4 | 0 | ~15s |
+
+Key observations:
+- **Easy tests ~35% faster** — likely byte token fix (#21488) improving JSON output, fewer parse retries
+- **Medium tests slower overall** — fix_python_syntax 19min vs 8.7min, more JSON parse retries. The `</s>` EOS fix (#21492, not yet merged) may help
+- **`--cache-reuse` confirmed broken** — server now explicitly logs `cache_reuse is not supported by this context`. Phase 2 (slot save/restore) unblocked by #21510
+- **Checkpoint restore verified** — `TestServerConfig::test_slot_restore` passes
 
 **Hard: 3/3 pass (16:49 total):**
 
@@ -554,32 +580,33 @@ Local integration tests (2026-04-07) revealed that most expensive executor retri
 
 ### Design
 
-Enable thinking on `get_plan()` — always-on for first plan, optional for replans (which already have error context as implicit reasoning).
+Enable thinking on `get_plan()` — always-on for both first plan and replans.
+
+Replans need reasoning *more* than first plans, not less. Errors provide raw data but the model still needs to reason about: (1) why the error happened (e.g. "compile error" → "missing header because files were created in wrong order"), (2) what to change in the new plan to avoid repeating the failure, (3) which completed work is reusable vs. tainted. Having error context makes the reasoning *harder*, not unnecessary.
 
 ```
-get_plan() — first plan:
+get_plan() — all plans (first and replan):
     ask_llm(messages, max_tokens=768, think=True)
     → Planner gets <|think|> (local) or reasoning.effort="medium" (OpenRouter)
-    → Thinking budget used to:
+    → First plan thinking used to:
       1. Identify task dependencies (which files need which includes)
       2. Produce specific task descriptions with content hints
       3. Avoid overlapping/redundant tasks
       4. Note relative path preference per task
-
-get_plan() — replan (state has errors):
-    ask_llm(messages, max_tokens=512)  # no thinking — errors provide reasoning context
+    → Replan thinking additionally used to:
+      5. Diagnose root cause from error messages + completed task state
+      6. Decide which completed work to preserve vs. redo
+      7. Design a recovery plan that avoids the same failure mode
 ```
 
 ### Changes to `get_plan()`
 
 ```python
 def get_plan(user_prompt, state):
-    is_replan = bool(state.get("errors") or state.get("completed_tasks"))
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
-    ], max_tokens=768 if not is_replan else 512,
-       think=not is_replan)
+    ], max_tokens=768, think=True)  # always think — replans need it more
 ```
 
 ### Changes to `SYSTEM_PLAN`
@@ -608,25 +635,25 @@ Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 | fix_wrong_command | 3 tasks (1 meta-task), ~4.5min | 2 tasks (actionable), ~2min |
 | Easy tests (no errors) | No change (already fast) | +~73s overhead (planner thinking) |
 
-**Tradeoff:** Easy tests get ~73s slower (planner thinking on tasks that don't need it). This is acceptable since easy tests already complete in <90s and the overhead is fixed (one planner call). For hard tasks the savings are 5-10x.
+**Tradeoff:** Easy tests get ~73s slower (planner thinking on tasks that don't need it). Hard tests with replans get ~73s extra per replan (1-2 replans = +73-146s), but this is noise compared to the 300-660s saved by better recovery plans. For hard tasks the net savings are still 5-10x.
 
 ### Token Budget
 
-| Call | Current | Proposed (first plan) | Proposed (replan) |
-|---|---|---|---|
-| `get_plan()` max_tokens | 512 | 768 | 512 (unchanged) |
-| Thinking | None | medium (local: `<|think|>`, ~256 tokens for reasoning) | None |
-| Net new tokens | 0 | ~256 thinking + 256 headroom | 0 |
+| Call | Current | Proposed |
+|---|---|---|
+| `get_plan()` max_tokens | 512 | 768 (all plans) |
+| Thinking | None | medium (local: `<|think|>`, ~256 tokens for reasoning) — all plans |
+| Net new tokens per plan call | 0 | ~256 thinking + 256 headroom |
 
-The 768 max_tokens for first plan accounts for thinking tokens being shared with output (both local and Parasail/bf16 OpenRouter).
+The 768 max_tokens accounts for thinking tokens being shared with output (both local and Parasail/bf16 OpenRouter). Cost per replan: ~73s at 7 tok/s — justified by better error analysis.
 
 ### Testing Approach
 
 **Unit tests (no LLM needed) — `TestPlannerReasoning`:**
 
 1. `test_first_plan_has_thinking` — mock `ask_llm`, verify `think=True` and `max_tokens=768` passed on first plan (empty state)
-2. `test_replan_no_thinking` — mock `ask_llm`, verify `think=False` and `max_tokens=512` on replan (state has errors)
-3. `test_replan_with_completed_tasks_no_thinking` — verify `think=False` when state has `completed_tasks` but no errors (partial completion → replan)
+2. `test_replan_has_thinking` — mock `ask_llm`, verify `think=True` and `max_tokens=768` on replan (state has errors)
+3. `test_replan_with_completed_tasks_has_thinking` — verify `think=True` and `max_tokens=768` when state has `completed_tasks` (partial completion → replan)
 4. `test_system_plan_includes_hints` — verify updated `SYSTEM_PLAN` contains "File content hints" and "relative filenames" guidance
 5. `test_planner_thinking_local_uses_think_tag` — mock `requests.post`, verify `<|think|>` prepended to system prompt in local mode when `think=True`
 6. `test_planner_thinking_openrouter_uses_reasoning` — mock `requests.post`, verify `reasoning.enabled=true` in OpenRouter mode when `think=True`
@@ -674,7 +701,7 @@ python3 -m pytest agent/test_agent.py -v -k "not Integration"
 python3 -m pytest agent/test_agent.py -s -v -k "Integration"
 ```
 
-**Unit tests (56) + server config tests (4) = 61 non-integration tests:**
+**Unit tests (59) + server config tests (4) = 63 non-integration tests:**
 - `TestExecuteShell` — success, failure, timeout, stderr, truncation, cwd, empty output
 - `TestExecuteWrite` — file creation, relative paths, nested dirs, bad paths
 - `TestExecuteRead` — read file, absolute/relative paths, missing files, truncation
@@ -746,7 +773,7 @@ Key flags for agentic use (defaults are suboptimal for sequential agent calls):
 | Flag | What it does | Default | Recommended |
 |---|---|---|---|
 | `--cache-prompt` | Prompt caching within a slot | Enabled | Keep |
-| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 (**broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468), see [gemma4-setup.md](gemma4-setup.md)) |
+| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 (**broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468), server now explicitly disables with log message. See [gemma4-setup.md](gemma4-setup.md) Phase 2 for workaround) |
 | `--slot-save-path DIR` | Persist KV cache to disk (survives restarts) | Off | `/tmp/llama-cache` |
 | `-np N` | Parallel slots (auto-detects 4 on M1, splits context) | Auto | 1 |
 | `--ctx-size N` | Context per slot (with -np 1, full context for agent) | 2048 | 16384 |
@@ -772,4 +799,4 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default). **Note:** currently broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — flag is silently ignored. See [gemma4-setup.md](gemma4-setup.md) for workaround plan.
+- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default). **Note:** currently broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server now explicitly disables with log message (previously silent). See [gemma4-setup.md](gemma4-setup.md) Phase 2 for manual slot save/restore workaround (unblocked by #21510 fix).
