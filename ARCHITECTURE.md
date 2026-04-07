@@ -122,8 +122,8 @@ OpenRouter requests include `"provider": {"order": ["Parasail"]}` for reliable b
 
 | Model | Architecture | "done" emission | Action looping | Speed | Notes |
 |---|---|---|---|---|---|
-| **Gemma 4 E4B** (local) | MoE 12B/4B active | Works after state fix (auto-done retained as safety net) | Duplicate write loops (same as 26B) | ~7 tok/s | Primary local model |
-| **Gemma 4 26B-A4B** (OpenRouter) | MoE 26B/4B active | Reliably emits done | Occasional write loops (3x before done) | ~1-2s/step | Recommended for testing |
+| **Gemma 4 E4B** (local) | MoE 12B/4B active | Works after state fix (auto-done retained as safety net) | Duplicate write loops (same as 26B) + write content truncation on multi-line files | ~7 tok/s | 9/9 integration tests pass (easy 3:20, medium 20:20, hard 16:49) |
+| **Gemma 4 26B-A4B** (OpenRouter) | MoE 26B/4B active | Reliably emits done | Occasional write loops (3x before done) | ~1-2s/step | 9/9 integration tests pass |
 | Qwen 3.5 9B | Dense | Unreliable (think-tag issues) | N/A | ~3 tok/s | Legacy |
 
 ### Gemma 4 vs Qwen 3.5 (Why We Switched)
@@ -199,6 +199,18 @@ When prompts contain long absolute paths (e.g., pytest temp dirs like `/private/
 **Workaround:** The `workdir` is set correctly, so the model should use relative paths (`cc -o fix_me fix_me.c`). The SYSTEM_STEP prompt says "use relative paths when possible" but the local model doesn't always follow this. The 26B model on OpenRouter handles this correctly.
 
 **Impact:** Adds extra thinking retries and steps. May cascade into replan if the model can't recover.
+
+### Write Content Truncation (Local Gemma 4 E4B)
+
+**Observed 2026-04-07 during local hard integration tests.**
+
+When the model needs to write multi-line file content (e.g., C source with `#include` directives, escaped quotes, newlines), the write action JSON frequently exceeds `max_tokens` before closing the JSON object. The model correctly identifies the fix but can't fit the complete `{"action":"write","arg":"main.c","content":"..."}` in the token budget.
+
+**Example:** `test_replan_build_with_dependency` step 5 — model needed to rewrite `main.c` with `#include <stdio.h>` added. Retry 1 (thinking=medium, 512 tokens) produced truncated JSON: `{"action": "write", "arg": "main.c", "content": "#include <stdio.h>\n#include \"msg.h\"\n\nint main() {\n    printf(\"%s` — cut off mid-content. Retry 2 (thinking=high, 768 tokens) produced empty output. Retry 3 (thinking=high, 768 tokens) finally succeeded. Total time for this single step: 303.6s.
+
+**Distinct from path truncation:** Path truncation is about long *args* (file paths). Write content truncation is about long *content* fields. Both exhaust `max_tokens` but from different JSON fields.
+
+**Mitigation:** Higher `max_tokens` for local executor would help but increases generation time proportionally (~7 tok/s). Current limits: 256 base → 512 thinking=medium → 768 thinking=high. The 768-token budget is barely sufficient for a 5-line C file with includes.
 
 ### Cross-Task State Bug (Fixed 2026-04-07)
 
@@ -358,6 +370,21 @@ Key observations:
 - **create_missing_file:** Clean — no error recovery needed, same pattern as easy tests.
 - Duplicate guard saved fix_missing_include from infinite loops (auto-fail on same shell failing twice → triggered replan).
 
+**Hard: 3/3 pass (16:49 total):**
+
+| Test | Replans | Tasks | Steps | Thinking | Dup Guard | Time |
+|------|---------|-------|-------|----------|-----------|------|
+| build_with_dependency | 1 | 3+2 | 8+2+2 | 5x (med+med+high+high+0) | 2x (write auto-done) | ~11min |
+| fix_wrong_command | 0 | 3 | 4+3+2 | 2x (med+med) | 0 | ~4.5min |
+| multi_step_recovery | 0 | 2 | 2+2 | 0 | 0 | ~1.5min |
+
+Key observations:
+- **build_with_dependency:** Most complex test. Plan 1 created files in task 1 (msg.h + main.c without `#include <stdio.h>`), task 2 auto-done via duplicate guard, task 3 hit 3 cascading failures: (1) `cc -o program main.c msg.h` — can't compile header directly, (2) thinking=medium fixed to `cc -o program main.c` — missing stdio.h, (3) model knew the fix (`#include <stdio.h>`) but write action JSON truncated at 512 tokens, retry at 768 also truncated, 3rd retry at 768 finally succeeded (303.6s for step 5 alone). After fixing main.c, compiled and ran successfully but exhausted 8/8 steps → triggered replan. Plan 2 was clean: just compile + run (2 steps each, done emission worked).
+- **fix_wrong_command:** Model followed instructions to try `datex` first (failed), then thinking=medium recovered with `date > path/today.txt` in a single command (clever — combined date + redirect). Then oddly retried `datex` again (step 3), triggering thinking=medium which produced `done`. Task 2 ran `date` standalone + wrote file. Task 3 re-ran date + done. No replan needed despite test expecting one — the model recovered within task via thinking.
+- **multi_step_recovery:** Cleanest hard test — model read the prompt carefully, created config.json first, then ran app.py. Only 4 steps total, no errors, no thinking retries. The planner correctly identified the dependency order without needing to fail first.
+- **New bug — write action JSON truncation:** When the model needs to write multi-line C code with includes and escapes, the write action JSON frequently exceeds max_tokens (256 local, even 512/768 with thinking). The model correctly identifies the fix but can't fit it in the token budget. This is distinct from the path truncation bug — it's the *content* that's too long, not the path. Observed in build_with_dependency step 5 (303.6s, 3 retries).
+- **New observation — thinking=medium datex recovery:** The model used shell redirection (`date > /path/today.txt`) after `datex` failed, bypassing the need for a separate write action. This is the first observed case of the model combining operations to reduce steps.
+
 ### References
 
 - [OpenRouter reasoning tokens docs](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) — `reasoning.enabled`, `reasoning.max_tokens`, `reasoning.effort`
@@ -510,6 +537,117 @@ No changes to `ask_llm()`, `get_step()`, `get_plan()`, or system prompts. The gu
 - Medium tests pass: error recovery within tasks works (the false-positive regression test)
 - Token usage: unchanged (guard is programmatic, `_content` is not sent to LLM)
 
+## Planner Reasoning (Proposed)
+
+### Motivation
+
+Local integration tests (2026-04-07) revealed that most expensive executor retries trace back to **poor task descriptions from the planner**:
+
+| Root cause | Test | Wasted time | How planner reasoning would help |
+|---|---|---|---|
+| Overlapping tasks | fix_python_syntax | 370s (3 retry budgets) | Planner would recognize task 1 already fixes the syntax → skip redundant task 2 |
+| Missing specificity | build_with_dependency | 303.6s (write content truncation) | Task "Create main.c" → "Create main.c with `#include <stdio.h>` and `#include \"msg.h\"`" — executor gets content hint, shorter write action |
+| Meta-tasks | fix_wrong_command | ~70s (confused executor) | `"Replan to use correct 'date' command"` is not actionable — thinking would produce `"Get date with 'date' command and save to today.txt"` |
+| No path guidance | fix_missing_include | ~660s (path truncation cascade) | Planner could hint "use relative paths in workdir" per task |
+
+**The cost asymmetry is clear:** planner runs **once per plan** (~512 extra tokens = ~73s at 7 tok/s). Executor retries fire **per failed step** (256→512→768 tokens × N steps = 150-600s). Investing reasoning at the planning stage prevents multiple downstream retries.
+
+### Design
+
+Enable thinking on `get_plan()` — always-on for first plan, optional for replans (which already have error context as implicit reasoning).
+
+```
+get_plan() — first plan:
+    ask_llm(messages, max_tokens=768, think=True)
+    → Planner gets <|think|> (local) or reasoning.effort="medium" (OpenRouter)
+    → Thinking budget used to:
+      1. Identify task dependencies (which files need which includes)
+      2. Produce specific task descriptions with content hints
+      3. Avoid overlapping/redundant tasks
+      4. Note relative path preference per task
+
+get_plan() — replan (state has errors):
+    ask_llm(messages, max_tokens=512)  # no thinking — errors provide reasoning context
+```
+
+### Changes to `get_plan()`
+
+```python
+def get_plan(user_prompt, state):
+    is_replan = bool(state.get("errors") or state.get("completed_tasks"))
+    return ask_llm([
+        {"role": "system", "content": SYSTEM_PLAN},
+        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
+    ], max_tokens=768 if not is_replan else 512,
+       think=not is_replan)
+```
+
+### Changes to `SYSTEM_PLAN`
+
+Add specificity guidance (only effective when thinking is enabled — without thinking, the model ignores long instructions):
+
+```python
+SYSTEM_PLAN = f"""You are a planner. Given a user request and current state, propose a list of tasks.
+If a previous plan failed, redesign it based on what went wrong.
+Prefer fewer tasks (1-3). Each task should be a complete goal, not a single command. Max {MAX_TASKS} tasks.
+Keep descriptions short (under 15 words each) but include key details:
+- File content hints: which includes, defines, or imports are needed
+- Use relative filenames (e.g. main.c not /full/path/main.c)
+- Never create a task for work already in completed_tasks
+Output ONLY valid JSON. No markdown, no explanation.
+Format: {{"tasks": ["task1 description", "task2 description"]}}"""
+```
+
+### Expected Impact
+
+| Scenario | Before (retry-based) | After (planner reasoning) |
+|---|---|---|
+| build_with_dependency | 3 tasks, 8+2+2 steps, 1 replan, ~11min | 2-3 tasks, ~5 steps, 0 replans, ~3min |
+| fix_python_syntax | 3 tasks (1 redundant), 9 steps, 370s wasted | 2 tasks (no overlap), ~5 steps, ~2min |
+| fix_missing_include | 3+3 tasks (replan), path truncation, ~11min | 2 tasks, relative paths, ~2min |
+| fix_wrong_command | 3 tasks (1 meta-task), ~4.5min | 2 tasks (actionable), ~2min |
+| Easy tests (no errors) | No change (already fast) | +~73s overhead (planner thinking) |
+
+**Tradeoff:** Easy tests get ~73s slower (planner thinking on tasks that don't need it). This is acceptable since easy tests already complete in <90s and the overhead is fixed (one planner call). For hard tasks the savings are 5-10x.
+
+### Token Budget
+
+| Call | Current | Proposed (first plan) | Proposed (replan) |
+|---|---|---|---|
+| `get_plan()` max_tokens | 512 | 768 | 512 (unchanged) |
+| Thinking | None | medium (local: `<|think|>`, ~256 tokens for reasoning) | None |
+| Net new tokens | 0 | ~256 thinking + 256 headroom | 0 |
+
+The 768 max_tokens for first plan accounts for thinking tokens being shared with output (both local and Parasail/bf16 OpenRouter).
+
+### Testing Approach
+
+**Unit tests (no LLM needed) — `TestPlannerReasoning`:**
+
+1. `test_first_plan_has_thinking` — mock `ask_llm`, verify `think=True` and `max_tokens=768` passed on first plan (empty state)
+2. `test_replan_no_thinking` — mock `ask_llm`, verify `think=False` and `max_tokens=512` on replan (state has errors)
+3. `test_replan_with_completed_tasks_no_thinking` — verify `think=False` when state has `completed_tasks` but no errors (partial completion → replan)
+4. `test_system_plan_includes_hints` — verify updated `SYSTEM_PLAN` contains "File content hints" and "relative filenames" guidance
+5. `test_planner_thinking_local_uses_think_tag` — mock `requests.post`, verify `<|think|>` prepended to system prompt in local mode when `think=True`
+6. `test_planner_thinking_openrouter_uses_reasoning` — mock `requests.post`, verify `reasoning.enabled=true` in OpenRouter mode when `think=True`
+
+**Integration tests — `TestPlannerReasoningIntegration` (local, requires llama-server):**
+
+7. `test_build_with_dependency_no_replan` — same prompt as hard test but assert 0 replans (planner should produce specific enough tasks that executor doesn't need replan)
+8. `test_no_overlapping_tasks` — fix_python_syntax prompt, assert no task in plan duplicates work of a previous task (parse plan output, check for redundant tasks)
+9. `test_plan_uses_relative_paths` — prompt with long temp paths, assert task descriptions contain relative filenames not absolute paths
+
+**Integration tests — `TestPlannerReasoningOpenRouter` (requires OPENROUTER_API_KEY):**
+
+10. `test_build_with_dependency_no_replan_openrouter` — same as test 7 but on 26B model
+11. `test_plan_specificity` — build_with_dependency prompt, assert plan task descriptions mention `stdio.h` or `#include` (planner reasoning should identify the dependency)
+
+**What success looks like:**
+- Hard tests: 0 replans (currently 1), ~50% fewer steps, ~60% less total time
+- Medium tests: 0 thinking retries on executor (currently 3-6x per test), similar total time (planner overhead offsets retry savings)
+- Easy tests: +~73s overhead (acceptable)
+- No regression on unit tests (thinking is transparent to JSON parsing)
+
 ## Usage
 
 ```bash
@@ -564,7 +702,7 @@ Medium (3 tests, 0 replans expected, error recovery within task — `TestIntegra
 - `test_fix_missing_include` — compile C without stdio.h, read error, add include, compile+run
 - `test_create_missing_file_then_use` — read non-existent file, create it, read again
 
-Hard (3 tests, 1-2 replans expected — `TestIntegrationHard`, skipped):
+Hard (3 tests, 1-2 replans expected — `TestIntegrationHard`):
 - `test_replan_build_with_dependency` — compile C with missing header, replan to create header first
 - `test_replan_fix_wrong_command` — try non-existent `datex`, replan with correct `date`
 - `test_replan_multi_step_recovery` — run script needing missing config.json, replan to create it
