@@ -122,7 +122,7 @@ OpenRouter requests include `"provider": {"order": ["Parasail"]}` for reliable b
 
 | Model | Architecture | "done" emission | Action looping | Speed | Notes |
 |---|---|---|---|---|---|
-| **Gemma 4 E4B** (local) | MoE 12B/4B active | Never emits — needs auto-done | N/A (too slow to test extensively) | ~7 tok/s | Primary local model |
+| **Gemma 4 E4B** (local) | MoE 12B/4B active | Works after state fix (auto-done retained as safety net) | Duplicate write loops (same as 26B) | ~7 tok/s | Primary local model |
 | **Gemma 4 26B-A4B** (OpenRouter) | MoE 26B/4B active | Reliably emits done | Occasional write loops (3x before done) | ~1-2s/step | Recommended for testing |
 | Qwen 3.5 9B | Dense | Unreliable (think-tag issues) | N/A | ~3 tok/s | Legacy |
 
@@ -165,19 +165,40 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 
 ## Known LLM Limitations
 
-### "done" Emission (Local Gemma 4 E4B)
+### "done" Emission (Local Gemma 4 E4B) — Resolved
 
-Gemma 4 E4B (12B/4B active, local) reliably solves problems but struggles to emit `{"action": "done"}`. After a successful action it either:
-- Generates verbose reasoning that exhausts `max_tokens` (256), truncating the JSON
-- Re-runs the same command instead of completing
-- Produces empty or unparseable responses
+**Status:** Fixed as of 2026-04-07. The model now emits `{"action": "done"}` reliably.
 
-**Workarounds applied:**
-1. **Stronger prompting** — `SYSTEM_STEP` uses CRITICAL RULES section with explicit done instructions
-2. **Auto-done heuristic** — if JSON parse fails after a successful step, treat as implicit completion
-3. **Input caps** — `MAX_INPUT=300` chars per field reduces prompt bloat that triggers verbose responses
+**Root cause:** The "never emits done" behavior was actually caused by the **cross-task state bug** (empty `last_steps` at task boundaries), not a model capability gap. When the executor received an empty state, the model had no context about what was accomplished and couldn't determine that the task was complete. Once the state bug was fixed (last step carryover + completed_tasks in slim state), done emission started working on all easy tests.
 
-**Impact:** Auto-done adds ~5 min latency per trigger (3 retries × ~100s each).
+**Auto-done heuristic retained** as safety net — it still fires occasionally on medium-difficulty tasks when the model enters verbose reasoning mode (see JSON Parse Failures below).
+
+### JSON Parse Failures on Already-Solved Tasks (Local Gemma 4 E4B)
+
+**Observed 2026-04-07 during local medium integration tests.**
+
+When the planner creates a task that was already completed by a previous task (e.g., "Correct the syntax error in greet.py" after task 1 already fixed and verified it), the local model struggles to produce valid JSON. Instead of emitting `{"action": "done"}`, it generates verbose reasoning text that exhausts `max_tokens` without producing a JSON object.
+
+**Example:** `test_fix_python_syntax_error` — Task 1 fixed the syntax error and verified with `python3 greet.py`. Task 2 "Correct the syntax error" got the carryover state showing `hello` output from the successful run. The model:
+1. Step 1: read greet.py (48.8s, 246 completion tokens — verbose) → saw correct code
+2. Step 2: JSON parse failure (256 tokens exhausted, no JSON) → retry 1 with thinking=medium (512 tokens, still no JSON) → retry 2 with thinking=high (609 tokens) → finally produced valid JSON after 254s total
+3. Step 3: Another round of JSON parse failures (256 tokens) → retry with thinking=medium (428 tokens, 116s) → finally emitted done
+
+**Impact:** ~370s wasted on a task that should have been instant. The model knows the task is done but can't express it concisely — it generates explanatory text instead of JSON.
+
+**Potential fix:** Detect when a task description matches completed work and auto-skip, or reduce planner task overlap.
+
+### Path Truncation in Long Temp Paths (Local Gemma 4 E4B)
+
+**Observed 2026-04-07 during local medium integration tests.**
+
+When prompts contain long absolute paths (e.g., pytest temp dirs like `/private/var/folders/k9/.../test_fix_missing_include0/fix_me.c`), the model attempts to reproduce the full path in shell commands but truncates it, causing "no such file or directory" errors instead of the expected semantic errors.
+
+**Example:** `test_fix_missing_include` — The compilation command with two long paths required ~112 completion tokens just for the shell command JSON. The model truncated the source file path, getting a path error instead of the expected missing-header error. This derails the recovery flow since the model sees a path error (needs thinking) instead of a missing include error (straightforward fix).
+
+**Workaround:** The `workdir` is set correctly, so the model should use relative paths (`cc -o fix_me fix_me.c`). The SYSTEM_STEP prompt says "use relative paths when possible" but the local model doesn't always follow this. The 26B model on OpenRouter handles this correctly.
+
+**Impact:** Adds extra thinking retries and steps. May cascade into replan if the model can't recover.
 
 ### Cross-Task State Bug (Fixed 2026-04-07)
 
@@ -309,10 +330,39 @@ Changes to `run()` / `int_run()`:
 - `test_replan_fix_wrong_command` — **PASSES** (thinking helped debug, replanned successfully)
 - `test_replan_multi_step_recovery` — **PASSES** (was failing — model output dict content `{"status": "SUCCESS"}` instead of escaped string; fixed by auto-serialization in `execute()`)
 
+### Local Integration Test Results (2026-04-07)
+
+**Easy: 3/3 pass (3:20 total):**
+
+| Test | Tasks | Steps | Thinking | Dup Guard | Time |
+|------|-------|-------|----------|-----------|------|
+| create_and_read_file | 2 | 4 (t1:3, t2:1) | 0 | 0 | 54s |
+| shell_and_write | 2 | 4 (t1:3, t2:1) | 0 | 0 | 60s |
+| multi_step_build | 3 | 6 (t1:2, t2:3, t3:1) | 0 | 1x write | 87s |
+
+- Done emission works reliably (was broken due to empty state bug, not model limitation)
+- Duplicate guard fired once (multi_step_build, same write loop as 26B)
+- ~10x slower than OpenRouter 26B (~10s/step vs <1s)
+
+**Medium: 3/3 pass (20:20 total):**
+
+| Test | Replans | Tasks | Steps | Thinking | Dup Guard | Time |
+|------|---------|-------|-------|----------|-----------|------|
+| fix_python_syntax | 0 | 3 | 9 | 3x (med+high+med) | 0 | ~520s |
+| fix_missing_include | 1 | 3+3 | 3+5 | 3x + 0 | 2x (write+shell) | ~660s |
+| create_missing_file | 0 | 2 | 4 | 0 | 0 | ~37s |
+
+Key observations:
+- **fix_python_syntax:** 370s wasted on task 2 ("Correct the syntax error") which was already fixed by task 1. Model couldn't produce `{"action":"done"}` — generated verbose reasoning text that exhausted all 3 retry token budgets (256→512→768 tokens). Only the final thinking=high retry succeeded.
+- **fix_missing_include:** Path truncation was the root cause — model tried to reproduce long temp paths (`/private/var/folders/...`) in shell commands, exhausting max_tokens before closing JSON. After replan, the planner's simpler task descriptions let the model use relative paths (`cc -o fix_me fix_me.c`), which succeeded immediately. Total time dominated by thinking retries on truncated paths (~12 min of ~11 min total).
+- **create_missing_file:** Clean — no error recovery needed, same pattern as easy tests.
+- Duplicate guard saved fix_missing_include from infinite loops (auto-fail on same shell failing twice → triggered replan).
+
 ### References
 
 - [OpenRouter reasoning tokens docs](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) — `reasoning.enabled`, `reasoning.max_tokens`, `reasoning.effort`
 - [OpenRouter API parameters](https://openrouter.ai/docs/api/reference/parameters) — full parameter reference
+- [Gemma 4 Setup & Optimization](gemma4-setup.md) — upstream PR tracker, `--cache-reuse` broken for iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)), manual save/restore workaround plan
 - [llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) — `--reasoning on`, `--reasoning-budget`, `--reasoning-format`
 - [Unsloth Gemma 4 guide](https://unsloth.ai/docs/models/gemma-4) — `<|think|>` token usage, recommended sampling params
 - [Google Gemma 4 blog](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/) — thinking is opt-in (not always-on like Qwen 3.5)
@@ -558,7 +608,7 @@ Key flags for agentic use (defaults are suboptimal for sequential agent calls):
 | Flag | What it does | Default | Recommended |
 |---|---|---|---|
 | `--cache-prompt` | Prompt caching within a slot | Enabled | Keep |
-| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 |
+| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 (**broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468), see [gemma4-setup.md](gemma4-setup.md)) |
 | `--slot-save-path DIR` | Persist KV cache to disk (survives restarts) | Off | `/tmp/llama-cache` |
 | `-np N` | Parallel slots (auto-detects 4 on M1, splits context) | Auto | 1 |
 | `--ctx-size N` | Context per slot (with -np 1, full context for agent) | 2048 | 16384 |
@@ -584,4 +634,4 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default)
+- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default). **Note:** currently broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — flag is silently ignored. See [gemma4-setup.md](gemma4-setup.md) for workaround plan.

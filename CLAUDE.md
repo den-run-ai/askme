@@ -76,6 +76,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `askme.py` — the agent (self-contained, ~336 lines)
 - `test_agent.py` — 56 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
+- `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
 
 ## Testing Conventions
@@ -96,8 +97,8 @@ All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=1
 
 ## Known Limitations
 
-### "done" Emission (Local Gemma 4 E4B only)
-Local 12B model never emits `{"action": "done"}` — always needs auto-done heuristic. The larger 26B model via OpenRouter emits done reliably. This is a model capability gap, not a prompting issue.
+### "done" Emission — RESOLVED (2026-04-07)
+Previously believed to be a model capability gap. Root cause was an **empty state bug** — executor received empty `completed_tasks` and `last_steps`, giving the model no context to recognize task completion. After fix, the local 12B model emits `{"action": "done"}` reliably. See local integration test results in [ARCHITECTURE.md](ARCHITECTURE.md#local-integration-test-results-2026-04-07).
 
 ### Action Looping (Gemma 4 26B via OpenRouter) — Mitigated
 The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → auto-done, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).

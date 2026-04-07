@@ -901,7 +901,6 @@ class TestIntegrationMedium:
         assert_file(tmp_path / "data.txt", "RECOVERED")
 
 
-@pytest.mark.skip(reason="LLM struggles to emit 'done' — needs stronger prompting or tool-use support")
 @skip_no_llm
 class TestIntegrationHard:
     """Hard difficulty: LLM must fail a task and replan to succeed.

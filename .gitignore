@@ -222,7 +222,7 @@ main.c
 *.local.md
 run.py
 plan.md
-gemma4-e4b-setup.md
+gemma4-setup.md
 
 # Claude Code local settings
 .claude/settings.local.json
