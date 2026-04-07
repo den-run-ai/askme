@@ -27,12 +27,55 @@ LLM_BACKEND = os.environ.get("LLM_BACKEND", "local")  # "local" or "openrouter"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 
+CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
+
 if LLM_BACKEND == "openrouter":
     API = "https://openrouter.ai/api/v1/chat/completions"
     MODEL = OPENROUTER_MODEL
 else:
     API = os.environ.get("LLM_API_URL", "http://localhost:8080/v1/chat/completions")
     MODEL = os.environ.get("LLM_MODEL", "gemma-4-e4b")
+_BASE_URL = API.rsplit("/v1/", 1)[0] if "/v1/" in API else "http://localhost:8080"
+_CACHE_SLOT = "agent-system-prompt"
+_cache_warmed = False
+
+
+def _warm_cache():
+    """Pre-process system prompt and save KV state for reuse.
+    Called once at start of run(). Non-fatal — falls back to no caching."""
+    global _cache_warmed
+    if not CACHE_WORKAROUND or LLM_BACKEND != "local":
+        return
+    try:
+        requests.post(f"{_BASE_URL}/v1/chat/completions", json={
+            "model": MODEL,
+            "messages": [{"role": "system", "content": SYSTEM_PLAN},
+                         {"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+        }, timeout=60)
+        resp = requests.post(f"{_BASE_URL}/slots/0?action=save",
+                             json={"filename": _CACHE_SLOT}, timeout=10)
+        if resp.status_code == 200 and resp.json().get("n_saved", 0) > 0:
+            _cache_warmed = True
+            log(f"Cache warm: saved {resp.json()['n_saved']} tokens")
+        else:
+            log(f"Cache warm: save failed ({resp.status_code}), continuing without cache")
+    except Exception as e:
+        log(f"Cache warm: error ({e}), continuing without cache")
+
+
+def _restore_cache():
+    """Restore system prompt KV state before each LLM request.
+    Non-fatal — silently skips if cache wasn't warmed or restore fails."""
+    if not _cache_warmed:
+        return
+    try:
+        requests.post(f"{_BASE_URL}/slots/0?action=restore",
+                      json={"filename": _CACHE_SLOT}, timeout=10)
+    except Exception:
+        pass
+
+
 MAX_REPLANS = 3
 MAX_TASKS = 10
 MAX_STEPS = 10
@@ -97,6 +140,7 @@ def ask_llm(messages, max_tokens=256, think=False):
         headers = {"Content-Type": "application/json"}
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
+        _restore_cache()
         resp = requests.post(API, json=body, headers=headers)
         rj = resp.json()
         # Handle API error responses
@@ -229,6 +273,7 @@ def run(user_prompt, working_dir=None):
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
+    _warm_cache()
 
     for replan in range(MAX_REPLANS):
         log("=" * 40)

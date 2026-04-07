@@ -107,7 +107,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 **Status:** Open, no fix yet. The iSWA sliding window pattern creates non-contiguous KV layouts that the current prefix matcher can't handle.
 
-**Workaround (not yet implemented):** Manual slot save/restore via API could bypass this — save KV state after the first system prompt eval, restore before each subsequent call. The server already supports this (`/slots/0?action=save|restore`), and `TestServerConfig` verifies it works. See [Phase 2](#phase-2-manual-slot-saverestore-workaround-medium-effort) below.
+**Workaround (Phase 2, tested): COUNTERPRODUCTIVE.** `CACHE_WORKAROUND=1` enables manual slot save/restore, but the same iSWA bug that breaks `--cache-reuse` also prevents slot restore from saving prompt eval time. Integration tests are 40% slower with cache workaround. No viable workaround until upstream fixes #21468.
 
 ## Upstream Gemma 4 Commits
 
@@ -192,61 +192,31 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 - Server now explicitly disables cache_reuse for Gemma 4 instead of silently ignoring
 - Checkpoint restore fix (#21510) is confirmed working (`TestServerConfig::test_slot_restore` passes)
 
-### Phase 2: Manual slot save/restore workaround — READY (unblocked by Phase 1)
+### Phase 2: Manual slot save/restore workaround — COUNTERPRODUCTIVE (2026-04-07)
 
 Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the system prompt. The checkpoint restore fix (#21510) from Phase 1 unblocks this — it fixes restore when `pos_min == 0`, which is exactly our case (system prompt starts at position 0).
 
-**Changes to `askme.py`:**
+**Implementation (in `askme.py`):**
 
-1. Add a `_warm_cache()` function called once at start of `run()`:
-   ```python
-   def _warm_cache(base_url):
-       """Pre-process system prompt and save KV state for reuse."""
-       # Send minimal request with system prompt to populate KV
-       requests.post(f"{base_url}/v1/chat/completions", json={
-           "model": "gemma-4-e4b",
-           "messages": [{"role": "system", "content": SYS_PLAN},
-                        {"role": "user", "content": "hi"}],
-           "max_tokens": 1
-       }, timeout=60)
-       # Save the KV state
-       requests.post(f"{base_url}/slots/0?action=save",
-           json={"filename": "agent-system-prompt"}, timeout=10)
-   ```
+- `CACHE_WORKAROUND` env var — `CACHE_WORKAROUND=1` to enable, off by default
+- `_warm_cache()` — called once at start of `run()`: sends minimal request with system prompt to populate KV, then saves slot 0 to disk via `/slots/0?action=save`
+- `_restore_cache()` — called inside `ask_llm()` before each `requests.post`: restores saved KV state via `/slots/0?action=restore`
+- Non-fatal — save/restore failures log a warning and fall back to normal behavior (no caching)
+- Local-only — skipped for OpenRouter backend
+- 7 unit tests in `TestCacheWorkaround` (mocked, no server needed)
 
-2. Add `_restore_cache()` call before each `ask_llm()`:
-   ```python
-   def _restore_cache(base_url):
-       """Restore system prompt KV state before each request."""
-       requests.post(f"{base_url}/slots/0?action=restore",
-           json={"filename": "agent-system-prompt"}, timeout=10)
-   ```
+**Result: COUNTERPRODUCTIVE.** Easy integration: 2:51 with cache vs 2:02 baseline (+49s, 40% slower). Every step after the first is ~5s slower — the restored KV state adds overhead that iSWA can't reconcile efficiently. Direct timing test confirms savings are negligible (0.02s per call) because the server already keeps the last request's KV in the single slot.
 
-3. Gate behind `CACHE_WORKAROUND=1` env var (off by default until validated).
+**Root cause:** The same iSWA prefix-matching issue that breaks `--cache-reuse` (#21468) also prevents slot restore from saving prompt eval time. Restoring stale KV state for a different prompt forces the server to do expensive comparison/invalidation before processing, which is slower than just evaluating from scratch.
 
-**Risk:** ~~The checkpoint restore fix (#21510) in Phase 1 may be needed first~~ — Phase 1 is complete, #21510 is in the build. `TestServerConfig::test_slot_restore` confirms save/restore works correctly.
+**Status:** Code remains in `askme.py` but `CACHE_WORKAROUND` defaults to off (`0`). Kept for future testing when upstream fixes land.
 
-**Test plan:**
-- Verify `TestServerConfig` still passes (save/restore mechanics)
-- Add `TestCacheWorkaround` unit test:
-  - Mock `requests.post` to verify save called once at start, restore called before each `ask_llm`
-  - Verify save failure is non-fatal (falls back to no caching)
-- Run easy + medium integration tests and compare times:
-  - Expected: ~30-50% speedup on multi-call tests (system prompt eval saved)
-  - Measure: prompt eval tokens in `/metrics` endpoint before/after
-- Add timing test:
-  ```python
-  def test_cache_restore_faster_than_cold():
-      """Second request with restore should have lower prompt eval time."""
-      # Cold request
-      t0 = time.time(); ask_llm([sys_msg, user_msg], 1); cold = time.time() - t0
-      # Save state
-      requests.post(".../slots/0?action=save", json={"filename": "test"})
-      # Restore + request
-      requests.post(".../slots/0?action=restore", json={"filename": "test"})
-      t0 = time.time(); ask_llm([sys_msg, user_msg], 1); warm = time.time() - t0
-      assert warm < cold * 0.7, f"Restore not faster: cold={cold:.1f}s warm={warm:.1f}s"
-  ```
+**Verification:**
+- [x] `TestCacheWorkaround` unit tests pass (7/7)
+- [x] All 66 unit tests pass (was 59, +7 new)
+- [x] Integration timing: `CACHE_WORKAROUND=1` is **40% slower** than baseline (2:51 vs 2:02)
+- [x] Direct timing: 0.02s savings per call (negligible, restore overhead dominates)
+- [x] `CACHE_WORKAROUND=0` (default) works — cache functions are no-ops
 
 ### Phase 3: Monitor upstream fixes (no code changes)
 
@@ -274,12 +244,13 @@ After Phase 1 (build update) — **ALL PASS (2026-04-07)**:
 - [x] 3/3 easy integration tests pass (2:12)
 - [x] 3/3 medium integration tests pass (39:08)
 
-After Phase 2 (cache workaround):
-- [ ] `TestCacheWorkaround` unit test passes
-- [ ] `test_cache_restore_faster_than_cold` integration test shows measurable speedup
-- [ ] Easy integration: time parity or improvement vs Phase 1
-- [ ] Medium integration: measurable time reduction (target: <400s for `fix_python_syntax`, <500s for `fix_missing_include`)
-- [ ] `CACHE_WORKAROUND=0` still works (graceful fallback)
+After Phase 2 (cache workaround) — **COUNTERPRODUCTIVE (2026-04-07)**:
+- [x] `TestCacheWorkaround` unit tests pass (7/7)
+- [x] All 66 unit tests pass (was 59, +7 new)
+- [x] Integration timing: **40% slower** with cache (2:51 vs 2:02 easy tests)
+- [x] Direct timing: 0.02s savings per call — restore overhead dominates
+- [x] `CACHE_WORKAROUND=0` works (default — cache functions are no-ops)
+- **Conclusion:** iSWA prefix-matching bug affects slot restore too, not just `--cache-reuse`. No workaround possible until upstream fix for #21468.
 
 ## 16GB M1 Lessons Learned
 
@@ -287,7 +258,7 @@ After Phase 2 (cache workaround):
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — as of build `b8695`, server now explicitly logs `cache_reuse is not supported by this context, it will be disabled` (previously silent). Manual slot save/restore is the workaround (Phase 2, unblocked by #21510 fix).
+- **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server explicitly logs `cache_reuse is not supported by this context, it will be disabled`. Manual slot save/restore was tested (`CACHE_WORKAROUND=1`) but is counterproductive — no viable workaround until upstream fix. See Phase 2 above.
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 
 ## References

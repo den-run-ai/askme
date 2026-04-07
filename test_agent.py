@@ -674,6 +674,144 @@ class TestDuplicateGuard:
         assert "_content" not in user_msg, f"_content leaked into LLM message: {user_msg}"
 
 
+# --- Cache workaround tests ---
+
+class TestCacheWorkaround:
+    """Test Phase 2 manual slot save/restore workaround for broken --cache-reuse."""
+
+    def test_warm_cache_saves_slot(self):
+        """_warm_cache() should send a minimal request then save slot 0."""
+        import askme
+        old_cw, old_backend, old_warmed = askme.CACHE_WORKAROUND, askme.LLM_BACKEND, askme._cache_warmed
+        try:
+            askme.CACHE_WORKAROUND = True
+            askme.LLM_BACKEND = "local"
+            askme._cache_warmed = False
+
+            calls = []
+            def fake_post(url, **kwargs):
+                calls.append(url)
+                resp = MagicMock()
+                resp.status_code = 200
+                if "action=save" in url:
+                    resp.json.return_value = {"n_saved": 150}
+                else:
+                    resp.json.return_value = {
+                        "choices": [{"message": {"content": '{"tasks":[]}'}}]
+                    }
+                return resp
+
+            with patch("askme.requests.post", side_effect=fake_post):
+                askme._warm_cache()
+
+            assert askme._cache_warmed is True
+            assert any("chat/completions" in u for u in calls), "Should send completion request"
+            assert any("action=save" in u for u in calls), "Should save slot"
+        finally:
+            askme.CACHE_WORKAROUND = old_cw
+            askme.LLM_BACKEND = old_backend
+            askme._cache_warmed = old_warmed
+
+    def test_warm_cache_noop_when_disabled(self):
+        """_warm_cache() should do nothing when CACHE_WORKAROUND is False."""
+        import askme
+        old_cw = askme.CACHE_WORKAROUND
+        try:
+            askme.CACHE_WORKAROUND = False
+            with patch("askme.requests.post") as mock_post:
+                askme._warm_cache()
+            mock_post.assert_not_called()
+        finally:
+            askme.CACHE_WORKAROUND = old_cw
+
+    def test_warm_cache_noop_for_remote_backend(self):
+        """_warm_cache() should do nothing for remote (non-local) backend."""
+        import askme
+        old_cw, old_backend = askme.CACHE_WORKAROUND, askme.LLM_BACKEND
+        try:
+            askme.CACHE_WORKAROUND = True
+            askme.LLM_BACKEND = "openrouter"
+            with patch("askme.requests.post") as mock_post:
+                askme._warm_cache()
+            mock_post.assert_not_called()
+        finally:
+            askme.CACHE_WORKAROUND = old_cw
+            askme.LLM_BACKEND = old_backend
+
+    def test_warm_cache_failure_is_nonfatal(self):
+        """If save fails, _cache_warmed stays False and execution continues."""
+        import askme
+        old_cw, old_backend, old_warmed = askme.CACHE_WORKAROUND, askme.LLM_BACKEND, askme._cache_warmed
+        try:
+            askme.CACHE_WORKAROUND = True
+            askme.LLM_BACKEND = "local"
+            askme._cache_warmed = False
+
+            def fake_post(url, **kwargs):
+                if "action=save" in url:
+                    raise ConnectionError("server down")
+                resp = MagicMock()
+                resp.json.return_value = {
+                    "choices": [{"message": {"content": '{"tasks":[]}'}}]
+                }
+                return resp
+
+            with patch("askme.requests.post", side_effect=fake_post):
+                askme._warm_cache()  # should not raise
+
+            assert askme._cache_warmed is False
+        finally:
+            askme.CACHE_WORKAROUND = old_cw
+            askme.LLM_BACKEND = old_backend
+            askme._cache_warmed = old_warmed
+
+    def test_restore_called_before_each_llm_request(self):
+        """When cache is warmed, _restore_cache() should be called before each ask_llm."""
+        import askme
+        old_warmed = askme._cache_warmed
+        try:
+            askme._cache_warmed = True
+            restore_calls = []
+
+            def fake_restore():
+                restore_calls.append(1)
+
+            with patch("askme._restore_cache", side_effect=fake_restore):
+                with patch("askme.requests.post", return_value=mock_response({"tasks": ["t1"]})):
+                    ask_llm([{"role": "user", "content": "hi"}], max_tokens=10)
+
+            assert len(restore_calls) == 1, f"Expected 1 restore call, got {len(restore_calls)}"
+        finally:
+            askme._cache_warmed = old_warmed
+
+    def test_restore_skipped_when_not_warmed(self):
+        """_restore_cache() should be a no-op when _cache_warmed is False."""
+        import askme
+        old_warmed = askme._cache_warmed
+        try:
+            askme._cache_warmed = False
+            with patch("askme.requests.post") as mock_post:
+                askme._restore_cache()
+            mock_post.assert_not_called()
+        finally:
+            askme._cache_warmed = old_warmed
+
+    def test_run_calls_warm_cache(self, work_dir):
+        """run() should call _warm_cache() once at start."""
+        warm_calls = []
+        import askme
+
+        def fake_warm():
+            warm_calls.append(1)
+
+        with patch("askme._warm_cache", side_effect=fake_warm):
+            with patch("askme.get_plan", return_value={"tasks": ["say hi"]}):
+                with patch("askme.get_step", return_value={"action": "done"}):
+                    run("test", working_dir=work_dir)
+
+        assert len(warm_calls) == 1, f"Expected 1 warm call, got {len(warm_calls)}"
+
+
 # --- Integration tests (require llama-server on :8080) ---
 
 import time
@@ -715,13 +853,14 @@ def log(msg):
 def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
             max_tasks=INT_MAX_TASKS, max_steps=INT_MAX_STEPS):
     """Minimal agent loop with configurable limits and live progress output."""
-    from askme import get_plan, get_step, execute
+    from askme import get_plan, get_step, execute, _warm_cache
     state = {"completed_tasks": [], "errors": [], "working_dir": work_dir}
     history = []
 
     log(f"PROMPT: {user_prompt}")
     log(f"WORKDIR: {work_dir}")
     log(f"LIMITS: replans={max_replans} tasks={max_tasks} steps={max_steps}")
+    _warm_cache()
 
     for replan in range(max_replans + 1):
         log(f"PLAN attempt {replan + 1}/{max_replans + 1} ...")

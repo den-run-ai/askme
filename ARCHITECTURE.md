@@ -393,7 +393,7 @@ Build updated from `941146b3f` → `0d049d6a9` (18 commits). Includes Gemma4 byt
 Key observations:
 - **Easy tests ~35% faster** — likely byte token fix (#21488) improving JSON output, fewer parse retries
 - **Medium tests slower overall** — fix_python_syntax 19min vs 8.7min, more JSON parse retries. The `</s>` EOS fix (#21492, not yet merged) may help
-- **`--cache-reuse` confirmed broken** — server now explicitly logs `cache_reuse is not supported by this context`. Phase 2 (slot save/restore) unblocked by #21510
+- **`--cache-reuse` confirmed broken** — server now explicitly logs `cache_reuse is not supported by this context`. Phase 2 workaround (manual slot save/restore) tested but **counterproductive** — same iSWA bug affects slot restore, making requests 40% slower
 - **Checkpoint restore verified** — `TestServerConfig::test_slot_restore` passes
 
 **Hard: 3/3 pass (16:49 total):**
@@ -701,7 +701,7 @@ python3 -m pytest agent/test_agent.py -v -k "not Integration"
 python3 -m pytest agent/test_agent.py -s -v -k "Integration"
 ```
 
-**Unit tests (59) + server config tests (4) = 63 non-integration tests:**
+**Unit tests (66) + server config tests (4) = 70 non-integration tests:**
 - `TestExecuteShell` — success, failure, timeout, stderr, truncation, cwd, empty output
 - `TestExecuteWrite` — file creation, relative paths, nested dirs, bad paths
 - `TestExecuteRead` — read file, absolute/relative paths, missing files, truncation
@@ -773,7 +773,7 @@ Key flags for agentic use (defaults are suboptimal for sequential agent calls):
 | Flag | What it does | Default | Recommended |
 |---|---|---|---|
 | `--cache-prompt` | Prompt caching within a slot | Enabled | Keep |
-| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 (**broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468), server now explicitly disables with log message. See [gemma4-setup.md](gemma4-setup.md) Phase 2 for workaround) |
+| `--cache-reuse N` | KV shifting for prefix reuse across requests | 0 (off) | 256 (**broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468), server explicitly disables. Manual slot save/restore workaround tested but counterproductive — no viable workaround until upstream fix) |
 | `--slot-save-path DIR` | Persist KV cache to disk (survives restarts) | Off | `/tmp/llama-cache` |
 | `-np N` | Parallel slots (auto-detects 4 on M1, splits context) | Auto | 1 |
 | `--ctx-size N` | Context per slot (with -np 1, full context for agent) | 2048 | 16384 |
@@ -799,4 +799,4 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default). **Note:** currently broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server now explicitly disables with log message (previously silent). See [gemma4-setup.md](gemma4-setup.md) Phase 2 for manual slot save/restore workaround (unblocked by #21510 fix).
+- **Use `--cache-reuse 256`** — enables KV prefix reuse across different requests (off by default). **Note:** currently broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server explicitly disables. Manual slot save/restore workaround tested (`CACHE_WORKAROUND=1`) but **counterproductive** — same iSWA bug makes restored requests 40% slower. No viable workaround until upstream fix. See [gemma4-setup.md](gemma4-setup.md) Phase 2.

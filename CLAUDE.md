@@ -17,6 +17,9 @@ NanAgent — a minimal, self-contained agent that runs on local or remote LLMs (
 # Run the agent (local, requires llama-server on :8080)
 python3 askme.py "your request here"
 
+# Run with cache workaround (COUNTERPRODUCTIVE — see Known Limitations)
+# CACHE_WORKAROUND=1 python3 askme.py "your request here"
+
 # Run via OpenRouter (requires OPENROUTER_API_KEY in .env)
 LLM_BACKEND=openrouter python3 askme.py "your request here"
 
@@ -79,8 +82,8 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~344 lines)
-- `test_agent.py` — 59 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
+- `askme.py` — the agent (self-contained, ~389 lines)
+- `test_agent.py` — 66 unit tests (mocked) + 4 server config tests + 9 local integration + 9 OpenRouter integration tests
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
@@ -92,6 +95,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `TestOutputFormatting` — verifies basename in write output and slim state args
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
 - `TestDuplicateGuard` — verifies per-action-type duplicate detection and loop prevention
+- `TestCacheWorkaround` — verifies slot save/restore lifecycle, non-fatal failure, backend gating
 - Integration tests use `int_run()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
 - Local integration tests are skipped automatically if llama-server isn't running on `:8080`
 - OpenRouter integration tests are skipped automatically if `OPENROUTER_API_KEY` is not set
@@ -109,8 +113,8 @@ Previously believed to be a model capability gap. Root cause was an **empty stat
 ### Action Looping (Gemma 4 26B via OpenRouter) — Mitigated
 The 26B model occasionally repeats the same action. Now handled by the **duplicate action guard**: write loops (same content) → auto-done, shell loops (same cmd, success) → auto-done, shell loops (same cmd, fail) → auto-fail + replan. Write with different content and reads are allowed through (legitimate retries).
 
-### `--cache-reuse` Broken for Gemma 4 — Upstream, No Fix
-[#21468](https://github.com/ggml-org/llama.cpp/issues/21468) — iSWA shared KV layers break prefix matching. Server now explicitly logs `cache_reuse is not supported by this context` (previously silent). Every request re-evaluates full prompt. Manual slot save/restore workaround planned — see [gemma4-setup.md](gemma4-setup.md) Phase 2 (unblocked by #21510 checkpoint restore fix, now in build).
+### `--cache-reuse` Broken for Gemma 4 — No Viable Workaround
+[#21468](https://github.com/ggml-org/llama.cpp/issues/21468) — iSWA shared KV layers break prefix matching. Server logs `cache_reuse is not supported by this context`. Manual slot save/restore workaround was implemented (`CACHE_WORKAROUND=1`) but is **counterproductive** — same iSWA bug affects slot restore too, making requests 40% slower. Code remains (off by default) for retesting when upstream fixes land. See [gemma4-setup.md](gemma4-setup.md) Phase 2.
 
 ## Models
 
