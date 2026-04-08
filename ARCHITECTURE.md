@@ -876,5 +876,5 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory. q8_0 is 7% slower — avoid it. See [gemma4-setup.md](gemma4-setup.md) Phase 3.
+- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory. q8_0 is 7% slower in single-trial testing — not recommended. See [gemma4-setup.md](gemma4-setup.md) Phase 3.
 - **Do NOT use `--cache-reuse 256`** — broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). Server explicitly disables it. Manual slot save/restore (`CACHE_WORKAROUND=1`) is counterproductive (40% slower). No viable workaround until upstream fix. See [gemma4-setup.md](gemma4-setup.md) Phase 2.

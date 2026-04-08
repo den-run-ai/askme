@@ -292,7 +292,7 @@ Watch these PRs — when merged, pull and rebuild:
 | PR | What to do when merged |
 |----|----------------------|
 | [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) (`</s>` EOS fix) | Pull, rebuild, re-run medium tests — may reduce JSON truncation that triggers thinking retries |
-| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) fix (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via timing test |
+| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) fix (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via `scripts/bench_kv.sh` |
 
 ### Phase 5: Future optimizations
 
@@ -331,7 +331,7 @@ After Phase 3 (quantized KV cache) — **q4_0 recommended (2026-04-08)**:
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower — avoid it.
+- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower in single-trial testing — not recommended.
 - **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server explicitly logs `cache_reuse is not supported by this context, it will be disabled`. Manual slot save/restore was tested (`CACHE_WORKAROUND=1`) but is counterproductive — no viable workaround until upstream fix. See Phase 2 above.
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 

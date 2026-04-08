@@ -52,6 +52,10 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy" 
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterMedium"   # medium (~2min)
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"     # hard (~2min)
 
+# KV cache benchmarks (stop llama-server first)
+./scripts/bench_kv.sh q4_0          # single trial, one KV mode
+./scripts/bench_kv.sh all 3         # 3 trials each for f16, q8_0, q4_0
+
 # Rebuild llama.cpp (if needed, from llama.cpp root)
 cmake -B build -DLLAMA_CURL=ON
 cmake --build build --config Release -j$(sysctl -n hw.ncpu)
@@ -114,6 +118,8 @@ All `requests.post()` calls use `timeout=LLM_TIMEOUT` (120s). Transport errors (
   - `test_agent_recovery.py` — duplicate guard, cache workaround, failure classification, error summarization, completion semantics (~430 lines)
   - `test_agent_planning.py` — planner reasoning, preflight probe, execution policy, command-aware timeouts, server config (~380 lines)
   - `test_agent_integration.py` — local + OpenRouter integration tests (easy/medium/hard) + planner reasoning integration (~400 lines)
+- `scripts/bench_kv.sh` — KV cache benchmark runner (manages server lifecycle, runs easy integration suite, writes JSON results)
+- `benchmarks/` — machine-readable benchmark results (JSON, one file per trial)
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
