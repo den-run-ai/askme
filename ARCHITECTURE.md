@@ -38,7 +38,7 @@ python3 agent/askme.py "create hello.c, compile it, run it"
 - `preflight_probe(working_dir)` — deterministic environment probe. Returns structured dict: platform, arch, working_dir, available/missing tools, package managers, dir listing. Called once before first plan.
 - `get_policy()` — returns execution policy dict (`allow_system_installs`, `allow_network`). Injected into both planner and executor state.
 - `ask_llm(messages, max_tokens, think)` — calls llama-server, strips `<think>` tags (closed and unclosed) as safety net, code fences, extracts JSON from mixed text, retries on parse failure (up to 2 retries).
-- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=PLANNER_MAX_TOKENS=768, think=True). Receives full state including completed tasks, typed/summarized errors, environment, and policy.
+- `get_plan(user_prompt, state)` — asks LLM for a task list (max_tokens=PLANNER_MAX_TOKENS=768). Thinking is conditional: `think=bool(errors or completed_tasks)` — off for first plan, on for replans. Receives full state including completed tasks, typed/summarized errors, environment, and policy.
 - `get_step(task, state, goal="")` — asks LLM for next action within a task (max_tokens=256). Receives a slim state: current task, task index, last 3 steps, missing_tools, and policy. Goal-aware completion — executor must satisfy full task, not just one step.
 - `classify_error(output, action)` — categorizes errors as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`.
 - `summarize_errors(errors)` — groups raw errors by type, deduplicates, caps at 3 per type for planner.
@@ -628,41 +628,46 @@ Local integration tests (2026-04-07) revealed that most expensive executor retri
 
 ### Design
 
-Enable thinking on `get_plan()` — always-on for both first plan and replans.
+Enable thinking on `get_plan()` conditionally — off for first plan, on for replans. Derived from planner state: `think=bool(errors or completed_tasks)`.
 
-Replans need reasoning *more* than first plans, not less. Errors provide raw data but the model still needs to reason about: (1) why the error happened (e.g. "compile error" → "missing header because files were created in wrong order"), (2) what to change in the new plan to avoid repeating the failure, (3) which completed work is reusable vs. tainted. Having error context makes the reasoning *harder*, not unnecessary.
+**Why not always-on:** Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and local (Gemma 4 E4B 4B-active, 22 calls, stopped early after decisive signal). Results:
+- think=False produced equal or better plan quality on every prompt in both backends
+- On local, think=True caused JSON truncation failures (thinking tokens consumed the 768-token budget, truncating task lists — 2/3 header_dep runs failed all retry attempts)
+- On OpenRouter, think=True was the only mode with rubric failures (header_dep: 2 FAILs vs 0 for think=False)
+- Speed: local think=True averaged 40-55s vs 3-12s for think=False (5-12x); OpenRouter 12.1s vs 1.1s (11x)
+
+See `benchmarks/planner_thinking_*.json` for raw data.
+
+**Why replans still need thinking:** Errors provide raw data but the model still needs to reason about: (1) why the error happened, (2) what to change to avoid repeating the failure, (3) which completed work is reusable vs. tainted.
 
 ```
-get_plan() — all plans (first and replan):
-    ask_llm(messages, max_tokens=PLANNER_MAX_TOKENS, think=True)
-    → Planner gets <|think|> (local) or reasoning.effort="medium" (OpenRouter)
-    → First plan thinking used to:
-      1. Identify task dependencies (which files need which includes)
-      2. Produce specific task descriptions with content hints
-      3. Avoid overlapping/redundant tasks
-      4. Note relative path preference per task
-    → Replan thinking additionally used to:
-      5. Diagnose root cause from error messages + completed task state
-      6. Decide which completed work to preserve vs. redo
-      7. Design a recovery plan that avoids the same failure mode
+get_plan() — conditional thinking:
+    is_replan = bool(state.errors or state.completed_tasks)
+    ask_llm(messages, max_tokens=PLANNER_MAX_TOKENS, think=is_replan)
+    → First plan (no thinking): straightforward decomposition, full token
+      budget available for task list
+    → Replan (thinking enabled): <|think|> (local) or reasoning.effort="medium"
+      (OpenRouter), used to diagnose root cause, preserve completed work,
+      avoid repeating failures
 ```
 
 ### Risks
 
-**Happy-path latency creep.** Planner thinking adds ~73s on local runs even when unnecessary. Track planner wall time separately in integration test results (not just total test time) so this cost stays visible and can be evaluated for future conditional-thinking optimization.
+**Replan thinking still adds latency.** ~73s per replan on local. This is justified by better error analysis on recovery plans.
 
 **Fewer tasks ≠ better tasks.** The SYSTEM_PLAN changes could reduce overlap by producing fewer but vaguer tasks, moving failure from "redundant task" to "underspecified executor." Validate SYSTEM_PLAN against both overlap reduction *and* task quality — integration tests should check that task descriptions contain actionable specifics (content hints, filenames), not just that there are fewer tasks.
 
 ### Changes to `get_plan()`
 
 ```python
-PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
+PLANNER_MAX_TOKENS = 768  # full budget for task list on first plan; shared with thinking on replans
 
 def get_plan(user_prompt, state):
+    is_replan = bool(plan_state.get("errors") or plan_state.get("completed_tasks"))
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
-        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(state)}"}
-    ], max_tokens=PLANNER_MAX_TOKENS, think=True)  # always think — replans need it more
+        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
+    ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan)
 ```
 
 ### Changes to `SYSTEM_PLAN`
@@ -689,33 +694,37 @@ Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 | fix_python_syntax | 3 tasks (1 redundant), 9 steps, 370s wasted | 2 tasks (no overlap), ~5 steps, ~2min |
 | fix_missing_include | 3+3 tasks (replan), path truncation, ~11min | 2 tasks, relative paths, ~2min |
 | fix_wrong_command | 3 tasks (1 meta-task), ~4.5min | 2 tasks (actionable), ~2min |
-| Easy tests (no errors) | No change (already fast) | +~73s overhead (planner thinking) |
+| Easy tests (no errors) | No change (already fast) | No overhead (thinking off for first plan) |
 
-**Tradeoff:** Easy tests get ~73s slower (planner thinking on tasks that don't need it). Hard tests with replans get ~73s extra per replan (1-2 replans = +73-146s), but this is noise compared to the 300-660s saved by better recovery plans. For hard tasks the net savings are still 5-10x.
+**Tradeoff:** Easy tests have no thinking overhead (conditional thinking skips first plan). Hard tests with replans get ~73s extra per replan (1-2 replans = +73-146s), but this is noise compared to the 300-660s saved by better recovery plans.
 
 ### Token Budget
 
 | Call | Current | Proposed |
 |---|---|---|
-| `get_plan()` max_tokens | 512 | `PLANNER_MAX_TOKENS` = 768 (all plans) |
-| Thinking | None | medium (local: `<|think|>`, ~256 tokens for reasoning) — all plans |
-| Net new tokens per plan call | 0 | ~256 thinking + 256 headroom |
+| `get_plan()` max_tokens | 512 | `PLANNER_MAX_TOKENS` = 768 |
+| Thinking (first plan) | None | None (off — full budget for task list) |
+| Thinking (replan) | None | medium (local: `<|think|>`, ~256 tokens for reasoning) |
+| Net new tokens per first plan | 0 | 0 (no thinking overhead) |
+| Net new tokens per replan | 0 | ~256 thinking + 256 headroom |
 
-The 768 max_tokens accounts for thinking tokens being shared with output (both local and Parasail/bf16 OpenRouter). Cost per replan: ~73s at 7 tok/s — justified by better error analysis.
+The 768 max_tokens is the full budget for task list on first plans. On replans, thinking tokens share this budget — cost per replan: ~73s at 7 tok/s, justified by better error analysis.
 
-**Null-content risk:** With reasoning always on, `content: null` becomes more likely (reasoning exhausts shared token budget). The existing `ask_llm()` retry path already handles this (`content or ""` → JSON parse failure → retry with escalated thinking), but this scenario is now on the hot path rather than edge case. Add a planner-specific unit test to verify.
+**Null-content risk (replans only):** With reasoning on replans, `content: null` can occur (reasoning exhausts shared token budget). The existing `ask_llm()` retry path handles this (`content or ""` → JSON parse failure → retry with escalated thinking). Covered by `test_replan_null_content_with_reasoning`.
 
 ### Testing Approach
 
 **Unit tests (no LLM needed) — `TestPlannerReasoning`:**
 
-1. `test_first_plan_has_thinking` — mock `ask_llm`, verify `think=True` and `max_tokens=768` passed on first plan (empty state)
+1. `test_first_plan_no_thinking` — mock `ask_llm`, verify `think=False` and `max_tokens=768` passed on first plan (empty state)
 2. `test_replan_has_thinking` — mock `ask_llm`, verify `think=True` and `max_tokens=768` on replan (state has errors)
 3. `test_replan_with_completed_tasks_has_thinking` — verify `think=True` and `max_tokens=768` when state has `completed_tasks` (partial completion → replan)
-4. `test_system_plan_includes_hints` — verify updated `SYSTEM_PLAN` contains "File content hints" and "relative filenames" guidance
-5. `test_planner_thinking_local_uses_think_tag` — mock `requests.post`, verify `<|think|>` prepended to system prompt in local mode when `think=True`
-6. `test_planner_thinking_openrouter_uses_reasoning` — mock `requests.post`, verify `reasoning.enabled=true` in OpenRouter mode when `think=True`
-7. `test_planner_null_content_with_reasoning` — mock `ask_llm` to return `content: null` on first call (reasoning exhausts budget), verify retry succeeds — planner-specific regression since reasoning is now always-on
+4. `test_system_plan_includes_hints` — verify `SYSTEM_PLAN` contains "File content hints" and "relative filenames" guidance
+5. `test_first_plan_local_no_think_tag` — mock `requests.post`, verify `<|think|>` NOT prepended on first plan (local)
+6. `test_replan_local_uses_think_tag` — mock `requests.post`, verify `<|think|>` prepended on replan (local, errors present)
+7. `test_first_plan_openrouter_no_reasoning` — mock `requests.post`, verify no `reasoning` params on first plan (OpenRouter)
+8. `test_replan_openrouter_uses_reasoning` — mock `requests.post`, verify `reasoning.enabled=true` on replan (OpenRouter, errors present)
+9. `test_replan_null_content_with_reasoning` — mock `requests.post` to return `content: null` on first call (reasoning exhausts budget on replan), verify retry succeeds
 
 **Integration tests — `TestPlannerReasoningIntegration` (local, requires llama-server):**
 
@@ -783,7 +792,7 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy o
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON in write actions
 - `TestDuplicateGuard` — verifies per-action-type duplicate detection: write/edit duplicates skip and continue, shell duplicates auto-done/fail, legitimate retries allowed, read excluded, edit internals not in slim state
 - `TestServerConfig` — verifies optimized server config: single slot with full context, slot save/restore via API, cache file on disk
-- `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, SYSTEM_PLAN specificity hints, local/OpenRouter thinking modes, null-content retry
+- `TestPlannerReasoning` — verifies conditional planner thinking (first plan=False, replans=True), local/OpenRouter request shapes for both modes, PLANNER_MAX_TOKENS, SYSTEM_PLAN specificity hints, null-content retry on replan
 
 **Integration tests (23 total, require live LLM) — local and OpenRouter tiers:**
 

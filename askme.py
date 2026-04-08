@@ -346,10 +346,15 @@ def get_plan(user_prompt, state):
     # Summarize errors for compact, typed diagnostics
     if plan_state.get("errors"):
         plan_state["errors"] = summarize_errors(plan_state["errors"])
+    # Think on replans (errors present) — first plans don't benefit from thinking
+    # and thinking tokens compete with the task-list budget (768 tokens).
+    # Benchmark evidence: think=False produces equal/better plans and avoids
+    # token-budget truncation on the local 4B model. See benchmarks/.
+    is_replan = bool(plan_state.get("errors") or plan_state.get("completed_tasks"))
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
-    ], max_tokens=PLANNER_MAX_TOKENS, think=True)  # always think — replans need it more
+    ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan)
 
 
 MAX_INPUT = 300  # max chars per field sent to executor

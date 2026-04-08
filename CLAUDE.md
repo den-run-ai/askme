@@ -66,7 +66,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 `askme.py` implements a **Preflight → Plan → Execute → Replan** loop:
 
 0. **Preflight** (`preflight_probe`) — Before the first plan, deterministically probes: platform, arch, working dir listing, available/missing tools (fixed allowlist: python3, go, node, gcc, cc, make, cargo, rustc, java, javac), and package managers (brew, apt-get, dnf, pacman, apk). Feeds structured dict + execution policy into planner state.
-1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, typed errors, environment, policy) and outputs `{"tasks": ["task1", "task2", ...]}`. Always uses thinking (`think=True`) with `PLANNER_MAX_TOKENS=768`. Errors are summarized into typed categories (`[missing_tool]`, `[timeout]`, etc.) before reaching the planner.
+1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, typed errors, environment, policy) and outputs `{"tasks": ["task1", "task2", ...]}`. Uses `PLANNER_MAX_TOKENS=768`. Thinking is conditional: off for first plan (no errors/completed tasks), on for replans. First-plan thinking was benchmarked and found to provide no quality benefit while consuming token budget — on the local model it caused JSON truncation failures. Errors are summarized into typed categories (`[missing_tool]`, `[timeout]`, etc.) before reaching the planner.
 2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `edit`, `read`, `done`, or `fail`. `edit` does exact single-match string replacement (fails on zero or multiple matches); `write` replaces the entire file. The model is prompted to prefer `edit` for localized changes and `write` for new files. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
 
@@ -132,7 +132,7 @@ All `requests.post()` calls use `timeout=LLM_TIMEOUT` (120s). Transport errors (
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
 - `TestDuplicateGuard` — verifies per-action-type duplicate detection: write/edit duplicates skip and continue, shell duplicates auto-done/fail
 - `TestCacheWorkaround` — verifies slot save/restore lifecycle, non-fatal failure, backend gating
-- `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, system prompt includes specificity hints, null-content retry
+- `TestPlannerReasoning` — verifies conditional planner thinking (first plan=False, replans=True), local/OpenRouter request shapes for both modes, PLANNER_MAX_TOKENS, system prompt specificity hints, null-content retry
 - `TestPreflightProbe` — verifies environment probing returns platform, arch, tools, dir listing, package managers; verifies run() injects into planner state
 - `TestExecutionPolicy` — verifies policy defaults, env override, planner/executor prompt rules, executor sees missing_tools and policy
 - `TestFailureClassification` — verifies error categorization (timeout, missing_tool, permission_denied, missing_file, compile_error, unknown), error_type in results
@@ -147,7 +147,7 @@ All `requests.post()` calls use `timeout=LLM_TIMEOUT` (120s). Transport errors (
 
 ## Safety Limits
 
-All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, `LLM_TIMEOUT=120s` (request timeout), `SHELL_TIMEOUT=30s` (default), `SHELL_TIMEOUT_LONG=120s` (install/build), `SHELL_TIMEOUT_MAX=300s` (hard cap). Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). `ALLOW_SYSTEM_INSTALLS=false` by default. Transport errors retry up to `MAX_LLM_RETRIES=2` times with backoff; `LLMTransportError` is raised on exhaustion. These exist to prevent runaway loops with a slow local LLM.
+All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, `LLM_TIMEOUT=120s` (request timeout), `SHELL_TIMEOUT=30s` (default), `SHELL_TIMEOUT_LONG=120s` (install/build), `SHELL_TIMEOUT_MAX=300s` (hard cap). Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner thinking is conditional: off for first plan, on for replans (derived from planner state). `ALLOW_SYSTEM_INSTALLS=false` by default. Transport errors retry up to `MAX_LLM_RETRIES=2` times with backoff; `LLMTransportError` is raised on exhaustion. These exist to prevent runaway loops with a slow local LLM.
 
 ## Known Limitations
 

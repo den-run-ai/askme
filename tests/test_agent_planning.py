@@ -11,10 +11,10 @@ from conftest import skip_no_llm
 # --- Planner reasoning tests ---
 
 class TestPlannerReasoning:
-    """Verify planner always uses thinking and PLANNER_MAX_TOKENS."""
+    """Verify planner uses thinking conditionally: off for first plan, on for replans."""
 
-    def test_first_plan_has_thinking(self):
-        """First plan (empty state) should pass think=True and max_tokens=PLANNER_MAX_TOKENS."""
+    def test_first_plan_no_thinking(self):
+        """First plan (empty state) should pass think=False — thinking wastes token budget."""
         from askme import PLANNER_MAX_TOKENS
         captured = {}
         def capture_llm(messages, max_tokens=256, think=False):
@@ -23,7 +23,7 @@ class TestPlannerReasoning:
             return {"tasks": ["do something"]}
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_plan("test request", {"completed_tasks": [], "errors": []})
-        assert captured["think"] is True, "First plan should have think=True"
+        assert captured["think"] is False, "First plan should have think=False"
         assert captured["max_tokens"] == PLANNER_MAX_TOKENS, \
             f"Expected max_tokens={PLANNER_MAX_TOKENS}, got {captured['max_tokens']}"
 
@@ -64,21 +64,42 @@ class TestPlannerReasoning:
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "local")
-    def test_planner_thinking_local_uses_think_tag(self, mock_post):
-        """Local planner should prepend <|think|> to system prompt."""
+    def test_first_plan_local_no_think_tag(self, mock_post):
+        """First plan (local) should NOT prepend <|think|> — no thinking on first plan."""
         mock_post.return_value = mock_response({"tasks": ["do thing"]})
         get_plan("test", {"completed_tasks": [], "errors": []})
         call_body = mock_post.call_args_list[0][1]["json"]
         sys_content = call_body["messages"][0]["content"]
+        assert not sys_content.startswith("<|think|>"), \
+            f"First plan should not have <|think|> prefix, got: {sys_content[:50]}"
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "local")
+    def test_replan_local_uses_think_tag(self, mock_post):
+        """Replan (local, errors present) should prepend <|think|> to system prompt."""
+        mock_post.return_value = mock_response({"tasks": ["retry thing"]})
+        get_plan("test", {"completed_tasks": [], "errors": ["compile failed"]})
+        call_body = mock_post.call_args_list[0][1]["json"]
+        sys_content = call_body["messages"][0]["content"]
         assert sys_content.startswith("<|think|>\n"), \
-            f"Expected <|think|> prefix, got: {sys_content[:50]}"
+            f"Replan should have <|think|> prefix, got: {sys_content[:50]}"
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
-    def test_planner_thinking_openrouter_uses_reasoning(self, mock_post):
-        """OpenRouter planner should include reasoning params."""
+    def test_first_plan_openrouter_no_reasoning(self, mock_post):
+        """First plan (OpenRouter) should NOT include reasoning params."""
         mock_post.return_value = mock_response({"tasks": ["do thing"]})
         get_plan("test", {"completed_tasks": [], "errors": []})
+        call_body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" not in call_body, \
+            "First plan should not include reasoning params"
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_replan_openrouter_uses_reasoning(self, mock_post):
+        """Replan (OpenRouter, errors present) should include reasoning params."""
+        mock_post.return_value = mock_response({"tasks": ["retry thing"]})
+        get_plan("test", {"completed_tasks": [], "errors": ["task failed"]})
         call_body = mock_post.call_args_list[0][1]["json"]
         assert "reasoning" in call_body
         assert call_body["reasoning"]["enabled"] is True
@@ -86,15 +107,15 @@ class TestPlannerReasoning:
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
-    def test_planner_null_content_with_reasoning(self, mock_post):
-        """Planner-specific: reasoning exhausts token budget, content=null -> retry succeeds."""
+    def test_replan_null_content_with_reasoning(self, mock_post):
+        """Replan: reasoning exhausts token budget, content=null -> retry succeeds."""
         resp_null = MagicMock()
         resp_null.status_code = 200
         resp_null.json.return_value = {
             "choices": [{"message": {"content": None, "reasoning": "planning..."}}]
         }
         mock_post.side_effect = [resp_null, mock_response({"tasks": ["recovered task"]})]
-        result = get_plan("test", {"completed_tasks": [], "errors": []})
+        result = get_plan("test", {"completed_tasks": [], "errors": ["previous failure"]})
         assert "tasks" in result
         assert result["tasks"] == ["recovered task"]
 
