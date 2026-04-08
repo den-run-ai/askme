@@ -36,20 +36,20 @@ mkdir -p /tmp/llama-cache
   --port 8080
 
 # Unit tests (mocked, no LLM needed)
-python3 -m pytest test_agent.py -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
+python3 -m pytest tests/ -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
 
 # Single test
-python3 -m pytest test_agent.py -v -k "test_simple_success"
+python3 -m pytest tests/ -v -k "test_simple_success"
 
 # Integration tests — local (requires llama-server on :8080)
-python3 -m pytest test_agent.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~2min)
-python3 -m pytest test_agent.py -s -v -k "IntegrationMedium"   # medium: error recovery (~40min)
-python3 -m pytest test_agent.py -s -v -k "IntegrationHard"     # hard: replanning (~17min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~2min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationMedium"   # medium: error recovery (~40min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"     # hard: replanning (~17min)
 
 # Integration tests — OpenRouter (requires OPENROUTER_API_KEY in .env)
-python3 -m pytest test_agent.py -s -v -k "TestOpenRouterEasy"     # easy (~10s)
-python3 -m pytest test_agent.py -s -v -k "TestOpenRouterMedium"   # medium (~2min)
-python3 -m pytest test_agent.py -s -v -k "TestOpenRouterHard"     # hard (~2min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy"     # easy (~10s)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterMedium"   # medium (~2min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"     # hard (~2min)
 
 # Rebuild llama.cpp (if needed, from llama.cpp root)
 cmake -B build -DLLAMA_CURL=ON
@@ -100,7 +100,14 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 ## Files
 
 - `askme.py` — the agent (self-contained, ~579 lines)
-- `test_agent.py` — 112 unit tests (mocked) + 4 server config tests + 12 local integration + 11 OpenRouter integration tests
+- `tests/` — test suite (5 modules + support files, 145 tests total)
+  - `conftest.py` — pytest fixtures (`work_dir`) and skip markers (`skip_no_llm`, `skip_no_openrouter`)
+  - `_test_support.py` — mock helpers, integration test runners (`int_run`, `or_run`), limit constants
+  - `test_agent_core.py` — execute(), ask_llm(), thinking retry, null-arg normalization (~310 lines)
+  - `test_agent_loop.py` — run() loop, cross-task state, output formatting, content serialization (~260 lines)
+  - `test_agent_recovery.py` — duplicate guard, cache workaround, failure classification, error summarization, completion semantics (~430 lines)
+  - `test_agent_planning.py` — planner reasoning, preflight probe, execution policy, command-aware timeouts, server config (~380 lines)
+  - `test_agent_integration.py` — local + OpenRouter integration tests (easy/medium/hard) + planner reasoning integration (~400 lines)
 - `ARCHITECTURE.md` — detailed architecture doc and design decisions
 - `gemma4-setup.md` — Gemma 4 setup, server config, upstream PR tracker, optimization plan
 - `.env` — OPENROUTER_API_KEY (not committed)
