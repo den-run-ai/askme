@@ -33,7 +33,7 @@ mkdir -p /tmp/llama-cache
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
-  -np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache \
+  -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 
 # Unit tests (mocked, no LLM needed)

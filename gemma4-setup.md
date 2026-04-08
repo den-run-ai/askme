@@ -4,7 +4,7 @@ Mac M1 16GB. Last updated 2026-04-08.
 
 **Current build:** `c5ce4bc22` (build `b8702`) — up to date with master as of 2026-04-08. Includes iSWA rotation (#21513) and server params fix (#21509).
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
-**Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is fastest (-4% vs f16), uses ~4x less memory. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
+**Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
 
 ## Model
 
@@ -55,19 +55,35 @@ mkdir -p /tmp/llama-cache
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
-  -np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache \
+  -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 ```
 
+#### Stable flags
+
+| Flag | Purpose | Notes |
+|------|---------|-------|
+| `-ngl 99` | Full GPU offload | |
+| `--ctx-size 16384` | Full context for single slot | |
+| `--flash-attn on` | Memory-efficient attention | |
+| `--cache-type-k q4_0 --cache-type-v q4_0` | Quantized KV cache (~4x less memory) | Current recommended default on M1 16GB. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08). |
+| `-np 1` | Single slot (avoids 4-way context split on M1) | |
+| `--slot-save-path /tmp/llama-cache` | Disk persistence for KV state | Verified by `TestServerConfig` |
+| `--port 8080` | Server port | |
+
+#### Known-broken flags (do not use)
+
+| Flag | Issue | Status |
+|------|-------|--------|
+| `--cache-reuse 256` | KV prefix reuse — broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). Server logs `cache_reuse is not supported by this context, it will be disabled`. | Waiting for upstream fix. |
+| `CACHE_WORKAROUND=1` | Manual slot save/restore bypass — tested in Phase 2, **counterproductive** (40% slower). Same iSWA bug affects slot restore. | Disabled by default. Code kept for retesting. |
+
+#### Experimental / deferred
+
 | Flag | Purpose | Status |
 |------|---------|--------|
-| `-ngl 99` | Full GPU offload | Working |
-| `--ctx-size 16384` | Full context for single slot | Working |
-| `--flash-attn on` | Memory-efficient attention | Working |
-| `--cache-type-k q4_0 --cache-type-v q4_0` | Quantized KV cache (~4x less memory) | **Working** — 4% faster than f16, identical quality. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08). |
-| `-np 1` | Single slot (avoids 4-way context split on M1) | Working |
-| `--cache-reuse 256` | KV prefix reuse across requests | **Broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468). Server now logs `cache_reuse is not supported by this context, it will be disabled` (previously silent). |
-| `--slot-save-path /tmp/llama-cache` | Disk persistence for KV state | Working (verified by `TestServerConfig`) |
+| `--ctx-size 32768` with q4_0 | Double context using KV memory savings | Not yet validated — see Phase 3 checklist |
+| `--cache-type-k q8_0 --cache-type-v q8_0` | Middle-ground KV quantization | Tested, 7% slower than f16 — not recommended |
 
 ### Interactive chat
 
@@ -229,7 +245,7 @@ Pulled 7 commits to `c5ce4bc22` (build `b8702`), picking up iSWA rotation (#2151
 
 **Why it matters on 16GB M1:** f16 KV at 16K context uses ~2GB. With q4_0, that drops to ~0.5GB — freeing headroom for larger context or more breathing room.
 
-**Result: q4_0 is the winner.** Fastest of all three configs, identical quality, ~4x less KV memory.
+**Result: q4_0 is the current recommended default on this M1 16GB setup.** Best result in current local tests — fastest of all three configs, identical quality, ~4x less KV memory.
 
 #### Phase 3 Comparison Results (2026-04-08)
 
@@ -250,6 +266,13 @@ Build `b8702` (`c5ce4bc22`). 132/132 unit tests pass. 3/3 easy integration tests
 - All three configs produce identical behavior patterns (same duplicate-write issue on multi_step_build, same replan count)
 - Planner thinking dominates timing (~45-89s per plan call) — exec steps are fast (~3-20s each)
 - The duplicate-write loop on multi_step_build is a model behavior issue, not KV cache related
+
+**Benchmark caveats:**
+- Results are from a single trial per config — run-to-run variance is expected (planner thinking time alone ranges 45-89s)
+- Planner thinking dominates total timing, not pure decode throughput — small KV cache speedups may be masked or amplified by planning variance
+- `--cache-reuse` is disabled for Gemma 4, so every request re-evaluates the full prompt from scratch
+- The `edit` action was added between older baselines and the current run — historical timing comparisons are not apples-to-apples
+- These results apply to this specific M1 16GB / Q4_K_M / 16K context setup and may not generalize to other hardware or quant levels
 
 **Verification checklist:**
 - [x] Build includes `4eb19514d` (iSWA rotation fix) — confirmed in `c5ce4bc22`
@@ -294,13 +317,13 @@ After Phase 2 (cache workaround) — **COUNTERPRODUCTIVE (2026-04-07)**:
 - [x] `CACHE_WORKAROUND=0` works (default — cache functions are no-ops)
 - **Conclusion:** iSWA prefix-matching bug affects slot restore too, not just `--cache-reuse`. No workaround possible until upstream fix for #21468.
 
-After Phase 3 (quantized KV cache) — **q4_0 WINS (2026-04-08)**:
+After Phase 3 (quantized KV cache) — **q4_0 recommended (2026-04-08)**:
 - [x] Build `b8702` (`c5ce4bc22`) includes iSWA rotation fix
 - [x] 132/132 unit tests pass
 - [x] 3/3 easy integration with q8_0: 7:09 (+7% vs f16)
 - [x] 3/3 easy integration with q4_0: 6:23 (-4% vs f16, fastest)
 - [x] Identical quality across all three KV types
-- **Conclusion:** q4_0 KV is the recommended config — faster and ~4x less KV memory.
+- **Conclusion:** q4_0 KV is the current recommended default — best result in single-trial testing, ~4x less KV memory. Pending multi-trial validation.
 
 ## 16GB M1 Lessons Learned
 
@@ -308,7 +331,7 @@ After Phase 3 (quantized KV cache) — **q4_0 WINS (2026-04-08)**:
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
-- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — quantized KV is 4% faster than f16 on Metal M1, with identical quality and ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower — avoid it.
+- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower — avoid it.
 - **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server explicitly logs `cache_reuse is not supported by this context, it will be disabled`. Manual slot save/restore was tested (`CACHE_WORKAROUND=1`) but is counterproductive — no viable workaround until upstream fix. See Phase 2 above.
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 

@@ -16,7 +16,8 @@ mkdir -p /tmp/llama-cache
 ./build/bin/llama-server \
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
-  -np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 
 # 2. Run the agent (from agent/ directory)
