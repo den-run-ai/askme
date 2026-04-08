@@ -2,9 +2,10 @@
 
 Mac M1 16GB. Last updated 2026-04-08.
 
-**Current build:** `c5ce4bc22` (build `b8702`) — up to date with master as of 2026-04-08. Includes iSWA rotation (#21513) and server params fix (#21509).
+**Current build:** `d12cc3d1c` — up to date with master as of 2026-04-08. Includes EOS fix (#21492), iSWA rotation (#21513), server params fix (#21509), per-layer projections (#21612), CUDA buffer overlap fix (#21566).
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 **Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
+**Phase 4 (EOS fix): COMPLETE** — #21492 merged, rebuilt, 157/157 unit tests pass, 3/3 easy integration pass (10:02). See [Phase 4 results](#phase-4-eos-fix--complete-2026-04-08).
 
 ## Model
 
@@ -130,7 +131,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 ## Upstream Gemma 4 Commits
 
-Local HEAD: `c5ce4bc22` (build `b8702`, up to date with master as of 2026-04-08).
+Local HEAD: `d12cc3d1c` (up to date with master as of 2026-04-08).
 
 ### In local build
 
@@ -147,20 +148,21 @@ Local HEAD: `c5ce4bc22` (build `b8702`, up to date with master as of 2026-04-08)
 | [#21159](https://github.com/ggml-org/llama.cpp/pull/21159) | Optimized `flash_attn_stream_k_fixup` kernel | CUDA only, no M1 Metal impact | `0d049d6a9` |
 | [#21513](https://github.com/ggml-org/llama.cpp/pull/21513) | Attention rotation for heterogeneous iSWA | **Enables Phase 3** — Hadamard rotation for Gemma 4's mixed head dims (256 SWA / 512 global). KL divergence 0.947 → 0.746 with quantized KV. | `c5ce4bc22` |
 | [#21509](https://github.com/ggml-org/llama.cpp/pull/21509) | Server: fix model params not propagated | Sampling defaults from model metadata now propagate correctly | `c5ce4bc22` |
+| [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) | Remove `</s>` EOS token for Gemma 4 | Removes spurious `</s>` from EOG list, adds `<eos>` — **reduces premature generation stops** | `d12cc3d1c` |
+| [#21612](https://github.com/ggml-org/llama.cpp/pull/21612) | Per-layer projections in first layer | Reduces graph splits for partial offload (minor perf) | `d12cc3d1c` |
+| [#21566](https://github.com/ggml-org/llama.cpp/pull/21566) | CUDA: check for buffer overlap before fusing | Fixes Gemma 4 26B `<unused>` token spam on CUDA — not relevant to Metal | `d12cc3d1c` |
 
 ### Not yet merged (watch list)
 
-| PR | Title | Status | Impact |
-|----|-------|--------|--------|
-| [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) | Remove `</s>` EOS token for Gemma 4 | Approved, not merged | **May fix premature generation stops** — could reduce JSON truncation before closing brace, which currently triggers thinking retries |
-| Draft (ggerganov) | Gemma 4 FFN MoE precision to F32 | Draft | Better expert routing quality, some speed cost |
+_No Gemma 4 PRs currently pending._ The FFN MoE F32 precision draft (#21506, ggerganov) was **closed** — superseded by #21566 (CUDA buffer overlap fix).
 
 ### Known Gemma 4 Bugs (upstream, no fix)
 
 | Issue | Title | Relevance |
 |-------|-------|-----------|
 | [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) | Cache reuse broken for Gemma 4 | **Critical** — see above |
-| [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | Not seen in agent use (low temp 0.1 may suppress) |
+| [#21516](https://github.com/ggml-org/llama.cpp/issues/21516) | Generates `<unused>` tokens in infinite loop (Vulkan) | Not applicable (Metal). Separate from CUDA fix #21566 |
+| [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | Not seen in agent use (low temp 0.1 may suppress). CUDA case fixed by #21566 |
 | [#21424](https://github.com/ggml-org/llama.cpp/issues/21424) | Very long generation latency (Vulkan/AMD) | Not applicable (Metal) |
 
 ## Implementation Plan
@@ -285,19 +287,46 @@ Build `b8702` (`c5ce4bc22`). 132/132 unit tests pass. 3/3 easy integration tests
 - [x] Quality comparison: identical step counts, replans, and task completion across all three
 - [ ] Expanded context test (`--ctx-size 32768` with q4_0) — deferred, current 16K is sufficient
 
-### Phase 4: Monitor remaining upstream fixes (no code changes)
+### Phase 4: EOS fix — COMPLETE (2026-04-08)
 
-Watch these PRs — when merged, pull and rebuild:
+Pulled to `d12cc3d1c` picking up EOS fix (#21492), per-layer projections (#21612), CUDA buffer overlap fix (#21566), and other non-Gemma changes.
 
-| PR | What to do when merged |
-|----|----------------------|
-| [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) (`</s>` EOS fix) | Pull, rebuild, re-run medium tests — may reduce JSON truncation that triggers thinking retries |
-| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) fix (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via `scripts/bench_kv.sh` |
+**What it does:** Removes spurious `</s>` from Gemma 4's end-of-generation token list and adds `<eos>`. This was causing premature generation stops that triggered JSON truncation and thinking retries.
 
-### Phase 5: Future optimizations
+#### Phase 4 Verification Results (2026-04-08)
+
+| Check | Result |
+|-------|--------|
+| HEAD includes `d9a12c82f` (EOS fix) | `d12cc3d1c` — yes |
+| 157/157 unit tests | Pass (30.9s) |
+| 3/3 easy integration | Pass (10:02) |
+
+**Easy integration (10:02 total, q4_0 KV):**
+
+| Test | Steps | Replans | Thinking Retries | Time |
+|------|-------|---------|------------------|------|
+| create_and_read_file | 5 | 1 | 1x (high) | ~286s |
+| shell_and_write | 2 | 0 | 0 | ~21s |
+| multi_step_build | 5+5 | 1 | 2x (medium) | ~295s |
+
+**Observations vs Phase 3 (q4_0, build b8702):**
+- `shell_and_write`: 21s vs 95s — **78% faster**, clean run with no retries
+- `create_and_read_file`: 286s vs 67s — slower due to transport timeout during replan (noise, not regression)
+- `multi_step_build`: 295s vs 221s — similar, duplicate-write loop persists (model behavior, not EOS related)
+- Thinking retries: 3 total vs Phase 1's 9 — **trending down** but single-trial variance is high
+- The duplicate-write loop on `multi_step_build` is a model behavior issue unrelated to EOS
+
+**Note:** Single trial — run-to-run variance is significant. The `create_and_read_file` regression is likely a transport timeout outlier, not a real regression from the EOS fix.
+
+### Phase 5: Monitor remaining upstream fixes
+
+| PR/Issue | What to do when fixed |
+|----------|----------------------|
+| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via `scripts/bench_kv.sh` |
+
+### Phase 6: Future optimizations
 
 - **TurboQuant KV** — [#21089](https://github.com/ggml-org/llama.cpp/pull/21089) adds 3.5-bit KV cache types (TBQ3_0/TBQ4_0). CPU-only for now, no Metal support.
-- **MoE F32 precision** — ggerganov's draft PR for Gemma 4 FFN MoE precision. Would improve expert routing quality at cost of some speed.
 
 ## Verification Checklist
 
@@ -325,6 +354,14 @@ After Phase 3 (quantized KV cache) — **q4_0 recommended (2026-04-08)**:
 - [x] Identical quality across all three KV types
 - **Conclusion:** q4_0 KV is the current recommended default — best result in single-trial testing, ~4x less KV memory. Pending multi-trial validation.
 
+After Phase 4 (EOS fix) — **COMPLETE (2026-04-08)**:
+- [x] `git log --oneline -1` shows `d12cc3d1c` (includes `d9a12c82f` EOS fix)
+- [x] 157/157 unit tests pass (30.9s)
+- [x] 3/3 easy integration pass (10:02, q4_0 KV)
+- [x] `shell_and_write` 78% faster (21s vs 95s) — clean run, no retries
+- [x] Thinking retries trending down (3 vs Phase 1's 9) — high variance, needs more trials
+- **Conclusion:** EOS fix merged and working. Duplicate-write loop persists (model behavior). Medium tests deferred — need multi-trial runs to separate signal from noise.
+
 ## 16GB M1 Lessons Learned
 
 - **Gemma 4 E4B is the sweet spot** — MoE with 4B active params, ~5.0GB Q4_K_M, full Metal GPU
@@ -343,6 +380,8 @@ After Phase 3 (quantized KV cache) — **q4_0 recommended (2026-04-08)**:
 - [PR #21492 — Remove </s> EOS for Gemma4](https://github.com/ggml-org/llama.cpp/pull/21492)
 - [PR #21513 — Attention rotation for heterogeneous iSWA](https://github.com/ggml-org/llama.cpp/pull/21513) (merged, was #21518)
 - [PR #21509 — Server: fix model params not propagated](https://github.com/ggml-org/llama.cpp/pull/21509)
+- [PR #21612 — Per-layer projections in first layer](https://github.com/ggml-org/llama.cpp/pull/21612)
+- [PR #21566 — CUDA: check for buffer overlap before fusing](https://github.com/ggml-org/llama.cpp/pull/21566)
 - [PR #21038 — Hadamard rotation for better KV quantization](https://github.com/ggml-org/llama.cpp/pull/21038)
 - [PR #21089 — TurboQuant CPU KV cache types](https://github.com/ggml-org/llama.cpp/pull/21089)
 - [Discussion #20572 — Persistent KV cache tutorial](https://github.com/ggml-org/llama.cpp/discussions/20572)
