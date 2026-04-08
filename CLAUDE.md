@@ -6,7 +6,7 @@ IMPORTANT: Ensure you've thoroughly reviewed the [AGENTS.md](../AGENTS.md) file 
 
 ## What This Is
 
-NanAgent — a minimal, self-contained agent that runs on local or remote LLMs (Gemma 4 via llama-server or OpenRouter). It takes a user prompt, plans tasks, executes them via shell/write/read actions, and replans on failure. Single file, no frameworks, no external dependencies beyond `requests`. Each run gets an isolated temp directory — agent-created files never pollute the repo. Exits with code 1 on failure for script chaining.
+NanAgent — a minimal, self-contained agent that runs on local or remote LLMs (Gemma 4 via llama-server or OpenRouter). It takes a user prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. Single file, no frameworks, no external dependencies beyond `requests`. Each run gets an isolated temp directory — agent-created files never pollute the repo. Exits with code 1 on failure for script chaining.
 
 ## Commands
 
@@ -62,7 +62,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
 0. **Preflight** (`preflight_probe`) — Before the first plan, deterministically probes: platform, arch, working dir listing, available/missing tools (fixed allowlist: python3, go, node, gcc, cc, make, cargo, rustc, java, javac), and package managers (brew, apt-get, dnf, pacman, apk). Feeds structured dict + execution policy into planner state.
 1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, typed errors, environment, policy) and outputs `{"tasks": ["task1", "task2", ...]}`. Always uses thinking (`think=True`) with `PLANNER_MAX_TOKENS=768`. Errors are summarized into typed categories (`[missing_tool]`, `[timeout]`, etc.) before reaching the planner.
-2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `read`, `done`, or `fail`. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
+2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `edit`, `read`, `done`, or `fail`. `edit` does exact single-match string replacement (fails on zero or multiple matches); `write` replaces the entire file. The model is prompted to prefer `edit` for localized changes and `write` for new files. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
 
 ### Working directory isolation
@@ -99,8 +99,8 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~579 lines)
-- `tests/` — test suite (5 modules + support files, 145 tests total)
+- `askme.py` — the agent (self-contained, ~633 lines)
+- `tests/` — test suite (5 modules + support files, 159 tests total)
   - `conftest.py` — pytest fixtures (`work_dir`) and skip markers (`skip_no_llm`, `skip_no_openrouter`)
   - `_test_support.py` — mock helpers, integration test runners (`int_run`, `or_run`), limit constants
   - `test_agent_core.py` — execute(), ask_llm(), thinking retry, null-arg normalization (~310 lines)
@@ -118,7 +118,7 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `TestCrossTaskState` — verifies completed_tasks and step carryover across tasks
 - `TestOutputFormatting` — verifies basename in write output and slim state args
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON
-- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write duplicates skip and continue, shell duplicates auto-done/fail
+- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write/edit duplicates skip and continue, shell duplicates auto-done/fail
 - `TestCacheWorkaround` — verifies slot save/restore lifecycle, non-fatal failure, backend gating
 - `TestPlannerReasoning` — verifies planner always uses think=True and PLANNER_MAX_TOKENS, system prompt includes specificity hints, null-content retry
 - `TestPreflightProbe` — verifies environment probing returns platform, arch, tools, dir listing, package managers; verifies run() injects into planner state

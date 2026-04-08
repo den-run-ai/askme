@@ -219,6 +219,33 @@ class TestOutputFormatting:
                 arg = Path(arg).name
             assert arg == "file.txt", f"Expected basename, got: {arg}"
 
+    def test_edit_output_basename(self, work_dir):
+        """Edit action output should show filename, not full path."""
+        Path(work_dir, "sub").mkdir()
+        Path(work_dir, "sub", "test.txt").write_text("old")
+        result = execute({"action": "edit", "arg": f"{work_dir}/sub/test.txt",
+                          "find": "old", "replace": "new"}, work_dir)
+        assert result["ok"] is True
+        assert result["output"] == "Edited test.txt"
+        assert work_dir not in result["output"]
+
+    def test_slim_steps_basename_for_edit(self):
+        """get_step should use basename for edit args in slim state."""
+        state = {
+            "current_task": "test",
+            "task_index": "1/1",
+            "last_steps": [
+                {"action": "edit", "arg": "/very/long/path/to/file.txt", "ok": True, "output": "Edited file.txt"},
+            ],
+            "completed_tasks": [],
+        }
+        steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
+        for s in steps:
+            arg = s.get("arg", "")
+            if s["action"] in ("write", "read", "edit") and "/" in arg:
+                arg = Path(arg).name
+            assert arg == "file.txt", f"Expected basename, got: {arg}"
+
 
 class TestWriteContentSerialization:
     """Verify that dict/list content in write actions is auto-serialized to JSON."""

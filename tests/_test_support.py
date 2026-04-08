@@ -114,15 +114,20 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                 last = state["last_steps"][-1:] if state["last_steps"] else []
                 if last and last[0]["action"] == act:
                     prev = last[0]
-                    if act == "write" and prev.get("arg", "") == action.get("arg", ""):
-                        if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                    if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
+                        is_dup = False
+                        if act == "write" and prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                            is_dup = True
+                        elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
+                            is_dup = True
+                        if is_dup:
                             dup_skip_count += 1
-                            log(f"  STEP {step+1} skip (duplicate write, same content)")
+                            log(f"  STEP {step+1} skip (duplicate {act}, same content)")
                             if dup_skip_count >= 2:
                                 state["last_steps"].append({
-                                    "action": "write", "arg": action.get("arg", ""),
+                                    "action": act, "arg": action.get("arg", ""),
                                     "ok": True,
-                                    "output": f"Already written (skipped {dup_skip_count}x). Choose a different action or emit done."
+                                    "output": f"Already applied (skipped {dup_skip_count}x). Choose a different action or emit done."
                                 })
                                 use_think = True
                             continue
@@ -150,6 +155,9 @@ def int_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                 }
                 if act == "write":
                     step_entry["_content"] = action.get("content", "")
+                if act == "edit":
+                    step_entry["_find"] = action.get("find", "")
+                    step_entry["_replace"] = action.get("replace", "")
                 state["last_steps"].append(step_entry)
                 if not result["ok"]:
                     state["errors"].append(f"{act} failed: {result['output'][:100]}")

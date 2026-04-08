@@ -154,7 +154,9 @@ CRITICAL RULES:
 - If last_steps shows the same error 2+ times, emit {"action":"fail"}.
 - completed_tasks are DONE — never redo their work.
 - If a required tool is in missing_tools and policy.allow_system_installs is false, emit {"action":"fail"} with reasoning explaining the missing prerequisite. Do NOT attempt to install software.
-Actions: shell, write, read, done, fail.
+- To modify an existing file, prefer edit over write. edit replaces one exact match; write replaces the entire file. Use write only for new files or full rewrites.
+Actions: shell, write, edit, read, done, fail.
+edit format: {"action":"edit","arg":"file","find":"exact old text","replace":"new text","reasoning":"..."}
 Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"""
 
 
@@ -325,7 +327,7 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
     for s in steps:
         # Use basename for file paths to avoid long tmp_path bloat
         arg = s.get("arg", "")
-        if s["action"] in ("write", "read") and "/" in arg:
+        if s["action"] in ("write", "read", "edit") and "/" in arg:
             arg = Path(arg).name
         else:
             arg = arg[-MAX_INPUT:]
@@ -428,6 +430,30 @@ def execute(action, working_dir="."):
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "write")}
+    elif act == "edit":
+        try:
+            p = Path(action["arg"])
+            if not p.is_absolute():
+                p = Path(working_dir) / p
+            if not p.exists():
+                return {"ok": False, "output": f"File not found: {p.name}",
+                        "error_type": "missing_file"}
+            text = p.read_text()
+            find = action.get("find", "")
+            replace = action.get("replace", "")
+            if not find:
+                return {"ok": False, "output": "edit requires non-empty 'find'"}
+            count = text.count(find)
+            if count == 0:
+                return {"ok": False, "output": f"No match for find string in {p.name}"}
+            if count > 1:
+                return {"ok": False,
+                        "output": f"Ambiguous: find string matches {count} times in {p.name}"}
+            p.write_text(text.replace(find, replace, 1))
+            return {"ok": True, "output": f"Edited {p.name}"}
+        except Exception as e:
+            out = str(e)[:MAX_RESULT]
+            return {"ok": False, "output": out, "error_type": classify_error(out, "edit")}
     elif act == "read":
         try:
             p = Path(action["arg"])
@@ -496,7 +522,7 @@ def run(user_prompt, working_dir=None):
                     state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
                     break
                 # Normalize None → "" for optional string fields (models emit "arg": null)
-                for _k in ("arg", "content", "reasoning"):
+                for _k in ("arg", "content", "reasoning", "find", "replace"):
                     if action.get(_k) is None:
                         action[_k] = ""
                 act = action.get("action", "")
@@ -515,16 +541,21 @@ def run(user_prompt, working_dir=None):
                 last = state["last_steps"][-1:] if state["last_steps"] else []
                 if last and last[0]["action"] == act:
                     prev = last[0]
-                    if act == "write" and prev.get("arg", "") == action.get("arg", ""):
-                        if prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                    if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
+                        # write: same content = duplicate; edit: same find+replace = duplicate
+                        is_dup = False
+                        if act == "write" and prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                            is_dup = True
+                        elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
+                            is_dup = True
+                        if is_dup:
                             dup_skip_count += 1
-                            log(f"  [{step + 1}] skip (duplicate write, same content)")
+                            log(f"  [{step + 1}] skip (duplicate {act}, same content)")
                             if dup_skip_count >= 2:
-                                # Break livelock: inject synthetic step so model sees new state
                                 state["last_steps"].append({
-                                    "action": "write", "arg": action.get("arg", ""),
+                                    "action": act, "arg": action.get("arg", ""),
                                     "ok": True,
-                                    "output": f"Already written (skipped {dup_skip_count}x). Choose a different action or emit done."
+                                    "output": f"Already applied (skipped {dup_skip_count}x). Choose a different action or emit done."
                                 })
                                 use_think = True
                             continue
@@ -563,6 +594,9 @@ def run(user_prompt, working_dir=None):
                     step_entry["_timeout"] = action["timeout"]
                 if act == "write":
                     step_entry["_content"] = action.get("content", "")
+                if act == "edit":
+                    step_entry["_find"] = action.get("find", "")
+                    step_entry["_replace"] = action.get("replace", "")
                 state["last_steps"].append(step_entry)
 
                 if not result["ok"]:

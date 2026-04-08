@@ -43,7 +43,7 @@ class TestDuplicateGuard:
         assert ok is True
         last_call_args = mock_llm.call_args_list[-1]
         user_msg = last_call_args[0][0][1]["content"]
-        assert "Already written" in user_msg
+        assert "Already applied" in user_msg
 
     def test_write_different_content_allowed(self, tmp_path):
         """Same file + different content -> allow (legitimate fix attempt)."""
@@ -117,6 +117,53 @@ class TestDuplicateGuard:
         with patch("askme.ask_llm", side_effect=responses):
             run("write and run")
 
+    def test_edit_same_find_replace_skips(self, tmp_path):
+        """Same file + same find + same replace + ok -> skip duplicate edit."""
+        f = tmp_path / "main.c"
+        f.write_text('#include "msg.h"\nint main(){return 0;}')
+        responses = [
+            {"tasks": ["fix include"]},
+            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
+             "replace": '#include <stdio.h>\n#include "msg.h"'},
+            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
+             "replace": '#include <stdio.h>\n#include "msg.h"'},  # dup - skip
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            ok = run("fix include", working_dir=str(tmp_path))
+        assert ok is True
+
+    def test_edit_different_find_allowed(self, tmp_path):
+        """Same file + different find -> allowed (different edit, not a duplicate)."""
+        f = tmp_path / "f.txt"
+        f.write_text("aaa\nbbb")
+        responses = [
+            {"tasks": ["fix two lines"]},
+            {"action": "edit", "arg": str(f), "find": "aaa", "replace": "AAA"},
+            {"action": "edit", "arg": str(f), "find": "bbb", "replace": "BBB"},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            ok = run("fix two lines", working_dir=str(tmp_path))
+        assert ok is True
+        assert f.read_text() == "AAA\nBBB"
+
+    def test_edit_recompile_after_edit_not_blocked(self, tmp_path):
+        """shell gcc (fail) -> edit fix -> shell gcc (same cmd) should NOT be blocked."""
+        src = tmp_path / "main.c"
+        src.write_text('int main(){puts("ok");return 0;}')
+        responses = [
+            {"tasks": ["compile"]},
+            {"action": "shell", "arg": f"cc -o main {src}"},
+            {"action": "edit", "arg": str(src),
+             "find": 'int main()',
+             "replace": '#include <stdio.h>\nint main()'},
+            {"action": "shell", "arg": f"cc -o main {src}"},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            run("compile")
+
     def test_content_not_in_slim_state(self):
         """_content field should not appear in messages sent to LLM by get_step()."""
         state = {
@@ -136,6 +183,27 @@ class TestDuplicateGuard:
             get_step("test task", state, goal="test goal")
         user_msg = captured["messages"][1]["content"]
         assert "_content" not in user_msg, f"_content leaked into LLM message: {user_msg}"
+
+    def test_edit_internals_not_in_slim_state(self):
+        """_find and _replace fields should not appear in messages sent to LLM."""
+        state = {
+            "current_task": "test",
+            "task_index": "1/1",
+            "last_steps": [
+                {"action": "edit", "arg": "f.txt", "ok": True, "output": "Edited f.txt",
+                 "_find": "old", "_replace": "new"},
+            ],
+            "completed_tasks": [],
+        }
+        captured = {}
+        def capture_llm(messages, **kwargs):
+            captured["messages"] = messages
+            return {"action": "done"}
+        with patch("askme.ask_llm", side_effect=capture_llm):
+            get_step("test task", state, goal="test goal")
+        user_msg = captured["messages"][1]["content"]
+        assert "_find" not in user_msg, f"_find leaked into LLM message: {user_msg}"
+        assert "_replace" not in user_msg, f"_replace leaked into LLM message: {user_msg}"
 
 
 # --- Cache workaround tests ---

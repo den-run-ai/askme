@@ -87,6 +87,70 @@ class TestExecuteRead:
         assert len(result["output"]) <= 300
 
 
+class TestExecuteEdit:
+    def test_edit_single_match(self, work_dir):
+        Path(work_dir, "main.c").write_text('#include "msg.h"\nint main(){return 0;}')
+        result = execute({"action": "edit", "arg": "main.c",
+                          "find": '#include "msg.h"',
+                          "replace": '#include <stdio.h>\n#include "msg.h"'}, work_dir)
+        assert result["ok"] is True
+        assert "Edited" in result["output"]
+        text = (Path(work_dir) / "main.c").read_text()
+        assert '#include <stdio.h>\n#include "msg.h"' in text
+        assert "int main()" in text
+
+    def test_edit_no_match(self, work_dir):
+        Path(work_dir, "f.txt").write_text("hello world")
+        result = execute({"action": "edit", "arg": "f.txt",
+                          "find": "goodbye", "replace": "hi"}, work_dir)
+        assert result["ok"] is False
+        assert "No match" in result["output"]
+
+    def test_edit_multiple_matches(self, work_dir):
+        Path(work_dir, "f.txt").write_text("aaa\naaa\naaa")
+        result = execute({"action": "edit", "arg": "f.txt",
+                          "find": "aaa", "replace": "bbb"}, work_dir)
+        assert result["ok"] is False
+        assert "3 times" in result["output"]
+
+    def test_edit_missing_file(self, work_dir):
+        result = execute({"action": "edit", "arg": "nope.txt",
+                          "find": "x", "replace": "y"}, work_dir)
+        assert result["ok"] is False
+        assert result.get("error_type") == "missing_file"
+
+    def test_edit_relative_path(self, work_dir):
+        (Path(work_dir) / "sub").mkdir()
+        (Path(work_dir) / "sub" / "f.txt").write_text("old text")
+        result = execute({"action": "edit", "arg": "sub/f.txt",
+                          "find": "old text", "replace": "new text"}, work_dir)
+        assert result["ok"] is True
+        assert (Path(work_dir) / "sub" / "f.txt").read_text() == "new text"
+
+    def test_edit_empty_find(self, work_dir):
+        Path(work_dir, "f.txt").write_text("content")
+        result = execute({"action": "edit", "arg": "f.txt",
+                          "find": "", "replace": "x"}, work_dir)
+        assert result["ok"] is False
+        assert "non-empty" in result["output"]
+
+    def test_edit_delete_text(self, work_dir):
+        """Replace with empty string effectively deletes the matched text."""
+        Path(work_dir, "f.txt").write_text("line1\nDELETE_ME\nline3")
+        result = execute({"action": "edit", "arg": "f.txt",
+                          "find": "DELETE_ME\n", "replace": ""}, work_dir)
+        assert result["ok"] is True
+        assert (Path(work_dir) / "f.txt").read_text() == "line1\nline3"
+
+    def test_edit_absolute_path(self, work_dir):
+        p = Path(work_dir) / "abs.txt"
+        p.write_text("before")
+        result = execute({"action": "edit", "arg": str(p),
+                          "find": "before", "replace": "after"}, work_dir)
+        assert result["ok"] is True
+        assert p.read_text() == "after"
+
+
 class TestExecuteDoneFail:
     def test_done(self, work_dir):
         result = execute({"action": "done", "arg": ""}, work_dir)
