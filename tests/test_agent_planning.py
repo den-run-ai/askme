@@ -89,6 +89,7 @@ class TestPlannerReasoning:
     def test_planner_null_content_with_reasoning(self, mock_post):
         """Planner-specific: reasoning exhausts token budget, content=null -> retry succeeds."""
         resp_null = MagicMock()
+        resp_null.status_code = 200
         resp_null.json.return_value = {
             "choices": [{"message": {"content": None, "reasoning": "planning..."}}]
         }

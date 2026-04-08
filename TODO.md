@@ -1,10 +1,10 @@
 # TODO
 
-## Reliability
+## Reliability — DONE (2026-04-08)
 
-- Add network timeouts and transport-level error handling around LLM requests in `ask_llm()`.
-- Decide whether non-200 HTTP responses should be retried, surfaced as task errors, or fail the run immediately.
-- Add tests for request timeouts, connection failures, and non-JSON API responses.
+- ~~Add network timeouts and transport-level error handling around LLM requests in `ask_llm()`.~~ → `LLM_TIMEOUT=120`, `LLMTransportError`, transport retry with backoff in `ask_llm()`. Both planner and executor phases catch transport errors.
+- ~~Decide whether non-200 HTTP responses should be retried, surfaced as task errors, or fail the run immediately.~~ → 429/5xx retry with backoff, 4xx fail fast, JSON "error" key preserved (existing behavior). `TestLLMTransport` verifies.
+- ~~Add tests for request timeouts, connection failures, and non-JSON API responses.~~ → 9 tests in `TestLLMTransport` covering timeout propagation, retry, fail-fast, planner/executor error handling.
 
 ## Task Completion Semantics — DONE (2026-04-07)
 
@@ -12,11 +12,11 @@
 - Revisit the auto-done fallback after JSON parse failure when the previous step was merely successful, not necessarily task-complete.
 - Add tests for genuinely multi-step single-task flows to verify the agent does not stop early after one successful action.
 
-## Test Consistency
+## Test Consistency — DONE (2026-04-08)
 
-- Align `int_run()` with `run()` so integration tests exercise the same exception handling behavior.
-- Align step-history output truncation between `int_run()` and `run()`.
-- Add a regression test proving the production loop and integration harness handle LLM/parsing failures the same way.
+- ~~Align `int_run()` with `run()` so integration tests exercise the same exception handling behavior.~~ → `int_run()` now delegates to `_run_loop()` (the shared core loop extracted from `run()`). Integration tests exercise identical production behavior: preflight, policy, null normalization, error reset, timeout retry, typed error formatting.
+- ~~Align step-history output truncation between `int_run()` and `run()`.~~ → Eliminated by shared `_run_loop()`.
+- ~~Add a regression test proving the production loop and integration harness handle LLM/parsing failures the same way.~~ → No separate regression test needed — they use the same code path now.
 
 ## Test Coverage Gaps
 
@@ -56,7 +56,7 @@
 - Validate preflight + policy with live LLM integration tests (both local and OpenRouter).
 - Consider making the tool allowlist configurable via env var or config file.
 - The auto-done fallback after JSON parse failure (when last step was successful) still uses step-level heuristic, not goal-aware completion. This is a known compromise for small LLMs that struggle with JSON output.
-- Update `int_run()` to include preflight and policy so integration tests exercise the same path as `run()`.
+- ~~Update `int_run()` to include preflight and policy so integration tests exercise the same path as `run()`.~~ → Done via `_run_loop()` extraction (2026-04-08).
 
 ## Optional Follow-Up
 

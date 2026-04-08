@@ -283,6 +283,7 @@ class TestCacheWorkaround:
                 if "action=save" in url:
                     raise ConnectionError("server down")
                 resp = MagicMock()
+                resp.status_code = 200
                 resp.json.return_value = {
                     "choices": [{"message": {"content": '{"tasks":[]}'}}]
                 }

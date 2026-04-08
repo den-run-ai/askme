@@ -126,7 +126,14 @@ def get_policy():
     }
 
 
-MAX_REPLANS = 3
+class LLMTransportError(Exception):
+    """Raised when all LLM request retries are exhausted."""
+    pass
+
+
+LLM_TIMEOUT = 120  # seconds; covers slow first-token on local LLM
+
+MAX_REPLANS = 3  # Total planning attempts (initial plan + up to 2 replans)
 MAX_TASKS = 10
 MAX_STEPS = 10
 MAX_RESULT = 300  # chars kept from command output
@@ -202,11 +209,38 @@ def ask_llm(messages, max_tokens=256, think=False):
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
         _restore_cache()
-        resp = requests.post(API, json=body, headers=headers)
-        rj = resp.json()
-        # Handle API error responses
+        # Transport-level error handling with retry + backoff
+        try:
+            resp = requests.post(API, json=body, headers=headers, timeout=LLM_TIMEOUT)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.RequestException) as e:
+            log(f"  Transport error: {type(e).__name__}: {e}")
+            if attempt < MAX_LLM_RETRIES:
+                time.sleep(1 if attempt == 0 else 3)
+                continue
+            raise LLMTransportError(f"Transport failed after {MAX_LLM_RETRIES + 1} attempts: {e}") from e
+        # HTTP status checks — fail-fast on client errors, retry on server/overload
+        sc = resp.status_code
+        if sc == 429 or sc >= 500:
+            log(f"  HTTP {sc}, retrying...")
+            if attempt < MAX_LLM_RETRIES:
+                time.sleep(1 if attempt == 0 else 3)
+                continue
+            raise LLMTransportError(f"HTTP {sc} after {MAX_LLM_RETRIES + 1} attempts")
+        if 400 <= sc < 500:
+            raise LLMTransportError(f"HTTP {sc}: {resp.text[:200]}")
+        # Parse JSON body — retry on non-JSON responses (proxy/gateway glitch)
+        try:
+            rj = resp.json()
+        except ValueError as e:
+            log(f"  Non-JSON response body: {resp.text[:100]}")
+            if attempt < MAX_LLM_RETRIES:
+                time.sleep(1 if attempt == 0 else 3)
+                continue
+            raise LLMTransportError(f"Non-JSON response after {MAX_LLM_RETRIES + 1} attempts") from e
+        # Handle API error responses (JSON body with "error" key)
         if "error" in rj:
-            log(f"  API error: {rj['error'].get('message', rj['error'])}")
+            log(f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}")
             if attempt < MAX_LLM_RETRIES:
                 continue
             raise KeyError(f"API error: {rj['error']}")
@@ -470,11 +504,16 @@ def execute(action, working_dir="."):
     return {"ok": False, "output": f"unknown action: {act}"}
 
 
-def run(user_prompt, working_dir=None):
-    # Create isolated temp directory per run unless caller provides one
-    if working_dir is None:
-        working_dir = tempfile.mkdtemp(prefix="nanagent_")
+def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
+              max_tasks=MAX_TASKS, max_steps=MAX_STEPS):
+    """Core agent loop. Returns structured result dict.
+
+    Used by run() (public API, returns bool) and by integration test harness
+    (needs rich dict with state + log). All production behavior lives here:
+    preflight, policy, null normalization, error reset, timeout retry, etc.
+    """
     state = {"completed_tasks": [], "errors": []}
+    history = []
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
@@ -490,15 +529,22 @@ def run(user_prompt, working_dir=None):
     log(f"Policy: allow_system_installs={state['policy']['allow_system_installs']}")
     _warm_cache()
 
-    for replan in range(MAX_REPLANS):
+    for replan in range(max_replans):
         log("=" * 40)
         t_plan = time.time()
-        log(f"Planning (attempt {replan + 1}/{MAX_REPLANS})...")
-        plan = get_plan(user_prompt, state)
+        log(f"Planning (attempt {replan + 1}/{max_replans})...")
+        try:
+            plan = get_plan(user_prompt, state)
+        except LLMTransportError as e:
+            log(f"  Planner transport error: {e}")
+            state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
+            history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
+            continue  # consumes a plan attempt
         state["errors"] = []  # reset errors each replan; planner already saw them
-        tasks = plan.get("tasks", [])
+        tasks = plan.get("tasks", [])[:max_tasks]
         plan_wall = time.time() - t_plan
         log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
+        history.append({"event": "plan", "replan": replan, "tasks": tasks})
 
         all_done = True
         for i, task in enumerate(tasks):
@@ -513,10 +559,15 @@ def run(user_prompt, working_dir=None):
             task_done = False
             use_think = False  # enable thinking after failed step execution
             dup_skip_count = 0  # consecutive duplicate write skips
-            for step in range(MAX_STEPS):
+            for step in range(max_steps):
                 t_step = time.time()
                 try:
-                    action = get_step(task, state, goal=user_prompt, step_num=step, think=use_think)
+                    action = get_step(task, state, goal=user_prompt, step_num=step,
+                                      max_steps=max_steps, think=use_think)
+                except LLMTransportError as e:
+                    log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
+                    state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
+                    break
                 except (json.JSONDecodeError, KeyError) as e:
                     log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
                     state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
@@ -598,6 +649,8 @@ def run(user_prompt, working_dir=None):
                     step_entry["_find"] = action.get("find", "")
                     step_entry["_replace"] = action.get("replace", "")
                 state["last_steps"].append(step_entry)
+                history.append({"event": "step", "task": i, "step": step, "action": action,
+                                "result": {"ok": result["ok"], "output": result["output"][:100]}})
 
                 if not result["ok"]:
                     etype = result.get("error_type", "unknown")
@@ -617,12 +670,21 @@ def run(user_prompt, working_dir=None):
         if all_done:
             log(f"All tasks complete. ({time.time()-t_run:.1f}s total)")
             log(f"Output in: {working_dir}")
-            return True
+            return {"status": "complete", "state": state, "log": history}
 
-    log(f"Exhausted {MAX_REPLANS} replan attempts. ({time.time()-t_run:.1f}s total)")
+    log(f"Exhausted {max_replans} replan attempts. ({time.time()-t_run:.1f}s total)")
     log(f"Errors: {state['errors']}")
     log(f"Output in: {working_dir}")
-    return False
+    return {"status": "exhausted", "state": state, "log": history}
+
+
+def run(user_prompt, working_dir=None):
+    """Public API: run agent and return True (success) or False (failure)."""
+    # Create isolated temp directory per run unless caller provides one
+    if working_dir is None:
+        working_dir = tempfile.mkdtemp(prefix="nanagent_")
+    result = _run_loop(user_prompt, working_dir)
+    return result["status"] == "complete"
 
 
 if __name__ == "__main__":

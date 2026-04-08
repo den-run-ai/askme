@@ -1,10 +1,11 @@
-"""Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization."""
+"""Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization, transport hardening."""
 import json
+import requests as req_lib
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
-from askme import execute, ask_llm, run
+from askme import execute, ask_llm, run, _run_loop, LLMTransportError, LLM_TIMEOUT
 from _test_support import mock_response, mock_response_raw
 
 
@@ -271,6 +272,7 @@ class TestThinkingRetry:
     def test_api_error_retries(self, mock_post):
         """API error responses should be retried, not crash on missing 'choices'."""
         resp_err = MagicMock()
+        resp_err.status_code = 200
         resp_err.json.return_value = {"error": {"message": "rate limited", "code": 429}}
         mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
         result = ask_llm([{"role": "user", "content": "test"}])
@@ -300,6 +302,7 @@ class TestThinkingRetry:
     def test_null_content_with_reasoning(self, mock_post):
         """When reasoning exhausts tokens, content may be null — should retry, not crash."""
         resp_null = MagicMock()
+        resp_null.status_code = 200
         resp_null.json.return_value = {
             "choices": [{"message": {"content": None, "reasoning": "thinking..."}}]
         }
@@ -312,6 +315,7 @@ class TestThinkingRetry:
     def test_null_content_recovers_json_from_reasoning(self, mock_post):
         """When content is null but reasoning contains valid JSON, recover it directly."""
         resp_null = MagicMock()
+        resp_null.status_code = 200
         resp_null.json.return_value = {
             "choices": [{"message": {"content": None, "reasoning": '{"action": "shell", "arg": "echo hi"}'}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
@@ -372,3 +376,120 @@ class TestNullArgNormalization:
         ]
         with patch("askme.ask_llm", side_effect=responses):
             assert run("write file") is True
+
+
+# --- LLM transport hardening tests ---
+
+class TestLLMTransport:
+    """Verify transport-level error handling in ask_llm()."""
+
+    @patch("askme.requests.post")
+    def test_timeout_propagated(self, mock_post):
+        """requests.post() must be called with timeout=LLM_TIMEOUT."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([{"role": "user", "content": "test"}])
+        _, kwargs = mock_post.call_args
+        assert kwargs.get("timeout") == LLM_TIMEOUT
+
+    @patch("askme.requests.post")
+    def test_timeout_retry(self, mock_post):
+        """Timeout errors should retry, then raise LLMTransportError."""
+        mock_post.side_effect = req_lib.exceptions.Timeout("timed out")
+        with patch("askme.time.sleep"):
+            with pytest.raises(LLMTransportError, match="Transport failed"):
+                ask_llm([{"role": "user", "content": "test"}])
+        # Should have attempted MAX_LLM_RETRIES + 1 times
+        assert mock_post.call_count == 3
+
+    @patch("askme.requests.post")
+    def test_connection_refused_retry(self, mock_post):
+        """ConnectionError should retry, then raise LLMTransportError."""
+        mock_post.side_effect = req_lib.exceptions.ConnectionError("refused")
+        with patch("askme.time.sleep"):
+            with pytest.raises(LLMTransportError, match="Transport failed"):
+                ask_llm([{"role": "user", "content": "test"}])
+        assert mock_post.call_count == 3
+
+    @patch("askme.requests.post")
+    def test_non_json_body_retry(self, mock_post):
+        """200 response with non-JSON body should retry, then raise."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.side_effect = ValueError("not json")
+        resp.text = "<html>Bad Gateway</html>"
+        mock_post.return_value = resp
+        with patch("askme.time.sleep"):
+            with pytest.raises(LLMTransportError, match="Non-JSON"):
+                ask_llm([{"role": "user", "content": "test"}])
+        assert mock_post.call_count == 3
+
+    @patch("askme.time.sleep")
+    @patch("askme.requests.post")
+    def test_502_retry_with_backoff(self, mock_post, mock_sleep):
+        """502 response should retry with backoff delays."""
+        resp_502 = MagicMock()
+        resp_502.status_code = 502
+        resp_502.text = "Bad Gateway"
+        mock_post.side_effect = [resp_502, resp_502, resp_502]
+        with pytest.raises(LLMTransportError, match="HTTP 502"):
+            ask_llm([{"role": "user", "content": "test"}])
+        # Verify backoff: sleep(1) then sleep(3)
+        assert mock_sleep.call_count == 2
+        assert mock_sleep.call_args_list[0][0][0] == 1
+        assert mock_sleep.call_args_list[1][0][0] == 3
+
+    @patch("askme.requests.post")
+    def test_401_fail_fast(self, mock_post):
+        """401 should raise immediately without retry."""
+        resp = MagicMock()
+        resp.status_code = 401
+        resp.text = "Unauthorized"
+        mock_post.return_value = resp
+        with pytest.raises(LLMTransportError, match="HTTP 401"):
+            ask_llm([{"role": "user", "content": "test"}])
+        assert mock_post.call_count == 1  # no retry
+
+    def test_transport_error_in_planner_consumes_attempt(self, tmp_path):
+        """LLMTransportError in get_plan() should consume a plan attempt, not crash."""
+        plan_calls = {"n": 0}
+        original_get_plan = None
+
+        def mock_get_plan(user_prompt, state):
+            plan_calls["n"] += 1
+            if plan_calls["n"] == 1:
+                raise LLMTransportError("connection refused")
+            return {"tasks": ["say hello"]}
+
+        with patch("askme.get_plan", side_effect=mock_get_plan), \
+             patch("askme.get_step", return_value={"action": "done"}):
+            result = _run_loop("test", str(tmp_path), max_replans=2)
+        assert result["status"] == "complete"
+        assert plan_calls["n"] == 2  # first failed, second succeeded
+        # Log should show plan_error event for first attempt
+        events = [e["event"] for e in result["log"]]
+        assert "plan_error" in events
+
+    def test_transport_error_in_executor_triggers_replan(self, tmp_path):
+        """LLMTransportError in get_step() should trigger replan, not crash."""
+        step_calls = {"n": 0}
+
+        def mock_get_step(task, state, goal="", step_num=0, max_steps=10, think=False):
+            step_calls["n"] += 1
+            if step_calls["n"] == 1:
+                raise LLMTransportError("timeout")
+            return {"action": "done"}
+
+        with patch("askme.get_plan", return_value={"tasks": ["do something"]}), \
+             patch("askme.get_step", side_effect=mock_get_step):
+            result = _run_loop("test", str(tmp_path), max_replans=2)
+        assert result["status"] == "complete"
+
+    @patch("askme.requests.post")
+    def test_json_error_key_still_retried(self, mock_post):
+        """Existing behavior: JSON body with 'error' key should still retry."""
+        resp_err = MagicMock()
+        resp_err.status_code = 200
+        resp_err.json.return_value = {"error": {"message": "rate limited"}}
+        mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}

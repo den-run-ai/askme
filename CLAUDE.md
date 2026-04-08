@@ -66,6 +66,8 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `edit`, `read`, `done`, or `fail`. `edit` does exact single-match string replacement (fails on zero or multiple matches); `write` replaces the entire file. The model is prompted to prefer `edit` for localized changes and `write` for new files. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS=3`). Errors reset per replan since the planner already saw them.
 
+The core loop lives in `_run_loop()`, which returns a structured dict `{"status": "complete"|"exhausted", "state": state, "log": history}`. `run()` is a thin wrapper that maps to `True`/`False`. Integration tests call `_run_loop()` directly (via `int_run()`) to get the rich result dict while exercising the same production behavior.
+
 ### Working directory isolation
 `run()` creates a temp directory per invocation (`/tmp/nanagent_*`), printed at start and end. All `execute()` calls use this dir as cwd. Shell commands run there; relative write/read paths resolve there. Callers can pass `working_dir=` to override (used by tests). `run()` returns `True`/`False`; `__main__` exits with code 1 on failure.
 
@@ -73,6 +75,9 @@ Key design constraint: the local LLM (Gemma 4 E4B, 4B active params) is slow (~7
 
 ### `ask_llm` parsing pipeline
 LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks → strip markdown code fences → extract JSON object → retry up to 2 times on parse failure. Retries auto-escalate with thinking: attempt 1 = medium effort, attempt 2 = high effort. When `think=True` is passed (after a failed step execution), thinking starts from attempt 0.
+
+### LLM transport hardening
+All `requests.post()` calls use `timeout=LLM_TIMEOUT` (120s). Transport errors (connection refused, timeout, non-JSON body, 5xx/429) retry with backoff (1s, 3s). Client errors (400/401/403) fail fast. After all retries exhausted, `LLMTransportError` is raised. Both planner and executor phases catch `LLMTransportError` — planner errors consume a plan attempt, executor errors trigger replan. JSON-body `"error"` key handling is preserved (existing behavior, no backoff).
 
 ### Error handling
 - Shell output: `r.stdout[:300] + r.stderr[-300:]` — tail-truncates stderr to keep actual error messages
@@ -100,11 +105,11 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 
 ## Files
 
-- `askme.py` — the agent (self-contained, ~633 lines)
-- `tests/` — test suite (5 modules + support files, 159 tests total)
+- `askme.py` — the agent (self-contained, ~695 lines)
+- `tests/` — test suite (5 modules + support files, 168 tests total)
   - `conftest.py` — pytest fixtures (`work_dir`) and skip markers (`skip_no_llm`, `skip_no_openrouter`)
-  - `_test_support.py` — mock helpers, integration test runners (`int_run`, `or_run`), limit constants
-  - `test_agent_core.py` — execute(), ask_llm(), thinking retry, null-arg normalization (~310 lines)
+  - `_test_support.py` — mock helpers, integration test runners (`int_run` delegates to `_run_loop()`, `or_run`), limit constants
+  - `test_agent_core.py` — execute(), ask_llm(), thinking retry, null-arg normalization, LLM transport hardening (~495 lines)
   - `test_agent_loop.py` — run() loop, cross-task state, output formatting, content serialization (~260 lines)
   - `test_agent_recovery.py` — duplicate guard, cache workaround, failure classification, error summarization, completion semantics (~430 lines)
   - `test_agent_planning.py` — planner reasoning, preflight probe, execution policy, command-aware timeouts, server config (~380 lines)
@@ -128,14 +133,15 @@ LLM responses go through: strip `<think>` tags → strip `<|channel>` blocks →
 - `TestCommandAwareTimeout` — verifies default/install/build/model-hint timeouts, timeout retry not blocked by duplicate guard
 - `TestErrorSummarization` — verifies typed grouping, deduplication, per-type caps, planner receives summarized errors
 - `TestCompletionSemantics` — verifies old "any successful step → done" rule removed, goal-aware completion rule present
-- Integration tests use `int_run()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
+- `TestLLMTransport` — verifies timeout propagation, retry on transport errors (timeout, connection, non-JSON, 502), fail-fast on 401, LLMTransportError in planner/executor phases, JSON error key preserved
+- Integration tests use `int_run()` which delegates to `_run_loop()` with tight limits (`INT_MAX_REPLANS=1`, `INT_MAX_TASKS=3`, `INT_MAX_STEPS=5`)
 - Local integration tests are skipped automatically if llama-server isn't running on `:8080`
 - OpenRouter integration tests are skipped automatically if `OPENROUTER_API_KEY` is not set
 - `TestServerConfig` tests verify the server has optimal agentic config (single slot, full context, cache enabled)
 
 ## Safety Limits
 
-All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, `SHELL_TIMEOUT=30s` (default), `SHELL_TIMEOUT_LONG=120s` (install/build), `SHELL_TIMEOUT_MAX=300s` (hard cap). Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). `ALLOW_SYSTEM_INSTALLS=false` by default. These exist to prevent runaway loops with a slow local LLM.
+All limits are constants at the top of `askme.py`: `MAX_REPLANS=3`, `MAX_TASKS=10`, `MAX_STEPS=10`, `MAX_RESULT=300` chars, `MAX_STEP_HISTORY=3`, `MAX_INPUT=300` chars per executor field, `PLANNER_MAX_TOKENS=768`, `LLM_TIMEOUT=120s` (request timeout), `SHELL_TIMEOUT=30s` (default), `SHELL_TIMEOUT_LONG=120s` (install/build), `SHELL_TIMEOUT_MAX=300s` (hard cap). Executor `max_tokens`: 256 (local) / 512 (OpenRouter). Planner always uses thinking (`think=True`). `ALLOW_SYSTEM_INSTALLS=false` by default. Transport errors retry up to `MAX_LLM_RETRIES=2` times with backoff; `LLMTransportError` is raised on exhaustion. These exist to prevent runaway loops with a slow local LLM.
 
 ## Known Limitations
 
