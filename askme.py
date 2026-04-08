@@ -336,6 +336,51 @@ def summarize_errors(errors):
     return result
 
 
+# --- Redundant task auto-skip ---
+
+_SYNONYMS = {
+    "fix": "fix", "correct": "fix", "repair": "fix",
+    "create": "create", "write": "create", "make": "create",
+    "compile": "compile", "build": "compile",
+    "run": "run", "execute": "run",
+    "verify": "verify", "check": "verify", "test": "verify",
+}
+
+_STOP = {"the", "and", "then", "that", "this", "with", "from", "for",
+         "its", "all", "not", "but", "into", "also"}
+
+
+def _task_keywords(text):
+    """Extract normalized keyword set from a task description."""
+    words = re.findall(r'[a-z0-9_.]+', text.lower())
+    result = set()
+    for w in words:
+        if len(w) >= 3 and w not in _STOP:
+            result.add(_SYNONYMS.get(w, w))
+    return result
+
+
+def _task_is_redundant(task, completed_tasks):
+    """Check if task is a near-duplicate of any single completed task.
+
+    Returns the matched completed task description, or None.
+    Compares against each completed task individually — never unions.
+    One-way only: skip when new task's keywords ⊆ completed task's keywords.
+    The reverse (completed ⊆ new) is unsafe — the new task may add work.
+    """
+    task_kw = _task_keywords(task)
+    if len(task_kw) < 3:
+        return None  # too few keywords to judge — don't skip
+
+    for ct in completed_tasks:
+        ct_kw = _task_keywords(ct)
+        if not ct_kw:
+            continue
+        if task_kw.issubset(ct_kw):
+            return ct
+    return None
+
+
 def get_plan(user_prompt, state):
     # Include environment and policy in planner state
     plan_state = dict(state)
@@ -560,6 +605,15 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             state["last_steps"] = prev_last
             t_task = time.time()
             log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
+
+            # Auto-skip: if task is a near-duplicate of one completed task, skip
+            if state["completed_tasks"]:
+                matched = _task_is_redundant(task, state["completed_tasks"])
+                if matched:
+                    log(f"  Auto-skip: near-duplicate of completed '{matched[:60]}'")
+                    history.append({"event": "skip", "task": i, "reason": "redundant",
+                                    "matched": matched})
+                    continue
 
             task_done = False
             use_think = False  # enable thinking after failed step execution

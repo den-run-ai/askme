@@ -887,3 +887,27 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
 - **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory. q8_0 is 7% slower in single-trial testing — not recommended. See [gemma4-setup.md](gemma4-setup.md) Phase 3.
 - **Do NOT use `--cache-reuse 256`** — broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). Server explicitly disables it. Manual slot save/restore (`CACHE_WORKAROUND=1`) is counterproductive (40% slower). No viable workaround until upstream fix. See [gemma4-setup.md](gemma4-setup.md) Phase 2.
+
+## Redundant Task Auto-Skip (Implemented 2026-04-08)
+
+### Motivation
+
+When the planner creates tasks that overlap with already-completed work, the local model (Gemma 4 E4B) wastes hundreds of seconds trying to express "this is already done" — it generates verbose reasoning that exhausts `max_tokens` without producing valid JSON. Observed in `test_fix_python_syntax_error`: task 2 "Correct the syntax error in greet.py" was redundant after task 1 already fixed it, burning ~370s across 3 JSON parse failures.
+
+### Design
+
+Pairwise keyword heuristic in `_run_loop()`, checked before entering the step loop for each task:
+
+1. **`_task_keywords(text)`** — extracts normalized keyword set: lowercase, min 3 chars, stop-word filtered, synonym-normalized (`fix/correct/repair` → `fix`, `create/write/make` → `create`, etc.)
+2. **`_task_is_redundant(task, completed_tasks)`** — compares new task against each completed task individually (never unions). Skip triggers only when the new task's keywords ⊆ a completed task's keywords (one-way). The reverse direction (completed ⊆ new) is unsafe — the new task may add work beyond what was completed. Minimum 3 keywords required to avoid false positives on generic tasks.
+
+### Key invariants
+
+- **Pairwise, not union**: Prevents false positives where unrelated completed tasks cover keywords in aggregate (e.g., `["create main.c", "compile tests"]` would wrongly make `"compile main.c"` look redundant)
+- **Min-3-keyword guard**: Tasks with ≤2 keywords (e.g., "fix bug") are never skipped — too generic to match safely
+- **Skipped tasks NOT in `completed_tasks`**: Preserves replan recovery — if a false-positive skip occurs, the planner can reintroduce the task on replan
+- **History-only event**: Skip is recorded as `{"event": "skip", "task": i, "reason": "redundant", "matched": "..."}` — no state mutation
+
+### Testing
+
+Unit tests in `TestRedundantTaskSkip` (12 tests): exact match, synonym match, subset match, different-action rejection, different-file rejection, union trap, min-keyword guard, generic-word guard, empty-completed guard, state integrity (not in completed_tasks), history event, replan recovery.

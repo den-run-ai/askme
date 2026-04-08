@@ -1,10 +1,11 @@
 """Recovery tests: duplicate guard, cache workaround, failure classification,
-error summarization, completion semantics."""
+error summarization, completion semantics, redundant task auto-skip."""
 import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from askme import execute, ask_llm, get_plan, get_step, run
+from askme import execute, ask_llm, get_plan, get_step, run, _run_loop
+from askme import _task_keywords, _task_is_redundant
 from _test_support import mock_response
 
 
@@ -494,3 +495,163 @@ class TestCompletionSemantics:
              patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
             result = run("write and compile hello.c", working_dir=str(tmp_path))
         assert result is False
+
+
+# --- Redundant task auto-skip tests ---
+
+class TestRedundantTaskSkip:
+    """Verify auto-skip heuristic for near-duplicate tasks."""
+
+    def test_redundant_exact_match(self):
+        """Same task description → skip."""
+        assert _task_is_redundant(
+            "Fix syntax error in greet.py",
+            ["Fix syntax error in greet.py"]
+        ) is not None
+
+    def test_redundant_synonym_match(self):
+        """'fix X' vs 'correct X' → skip (synonym normalization)."""
+        assert _task_is_redundant(
+            "Correct the syntax error in greet.py",
+            ["Fix syntax error in greet.py"]
+        ) is not None
+
+    def test_redundant_subset_match(self):
+        """'create hello.c program' vs 'write and compile hello.c program' → skip (subset)."""
+        assert _task_is_redundant(
+            "Create hello.c program",
+            ["Write and compile hello.c program"]
+        ) is not None
+
+    def test_not_redundant_different_action(self):
+        """'create X' vs 'compile X' → don't skip."""
+        assert _task_is_redundant(
+            "Compile main.c program",
+            ["Create main.c program"]
+        ) is None
+
+    def test_not_redundant_different_file(self):
+        """'fix a.py' vs 'fix b.py' → don't skip."""
+        assert _task_is_redundant(
+            "Fix syntax error in b.py",
+            ["Fix syntax error in a.py"]
+        ) is None
+
+    def test_not_redundant_cross_task_union(self):
+        """Union trap: ['create main.c', 'compile tests'] vs 'compile main.c' → don't skip."""
+        assert _task_is_redundant(
+            "Compile the main.c program",
+            ["Create the main.c program", "Compile the test suite"]
+        ) is None
+
+    def test_synonym_overcollapse_check_vs_test(self):
+        """check/test/verify collapse to 'verify' — must not skip when intent differs.
+
+        'Check the server logs for errors' vs 'Test the server endpoint for errors'
+        are semantically different tasks that share keywords after synonym collapse.
+        The non-shared keyword (logs vs endpoint) prevents the false skip.
+        """
+        assert _task_is_redundant(
+            "Test the server endpoint for errors",
+            ["Check the server logs for errors"]
+        ) is None
+
+    def test_skip_requires_min_keywords(self):
+        """≤2-keyword task → never skip."""
+        # "fix bug" has only 2 keywords: {fix, bug}
+        assert _task_is_redundant(
+            "fix bug",
+            ["fix bug in parser.py"]
+        ) is None
+
+    def test_generic_words_no_false_skip(self):
+        """Short generic tasks blocked by min-3 guard."""
+        assert _task_is_redundant(
+            "update file",
+            ["update file permissions and verify"]
+        ) is None
+
+    def test_skip_only_when_completed_nonempty(self):
+        """Empty completed_tasks → never skip."""
+        assert _task_is_redundant("Fix syntax error in greet.py", []) is None
+
+    def test_skip_not_in_completed_tasks(self, tmp_path):
+        """Skipped task must NOT appear in completed_tasks."""
+        responses = [
+            {"tasks": ["Fix syntax error in greet.py", "Correct the syntax error in greet.py"]},
+            # Task 1 executes normally
+            {"action": "shell", "arg": "echo fixed"},
+            {"action": "done"},
+            # Task 2 should be auto-skipped — no LLM calls needed
+        ]
+        with patch("askme.ask_llm", side_effect=responses), \
+             patch("askme.execute", return_value={"ok": True, "output": "fixed"}), \
+             patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
+            result = _run_loop("fix greet.py", working_dir=str(tmp_path),
+                               max_steps=5, max_tasks=3, max_replans=1)
+        # Only task 1 should be in completed_tasks
+        assert len(result["state"]["completed_tasks"]) == 1
+        assert "Fix syntax error" in result["state"]["completed_tasks"][0]
+
+    def test_skip_history_includes_matched_task(self, tmp_path):
+        """History event has {"event": "skip", "matched": "..."} with the specific completed task."""
+        responses = [
+            {"tasks": ["Fix syntax error in greet.py", "Correct the syntax error in greet.py"]},
+            {"action": "shell", "arg": "echo fixed"},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses), \
+             patch("askme.execute", return_value={"ok": True, "output": "fixed"}), \
+             patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
+            result = _run_loop("fix greet.py", working_dir=str(tmp_path),
+                               max_steps=5, max_tasks=3, max_replans=1)
+        skip_events = [e for e in result["log"] if e.get("event") == "skip"]
+        assert len(skip_events) == 1
+        assert skip_events[0]["reason"] == "redundant"
+        assert "Fix syntax error" in skip_events[0]["matched"]
+
+    def test_not_redundant_reverse_subset(self):
+        """Completed ⊆ new is NOT safe — new task may add work. Must not skip."""
+        # Completed "Fix error in greet.py" is a subset of new "Fix error in greet.py and run tests"
+        # but the new task adds work (run tests), so it must not be skipped
+        assert _task_is_redundant(
+            "Fix error in greet.py and run tests",
+            ["Fix error in greet.py"]
+        ) is None
+
+    def test_skip_does_not_block_replan(self, tmp_path):
+        """After skip, replan can reintroduce work (skipped task not in completed_tasks)."""
+        # Plan 1: task A completes, task B is skipped (exact dup), task C fails → replan
+        # Plan 2: task B reintroduced with different wording and completes
+        responses = [
+            # Plan 1
+            {"tasks": ["Fix syntax error in greet.py", "Correct syntax error in greet.py", "Run the test suite now"]},
+            # Task 1 executes
+            {"action": "shell", "arg": "echo fixed"},
+            {"action": "done"},
+            # Task 2 — auto-skipped (synonym match: correct→fix, same keywords)
+            # Task 3 — fails
+            {"action": "shell", "arg": "python3 -m pytest"},
+            {"action": "fail"},
+            # Replan — planner sees completed_tasks has only task 1
+            {"tasks": ["Verify greet.py has no errors", "Run the test suite now"]},
+            # Task: verify — completes
+            {"action": "shell", "arg": "python3 greet.py"},
+            {"action": "done"},
+            # Task: run tests — completes
+            {"action": "shell", "arg": "python3 -m pytest"},
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses), \
+             patch("askme.execute", return_value={"ok": True, "output": "ok"}), \
+             patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
+            result = _run_loop("fix and test greet.py", working_dir=str(tmp_path),
+                               max_steps=5, max_tasks=4, max_replans=2)
+        assert result["status"] == "complete"
+        # Verify the skip happened in plan 1
+        skip_events = [e for e in result["log"] if e.get("event") == "skip"]
+        assert len(skip_events) == 1
+        # Replan tasks should be in completed_tasks
+        ct = result["state"]["completed_tasks"]
+        assert any("Verify" in t for t in ct)
+        assert any("Run the test" in t for t in ct)
