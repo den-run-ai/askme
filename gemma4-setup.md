@@ -1,9 +1,10 @@
 # Gemma 4 E4B — Setup, Configuration & Optimization
 
-Mac M1 16GB. Last updated 2026-04-07.
+Mac M1 16GB. Last updated 2026-04-08.
 
-**Current build:** `0d049d6a9` (build `b8695`) — up to date with master as of 2026-04-07.
+**Current build:** `c5ce4bc22` (build `b8702`) — up to date with master as of 2026-04-08. Includes iSWA rotation (#21513) and server params fix (#21509).
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
+**Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is fastest (-4% vs f16), uses ~4x less memory. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
 
 ## Model
 
@@ -53,6 +54,7 @@ mkdir -p /tmp/llama-cache
 ./build/bin/llama-server \
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
   -np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache \
   --port 8080
 ```
@@ -62,6 +64,7 @@ mkdir -p /tmp/llama-cache
 | `-ngl 99` | Full GPU offload | Working |
 | `--ctx-size 16384` | Full context for single slot | Working |
 | `--flash-attn on` | Memory-efficient attention | Working |
+| `--cache-type-k q4_0 --cache-type-v q4_0` | Quantized KV cache (~4x less memory) | **Working** — 4% faster than f16, identical quality. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08). |
 | `-np 1` | Single slot (avoids 4-way context split on M1) | Working |
 | `--cache-reuse 256` | KV prefix reuse across requests | **Broken for Gemma 4** — [#21468](https://github.com/ggml-org/llama.cpp/issues/21468). Server now logs `cache_reuse is not supported by this context, it will be disabled` (previously silent). |
 | `--slot-save-path /tmp/llama-cache` | Disk persistence for KV state | Working (verified by `TestServerConfig`) |
@@ -111,7 +114,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 ## Upstream Gemma 4 Commits
 
-Local HEAD: `0d049d6a9` (up to date with master as of 2026-04-07).
+Local HEAD: `c5ce4bc22` (build `b8702`, up to date with master as of 2026-04-08).
 
 ### In local build
 
@@ -126,14 +129,14 @@ Local HEAD: `0d049d6a9` (up to date with master as of 2026-04-07).
 | [#21488](https://github.com/ggml-org/llama.cpp/pull/21488) | Byte token handling in BPE detokenizer for Gemma4 | Tokenizer correctness — fixes edge cases in JSON output | `0d049d6a9` |
 | [#21510](https://github.com/ggml-org/llama.cpp/pull/21510) | Fix restore for checkpoints with `pos_min == 0` | **Unblocks Phase 2** — slot save/restore now works correctly | `0d049d6a9` |
 | [#21159](https://github.com/ggml-org/llama.cpp/pull/21159) | Optimized `flash_attn_stream_k_fixup` kernel | CUDA only, no M1 Metal impact | `0d049d6a9` |
+| [#21513](https://github.com/ggml-org/llama.cpp/pull/21513) | Attention rotation for heterogeneous iSWA | **Enables Phase 3** — Hadamard rotation for Gemma 4's mixed head dims (256 SWA / 512 global). KL divergence 0.947 → 0.746 with quantized KV. | `c5ce4bc22` |
+| [#21509](https://github.com/ggml-org/llama.cpp/pull/21509) | Server: fix model params not propagated | Sampling defaults from model metadata now propagate correctly | `c5ce4bc22` |
 
 ### Not yet merged (watch list)
 
 | PR | Title | Status | Impact |
 |----|-------|--------|--------|
 | [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) | Remove `</s>` EOS token for Gemma 4 | Approved, not merged | **May fix premature generation stops** — could reduce JSON truncation before closing brace, which currently triggers thinking retries |
-| [#21518](https://github.com/ggml-org/llama.cpp/pull/21518) | Activation rotation for heterogeneous iSWA | Open | Enables Hadamard rotation ([#21038](https://github.com/ggml-org/llama.cpp/pull/21038)) for Gemma 4 — KL divergence drops 0.947 → 0.746 with quantized KV. No benefit at f16 KV (our current setup). |
-| [#21394](https://github.com/ggml-org/llama.cpp/issues/21394) | `attn_rot_k` and `v = 0` (rotation disabled for variable head dims) | Open | Head dims vary per layer (256 SWA, 512 global) — blocks #21518 |
 | Draft (ggerganov) | Gemma 4 FFN MoE precision to F32 | Draft | Better expert routing quality, some speed cost |
 
 ### Known Gemma 4 Bugs (upstream, no fix)
@@ -218,7 +221,48 @@ Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the
 - [x] Direct timing: 0.02s savings per call (negligible, restore overhead dominates)
 - [x] `CACHE_WORKAROUND=0` (default) works — cache functions are no-ops
 
-### Phase 3: Monitor upstream fixes (no code changes)
+### Phase 3: Quantized KV cache — COMPLETE (2026-04-08)
+
+Pulled 7 commits to `c5ce4bc22` (build `b8702`), picking up iSWA rotation (#21513) and server params fix (#21509). Tested f16 vs q8_0 vs q4_0 KV cache.
+
+**What it does:** Replaces f16 KV cache with q4_0, reducing KV memory by ~4x. The iSWA rotation fix (#21513) ensures Gemma 4's mixed head dims (256 SWA / 512 global) get proper Hadamard rotation, keeping quantized KV quality close to f16 (KL divergence 0.947 → 0.746 with rotation).
+
+**Why it matters on 16GB M1:** f16 KV at 16K context uses ~2GB. With q4_0, that drops to ~0.5GB — freeing headroom for larger context or more breathing room.
+
+**Result: q4_0 is the winner.** Fastest of all three configs, identical quality, ~4x less KV memory.
+
+#### Phase 3 Comparison Results (2026-04-08)
+
+Build `b8702` (`c5ce4bc22`). 132/132 unit tests pass. 3/3 easy integration tests pass on all configs.
+
+| Test | f16 (baseline) | q8_0 | q4_0 |
+|------|---------------|------|------|
+| create_and_read_file | plan 65s, exec 25s = ~90s | plan 86s, exec 28s = ~114s | plan 45s, exec 22s = ~67s |
+| shell_and_write | plan 81s, exec 25s = ~106s | plan 89s, exec 24s = ~113s | plan 81s, exec 14s = ~95s |
+| multi_step_build | plan 58s, exec+replan = ~204s | plan 64s, exec+replan = ~202s | plan 65s, exec+replan = ~221s |
+| **Total** | **6:40** | **7:09** (+7%) | **6:23** (-4%) |
+| Replans | 1 (multi_step) | 1 (multi_step) | 1 (multi_step) |
+| Quality | Same duplicate-write pattern | Identical behavior | Identical behavior |
+
+**Observations:**
+- q4_0 is 4% faster than f16 — likely because smaller KV cache gives better Metal memory throughput on M1
+- q8_0 is 7% slower than f16 — quantize/dequantize overhead without enough memory savings to compensate
+- All three configs produce identical behavior patterns (same duplicate-write issue on multi_step_build, same replan count)
+- Planner thinking dominates timing (~45-89s per plan call) — exec steps are fast (~3-20s each)
+- The duplicate-write loop on multi_step_build is a model behavior issue, not KV cache related
+
+**Verification checklist:**
+- [x] Build includes `4eb19514d` (iSWA rotation fix) — confirmed in `c5ce4bc22`
+- [x] 132/132 unit tests pass (30.8s)
+- [x] 4/4 `TestServerConfig` pass
+- [x] Server starts with `--cache-type-k q8_0 --cache-type-v q8_0`
+- [x] 3/3 easy integration tests pass with q8_0 (7:09)
+- [x] Server starts with `--cache-type-k q4_0 --cache-type-v q4_0`
+- [x] 3/3 easy integration tests pass with q4_0 (6:23)
+- [x] Quality comparison: identical step counts, replans, and task completion across all three
+- [ ] Expanded context test (`--ctx-size 32768` with q4_0) — deferred, current 16K is sufficient
+
+### Phase 4: Monitor remaining upstream fixes (no code changes)
 
 Watch these PRs — when merged, pull and rebuild:
 
@@ -226,11 +270,9 @@ Watch these PRs — when merged, pull and rebuild:
 |----|----------------------|
 | [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) (`</s>` EOS fix) | Pull, rebuild, re-run medium tests — may reduce JSON truncation that triggers thinking retries |
 | [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) fix (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via timing test |
-| [#21518](https://github.com/ggml-org/llama.cpp/pull/21518) (activation rotation for iSWA) | Only matters if switching to quantized KV cache (`--cache-type-k q4_0`). No impact at f16. |
 
-### Phase 4: Future optimizations (blocked on upstream)
+### Phase 5: Future optimizations
 
-- **Quantized KV cache** — Once #21518 lands, test `--cache-type-k q4_0 --cache-type-v q4_0` for ~4x KV memory reduction. Would allow `--ctx-size 32768` or `--ctx-size 65536` on 16GB M1.
 - **TurboQuant KV** — [#21089](https://github.com/ggml-org/llama.cpp/pull/21089) adds 3.5-bit KV cache types (TBQ3_0/TBQ4_0). CPU-only for now, no Metal support.
 - **MoE F32 precision** — ggerganov's draft PR for Gemma 4 FFN MoE precision. Would improve expert routing quality at cost of some speed.
 
@@ -252,12 +294,21 @@ After Phase 2 (cache workaround) — **COUNTERPRODUCTIVE (2026-04-07)**:
 - [x] `CACHE_WORKAROUND=0` works (default — cache functions are no-ops)
 - **Conclusion:** iSWA prefix-matching bug affects slot restore too, not just `--cache-reuse`. No workaround possible until upstream fix for #21468.
 
+After Phase 3 (quantized KV cache) — **q4_0 WINS (2026-04-08)**:
+- [x] Build `b8702` (`c5ce4bc22`) includes iSWA rotation fix
+- [x] 132/132 unit tests pass
+- [x] 3/3 easy integration with q8_0: 7:09 (+7% vs f16)
+- [x] 3/3 easy integration with q4_0: 6:23 (-4% vs f16, fastest)
+- [x] Identical quality across all three KV types
+- **Conclusion:** q4_0 KV is the recommended config — faster and ~4x less KV memory.
+
 ## 16GB M1 Lessons Learned
 
 - **Gemma 4 E4B is the sweet spot** — MoE with 4B active params, ~5.0GB Q4_K_M, full Metal GPU
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
+- **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — quantized KV is 4% faster than f16 on Metal M1, with identical quality and ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower — avoid it.
 - **`--cache-reuse 256` is currently broken** for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)) — server explicitly logs `cache_reuse is not supported by this context, it will be disabled`. Manual slot save/restore was tested (`CACHE_WORKAROUND=1`) but is counterproductive — no viable workaround until upstream fix. See Phase 2 above.
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 
@@ -267,8 +318,8 @@ After Phase 2 (cache workaround) — **COUNTERPRODUCTIVE (2026-04-07)**:
 - [PR #21488 — Byte token handling for Gemma4](https://github.com/ggml-org/llama.cpp/pull/21488)
 - [PR #21510 — Fix restore for checkpoints with pos_min == 0](https://github.com/ggml-org/llama.cpp/pull/21510)
 - [PR #21492 — Remove </s> EOS for Gemma4](https://github.com/ggml-org/llama.cpp/pull/21492)
-- [PR #21518 — Activation rotation for heterogeneous iSWA](https://github.com/ggml-org/llama.cpp/pull/21518)
-- [Issue #21394 — attn_rot disabled for Gemma 4](https://github.com/ggml-org/llama.cpp/issues/21394)
+- [PR #21513 — Attention rotation for heterogeneous iSWA](https://github.com/ggml-org/llama.cpp/pull/21513) (merged, was #21518)
+- [PR #21509 — Server: fix model params not propagated](https://github.com/ggml-org/llama.cpp/pull/21509)
 - [PR #21038 — Hadamard rotation for better KV quantization](https://github.com/ggml-org/llama.cpp/pull/21038)
 - [PR #21089 — TurboQuant CPU KV cache types](https://github.com/ggml-org/llama.cpp/pull/21089)
 - [Discussion #20572 — Persistent KV cache tutorial](https://github.com/ggml-org/llama.cpp/discussions/20572)

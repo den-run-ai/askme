@@ -32,6 +32,7 @@ mkdir -p /tmp/llama-cache
 ./build/bin/llama-server \
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
   -np 1 --cache-reuse 256 --slot-save-path /tmp/llama-cache \
   --port 8080
 
@@ -42,7 +43,7 @@ python3 -m pytest tests/ -v -k "not Integration and not ServerConfig and not (Op
 python3 -m pytest tests/ -v -k "test_simple_success"
 
 # Integration tests — local (requires llama-server on :8080)
-python3 -m pytest tests/test_agent_integration.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~2min)
+python3 -m pytest tests/test_agent_integration.py -s -v -k "TestIntegration and not Medium and not Hard"  # easy (~6min)
 python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationMedium"   # medium: error recovery (~40min)
 python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"     # hard: replanning (~17min)
 
