@@ -29,22 +29,39 @@ class TestDuplicateGuard:
         assert ok is True
         assert (tmp_path / "data.txt").read_text() == "hello"
 
-    def test_write_duplicate_skip_livelock_escape(self, tmp_path):
-        """After 2 consecutive duplicate write skips, synthetic step is injected so model sees new state."""
+    def test_write_first_skip_feedback_visible(self, tmp_path):
+        """First duplicate write skip injects feedback so the LLM sees new state immediately."""
+        f = str(tmp_path / "data.txt")
+        responses = [
+            {"tasks": ["write data.txt"]},
+            {"action": "write", "arg": f, "content": "hello"},
+            {"action": "write", "arg": f, "content": "hello"},  # skip 1 -- feedback injected
+            {"action": "done"},                                   # model sees feedback, emits done
+        ]
+        with patch("askme.ask_llm", side_effect=responses) as mock_llm:
+            ok = run("write data.txt", working_dir=str(tmp_path))
+        assert ok is True
+        # The done call should see the "Already done" feedback in slim state
+        last_call_args = mock_llm.call_args_list[-1]
+        user_msg = last_call_args[0][0][1]["content"]
+        assert "Already done" in user_msg
+
+    def test_write_triple_duplicate_still_detected(self, tmp_path):
+        """Three consecutive duplicate writes all detected — synthetic entries preserve _content for matching."""
         f = str(tmp_path / "data.txt")
         responses = [
             {"tasks": ["write data.txt"]},
             {"action": "write", "arg": f, "content": "hello"},
             {"action": "write", "arg": f, "content": "hello"},  # skip 1
-            {"action": "write", "arg": f, "content": "hello"},  # skip 2 -- injects synthetic step
-            {"action": "done"},                                   # model now sees new state, emits done
+            {"action": "write", "arg": f, "content": "hello"},  # skip 2 -- thinking enabled
+            {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("write data.txt", working_dir=str(tmp_path))
         assert ok is True
-        last_call_args = mock_llm.call_args_list[-1]
-        user_msg = last_call_args[0][0][1]["content"]
-        assert "Already applied" in user_msg
+        # The done call (after skip 2) should have think=True
+        last_call = mock_llm.call_args_list[-1]
+        assert last_call[1].get("think") is True
 
     def test_write_different_content_allowed(self, tmp_path):
         """Same file + different content -> allow (legitimate fix attempt)."""
@@ -133,6 +150,27 @@ class TestDuplicateGuard:
         with patch("askme.ask_llm", side_effect=responses):
             ok = run("fix include", working_dir=str(tmp_path))
         assert ok is True
+
+    def test_edit_triple_duplicate_still_detected(self, tmp_path):
+        """Three consecutive duplicate edits all detected — synthetic entries preserve _find/_replace."""
+        f = tmp_path / "main.c"
+        f.write_text('#include "msg.h"\nint main(){return 0;}')
+        responses = [
+            {"tasks": ["fix include"]},
+            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
+             "replace": '#include <stdio.h>\n#include "msg.h"'},
+            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
+             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 1
+            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
+             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 2 -- thinking enabled
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses) as mock_llm:
+            ok = run("fix include", working_dir=str(tmp_path))
+        assert ok is True
+        # The done call (after skip 2) should have think=True
+        last_call = mock_llm.call_args_list[-1]
+        assert last_call[1].get("think") is True
 
     def test_edit_different_find_allowed(self, tmp_path):
         """Same file + different find -> allowed (different edit, not a duplicate)."""

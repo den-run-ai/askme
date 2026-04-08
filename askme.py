@@ -661,12 +661,19 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         if is_dup:
                             dup_skip_count += 1
                             log(f"  [{step + 1}] skip (duplicate {act}, same content)")
+                            entry = {
+                                "action": act, "arg": action.get("arg", ""),
+                                "ok": True,
+                                "output": "Already done — file unchanged. Move to next action or emit done."
+                            }
+                            # Preserve match metadata so guard still detects duplicates on subsequent turns
+                            if act == "write":
+                                entry["_content"] = action.get("content", "")
+                            elif act == "edit":
+                                entry["_find"] = action.get("find", "")
+                                entry["_replace"] = action.get("replace", "")
+                            state["last_steps"].append(entry)
                             if dup_skip_count >= 2:
-                                state["last_steps"].append({
-                                    "action": act, "arg": action.get("arg", ""),
-                                    "ok": True,
-                                    "output": f"Already applied (skipped {dup_skip_count}x). Choose a different action or emit done."
-                                })
                                 use_think = True
                             continue
                     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
