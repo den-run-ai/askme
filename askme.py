@@ -673,8 +673,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 entry["_find"] = action.get("find", "")
                                 entry["_replace"] = action.get("replace", "")
                             state["last_steps"].append(entry)
-                            if dup_skip_count >= 2:
-                                use_think = True
+                            use_think = True
                             continue
                     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok"):

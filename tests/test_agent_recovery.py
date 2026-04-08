@@ -29,22 +29,23 @@ class TestDuplicateGuard:
         assert ok is True
         assert (tmp_path / "data.txt").read_text() == "hello"
 
-    def test_write_first_skip_feedback_visible(self, tmp_path):
-        """First duplicate write skip injects feedback so the LLM sees new state immediately."""
+    def test_write_first_skip_feedback_and_thinking(self, tmp_path):
+        """First duplicate write skip injects feedback AND enables thinking immediately."""
         f = str(tmp_path / "data.txt")
         responses = [
             {"tasks": ["write data.txt"]},
             {"action": "write", "arg": f, "content": "hello"},
-            {"action": "write", "arg": f, "content": "hello"},  # skip 1 -- feedback injected
-            {"action": "done"},                                   # model sees feedback, emits done
+            {"action": "write", "arg": f, "content": "hello"},  # skip 1 -- feedback + thinking
+            {"action": "done"},                                   # model sees feedback with thinking, emits done
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("write data.txt", working_dir=str(tmp_path))
         assert ok is True
-        # The done call should see the "Already done" feedback in slim state
-        last_call_args = mock_llm.call_args_list[-1]
-        user_msg = last_call_args[0][0][1]["content"]
+        # The done call should see "Already done" feedback and have think=True
+        last_call = mock_llm.call_args_list[-1]
+        user_msg = last_call[0][0][1]["content"]
         assert "Already done" in user_msg
+        assert last_call[1].get("think") is True
 
     def test_write_triple_duplicate_still_detected(self, tmp_path):
         """Three consecutive duplicate writes all detected — synthetic entries preserve _content for matching."""
@@ -52,14 +53,14 @@ class TestDuplicateGuard:
         responses = [
             {"tasks": ["write data.txt"]},
             {"action": "write", "arg": f, "content": "hello"},
-            {"action": "write", "arg": f, "content": "hello"},  # skip 1
-            {"action": "write", "arg": f, "content": "hello"},  # skip 2 -- thinking enabled
+            {"action": "write", "arg": f, "content": "hello"},  # skip 1 -- thinking enabled
+            {"action": "write", "arg": f, "content": "hello"},  # skip 2 -- still detected
             {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("write data.txt", working_dir=str(tmp_path))
         assert ok is True
-        # The done call (after skip 2) should have think=True
+        # The done call should have think=True
         last_call = mock_llm.call_args_list[-1]
         assert last_call[1].get("think") is True
 
