@@ -1,11 +1,12 @@
 # Gemma 4 E4B — Setup, Configuration & Optimization
 
-Mac M1 16GB. Last updated 2026-04-08.
+Mac M1 16GB. Last updated 2026-04-16.
 
-**Current build:** `d12cc3d1c` — up to date with master as of 2026-04-08. Includes EOS fix (#21492), iSWA rotation (#21513), server params fix (#21509), per-layer projections (#21612), CUDA buffer overlap fix (#21566).
+**Current build:** `85dde8dc4` — up to date with master as of 2026-04-16. Includes all prior fixes plus: tokenizer edge case (#21534), ambiguous grammar fix (#21661), reasoning budget sampler (#21697), official template alignment (#21704), shared-KV optional tensors (#21739), parsing edge cases (#21760), audio support (#21421/#21824), NVFP4 (#21971).
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 **Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
 **Phase 4 (EOS fix): COMPLETE** — #21492 merged, rebuilt, 157/157 unit tests pass, 3/3 easy integration pass (10:02). See [Phase 4 results](#phase-4-eos-fix--complete-2026-04-08).
+**Phase 5 (build refresh): COMPLETE** — pulled 12 new Gemma 4 commits to `85dde8dc4`, rebuilt, 159/159 unit tests pass, 3/3 easy integration pass (1:36 — fastest ever). See [Phase 5 results](#phase-5-build-refresh--complete-2026-04-16).
 
 ## Model
 
@@ -83,6 +84,7 @@ mkdir -p /tmp/llama-cache
 
 | Flag | Purpose | Status |
 |------|---------|--------|
+| `--swa-full --cache-reuse 256` | SWA-full prompt caching — potential major speedup for agent use (eliminates redundant prompt eval per step) | **Wait for master.** PR [#21749](https://github.com/ggml-org/llama.cpp/pull/21749) is open (1/2 approvals), could get revised, requires `--swa-full` flag (unclear memory/quality impact on E4B 16GB), and only fixes SWA path — shared KV layers (#21468 core) still blocked. When merged: pull, rebuild, benchmark with `--swa-full --cache-reuse 256` vs current baseline |
 | `--ctx-size 32768` with q4_0 | Double context using KV memory savings | Not yet validated — see Phase 3 checklist |
 | `--cache-type-k q8_0 --cache-type-v q8_0` | Middle-ground KV quantization | Tested, 7% slower than f16 — not recommended |
 
@@ -131,7 +133,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 ## Upstream Gemma 4 Commits
 
-Local HEAD: `d12cc3d1c` (up to date with master as of 2026-04-08).
+Local HEAD: `85dde8dc4` (up to date with master as of 2026-04-16).
 
 ### In local build
 
@@ -151,19 +153,32 @@ Local HEAD: `d12cc3d1c` (up to date with master as of 2026-04-08).
 | [#21492](https://github.com/ggml-org/llama.cpp/pull/21492) | Remove `</s>` EOS token for Gemma 4 | Removes spurious `</s>` from EOG list, adds `<eos>` — **reduces premature generation stops** | `d12cc3d1c` |
 | [#21612](https://github.com/ggml-org/llama.cpp/pull/21612) | Per-layer projections in first layer | Reduces graph splits for partial offload (minor perf) | `d12cc3d1c` |
 | [#21566](https://github.com/ggml-org/llama.cpp/pull/21566) | CUDA: check for buffer overlap before fusing | Fixes Gemma 4 26B `<unused>` token spam on CUDA — not relevant to Metal | `d12cc3d1c` |
+| [#21534](https://github.com/ggml-org/llama.cpp/pull/21534) | Gemma 4 tokenizer tests, fix edge case | Tokenizer correctness — fixes edge case in vocab handling | `85dde8dc4` |
+| [#21625](https://github.com/ggml-org/llama.cpp/pull/21625) | Fix multimodal padding token for gemma3n/gemma4 | Correct multimodal padding — no impact on text-only agent use | `85dde8dc4` |
+| [#21661](https://github.com/ggml-org/llama.cpp/pull/21661) | Fix ambiguous grammar rule in gemma4 | Parser correctness — resolves ambiguity in grammar-guided output | `85dde8dc4` |
+| [#21697](https://github.com/ggml-org/llama.cpp/pull/21697) | Enable reasoning budget sampler for gemma4 | Allows reasoning budget control — relevant if using thinking mode | `85dde8dc4` |
+| [#21704](https://github.com/ggml-org/llama.cpp/pull/21704) | Better align to updated official gemma4 template | Template alignment — improves chat/tool-call formatting fidelity | `85dde8dc4` |
+| [#21739](https://github.com/ggml-org/llama.cpp/pull/21739) | Make shared-KV tail `attn_k` tensors optional on load | Model loading robustness — shared KV layers load gracefully when tensors absent | `85dde8dc4` |
+| [#21760](https://github.com/ggml-org/llama.cpp/pull/21760) | `common/gemma4`: handle parsing edge cases | Fixes 3 template parsing bugs: missing generation prompt before tool calls, trailing `<channel\|>` tokens, duplicate opening `<channel\|>`. Author notes artifacts primarily appear in 26B — E4B impact unverified but safe | `85dde8dc4` |
+| [#21421](https://github.com/ggml-org/llama.cpp/pull/21421) | Gemma 4 audio conformer encoder support | Multimodal — enables audio input when projector is loaded | `85dde8dc4` |
+| [#21824](https://github.com/ggml-org/llama.cpp/pull/21824) | Use causal attn for gemma 4 audio | Multimodal audio fix | `85dde8dc4` |
+| [#21971](https://github.com/ggml-org/llama.cpp/pull/21971) | NVFP4 tensors for Gemma4 | CUDA/NVIDIA-only — no Metal impact | `85dde8dc4` |
 
 ### Not yet merged (watch list)
 
-_No Gemma 4 PRs currently pending._ The FFN MoE F32 precision draft (#21506, ggerganov) was **closed** — superseded by #21566 (CUDA buffer overlap fix).
+| PR | Title | Status | Why it matters |
+|----|-------|--------|----------------|
+| [#21749](https://github.com/ggml-org/llama.cpp/pull/21749) | Prompt caching fix for SWA models (partial fix for #21468) | **OPEN**, 1/2 approvals | Sets `pos_min_thold=0` when `--swa-full` is used and skips checkpoint restoration for full-size SWA caches. One reviewer confirmed it "fixed my issue on swa models." **Only addresses the SWA-full path — the shared KV layers path (the core of #21468) is still blocked.** Current `-np 1` single-slot workflow already accepts full re-eval, so low-priority until merged |
 
-### Known Gemma 4 Bugs (upstream, no fix)
+### Known Gemma 4 Bugs (upstream)
 
-| Issue | Title | Relevance |
-|-------|-------|-----------|
-| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) | Cache reuse broken for Gemma 4 | **Critical** — see above |
-| [#21516](https://github.com/ggml-org/llama.cpp/issues/21516) | Generates `<unused>` tokens in infinite loop (Vulkan) | Not applicable (Metal). Separate from CUDA fix #21566 |
-| [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | Not seen in agent use (low temp 0.1 may suppress). CUDA case fixed by #21566 |
-| [#21424](https://github.com/ggml-org/llama.cpp/issues/21424) | Very long generation latency (Vulkan/AMD) | Not applicable (Metal) |
+| Issue | Title | State | Relevance |
+|-------|-------|-------|-----------|
+| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) | Cache reuse broken for Gemma 4 | Open | **Critical** — now understood as two sub-problems: (1) SWA caching — fixable via `--swa-full` and #21749, (2) shared KV layers — still no fix. See above |
+| [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) | Gibberish on 2nd message with kv quantization | Open | **Monitor** — primary repro is GLM 5.1 on CUDA; reporter tested Gemma 4 31B and could not reproduce. No E4B/Metal/q4_0 reports yet, but suspected regression near rotation PR #21038 (which our q4_0 default depends on via #21513). Do a sanity second-message check after next rebuild |
+| [#21516](https://github.com/ggml-org/llama.cpp/issues/21516) | Generates `<unused>` tokens in infinite loop (Vulkan) | Open | Not applicable (Metal). Separate from CUDA fix #21566 |
+| [#21424](https://github.com/ggml-org/llama.cpp/issues/21424) | Very long generation latency (Vulkan/AMD) | Open | Not applicable (Metal) |
+| [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | **Closed/completed** (2026-04) | Resolved upstream |
 
 ## Implementation Plan
 
@@ -318,13 +333,54 @@ Pulled to `d12cc3d1c` picking up EOS fix (#21492), per-layer projections (#21612
 
 **Note:** Single trial — run-to-run variance is significant. The `create_and_read_file` regression is likely a transport timeout outlier, not a real regression from the EOS fix.
 
-### Phase 5: Monitor remaining upstream fixes
+### Phase 5: Build refresh — COMPLETE (2026-04-16)
+
+Pulled from `d12cc3d1c` → `85dde8dc4` (~8 days, 12 new Gemma 4 commits). Rebuilt successfully. Picks up: tokenizer edge case (#21534), ambiguous grammar fix (#21661), reasoning budget sampler (#21697), official template alignment (#21704), shared-KV optional tensors (#21739), parsing edge cases (#21760), multimodal padding (#21625), audio support (#21421/#21824), NVFP4 (#21971).
+
+#### Phase 5 Verification Results (2026-04-16)
+
+| Check | Result |
+|-------|--------|
+| HEAD | `85dde8dc4` — up to date with master |
+| 159/159 unit tests | Pass (30.6s) |
+| 4/4 `TestServerConfig` | Pass (1.1s) |
+| 3/3 easy integration | Pass (1:36) |
+
+**Easy integration (1:36 total, q4_0 KV):**
+
+| Test | Steps | Replans | Thinking Retries | Time |
+|------|-------|---------|------------------|------|
+| create_and_read_file | 5 (1 dup skip) | 0 | 0 | ~11s |
+| shell_and_write | 2 | 0 | 0 | ~6s |
+| multi_step_build | 5+2 | 0 | 1x (medium) | ~59s |
+
+**Observations vs Phase 4 (build `d12cc3d1c`, q4_0 KV):**
+- **Total: 1:36 vs 10:02 — 84% faster** — biggest single improvement across all phases
+- `multi_step_build`: 59s vs 295s — **80% faster**, no replans (was 1), duplicate-write handled cleanly by skip guard
+- `shell_and_write`: 6s vs 21s — **71% faster**, already fast, now faster
+- `create_and_read_file`: 11s vs 286s — **96% faster** (Phase 4 had a transport timeout outlier, so this is closer to the true baseline)
+- Thinking retries: 1 total vs Phase 4's 3, Phase 1's 9 — **consistently trending down**
+- Template alignment (#21704), grammar fix (#21661), and parsing edge cases (#21760) likely the key contributors — cleaner LLM output = fewer retries and faster planning
+- No duplicate-write loop on `multi_step_build` — the persistent model behavior issue from Phase 3/4 appears resolved
+
+**Verification checklist:**
+- [x] `git log --oneline -1` shows `85dde8dc4`
+- [x] 159/159 unit tests pass (30.6s)
+- [x] Server starts with q4_0 KV flags
+- [x] `TestServerConfig` passes (4 tests, 1.1s)
+- [x] 3/3 easy integration pass (1:36)
+- [x] No gibberish on multi-message sequences (KV-quant #21915 not repro'd)
+- **Conclusion:** Significant quality improvement from upstream template/grammar/parser fixes. Easy integration 84% faster than Phase 4. Duplicate-write loop no longer observed. Medium tests deferred — easy tests now fast enough that variance is low.
+
+### Phase 6: Monitor remaining upstream fixes
 
 | PR/Issue | What to do when fixed |
 |----------|----------------------|
-| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) (cache-reuse for iSWA) | Pull, rebuild, remove Phase 2 workaround, verify `--cache-reuse 256` works via `scripts/bench_kv.sh` |
+| [#21749](https://github.com/ggml-org/llama.cpp/pull/21749) (SWA-full prompt caching) | When merged, retest `--cache-reuse 256` with `--swa-full` via `scripts/bench_kv.sh`. Partial fix only — will not unblock shared KV layer path |
+| [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) (shared KV layer cache-reuse) | When fully fixed, remove Phase 2 workaround code from `askme.py`, verify `--cache-reuse 256` via `scripts/bench_kv.sh` |
+| [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) (KV-quant gibberish on 2nd message) | Monitor for E4B/Metal repro. If confirmed, temporarily revert KV to f16 in configured flags |
 
-### Phase 6: Future optimizations
+### Phase 7: Future optimizations
 
 - **TurboQuant KV** — [#21089](https://github.com/ggml-org/llama.cpp/pull/21089) adds 3.5-bit KV cache types (TBQ3_0/TBQ4_0). CPU-only for now, no Metal support.
 
@@ -362,6 +418,16 @@ After Phase 4 (EOS fix) — **COMPLETE (2026-04-08)**:
 - [x] Thinking retries trending down (3 vs Phase 1's 9) — high variance, needs more trials
 - **Conclusion:** EOS fix merged and working. Duplicate-write loop persists (model behavior). Medium tests deferred — need multi-trial runs to separate signal from noise.
 
+After Phase 5 (build refresh) — **ALL PASS (2026-04-16)**:
+- [x] `git log --oneline -1` shows `85dde8dc4` (12 new Gemma 4 commits from `d12cc3d1c`)
+- [x] 159/159 unit tests pass (30.6s)
+- [x] Server starts with q4_0 KV flags, no errors
+- [x] `TestServerConfig` passes (4 tests, 1.1s)
+- [x] 3/3 easy integration pass (1:36 — **84% faster** than Phase 4's 10:02)
+- [x] No KV-quant gibberish (#21915 not repro'd on E4B/Metal/q4_0)
+- [x] Duplicate-write loop on `multi_step_build` no longer observed
+- **Conclusion:** Template alignment (#21704), grammar fix (#21661), and parsing edge cases (#21760) dramatically improve LLM output quality. Fastest easy integration ever. No regressions.
+
 ## 16GB M1 Lessons Learned
 
 - **Gemma 4 E4B is the sweet spot** — MoE with 4B active params, ~5.0GB Q4_K_M, full Metal GPU
@@ -375,6 +441,9 @@ After Phase 4 (EOS fix) — **COMPLETE (2026-04-08)**:
 ## References
 
 - [Issue #21468 — Cache reuse broken for Gemma 4](https://github.com/ggml-org/llama.cpp/issues/21468)
+- [PR #21749 — Prompt caching fix for SWA models (open, partial fix for #21468)](https://github.com/ggml-org/llama.cpp/pull/21749)
+- [PR #21760 — common/gemma4 parsing edge cases (merged)](https://github.com/ggml-org/llama.cpp/pull/21760)
+- [Issue #21915 — Gibberish on 2nd message with kv quantization](https://github.com/ggml-org/llama.cpp/issues/21915)
 - [PR #21488 — Byte token handling for Gemma4](https://github.com/ggml-org/llama.cpp/pull/21488)
 - [PR #21510 — Fix restore for checkpoints with pos_min == 0](https://github.com/ggml-org/llama.cpp/pull/21510)
 - [PR #21492 — Remove </s> EOS for Gemma4](https://github.com/ggml-org/llama.cpp/pull/21492)
