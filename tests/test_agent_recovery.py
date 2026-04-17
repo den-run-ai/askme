@@ -1,10 +1,14 @@
 """Recovery tests: duplicate guard, cache workaround, failure classification,
-error summarization, completion semantics, redundant task auto-skip."""
+error summarization, completion semantics, final validation."""
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from askme import execute, ask_llm, get_plan, get_step, run, _run_loop
+import pytest
+
+from askme import (execute, ask_llm, get_plan, get_step, run, _run_loop,
+                   _should_validate, _validate_completion, LLMTransportError)
 from _test_support import mock_response
 
 
@@ -534,4 +538,317 @@ class TestCompletionSemantics:
              patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
             result = run("write and compile hello.c", working_dir=str(tmp_path))
         assert result is False
+
+
+# --- Final validation tests ---
+
+class TestFinalValidation:
+    """Verify end-to-end goal validation after all tasks complete."""
+
+    @pytest.fixture(autouse=True)
+    def enable_validation(self):
+        """Re-enable validation for this test class (conftest disables it globally)."""
+        import askme
+        askme.FINAL_VALIDATE = "auto"
+        yield
+        # conftest autouse fixture will restore to "0" after
+
+    def _simple_run(self, prompt, tmp_path, validate_response=None, extra_responses=None,
+                    env_vars=None):
+        """Helper: run a single-task agent with optional validation mock.
+        Returns (result_bool, ask_llm_mock)."""
+        responses = [
+            {"tasks": ["do the thing"]},
+            {"action": "shell", "arg": "echo done"},
+            {"action": "done"},
+        ]
+        if extra_responses:
+            responses.extend(extra_responses)
+
+        call_count = [0]
+        original_responses = list(responses)
+
+        def mock_ask_llm(messages, **kwargs):
+            # If this is a validation call (SYSTEM_VALIDATE in system prompt)
+            sys_content = messages[0]["content"] if messages else ""
+            if "completion validator" in sys_content:
+                if validate_response is None:
+                    return {"valid": True}
+                if isinstance(validate_response, Exception):
+                    raise validate_response
+                return validate_response
+            # Regular call
+            if call_count[0] < len(original_responses):
+                resp = original_responses[call_count[0]]
+                call_count[0] += 1
+                return resp
+            return {"action": "done"}
+
+        env_patches = {}
+        if env_vars:
+            env_patches = env_vars
+
+        import askme
+        old_validate = askme.FINAL_VALIDATE
+        if "AGENT_FINAL_VALIDATE" in env_patches:
+            askme.FINAL_VALIDATE = env_patches["AGENT_FINAL_VALIDATE"]
+
+        try:
+            with patch("askme.ask_llm", side_effect=mock_ask_llm) as mock_llm:
+                ok = run(prompt, working_dir=str(tmp_path))
+            return ok, mock_llm
+        finally:
+            askme.FINAL_VALIDATE = old_validate
+
+    def test_validate_skipped_trivial(self, tmp_path):
+        """Single-task no-failure run with no keyword match → no validation call."""
+        responses = [
+            {"tasks": ["write greeting"]},
+            {"action": "write", "arg": str(tmp_path / "hi.txt"), "content": "hello"},
+            {"action": "done"},
+        ]
+        validate_called = [False]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                validate_called[0] = True
+                return {"valid": True}
+            return responses.pop(0)
+
+        with patch("askme.ask_llm", side_effect=mock_ask_llm):
+            ok = run("write greeting", working_dir=str(tmp_path))
+        assert ok is True
+        assert validate_called[0] is False
+
+    def test_validate_runs_on_replan(self, tmp_path):
+        """replan > 0 → validation runs."""
+        responses = [
+            # Plan 1: task fails
+            {"tasks": ["try bad"]},
+            {"action": "fail", "reasoning": "oops"},
+            # Plan 2: task succeeds
+            {"tasks": ["try good"]},
+            {"action": "shell", "arg": "echo ok"},
+            {"action": "done"},
+        ]
+        validate_called = [False]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                validate_called[0] = True
+                return {"valid": True}
+            return responses.pop(0)
+
+        with patch("askme.ask_llm", side_effect=mock_ask_llm):
+            result = _run_loop("try stuff", str(tmp_path), max_replans=3)
+        assert result["status"] == "complete"
+        assert validate_called[0] is True
+
+    def test_validate_passes(self, tmp_path):
+        """{"valid":true} → success returned."""
+        ok, _ = self._simple_run("compile and run program", tmp_path,
+                                 validate_response={"valid": True})
+        assert ok is True
+
+    def test_validate_fails_triggers_replan(self, tmp_path):
+        """{"valid":false,...} → replan with [validation_failed] error."""
+        responses = [
+            # Plan 1
+            {"tasks": ["build it"]},
+            {"action": "shell", "arg": "echo building"},
+            {"action": "done"},
+            # Plan 2 (after validation failure)
+            {"tasks": ["build it properly"]},
+            {"action": "shell", "arg": "echo built"},
+            {"action": "done"},
+        ]
+        call_count = [0]
+        validate_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                validate_count[0] += 1
+                if validate_count[0] == 1:
+                    return {"valid": False, "reason": "binary not created",
+                            "missing": ["program"]}
+                return {"valid": True}
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        result = None
+        with patch("askme.ask_llm", side_effect=mock_ask_llm):
+            result = _run_loop("build it", str(tmp_path), max_replans=3)
+        assert result["status"] == "complete"
+        # Validation should have triggered a replan — check errors were set
+        # The second plan should have run (call_count > 3)
+        assert call_count[0] > 3
+
+    def test_validate_transport_error_returns_success(self, tmp_path):
+        """Transport error → fail-open, return success."""
+        ok, _ = self._simple_run("compile and run program", tmp_path,
+                                 validate_response=LLMTransportError("connection refused"))
+        assert ok is True
+
+    def test_validate_parse_error_returns_success(self, tmp_path):
+        """Garbage output → fail-open, return success."""
+        ok, _ = self._simple_run("compile and run program", tmp_path,
+                                 validate_response=json.JSONDecodeError("bad", "", 0))
+        assert ok is True
+
+    def test_validate_no_infinite_loop(self, tmp_path):
+        """validated_once flag prevents second validation after recovery replan."""
+        responses = [
+            # Plan 1
+            {"tasks": ["build it"]},
+            {"action": "shell", "arg": "echo building"},
+            {"action": "done"},
+            # Plan 2 (after validation failure)
+            {"tasks": ["build properly"]},
+            {"action": "shell", "arg": "echo ok"},
+            {"action": "done"},
+        ]
+        call_count = [0]
+        validate_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                validate_count[0] += 1
+                return {"valid": False, "reason": "still wrong", "missing": ["x"]}
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        with patch("askme.ask_llm", side_effect=mock_ask_llm):
+            result = _run_loop("build it", str(tmp_path), max_replans=3)
+        # Validation should only run once (validated_once flag)
+        assert validate_count[0] == 1
+        assert result["status"] == "complete"
+
+    def test_validate_always_mode(self, tmp_path):
+        """AGENT_FINAL_VALIDATE=always forces validation on trivial run."""
+        import askme
+        old = askme.FINAL_VALIDATE
+        askme.FINAL_VALIDATE = "always"
+        try:
+            responses = [
+                {"tasks": ["write hi"]},
+                {"action": "write", "arg": str(tmp_path / "hi.txt"), "content": "hi"},
+                {"action": "done"},
+            ]
+            validate_called = [False]
+
+            def mock_ask_llm(messages, **kwargs):
+                if messages and "completion validator" in messages[0].get("content", ""):
+                    validate_called[0] = True
+                    return {"valid": True}
+                return responses.pop(0)
+
+            with patch("askme.ask_llm", side_effect=mock_ask_llm):
+                ok = run("write hi", working_dir=str(tmp_path))
+            assert ok is True
+            assert validate_called[0] is True
+        finally:
+            askme.FINAL_VALIDATE = old
+
+    def test_validate_disabled(self, tmp_path):
+        """AGENT_FINAL_VALIDATE=0 skips validation."""
+        import askme
+        old = askme.FINAL_VALIDATE
+        askme.FINAL_VALIDATE = "0"
+        try:
+            responses = [
+                # replan scenario that would normally trigger validation
+                {"tasks": ["try bad"]},
+                {"action": "fail", "reasoning": "oops"},
+                {"tasks": ["try good"]},
+                {"action": "shell", "arg": "echo ok"},
+                {"action": "done"},
+            ]
+            validate_called = [False]
+
+            def mock_ask_llm(messages, **kwargs):
+                if messages and "completion validator" in messages[0].get("content", ""):
+                    validate_called[0] = True
+                    return {"valid": True}
+                return responses.pop(0)
+
+            with patch("askme.ask_llm", side_effect=mock_ask_llm):
+                result = _run_loop("compile program", str(tmp_path), max_replans=3)
+            assert result["status"] == "complete"
+            assert validate_called[0] is False
+        finally:
+            askme.FINAL_VALIDATE = old
+
+    def test_validate_uses_high_thinking(self, tmp_path):
+        """Confirms think=True, think_level="high", max_retries=0."""
+        captured_kwargs = {}
+
+        responses = [
+            {"tasks": ["build program"]},
+            {"action": "shell", "arg": "echo building"},
+            {"action": "done"},
+        ]
+        call_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                captured_kwargs.update(kwargs)
+                return {"valid": True}
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        # Use "always" to force validation on this simple run
+        import askme
+        old = askme.FINAL_VALIDATE
+        askme.FINAL_VALIDATE = "always"
+        try:
+            with patch("askme.ask_llm", side_effect=mock_ask_llm):
+                run("build program", working_dir=str(tmp_path))
+        finally:
+            askme.FINAL_VALIDATE = old
+
+        assert captured_kwargs.get("think") is True
+        assert captured_kwargs.get("think_level") == "high"
+        assert captured_kwargs.get("max_retries") == 0
+
+    def test_validate_prompt_includes_files_and_steps(self, tmp_path):
+        """Evidence contains file listing + step summaries."""
+        (tmp_path / "output.txt").write_text("result")
+        captured_messages = {}
+
+        responses = [
+            {"tasks": ["create output"]},
+            {"action": "write", "arg": str(tmp_path / "output.txt"), "content": "result"},
+            {"action": "done"},
+        ]
+        call_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                captured_messages["user"] = messages[1]["content"]
+                return {"valid": True}
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        import askme
+        old = askme.FINAL_VALIDATE
+        askme.FINAL_VALIDATE = "always"
+        try:
+            with patch("askme.ask_llm", side_effect=mock_ask_llm):
+                run("create output", working_dir=str(tmp_path))
+        finally:
+            askme.FINAL_VALIDATE = old
+
+        user_msg = captured_messages["user"]
+        # Should contain goal
+        assert "create output" in user_msg
+        # Should contain file listing
+        assert "output.txt" in user_msg
+        # Should contain task evidence
+        assert "Task 1" in user_msg
+        # Should contain step evidence (write action)
+        assert "write" in user_msg
 

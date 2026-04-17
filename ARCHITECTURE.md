@@ -198,7 +198,7 @@ When the planner creates a task that was already completed by a previous task (e
 
 **Impact:** ~370s wasted on a task that should have been instant. The model knows the task is done but can't express it concisely — it generates explanatory text instead of JSON.
 
-**Mitigation implemented:** Redundant task auto-skip detects completed work before entering the executor step loop. See "Redundant Task Auto-Skip" below for the current step-aware design.
+**Mitigation:** The executor handles this naturally — it sees `completed_tasks` in state and emits `{"action":"done"}` on step 1. Final validation (post-completion LLM check) catches any cases where this leads to incomplete work.
 
 ### Path Truncation in Long Temp Paths (Local Gemma 4 E4B)
 
@@ -899,3 +899,26 @@ Both keyword heuristics and LLM-based classification were tried and removed:
 - **LLM classification** (2026-04-16 to 2026-04-17): 6 prompt engineering attempts failed. The 4B model (Gemma 4 E4B) cannot do classification — it enters executor mode when it sees task descriptions, regardless of system prompt. Thinking helps (`think=high` gets correct answers) but costs 23-26s per check, far worse than the 1-2s executor fallback.
 
 The executor-based approach is simpler, robust, and fast enough.
+
+## Final Validation (Implemented 2026-04-17)
+
+After all tasks complete, `_validate_completion()` runs an LLM-based check to verify the goal was actually achieved. This catches cases where individual tasks succeed but the overall goal is incomplete (e.g., files created but not compiled, tests written but not run).
+
+### How it works
+
+1. **Gating** (`_should_validate()`): validation only runs when complexity/risk signals are present — replan occurred, failed steps in history, ≥3 tasks, ≥5 total steps, or prompt matches action keywords (compile, build, test, run, fix, etc.). Trivial runs (single write, no failures) skip validation entirely.
+
+2. **Evidence collection**: the validator receives the goal, completed tasks with per-task step summaries (action + basename + output snippet, ≤5 per task), and `sorted(os.listdir(working_dir))[:50]`.
+
+3. **LLM call**: `ask_llm(..., max_tokens=768, think=True, think_level="high", max_retries=0)` — one high-thinking attempt, no retries. Returns `{"valid": true}` or `{"valid": false, "reason": "...", "missing": [...]}`.
+
+4. **Fail-open**: transport errors, parse errors, or unexpected formats return `None` → treated as valid. The agent never fails due to validation infrastructure issues.
+
+5. **Single-shot**: `validated_once` flag prevents re-validation after a recovery replan. If validation fails, it triggers one replan with `[validation_failed]` error; the recovery plan succeeds or fails on its own merits.
+
+### Configuration
+
+`AGENT_FINAL_VALIDATE` env var controls behavior:
+- `auto` (default): validate when complexity signals are present
+- `always`: validate every run
+- `0`: disable validation entirely

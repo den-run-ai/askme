@@ -22,6 +22,9 @@ LLM_BACKEND=openrouter python3 askme.py "your request here"
 # Allow the agent to install software (disabled by default)
 ALLOW_SYSTEM_INSTALLS=1 python3 askme.py "your request here"
 
+# Control final validation (auto=default, always, 0=disabled)
+AGENT_FINAL_VALIDATE=always python3 askme.py "your request here"
+
 # Start llama-server (optimized for agentic use)
 cd /Users/macmone/code/llama.cpp
 mkdir -p /tmp/llama-cache
@@ -65,6 +68,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 1. **Planner** (`get_plan`) — LLM receives the user prompt + full state (completed tasks, typed/summarized errors, environment, policy) and outputs `{"tasks": [...]}`. Thinking is conditional: **off for first plan, on for replans**. First-plan thinking was benchmarked and found to provide no quality benefit while consuming token budget — on the local model it caused JSON truncation failures.
 2. **Executor** (`get_step`) — For each task, LLM receives a **slim state** (current task + completed tasks + last 3 steps with cross-task carryover + missing_tools + policy) and proposes one action at a time: `shell`, `write`, `edit`, `read`, `done`, or `fail`. Completion is goal-aware — executor must satisfy the full task description, not just one successful step.
 3. **Replan** — If a task fails, the full loop restarts with a new plan (up to `MAX_REPLANS`). Errors are classified into types (`timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, `unknown`), summarized/deduplicated, then fed to the planner.
+4. **Final Validation** (`_validate_completion`) — After all tasks complete, an LLM-based check verifies the goal was achieved. Gated by `_should_validate()` (auto-triggers on replans, failed steps, ≥3 tasks, ≥5 steps, or action keywords in prompt). Uses `think_level="high"`, `max_retries=0`. Fail-open on errors. Runs at most once per `_run_loop()` call (`validated_once` flag). Controlled by `AGENT_FINAL_VALIDATE` env var (`auto`/`always`/`0`).
 
 The core loop lives in `_run_loop()`, which returns `{"status": "complete"|"exhausted", "state": state, "log": history}`. `run()` is a thin wrapper mapping to `True`/`False`. Integration tests call `_run_loop()` directly (via `int_run()`) for the rich result dict.
 

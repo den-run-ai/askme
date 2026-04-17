@@ -154,6 +154,22 @@ POLICY RULES:
 Output ONLY valid JSON. No markdown, no explanation.
 Format: {{"tasks": ["task1 description", "task2 description"]}}"""
 
+SYSTEM_VALIDATE = """You are a completion validator. Given a goal, completed tasks with their execution evidence, and the current working directory listing, determine if the goal was fully achieved.
+
+Examine the evidence carefully:
+- Did all required files get created?
+- Did compilation/build succeed?
+- Did the program run and produce correct output?
+- Were all parts of the goal addressed?
+
+Output ONLY valid JSON. No markdown, no explanation.
+Format: {"valid": true} or {"valid": false, "reason": "what is missing or wrong", "missing": ["specific missing items"]}"""
+
+# Final validation config
+FINAL_VALIDATE = os.environ.get("AGENT_FINAL_VALIDATE", "auto")
+_VALIDATE_KEYWORDS = re.compile(
+    r'\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b', re.I)
+
 SYSTEM_STEP = """You are a task executor. Output ONLY valid JSON. No markdown, no explanation.
 Propose ONE action at a time. Use relative paths (e.g. main.c not /full/path/main.c).
 CRITICAL RULES:
@@ -170,15 +186,18 @@ Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"
 MAX_LLM_RETRIES = 2
 
 
-def ask_llm(messages, max_tokens=256, think=False, max_retries=MAX_LLM_RETRIES, raw=False):
+def ask_llm(messages, max_tokens=256, think=False, think_level=None,
+            max_retries=MAX_LLM_RETRIES, raw=False):
     for attempt in range(max_retries + 1):
-        # Determine thinking level: caller-requested or auto-escalate on retry
-        if think:
-            think_level = "high" if attempt >= 1 else "medium"
+        # Determine thinking level: explicit think_level overrides auto-escalation
+        if think_level:
+            effective_think_level = think_level
+        elif think:
+            effective_think_level = "high" if attempt >= 1 else "medium"
         elif attempt >= 1:
-            think_level = "high" if attempt >= 2 else "medium"
+            effective_think_level = "high" if attempt >= 2 else "medium"
         else:
-            think_level = None
+            effective_think_level = None
 
         body = {
             "model": MODEL,
@@ -188,22 +207,22 @@ def ask_llm(messages, max_tokens=256, think=False, max_retries=MAX_LLM_RETRIES, 
         }
         if LLM_BACKEND == "openrouter":
             body["provider"] = {"order": ["Parasail"]}
-            if think_level:
+            if effective_think_level:
                 body["reasoning"] = {
                     "enabled": True,
-                    "effort": think_level,
+                    "effort": effective_think_level,
                 }
                 # Reasoning tokens count against max_tokens with Parasail provider,
                 # despite OpenRouter docs claiming they're separate. Bump to compensate.
-                body["max_tokens"] = max(max_tokens, 2048 if think_level == "high" else 1536)
-        elif think_level:
+                body["max_tokens"] = max(max_tokens, 2048 if effective_think_level == "high" else 1536)
+        elif effective_think_level:
             # Local llama-server: prepend <|think|> to system prompt, bump max_tokens
             msgs = list(messages)
             if msgs and msgs[0]["role"] == "system":
                 msgs[0] = dict(msgs[0])
                 msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
             body["messages"] = msgs
-            body["max_tokens"] = max(max_tokens, 768 if think_level == "high" else 512)
+            body["max_tokens"] = max(max_tokens, 768 if effective_think_level == "high" else 512)
 
         headers = {"Content-Type": "application/json"}
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
@@ -248,8 +267,8 @@ def ask_llm(messages, max_tokens=256, think=False, max_retries=MAX_LLM_RETRIES, 
         usage = rj.get("usage", {})
         if usage:
             tok_msg = f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}"
-            if think_level:
-                tok_msg += f" thinking={think_level}"
+            if effective_think_level:
+                tok_msg += f" thinking={effective_think_level}"
             log(tok_msg)
         msg = rj["choices"][0]["message"]
         text = msg.get("content") or ""
@@ -282,7 +301,7 @@ def ask_llm(messages, max_tokens=256, think=False, max_retries=MAX_LLM_RETRIES, 
             return parsed
         except json.JSONDecodeError:
             if attempt < max_retries:
-                think_str = f" thinking={think_level}" if think_level else ""
+                think_str = f" thinking={effective_think_level}" if effective_think_level else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
                 raise
@@ -399,6 +418,71 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
     ], max_tokens=step_tokens, think=think)
+
+
+def _should_validate(replan, history, state, user_prompt):
+    """Decide whether to run final validation. Returns True if validation should run."""
+    if FINAL_VALIDATE == "0":
+        return False
+    if FINAL_VALIDATE == "always":
+        return True
+    # auto mode: trigger on complexity/risk signals
+    if replan > 0:
+        return True
+    # Any failed steps in history
+    if any(e.get("event") == "step" and not e.get("result", {}).get("ok", True) for e in history):
+        return True
+    completed = state.get("completed_tasks", [])
+    if len(completed) >= 3:
+        return True
+    # Count total steps
+    total_steps = sum(1 for e in history if e.get("event") == "step")
+    if total_steps >= 5:
+        return True
+    if _VALIDATE_KEYWORDS.search(user_prompt):
+        return True
+    return False
+
+
+def _validate_completion(user_prompt, state, working_dir):
+    """Run LLM-based final validation. Returns dict or None (fail-open)."""
+    completed = state.get("completed_tasks", [])
+    step_groups = state.get("completed_step_groups", [])
+    # Build evidence: per-task step summaries (action + basename + output snippet, ≤5 per task)
+    evidence_lines = []
+    for i, task in enumerate(completed):
+        evidence_lines.append(f"Task {i+1}: {task}")
+        if i < len(step_groups):
+            for s in step_groups[i][:5]:
+                arg = s.get("arg", "")
+                if "/" in arg:
+                    arg = Path(arg).name
+                out = s.get("output", "")[:80]
+                evidence_lines.append(f"  - {s['action']} {arg}: {out}")
+    evidence = "\n".join(evidence_lines)
+    # File listing
+    try:
+        files = sorted(os.listdir(working_dir))[:50]
+    except Exception:
+        files = []
+    user_msg = (f"GOAL:\n{user_prompt}\n\n"
+                f"COMPLETED TASKS AND EVIDENCE:\n{evidence}\n\n"
+                f"FILES IN WORKING DIRECTORY:\n{json.dumps(files)}")
+    try:
+        result = ask_llm([
+            {"role": "system", "content": SYSTEM_VALIDATE},
+            {"role": "user", "content": user_msg}
+        ], max_tokens=768, think=True, think_level="high", max_retries=0)
+        if isinstance(result, dict) and "valid" in result:
+            return result
+        log(f"  Validation returned unexpected format: {result}")
+        return None
+    except LLMTransportError as e:
+        log(f"  Validation transport error (fail-open): {e}")
+        return None
+    except (json.JSONDecodeError, KeyError) as e:
+        log(f"  Validation parse error (fail-open): {e}")
+        return None
 
 
 def classify_error(output, action="shell"):
@@ -519,7 +603,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     (needs rich dict with state + log). All production behavior lives here:
     preflight, policy, null normalization, error reset, timeout retry, etc.
     """
-    state = {"completed_tasks": [], "errors": []}
+    state = {"completed_tasks": [], "errors": [], "validated_once": False,
+             "completed_step_groups": []}
     history = []
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
@@ -564,6 +649,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             task_done = False
+            task_steps = []  # successful steps for validation evidence
             use_think = False  # enable thinking after failed step execution
             dup_skip_count = 0  # consecutive duplicate write skips
             for step in range(max_steps):
@@ -675,9 +761,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     use_think = True  # think harder on next step after failure
                 else:
                     use_think = False
+                    task_steps.append(step_entry)
 
             if task_done:
                 state["completed_tasks"].append(task)
+                state["completed_step_groups"].append(task_steps)
                 log(f"  Task complete. ({time.time()-t_task:.1f}s)")
             else:
                 all_done = False
@@ -685,6 +773,21 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 break
 
         if all_done:
+            if not state.get("validated_once") and _should_validate(replan, history, state, user_prompt):
+                state["validated_once"] = True
+                vresult = _validate_completion(user_prompt, state, working_dir)
+                if vresult and vresult.get("valid") is False:
+                    reason = vresult.get("reason", "validation failed")
+                    missing = vresult.get("missing", [])
+                    error_msg = f"[validation_failed] {reason}"
+                    if missing:
+                        error_msg += f" missing: {', '.join(missing)}"
+                    state["errors"].append(error_msg)
+                    log(f"  Validation failed: {reason}")
+                    all_done = False
+                    continue  # replan
+                else:
+                    log(f"  Validation passed.")
             log(f"All tasks complete. ({time.time()-t_run:.1f}s total)")
             log(f"Output in: {working_dir}")
             return {"status": "complete", "state": state, "log": history}

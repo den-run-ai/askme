@@ -13,6 +13,17 @@ def work_dir(tmp_path):
     return str(tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def disable_validation():
+    """Disable final validation in all unit tests by default.
+    TestFinalValidation tests explicitly re-enable it."""
+    import askme
+    old = askme.FINAL_VALIDATE
+    askme.FINAL_VALIDATE = "0"
+    yield
+    askme.FINAL_VALIDATE = old
+
+
 # --- Availability probes (evaluated once at collection time) ---
 
 def _llm_available():

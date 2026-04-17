@@ -1,8 +1,8 @@
 # Gemma 4 E4B — Setup, Configuration & Optimization
 
-Mac M1 16GB. Last updated 2026-04-16.
+Mac M1 16GB. Last updated 2026-04-17.
 
-**Current build:** `85dde8dc4` — up to date with master as of 2026-04-16. Includes all prior fixes plus: tokenizer edge case (#21534), ambiguous grammar fix (#21661), reasoning budget sampler (#21697), official template alignment (#21704), shared-KV optional tensors (#21739), parsing edge cases (#21760), audio support (#21421/#21824), NVFP4 (#21971).
+**Current build:** `85dde8dc4` — up to date with master as of 2026-04-16. Includes all prior fixes plus: tokenizer edge case (#21534), ambiguous grammar fix (#21661), reasoning budget sampler (#21697), official template alignment (#21704), shared-KV optional tensors (#21739), parsing edge cases (#21760), audio support (#21421/#21824), NVFP4 (#21971), custom newline split (#21406), multimodal tests (#21806).
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 **Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
 **Phase 4 (EOS fix): COMPLETE** — #21492 merged, rebuilt, 157/157 unit tests pass, 3/3 easy integration pass (10:02). See [Phase 4 results](#phase-4-eos-fix--complete-2026-04-08).
@@ -162,6 +162,8 @@ Local HEAD: `85dde8dc4` (up to date with master as of 2026-04-16).
 | [#21760](https://github.com/ggml-org/llama.cpp/pull/21760) | `common/gemma4`: handle parsing edge cases | Fixes 3 template parsing bugs: missing generation prompt before tool calls, trailing `<channel\|>` tokens, duplicate opening `<channel\|>`. Author notes artifacts primarily appear in 26B — E4B impact unverified but safe | `85dde8dc4` |
 | [#21421](https://github.com/ggml-org/llama.cpp/pull/21421) | Gemma 4 audio conformer encoder support | Multimodal — enables audio input when projector is loaded | `85dde8dc4` |
 | [#21824](https://github.com/ggml-org/llama.cpp/pull/21824) | Use causal attn for gemma 4 audio | Multimodal audio fix | `85dde8dc4` |
+| [#21406](https://github.com/ggml-org/llama.cpp/pull/21406) | Custom newline split for Gemma 4 | Replaces `std::regex` newline splitting — fixes stack overflow on large newline-heavy prompts | `85dde8dc4` |
+| [#21806](https://github.com/ggml-org/llama.cpp/pull/21806) | mtmd: add gemma 4 test (vision + audio) [no ci] | Test-only multimodal coverage — no runtime impact | `85dde8dc4` |
 | [#21971](https://github.com/ggml-org/llama.cpp/pull/21971) | NVFP4 tensors for Gemma4 | CUDA/NVIDIA-only — no Metal impact | `85dde8dc4` |
 
 ### Not yet merged (watch list)
@@ -178,7 +180,97 @@ Local HEAD: `85dde8dc4` (up to date with master as of 2026-04-16).
 | [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) | Gibberish on 2nd message with kv quantization | Open | **Monitor** — primary repro is GLM 5.1 on CUDA; reporter tested Gemma 4 31B and could not reproduce. No E4B/Metal/q4_0 reports yet, but suspected regression near rotation PR #21038 (which our q4_0 default depends on via #21513). Do a sanity second-message check after next rebuild |
 | [#21516](https://github.com/ggml-org/llama.cpp/issues/21516) | Generates `<unused>` tokens in infinite loop (Vulkan) | Open | Not applicable (Metal). Separate from CUDA fix #21566 |
 | [#21424](https://github.com/ggml-org/llama.cpp/issues/21424) | Very long generation latency (Vulkan/AMD) | Open | Not applicable (Metal) |
+| [#21831](https://github.com/ggml-org/llama.cpp/issues/21831) | Server forces full prompt re-processing (SWA/recurrent memory error) | Open | Related to #21468. Interesting finding: Gemma 4 26B actually retains context correctly despite the warning — real breakage is on qwen35moe. The warning may be cosmetic for SWA models. Checkpoint workaround mentioned: `--checkpoint-every-n-tokens 1024 --ctx-checkpoints 256` (untested on E4B/Metal) |
+| [#21912](https://github.com/ggml-org/llama.cpp/issues/21912) | Gemma 4 & Qwen 3.5 full prompt reprocessing in agentic workflows | Open | Same root cause as #21468 — users reporting impact on OpenCode and Pi Coding Agent |
 | [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | **Closed/completed** (2026-04) | Resolved upstream |
+
+## Cross-Ecosystem Status (2026-04-17)
+
+iSWA/shared-KV cache reuse is broken across **all** frameworks. No project has fully solved it yet. llama.cpp is furthest along on the KV quantization side (q4_0 + Hadamard rotation via #21513).
+
+### vLLM
+
+| Item | State | Details |
+|------|-------|---------|
+| [#38826](https://github.com/vllm-project/vllm/pull/38826) | Merged | Full Gemma 4 support (MoE, multimodal, reasoning, Gemma4ToolParser, Gemma4ThinkingParser) |
+| [#38847](https://github.com/vllm-project/vllm/pull/38847) | Merged | Bugfix: Gemma4ToolParser missing `tools` parameter |
+| [#38887](https://github.com/vllm-project/vllm/issues/38887) | Open | E4B extremely slow (~9 tok/s on RTX 4090) — heterogeneous head dims (256 SWA / 512 global) force FlashAttention off, Triton fallback is ~10x slower. Root cause: [FlashAttention #2427](https://github.com/Dao-AILab/flash-attention/issues/2427) caps at head_dim=256, Gemma 4 global layers need 512 |
+| [#12655](https://github.com/vllm-project/vllm/pull/12655) | Open/WIP | Hybrid allocator for full+SWA interleaved models — separate KV pools per attention type. Could inform llama.cpp's approach to #21468 |
+| [#36684](https://github.com/vllm-project/vllm/pull/36684) | Merged | Fix hybrid attention grouping threshold (1.25 → 1.5) for speculative decoding |
+| [#38479](https://github.com/vllm-project/vllm/pull/38479) | Merged | TurboQuant: 2-bit KV cache with WHT rotation — future optimization path |
+| [#39392](https://github.com/vllm-project/vllm/issues/39392) | Open | Tool-call-parser produces `<pad>` tokens under concurrent requests |
+| [#39043](https://github.com/vllm-project/vllm/issues/39043) | Open | Tool calling problems when used with Claude Code as client |
+| [#39133](https://github.com/vllm-project/vllm/issues/39133) | Open | Gemma 4 31B KV cache sizing may not exploit SWA 1024-token window |
+
+### SGLang
+
+| Item | State | Details |
+|------|-------|---------|
+| [#21952](https://github.com/sgl-project/sglang/pull/21952) | Merged | Full Gemma 4 support. Key fixes in PR history: (1) `layer_scalar` must apply to ALL decoder layers (SWA + global), not just full-attention — llama.cpp already does this correctly (`gemma4-iswa.cpp:226` applies `out_scale` unconditionally in the main layer loop); (2) SWA memory pool index retrieval fix; (3) bidirectional image-token attention |
+| [#22277](https://github.com/sgl-project/sglang/issues/22277) | Open | **Monitor** — E4B's 18 shared KV layers + fp8 KV cache crash: dtype mismatch (bf16 query × fp8 key). Shared layers retrieve quantized tensors without dequantization. Pattern to watch for q4_0 KV — llama.cpp's Hadamard rotation (#21513) likely handles this, but confirms shared-KV + quantized-KV is a fragile combination across frameworks |
+
+### MLX
+
+| Item | State | Details |
+|------|-------|---------|
+| [mlx-lm #980](https://github.com/ml-explore/mlx-lm/issues/980) | Closed | `RotatingKVCache` can't support prefix reuse for ANY hybrid-attention model (Gemma 3/4, Qwen 3.5). Multi-turn penalty: ~200s vs ~5s. **Architecturally identical to llama.cpp #21468** |
+| [mlx #3393](https://github.com/ml-explore/mlx/issues/3393) | Closed | Quantized Gemma 4 26B MoE produced garbage on base M4 (10 GPU cores) — `gather_mm` Metal kernel dispatch issue. Fixed |
+| [mlx-lm #1096](https://github.com/ml-explore/mlx-lm/issues/1096) | Closed | Gemma 4 native tool calls not parsed in OpenAI-compat server. Fixed |
+| [mlx-lm #1125](https://github.com/ml-explore/mlx-lm/issues/1125) | Open | Tool call failure with gemma-4-26b-a4b-it-4bit — remaining tool-call issues |
+| [mlx-swift #389](https://github.com/ml-explore/mlx-swift/issues/389) | Open | Gemma 4 architecture not yet supported in mlx-swift |
+
+**MLX verdict:** Not a viable alternative backend for agentic use — tool calling has remaining issues, and mlx-swift lacks Gemma 4 support entirely. The prefix cache reuse problem (#980) confirms this is an architecture-level challenge, not a llama.cpp-specific bug.
+
+### FlashAttention
+
+| Item | State | Details |
+|------|-------|---------|
+| [#2427](https://github.com/Dao-AILab/flash-attention/issues/2427) | Open | FA2 caps at head_dim=256; Gemma 4 global attention uses 512. First production model requiring this. Root cause of vLLM's Triton fallback slowness. Not relevant to Metal (llama.cpp handles 512 natively) but blocks efficient GPU serving in all CUDA frameworks |
+
+## Ecosystem Watch List (2026-04-17)
+
+Repos to monitor for Gemma 4 fixes, parser bugs, and architecture insights relevant to this agent setup.
+
+### High signal
+
+| Repo | Why |
+|------|-----|
+| [huggingface/transformers](https://github.com/huggingface/transformers) | Reference implementation for model config, tokenizer/chat template, tool-call formatting, `layer_scalar`, shared-KV semantics, and generation behavior. HF says Gemma 4's transformers integration was a major standardization point — first-class support from launch |
+| [ollama/ollama](https://github.com/ollama/ollama) | Track Gemma 4 parser/tool-call bugs. Already had tool parsing failures in #15241 (partly fixed by #15254), but [#15315](https://github.com/ollama/ollama/issues/15315) is still open for gemma4:e4b tool parsing errors on Ollama 0.20.1. Parser failures reveal edge cases in Gemma 4's native tool syntax even if you don't use Ollama |
+| [EricLBuehler/mistral.rs](https://github.com/EricLBuehler/mistral.rs) | Rust-native engine with day-one Gemma 4 support (text/image/video/audio + tool calling + agentic). Most interesting non-llama.cpp local backend for Mac-friendly architecture ideas |
+| [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention) | Track head_dim=512 / Gemma 4 full-attention support ([#2427](https://github.com/Dao-AILab/flash-attention/issues/2427)). Not directly useful for Metal, but root bottleneck behind vLLM's slow Triton fallback for E4B/31B heterogeneous attention |
+| [triton-lang/triton](https://github.com/triton-lang/triton) | Lower-level than vLLM, but relevant because vLLM falls back to Triton attention for Gemma 4. If FlashAttention doesn't solve head_dim=512 quickly, Triton kernels may become the practical GPU serving path |
+
+### Medium signal
+
+| Repo | Why |
+|------|-----|
+| [sst/opencode](https://github.com/sst/opencode) | Track local OpenAI-compatible provider and tool-call compatibility. The Gemma 4 ecosystem is still finding parser mismatches between model output, server adapter, and agent client |
+| [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) | More relevant than bare mlx for Gemma 4 on Apple Silicon — HF points to mlx-vlm for full multimodal Gemma 4 support and TurboQuant usage. Not first choice for agentic use until tool calling is cleaner |
+| [huggingface/transformers.js](https://github.com/huggingface/transformers.js) | Gemma 4 support for browser/WebGPU. Not directly useful for M1 agent, but useful if bugs surface in tokenization, ONNX export, or multimodal formatting |
+| [huggingface/trl](https://github.com/huggingface/trl) | Gemma 4 fine-tuning support including multimodal tool-response training. Track only if you care about agent behavior tuning or tool-call datasets |
+| [google-deepmind/gemma](https://github.com/google-deepmind/gemma) / [google-gemini/gemma-cookbook](https://github.com/google-gemini/gemma-cookbook) | Official examples, prompt/template clarifications, model behavior notes. Less likely to produce low-level cache fixes |
+| [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) / [ml-explore/mlx](https://github.com/ml-explore/mlx) / [ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift) | Secondary trackers. mlx-lm #1125 and mlx-swift #389 remain open; mlx-lm #1096 and mlx #3393 are now closed |
+
+### Low signal (GPU serving only)
+
+| Repo | Why |
+|------|-----|
+| [NVIDIA/TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | NVIDIA deployment, FP8/NVFP4, paged KV, MoE serving |
+| [huggingface/text-generation-inference](https://github.com/huggingface/text-generation-inference) | Production serving behavior, less useful for Apple Silicon/local agent |
+| [InternLM/lmdeploy](https://github.com/InternLM/lmdeploy) | CUDA/TurboMind serving, prefix-cache for routed experts |
+
+### Watch queries
+
+```
+repo:huggingface/transformers gemma4 OR "Gemma 4"
+repo:ollama/ollama gemma4 tool parser
+repo:EricLBuehler/mistral.rs gemma4 OR "Gemma 4"
+repo:Dao-AILab/flash-attention "head_dim" "512"
+repo:triton-lang/triton gemma4 OR "Gemma 4"
+repo:sst/opencode gemma4 OR "Gemma 4" OR "tool_calls"
+repo:Blaizzy/mlx-vlm gemma4 OR "Gemma 4"
+```
 
 ## Implementation Plan
 
@@ -379,6 +471,9 @@ Pulled from `d12cc3d1c` → `85dde8dc4` (~8 days, 12 new Gemma 4 commits). Rebui
 | [#21749](https://github.com/ggml-org/llama.cpp/pull/21749) (SWA-full prompt caching) | When merged, retest `--cache-reuse 256` with `--swa-full` via `scripts/bench_kv.sh`. Partial fix only — will not unblock shared KV layer path |
 | [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) (shared KV layer cache-reuse) | When fully fixed, remove Phase 2 workaround code from `askme.py`, verify `--cache-reuse 256` via `scripts/bench_kv.sh` |
 | [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) (KV-quant gibberish on 2nd message) | Monitor for E4B/Metal repro. If confirmed, temporarily revert KV to f16 in configured flags |
+| [#21831](https://github.com/ggml-org/llama.cpp/issues/21831) / [#21912](https://github.com/ggml-org/llama.cpp/issues/21912) (full prompt re-processing) | Related to #21468. If checkpoint workaround proves viable, test on E4B/Metal |
+| [SGLang #22277](https://github.com/sgl-project/sglang/issues/22277) (shared KV + quantized KV crash) | Monitor for similar pattern in llama.cpp — shared KV layers + quantized KV is fragile across frameworks |
+| [vLLM #38887](https://github.com/vllm-project/vllm/issues/38887) / [FA #2427](https://github.com/Dao-AILab/flash-attention/issues/2427) (head_dim=512 blocker) | Not relevant to Metal, but tracks when GPU serving frameworks catch up. If switching to CUDA backend, this matters |
 
 ### Phase 7: Future optimizations
 
@@ -456,3 +551,17 @@ After Phase 5 (build refresh) — **ALL PASS (2026-04-16)**:
 - [Discussion #20572 — Persistent KV cache tutorial](https://github.com/ggml-org/llama.cpp/discussions/20572)
 - [llama-server slots API](https://github.com/ggml-org/llama.cpp/blob/master/examples/server/README.md)
 - [gemma4-iswa.cpp source](https://github.com/ggml-org/llama.cpp/blob/master/src/models/gemma4-iswa.cpp)
+- [PR #21406 — Custom newline split for Gemma 4](https://github.com/ggml-org/llama.cpp/pull/21406)
+- [Issue #21831 — Server forces full prompt re-processing (SWA/recurrent)](https://github.com/ggml-org/llama.cpp/issues/21831)
+- [Issue #21912 — Full prompt reprocessing in agentic workflows](https://github.com/ggml-org/llama.cpp/issues/21912)
+- [vLLM #38826 — Full Gemma 4 support](https://github.com/vllm-project/vllm/pull/38826)
+- [vLLM #38887 — E4B slow on RTX 4090 (Triton fallback)](https://github.com/vllm-project/vllm/issues/38887)
+- [vLLM #12655 — Hybrid allocator for iSWA models (WIP)](https://github.com/vllm-project/vllm/pull/12655)
+- [SGLang #21952 — Gemma 4 support (includes layer_scalar + SWA KV fixes)](https://github.com/sgl-project/sglang/pull/21952)
+- [SGLang #22277 — Shared KV + fp8 KV cache crash](https://github.com/sgl-project/sglang/issues/22277)
+- [mlx-lm #980 — Prefix cache reuse broken for hybrid-attention models](https://github.com/ml-explore/mlx-lm/issues/980)
+- [FlashAttention #2427 — head_dim=512 support needed for Gemma 4](https://github.com/Dao-AILab/flash-attention/issues/2427)
+- [Ollama #15315 — gemma4:e4b tool parsing errors (open)](https://github.com/ollama/ollama/issues/15315)
+- [mistral.rs — Rust-native engine with Gemma 4 support](https://github.com/EricLBuehler/mistral.rs)
+- [OpenCode — local OpenAI-compatible agent client](https://github.com/sst/opencode)
+- [mlx-vlm — Gemma 4 multimodal on Apple Silicon](https://github.com/Blaizzy/mlx-vlm)
