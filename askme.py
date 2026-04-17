@@ -170,8 +170,8 @@ Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"
 MAX_LLM_RETRIES = 2
 
 
-def ask_llm(messages, max_tokens=256, think=False):
-    for attempt in range(MAX_LLM_RETRIES + 1):
+def ask_llm(messages, max_tokens=256, think=False, max_retries=MAX_LLM_RETRIES, raw=False):
+    for attempt in range(max_retries + 1):
         # Determine thinking level: caller-requested or auto-escalate on retry
         if think:
             think_level = "high" if attempt >= 1 else "medium"
@@ -215,18 +215,18 @@ def ask_llm(messages, max_tokens=256, think=False):
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
                 requests.exceptions.RequestException) as e:
             log(f"  Transport error: {type(e).__name__}: {e}")
-            if attempt < MAX_LLM_RETRIES:
+            if attempt < max_retries:
                 time.sleep(1 if attempt == 0 else 3)
                 continue
-            raise LLMTransportError(f"Transport failed after {MAX_LLM_RETRIES + 1} attempts: {e}") from e
+            raise LLMTransportError(f"Transport failed after {max_retries + 1} attempts: {e}") from e
         # HTTP status checks — fail-fast on client errors, retry on server/overload
         sc = resp.status_code
         if sc == 429 or sc >= 500:
             log(f"  HTTP {sc}, retrying...")
-            if attempt < MAX_LLM_RETRIES:
+            if attempt < max_retries:
                 time.sleep(1 if attempt == 0 else 3)
                 continue
-            raise LLMTransportError(f"HTTP {sc} after {MAX_LLM_RETRIES + 1} attempts")
+            raise LLMTransportError(f"HTTP {sc} after {max_retries + 1} attempts")
         if 400 <= sc < 500:
             raise LLMTransportError(f"HTTP {sc}: {resp.text[:200]}")
         # Parse JSON body — retry on non-JSON responses (proxy/gateway glitch)
@@ -234,14 +234,14 @@ def ask_llm(messages, max_tokens=256, think=False):
             rj = resp.json()
         except ValueError as e:
             log(f"  Non-JSON response body: {resp.text[:100]}")
-            if attempt < MAX_LLM_RETRIES:
+            if attempt < max_retries:
                 time.sleep(1 if attempt == 0 else 3)
                 continue
-            raise LLMTransportError(f"Non-JSON response after {MAX_LLM_RETRIES + 1} attempts") from e
+            raise LLMTransportError(f"Non-JSON response after {max_retries + 1} attempts") from e
         # Handle API error responses (JSON body with "error" key)
         if "error" in rj:
             log(f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}")
-            if attempt < MAX_LLM_RETRIES:
+            if attempt < max_retries:
                 continue
             raise KeyError(f"API error: {rj['error']}")
         # Log token usage if available
@@ -261,6 +261,8 @@ def ask_llm(messages, max_tokens=256, think=False):
                 r = msg.get("reasoning", "")
                 reasoning = r.get("content", "") if isinstance(r, dict) else (r or "")
             text = reasoning
+        if raw:
+            return text
         # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
@@ -279,7 +281,7 @@ def ask_llm(messages, max_tokens=256, think=False):
                 raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
             return parsed
         except json.JSONDecodeError:
-            if attempt < MAX_LLM_RETRIES:
+            if attempt < max_retries:
                 think_str = f" thinking={think_level}" if think_level else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
@@ -334,51 +336,6 @@ def summarize_errors(errors):
         for msg in msgs[:3]:  # max 3 per type
             result.append(f"[{etype}] {msg}")
     return result
-
-
-# --- Redundant task auto-skip ---
-
-_SYNONYMS = {
-    "fix": "fix", "correct": "fix", "repair": "fix",
-    "create": "create", "write": "create", "make": "create",
-    "compile": "compile", "build": "compile",
-    "run": "run", "execute": "run",
-    "verify": "verify", "check": "verify", "test": "verify",
-}
-
-_STOP = {"the", "and", "then", "that", "this", "with", "from", "for",
-         "its", "all", "not", "but", "into", "also"}
-
-
-def _task_keywords(text):
-    """Extract normalized keyword set from a task description."""
-    words = re.findall(r'[a-z0-9_.]+', text.lower())
-    result = set()
-    for w in words:
-        if len(w) >= 3 and w not in _STOP:
-            result.add(_SYNONYMS.get(w, w))
-    return result
-
-
-def _task_is_redundant(task, completed_tasks):
-    """Check if task is a near-duplicate of any single completed task.
-
-    Returns the matched completed task description, or None.
-    Compares against each completed task individually — never unions.
-    One-way only: skip when new task's keywords ⊆ completed task's keywords.
-    The reverse (completed ⊆ new) is unsafe — the new task may add work.
-    """
-    task_kw = _task_keywords(task)
-    if len(task_kw) < 3:
-        return None  # too few keywords to judge — don't skip
-
-    for ct in completed_tasks:
-        ct_kw = _task_keywords(ct)
-        if not ct_kw:
-            continue
-        if task_kw.issubset(ct_kw):
-            return ct
-    return None
 
 
 def get_plan(user_prompt, state):
@@ -606,15 +563,6 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             t_task = time.time()
             log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
-            # Auto-skip: if task is a near-duplicate of one completed task, skip
-            if state["completed_tasks"]:
-                matched = _task_is_redundant(task, state["completed_tasks"])
-                if matched:
-                    log(f"  Auto-skip: near-duplicate of completed '{matched[:60]}'")
-                    history.append({"event": "skip", "task": i, "reason": "redundant",
-                                    "matched": matched})
-                    continue
-
             task_done = False
             use_think = False  # enable thinking after failed step execution
             dup_skip_count = 0  # consecutive duplicate write skips
@@ -673,7 +621,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 entry["_find"] = action.get("find", "")
                                 entry["_replace"] = action.get("replace", "")
                             state["last_steps"].append(entry)
-                            use_think = True
+                            # Defer thinking escalation: first duplicate skip gets a
+                            # corrective observation only; escalate on 2+ consecutive skips.
+                            # Saves ~10s of thinking time on harmless first-time duplicates.
+                            if dup_skip_count >= 2:
+                                use_think = True
                             continue
                     elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                         if prev.get("ok"):

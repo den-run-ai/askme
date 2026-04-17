@@ -173,7 +173,7 @@ Gemma 4 E4B has opt-in thinking (not always-on), so:
 | Thinking-on-retry | Thinking enabled only after failure: zero cost on happy path, chain-of-thought on retry |
 | Null content | OpenRouter reasoning can return `content: null` — falls back to `reasoning_content` / `reasoning` fields to recover JSON, then requires result is a dict (non-dict like `null` or `[]` triggers retry) |
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models output objects instead of escaped strings |
-| Duplicate guard | Per-action-type loop detection: write(same content)→auto-done, shell(same+ok)→auto-done, shell(same+fail)→auto-fail |
+| Duplicate guard | Per-action-type loop detection: write(same content)→skip+continue, shell(same+ok)→auto-done, shell(same+fail)→auto-fail. Thinking deferred on duplicate skips: first skip gets corrective observation only, thinking activates on 2+ consecutive skips (~10s saved on harmless single duplicates) |
 
 ## Known LLM Limitations
 
@@ -198,7 +198,7 @@ When the planner creates a task that was already completed by a previous task (e
 
 **Impact:** ~370s wasted on a task that should have been instant. The model knows the task is done but can't express it concisely — it generates explanatory text instead of JSON.
 
-**Potential fix:** Detect when a task description matches completed work and auto-skip, or reduce planner task overlap.
+**Mitigation implemented:** Redundant task auto-skip detects completed work before entering the executor step loop. See "Redundant Task Auto-Skip" below for the current step-aware design.
 
 ### Path Truncation in Long Temp Paths (Local Gemma 4 E4B)
 
@@ -327,7 +327,7 @@ Changes to `ask_llm()`:
 - API error responses (`"error"` key) are retried instead of crashing on missing `"choices"`
 
 Changes to `run()` / `int_run()`:
-- `use_think` flag set to `True` after any failed step execution, `False` after success
+- `use_think` flag set to `True` after any failed step execution, `False` after success. For duplicate write/edit skips, thinking is deferred: first skip injects a corrective observation without thinking, thinking only activates on 2+ consecutive skips
 - Passed through `get_step()` → `ask_llm()` — thinking activates on the step after failure
 
 ### Bugs Found During Implementation
@@ -778,7 +778,7 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestIntegration"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 ```
 
-**Unit tests (132 non-integration, 27 skipped integration/openrouter):**
+**Unit tests (134 non-integration, 27 skipped integration/openrouter):**
 - `TestExecuteShell` — success, failure, timeout, stderr, truncation, cwd, empty output
 - `TestExecuteWrite` — file creation, relative paths, nested dirs, bad paths
 - `TestExecuteEdit` — single match, no match, multiple match, missing file, relative path, empty find, delete text, absolute path
@@ -790,7 +790,7 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy o
 - `TestCrossTaskState` — verifies completed_tasks and last step carryover across tasks
 - `TestOutputFormatting` — verifies write/edit output uses basename, slim state uses basename for write/edit/read args
 - `TestWriteContentSerialization` — verifies dict/list content auto-serialized to JSON in write actions
-- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write/edit duplicates skip and continue, shell duplicates auto-done/fail, legitimate retries allowed, read excluded, edit internals not in slim state
+- `TestDuplicateGuard` — verifies per-action-type duplicate detection: write/edit duplicates skip and continue, shell duplicates auto-done/fail, legitimate retries allowed, read excluded, edit internals not in slim state, deferred thinking escalation (first skip=no thinking, 2+ consecutive=thinking)
 - `TestServerConfig` — verifies optimized server config: single slot with full context, slot save/restore via API, cache file on disk
 - `TestPlannerReasoning` — verifies conditional planner thinking (first plan=False, replans=True), local/OpenRouter request shapes for both modes, PLANNER_MAX_TOKENS, SYSTEM_PLAN specificity hints, null-content retry on replan
 
@@ -888,26 +888,14 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 - **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory. q8_0 is 7% slower in single-trial testing — not recommended. See [gemma4-setup.md](gemma4-setup.md) Phase 3.
 - **Do NOT use `--cache-reuse 256`** — broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). Server explicitly disables it. Manual slot save/restore (`CACHE_WORKAROUND=1`) is counterproductive (40% slower). No viable workaround until upstream fix. See [gemma4-setup.md](gemma4-setup.md) Phase 2.
 
-## Redundant Task Auto-Skip (Implemented 2026-04-08)
+## Redundant Task Handling (Removed pre-check 2026-04-17)
 
-### Motivation
+No pre-execution skip check. When the planner creates tasks that overlap with already-completed work, the executor handles it naturally — it sees `completed_tasks` in its state and emits `{"action":"done"}` on step 1 (~1-2s per redundant task).
 
-When the planner creates tasks that overlap with already-completed work, the local model (Gemma 4 E4B) wastes hundreds of seconds trying to express "this is already done" — it generates verbose reasoning that exhausts `max_tokens` without producing valid JSON. Observed in `test_fix_python_syntax_error`: task 2 "Correct the syntax error in greet.py" was redundant after task 1 already fixed it, burning ~370s across 3 JSON parse failures.
+### Why no pre-check
 
-### Design
+Both keyword heuristics and LLM-based classification were tried and removed:
+- **Keyword heuristics** (2026-04-08 to 2026-04-16): Zero latency but brittle — synonym coverage never complete, filler words caused false negatives, every edge case tempted adding more special cases.
+- **LLM classification** (2026-04-16 to 2026-04-17): 6 prompt engineering attempts failed. The 4B model (Gemma 4 E4B) cannot do classification — it enters executor mode when it sees task descriptions, regardless of system prompt. Thinking helps (`think=high` gets correct answers) but costs 23-26s per check, far worse than the 1-2s executor fallback.
 
-Pairwise keyword heuristic in `_run_loop()`, checked before entering the step loop for each task:
-
-1. **`_task_keywords(text)`** — extracts normalized keyword set: lowercase, min 3 chars, stop-word filtered, synonym-normalized (`fix/correct/repair` → `fix`, `create/write/make` → `create`, etc.)
-2. **`_task_is_redundant(task, completed_tasks)`** — compares new task against each completed task individually (never unions). Skip triggers only when the new task's keywords ⊆ a completed task's keywords (one-way). The reverse direction (completed ⊆ new) is unsafe — the new task may add work beyond what was completed. Minimum 3 keywords required to avoid false positives on generic tasks.
-
-### Key invariants
-
-- **Pairwise, not union**: Prevents false positives where unrelated completed tasks cover keywords in aggregate (e.g., `["create main.c", "compile tests"]` would wrongly make `"compile main.c"` look redundant)
-- **Min-3-keyword guard**: Tasks with ≤2 keywords (e.g., "fix bug") are never skipped — too generic to match safely
-- **Skipped tasks NOT in `completed_tasks`**: Preserves replan recovery — if a false-positive skip occurs, the planner can reintroduce the task on replan
-- **History-only event**: Skip is recorded as `{"event": "skip", "task": i, "reason": "redundant", "matched": "..."}` — no state mutation
-
-### Testing
-
-Unit tests in `TestRedundantTaskSkip` (12 tests): exact match, synonym match, subset match, different-action rejection, different-file rejection, union trap, min-keyword guard, generic-word guard, empty-completed guard, state integrity (not in completed_tasks), history event, replan recovery.
+The executor-based approach is simpler, robust, and fast enough.

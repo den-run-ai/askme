@@ -74,8 +74,7 @@ The core loop lives in `_run_loop()`, which returns `{"status": "complete"|"exha
 - **State split**: Planner sees the full picture (environment, all errors, policy). Executor sees only what it needs (current task, last 3 steps, missing tools, policy). Write/read args use **basename** in slim state — critical for the LLM to recognize file operations.
 - **`ask_llm` parsing pipeline**: Strip `<think>` tags → strip `<|channel>` blocks → strip markdown fences → extract JSON → retry up to 2 times with auto-escalating thinking effort.
 - **LLM transport**: All requests use `timeout=LLM_TIMEOUT`. Transport errors (connection refused, timeout, non-JSON, 5xx/429) retry with backoff. Client errors (4xx) fail fast. `LLMTransportError` is raised on exhaustion; planner catches it as a plan attempt, executor catches it as a replan trigger.
-- **Duplicate action guard**: Handles model looping — write/edit duplicates skip and continue, shell duplicates (same cmd) auto-done/fail. Timeout failures are exempt (get one retry with longer timeout).
-- **Redundant task auto-skip**: Before executing each task, a pairwise keyword heuristic checks if it's a near-duplicate of a single completed task (synonym-normalized, one-way subset: new ⊆ completed only, min-3-keyword guard). Skipped tasks are NOT added to `completed_tasks` — they remain eligible for replan recovery. Zero latency, no LLM call.
+- **Duplicate action guard**: Handles model looping — write/edit duplicates skip and continue, shell duplicates (same cmd) auto-done/fail. Timeout failures are exempt (get one retry with longer timeout). Thinking escalation is deferred on duplicate skips: first skip gets a corrective observation only, thinking activates on 2+ consecutive skips.
 - **Working directory isolation**: `run()` creates `/tmp/nanagent_*` per invocation. All shell/write/read resolve there. Callers can pass `working_dir=` to override (tests do this).
 
 ## Testing Conventions
