@@ -51,16 +51,14 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterMedium"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"
 
-# KV cache benchmarks (stop llama-server first)
-./scripts/bench_kv.sh q4_0          # single trial, one KV mode
-./scripts/bench_kv.sh all 3         # 3 trials each for f16, q8_0, q4_0
-
 # Rebuild llama.cpp (if needed, from llama.cpp root)
 cmake -B build -DLLAMA_CURL=ON
 cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 ```
 
 ## Architecture
+
+For the full design rationale, state shapes, and server-config reference, see [ARCHITECTURE.md](ARCHITECTURE.md). The summary below is the minimum needed to navigate the code.
 
 `askme.py` implements a **Preflight → Plan → Execute → Replan** loop:
 
