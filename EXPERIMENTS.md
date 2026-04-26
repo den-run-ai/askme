@@ -29,31 +29,34 @@ Execution is sequenced in waves so cheap-but-high-information experiments run fi
 
 Ordered by execution sequence (Wave, then within-wave order). For a topic-based view, see the section headers below.
 
-| Run | ID  | Experiment                                              | Wave | Priority | Effort | Status  |
-|-----|-----|---------------------------------------------------------|------|----------|--------|---------|
-| 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | planned |
-| 2   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | planned |
-| 3   | E09 | Q8_0 model trial on medium/hard tests                   | 1    | P1       | S      | planned |
-| 4   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned |
-| 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | planned |
-| 6   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned |
-| 7   | E05 | Error-class-specific retry policy                       | 3    | P1       | M      | planned |
-| 8   | E06 | Typed recovery templates by `error_type`                | 3    | P1       | M      | planned |
-| 9   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned |
-| 10  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned |
-| 11  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned |
-| 12  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned |
-| 13  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned |
-| 14  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned |
-| 15  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned |
+| Run | ID  | Experiment                                              | Wave | Priority | Effort | Status   |
+|-----|-----|---------------------------------------------------------|------|----------|--------|----------|
+| 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
+| —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
+| 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | planned  |
+| 3   | E06 | Typed recovery templates by `error_type`                | 2    | P1       | M      | planned  |
+| 4   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | planned  |
+| 5   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
+| 6   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
+| 7   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned  |
+| 8   | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
+| 9   | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
+| 10  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
+| 11  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
+| 12  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
+| 13  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
+| 14  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
 
-- **Wave 1 runs E08 before E09** — server-flag test is cheaper than a model swap. Both are zero-code changes; run them under the E01 harness to get fresh baselines that reprice the remaining backlog.
-- **Wave 2 clusters E02, E03, E07** — all S-effort with non-overlapping surface (prompts / retry / validator). Can be run independently without confounding.
-- **Wave 3 respects E05 → E06 dependency** — E06's typed recovery templates build on E05's error-class branching. E11 and E04 are independent but ranked by "directly tied to documented cost" (E11) vs "expands action surface" (E04).
+Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis (PERFORMANCE.md). The data shows E05/E06 is the highest-leverage scaffold fix — thinking-inflated reads after edit failures account for ~250–300s per `fix_missing_include` trial. This reprices Wave 2 vs Wave 3 priority.
+
+- **Wave 2 promotes E05/E06 alongside E03.** E05/E06 targets the single biggest time sink (thinking escalation on edit failures → 140–253s reads). E03 (JSON repair) is complementary — repairs avoid the retry entirely. E02 and E07 remain in Wave 2 as independent S-effort items.
+- **Wave 1 runs E09 next** — E08 archived (subsumed by Phase 6). E09 is the remaining zero-code baseline that can reprice the backlog. E09 could reduce the underlying edit failure rate from the model side, potentially obviating some scaffold fixes.
+- **Wave 3 clusters E11, E04** — E11 (task-local replan) saves ~60–90s per replan on local but is lower leverage than E05/E06. E04 is independent.
 - **Wave 4 is effort-ascending then dependency** — E12 and E15 are S-effort standalones. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
 - **Wave 5 (E10) stays deferred** — redesign-scale; do not start until Waves 2–4 close and the harness can detect reliability regressions.
+- **Recommended execution order within waves:** E05/E06 → E03 → E11 → E09. Data-backed: E05/E06 targets ~300s/trial waste, E03 targets ~30–60s/trial, E11 targets ~60–90s/trial, E09 reduces root cause.
 
 ## Prerequisite
 
@@ -77,8 +80,9 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 - **Metric.** Harness produces reliable deltas (median ± range) across N=3.
 - **Upside.** Unlocks the rest of the backlog. Makes PERFORMANCE.md entries directly reproducible.
 - **Risk.** Low. Harness is additive; no production code changes.
-- **Code.** `tests/_test_support.py` (harness), optionally a small CLI wrapper.
+- **Code.** `tests/bench_harness.py` (standalone CLI). No `askme.py` changes.
 - **Effort.** S.
+- **Status.** Done (2026-04-26). Harness discovers tests via `pytest --collect-only`, runs N trials as subprocesses with per-trial `AGENT_RUN_LOG`, parses JSONL, reports median+range for wall time, replans, steps, thinking retries, LLM calls, and tokens. Saves `summary.json` for programmatic comparison. Documented in README.md and CLAUDE.md.
 
 ## Prompts / output format
 
@@ -95,6 +99,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 ### E03 — Tiered retry contract + JSON repair
 
 - **Hypothesis.** Parse retries dominate medium-test time (PERFORMANCE.md:82, 5× retries on `fix_python_syntax`). Most failures are truncation or verbose-reasoning leaks, not semantic errors. Current retry only changes thinking level, not the output contract.
+- **Evidence (2026-04-26).** Local E4B: 2–3 failed edit attempts per `fix_missing_include` trial at ~30–60s each. If JSON repair salvages even one, that's one fewer thinking retry saved.
 - **Change.** On parse fail:
   1. First retry: same contract, same thinking.
   2. Second retry: strict contract — "Output only the JSON object, shortest possible, no reasoning".
@@ -142,13 +147,14 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 ### E05 — Error-class-specific retry policy
 
 - **Hypothesis.** Current retry always escalates thinking (medium → high) regardless of error class. But `missing_tool` is not fixable by more thinking; `timeout` wants a longer timeout; `compile_error` wants to re-read the file first.
+- **Evidence (2026-04-26).** JSONL analysis of `fix_missing_include` on local E4B: failed edit → thinking escalation → next `read` takes 140–253s because thinking tokens consume budget. This pattern accounts for ~250–300s per trial (~45% of wall time). The edit failure doesn't need more thinking — it needs to read the file first.
 - **Change.** Branch on `classify_error` output before choosing retry strategy:
   - `missing_tool` → fail fast with prerequisite message, skip thinking escalation.
   - `timeout` → bump timeout, no thinking.
   - `compile_error` / `missing_file` → inject "read before edit" template (see E06).
   - `unknown` → current behavior (escalate thinking).
 - **Metric.** Wasted-thinking-time on unrecoverable failures; replan count.
-- **Upside.** High — `classify_error` types exist but are barely used.
+- **Upside.** Highest-leverage scaffold fix — targets ~300s/trial waste on `fix_missing_include`.
 - **Risk.** Low. Easy to ablate per type.
 - **Code.** `askme.py:512` (`classify_error`), `askme.py:785` (error handling in step loop), `askme.py:205` (`ask_llm` — retry ladder).
 - **Effort.** M.
@@ -156,6 +162,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 ### E06 — Typed recovery templates by `error_type`
 
 - **Hypothesis.** After a `compile_error`, the next action is almost always `read` the offending file, then `edit`. After `missing_file`, the next action is often `search` or `ls`. Encoding this as a template is cheaper than asking the model to rediscover it.
+- **Evidence (2026-04-26).** In all 9 `fix_missing_include` trials (local E4B), the successful recovery pattern is always: failed edit → read file → successful edit. But the scaffold currently lets the model rediscover this at ~150s cost per cycle (thinking-inflated). A template injection would short-circuit to the read immediately.
 - **Change.** On failed step, inject a short per-error-type observation into `last_steps` that nudges the next action. E.g., for `compile_error`: `"Read the file before editing. Prefer edit over write for localized fixes."`
 - **Metric.** Steps-to-recovery after typed failure; replan count.
 - **Upside.** Compounds with E05. Addresses the `fix_python_syntax` / `fix_missing_include` slow-recovery pattern directly.
@@ -166,9 +173,10 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 ### E11 — Task-local replan before full replan
 
 - **Hypothesis.** Full replan costs ~73s on local (planner thinking budget, ARCHITECTURE.md:185). Most failures are task-local: one task's plan was wrong, the others are fine. A scoped "re-plan this task only" is dramatically cheaper.
+- **Evidence (2026-04-26).** All 3 `fix_missing_include` trials replan once at 69–112s. The replan produces essentially the same 3-task plan. Task-local replan would save ~60–90s per trial.
 - **Change.** On task failure, call a mini-planner with `(failed_task, errors, completed_tasks)` that returns only a replacement task description. Reserve full `run()` replan for when task-local replan itself fails.
 - **Metric.** Replan count; total test time on failure-heavy medium/hard tests.
-- **Upside.** High on medium tests with ≥1 replan today.
+- **Upside.** Medium — saves ~60–90s per replan on local, but lower leverage than E05/E06.
 - **Risk.** Medium. Must avoid infinite task-local loop — cap at 1 task-local attempt before escalating to full replan.
 - **Code.** `askme.py:651` (replan loop), `askme.py:384` (`get_plan`).
 - **Effort.** M.
@@ -187,22 +195,17 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 
 ## Performance / runtime
 
-### E08 — `--checkpoint-every-n-tokens` on E4B
+### E08 — `--checkpoint-every-n-tokens` on E4B — ARCHIVED
 
-- **Hypothesis.** `--checkpoint-every-n-tokens 1024 --ctx-checkpoints 256` was confirmed working on Qwen ([#21831](https://github.com/ggml-org/llama.cpp/issues/21831), gemma4-setup.md:183). Explicitly untested on E4B/Metal. **Caveat.** `gemma4-setup.md:132` is emphatic that **no viable workaround exists** for #21468 today — manual slot save/restore (Phase 2) tested as counterproductive, same iSWA bug affects restore. This experiment probes whether checkpointing happens to dodge the iSWA path; it is not a confirmed workaround.
-- **Change.** Launch `llama-server` with the two flags. Run easy integration under E01's harness and measure per-call prompt eval tokens. If prompt tokens stay constant across calls, it did not help. Do not escalate to medium/hard tests unless the easy signal is clearly positive.
-- **Metric.** Per-call `prompt_tokens` from `AGENT_RUN_LOG`. Secondary: total test time.
-- **Upside.** If it works, meaningful — but don't pre-count it. Most likely outcome is "no effect, reverts immediately."
-- **Risk.** Low. Server-side flag, easy to revert. If it breaks iSWA like `--cache-reuse` did, tests fail loudly.
-- **Code.** `gemma4-setup.md` (server flags), no `askme.py` change.
-- **Effort.** S.
+Moved to [Archived / rejected](#archived--rejected).
 
 ### E09 — Q8_0 model trial
 
 - **Hypothesis.** `gemma4-setup.md:22` notes Q8_0 (8 GB) is viable and "higher quality." Parse retries likely drop with better token probabilities. On a 16 GB M1 with q4_0 KV the memory headroom exists.
+- **Evidence (2026-04-26).** Local E4B generates bad edit JSON ~60% of first attempts (vs near-zero on OpenRouter 26B). Q8_0 could reduce this underlying failure rate. However, JSONL analysis shows ~60% of `fix_missing_include` wall time is scaffold-addressable — run E05/E06/E03 first.
 - **Change.** Download Q8_0 GGUF, launch with same flags, run easy + medium integration under E01's harness.
-- **Metric.** Parse-retry count, total test time, especially on `fix_python_syntax` (currently 19 min).
-- **Upside.** Could obviate several prompt-tuning experiments if parse failures are the real bottleneck.
+- **Metric.** Parse-retry count, total test time, especially on `fix_missing_include` (currently 609s median).
+- **Upside.** Reduces root-cause edit failure rate, but scaffold fixes (E05/E06/E03) target the same symptom more directly.
 - **Risk.** Low. Model is a swap; reverts trivially. Decode throughput may drop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
 - **Effort.** S.
@@ -245,7 +248,9 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 
 ## Archived / rejected
 
-None yet. When an experiment is killed or superseded, move its block here with a one-line reason + date.
+### E08 — `--checkpoint-every-n-tokens` on E4B (2026-04-26)
+
+**Archived: subsumed by Phase 6.** The `--swa-full --cache-reuse 256` fix ([#22288](https://github.com/ggml-org/llama.cpp/pull/22288)) solved the prompt re-processing problem that checkpointing was meant to work around. Phase 6 deterministic benchmark confirmed no downside vs Phase 5 and 4.5% faster prompt eval. The checkpoint flags (`--checkpoint-every-n-tokens 1024 --ctx-checkpoints 256`) were a Qwen workaround for the same underlying issue (#21468/#21831); `gemma4-setup.md:559` explicitly notes this path is "effectively subsumed."
 
 ## References
 

@@ -58,12 +58,20 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"
 
 # Integration — OpenRouter (requires OPENROUTER_API_KEY in .env)
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
+
+# Multi-trial benchmark harness (reports median + range across N trials)
+python3 tests/bench_harness.py                                    # 3 trials, easy, local
+python3 tests/bench_harness.py --suite medium --trials 5          # 5 trials, medium, local
+python3 tests/bench_harness.py --backend openrouter --suite hard  # 3 trials, hard, openrouter
+python3 tests/bench_harness.py --test test_shell_and_write        # single test
+python3 tests/bench_harness.py --list                             # show available tests
 ```
 
 ## Files
 
 - `askme.py` — the agent
 - `tests/` — unit and integration tests, split by concern
+- `tests/bench_harness.py` — multi-trial benchmark harness (E01)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — loop design, state model, action model, current constraints
 - [gemma4-setup.md](gemma4-setup.md) — llama-server config, KV cache, model notes
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices

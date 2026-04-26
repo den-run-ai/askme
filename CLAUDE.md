@@ -46,6 +46,11 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterMedium"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"
+
+# Multi-trial benchmark harness (median + range across N trials)
+python3 tests/bench_harness.py                                    # 3 trials, easy, local
+python3 tests/bench_harness.py --suite medium --backend openrouter # 3 trials, medium, openrouter
+python3 tests/bench_harness.py --list                             # show available tests
 ```
 
 For the `llama-server` launch command, see [README.md](README.md) or [gemma4-setup.md](gemma4-setup.md).

@@ -181,7 +181,7 @@ Active limitations that still shape the design.
 - **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; final validation catches any that slip through.
 - **Path truncation in long temp paths (local).** The local model reproduces long absolute paths in shell commands and sometimes truncates them. `SYSTEM_STEP` recommends relative paths; the 26B model on OpenRouter handles this correctly.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
-- **`--cache-reuse` broken for Gemma 4 iSWA.** Server explicitly disables it ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). Manual slot save/restore (`CACHE_WORKAROUND=1`) is counterproductive — same bug affects restore, making requests ~40% slower. No viable workaround until upstream fix. See [gemma4-setup.md](gemma4-setup.md).
+- **`--cache-reuse` requires `--swa-full` for Gemma 4 iSWA.** Fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (build `a702f395`+). Current default: `--swa-full --cache-reuse 256`. Not compatible with `--mmproj`. See [gemma4-setup.md](gemma4-setup.md).
 - **Replan thinking latency.** ~73s per replan on local (thinking shares the 768-token planner budget). Justified by better error analysis on recovery plans; not justified on first plans.
 
 ## Multi-Backend Support

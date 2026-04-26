@@ -6,6 +6,89 @@ Benchmark history and test-run matrices for NanAgent. Each entry is a point-in-t
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## E01 Harness Baseline — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
+
+Local E4B baseline with Phase 6 server config (`--swa-full --cache-reuse 256`). 3 trials per test. Build `a702f395`, M1 16 GB.
+
+### Easy (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | Replans | Thinking retries | LLM calls | Prompt tok | Completion tok |
+|---|---|---|---|---|---|---|---|---|
+| `create_and_read_file` | 3/3 | 33.7s (27.2–445.2) | 2 | 0 (0–1) | 0 (0–1) | 5 (5–6) | 2637 (2610–3338) | 106 (95–1296) |
+| `shell_and_write` | 3/3 | 20.1s (19.6–36.1) | 1 | 0 | 0 | 3 | 1530 (1530–1590) | 57 (57–118) |
+| `multi_step_build` | 3/3 | 118.7s (102.7–124.5) | 5 (5–6) | 1 | 0 | 11 (11–12) | 6401 (6389–6892) | 541 (532–570) |
+
+**Observations:**
+- Trial 1 of `create_and_read_file` was a 445s cold-start outlier (1 replan + 1 thinking retry). Trials 2–3 settled to 27–34s.
+- `multi_step_build` required 1 replan on all 3 trials (vs 0 on OpenRouter 26B). Local E4B model struggles with multi-step planning quality.
+- `shell_and_write` is the most stable: 1 step, 0 replans, 0 retries across all trials.
+- Local is ~5–24× slower than OpenRouter 26B (dominated by ~7 tok/s decode).
+
+### Medium (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | Failed | Replans | Thinking retries | LLM calls | Prompt tok | Completion tok |
+|---|---|---|---|---|---|---|---|---|---|
+| `fix_python_syntax_error` | 3/3 | 124.8s (118.6–583.9) | 5 (5–8) | 0 | 0 (0–1) | 1 (1–3) | 9 (9–14) | 4335 (4335–7285) | 882 (743–2286) |
+| `fix_missing_include` | 3/3 | 609.1s (569.9–679.3) | 7 | 3 (3–4) | 1 | 3 (2–3) | 15 (14–16) | 10436 (9895–11493) | 4072 (3336–5149) |
+| `create_missing_file_then_use` | 3/3 | 29.0s (24.5–171.4) | 3 (2–10) | 0 | 0 (0–1) | 0 | 6 (5–13) | 3223 (2700–7663) | 129 (112–899) |
+
+**Observations:**
+- `fix_missing_include` is the clear local bottleneck: 609s median, always 1 replan, 3–4 failed steps, 2–3 thinking retries. Top target for E03 (retry/JSON repair) and E05 (error-class retry).
+- Trial 1 outlier pattern persists across all tests — first trial of each runs 2–5× slower (cold model state or unlucky planning). Median excludes these outliers.
+- Thinking retries dominate cost: `fix_missing_include` 2–3 per trial, `fix_python_syntax_error` 1–3 per trial.
+- `fix_python_syntax_error` improved vs historical (median 125s vs 520s on 2026-04-07 build) — likely `edit` action and byte token fix.
+- `create_missing_file_then_use` behaves like an easy test when the planner cooperates (25–29s on trials 2–3).
+- Local is ~9–16× slower than OpenRouter 26B on medium tests.
+
+### `fix_missing_include` time breakdown (JSONL analysis)
+
+Per-trial breakdown from run logs, showing where time goes on the worst local test:
+
+| Category | Trial 1 | Trial 2 | Trial 3 | Scaffold-fixable? |
+|---|---|---|---|---|
+| Planning (incl. replan) | 86s | 112s | 112s | E11 (task-local replan) |
+| Failed edit attempts | 132s | 64s | 101s | E03 (JSON repair) |
+| Thinking-inflated reads | 304s | 142s | 285s | E05/E06 (error-class retry) |
+| Successful steps | ~20s | ~11s | ~22s | irreducible |
+
+The dominant waste pattern: model fails an `edit` (bad JSON or wrong `old` string) → scaffold escalates thinking → next `read` takes 140–253s because thinking tokens consume budget. A failed edit doesn't need more thinking — it needs to read the file first. Error-class branching (E05) + recovery templates (E06: "read before edit retry") would skip the expensive thinking escalation. Full replans produce essentially the same 3-task plan — task-local replan (E11) would cost ~10–20s instead of 69–112s.
+
+~60% of `fix_missing_include` wall time is scaffold-addressable. The remaining ~40% is irreducible model quality (E4B generates bad edit JSON ~60% of first attempts vs near-zero on OpenRouter 26B).
+
+## E01 Harness Baseline — 2026-04-26, OpenRouter (Gemma 4 26B-A4B)
+
+First multi-trial harness run (E01). 3 trials per test, all suites. Establishes the baseline for Wave 1+ experiments. 27/27 passed.
+
+### Easy (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | LLM calls | Prompt tok | Completion tok |
+|---|---|---|---|---|---|---|
+| `create_and_read_file` | 3/3 | 2.5s (2.0–4.0) | 2 | 5 | 2686 | 114 (114–116) |
+| `shell_and_write` | 3/3 | 3.9s (3.8–5.2) | 2 | 4 | 2268 | 207 |
+| `multi_step_build` | 3/3 | 5.0s (4.4–8.9) | 3 (3–4) | 6 (6–9) | 3370 (3370–5463) | 175 (175–533) |
+
+### Medium (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | Failed | Replans | LLM calls | Prompt tok |
+|---|---|---|---|---|---|---|---|
+| `fix_python_syntax_error` | 3/3 | 14.0s (8.4–15.1) | 6 (6–8) | 1 | 0 | 9 (9–11) | 4655 (4655–5692) |
+| `fix_missing_include` | 3/3 | 38.7s (21.9–41.0) | 8 (7–9) | 2 (2–3) | 1 (0–1) | 12 (12–13) | 10050 (9483–10361) |
+| `create_missing_file_then_use` | 3/3 | 2.2s (2.0–2.2) | 2 | 0 | 0 | 5 | 2721 |
+
+### Hard (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | Failed | Replans | LLM calls | Prompt tok |
+|---|---|---|---|---|---|---|---|
+| `replan_build_with_dependency` | 3/3 | 43.0s (8.3–47.1) | 8 (4–16) | 0 (0–1) | 1 (0–1) | 23 (9–28) | 15875 (5677–19181) |
+| `replan_fix_wrong_command` | 3/3 | 19.6s (17.7–29.0) | 3 | 1 | 0 | 6 | 4168 |
+| `replan_multi_step_recovery` | 3/3 | 9.5s (7.8–9.8) | 2 | 0 | 0 | 5 | 3201 |
+
+**Observations:**
+- `fix_missing_include` has the most variance: 21.9–41.0s wall, 0–1 replans, 2–3 failed steps. This is the test most likely to benefit from Wave 2 experiments (E03 retry/repair, E05 error-class policy).
+- `replan_build_with_dependency` shows extreme variance: 8.3–47.1s, 4–16 steps. Trial 1 solved it in 4 steps with no replan; trials 2–3 needed replans and 3–4× more steps. Targets E11 (task-local replan) and E13 (planner critique).
+- Zero thinking retries across all hard tests. Easy/medium also zero except 1 on `fix_missing_include` trial 2.
+- `create_missing_file_then_use` behaves like an easy test (2.0–2.2s, 2 steps, no failures).
+
 ## Phase 6 Caching A/B — 2026-04-25, build `a702f395` (master)
 
 Synthetic + real-workload comparison of Phase 5 (no `--swa-full`, no `--cache-reuse`) vs Phase 6 (`--swa-full --cache-reuse 256`). Full analysis in [caching_analysis.md](caching_analysis.md).
