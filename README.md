@@ -17,6 +17,7 @@ mkdir -p /tmp/llama-cache
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
+  --swa-full --cache-reuse 256 \
   -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 
@@ -42,6 +43,7 @@ LLM_BACKEND=openrouter python3 askme.py "your task here"
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Whether the agent may install software |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
+| `AGENT_RUN_LOG` | (unset) | Path to append JSONL events (`run_start`, `plan`, `tokens`, `step`, `task_complete`, `task_failed`, `validation`, `run_end`). Disabled when unset. |
 
 ## Tests
 

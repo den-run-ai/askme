@@ -4,7 +4,41 @@ Benchmark history and test-run matrices for NanAgent. Each entry is a point-in-t
 
 **Staleness policy.** Each section is dated. If an entry is more than ~6 months old and the code that produced it has changed materially, treat it as historical only — re-run before citing numbers. Sections marked `[stale]` have known divergence from current code.
 
-For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md).
+For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
+
+## Phase 6 Caching A/B — 2026-04-25, build `a702f395` (master)
+
+Synthetic + real-workload comparison of Phase 5 (no `--swa-full`, no `--cache-reuse`) vs Phase 6 (`--swa-full --cache-reuse 256`). Full analysis in [caching_analysis.md](caching_analysis.md).
+
+**Synthetic A/B (isolated prefix reuse test):**
+- Both configs reuse warm prefix identically via `cache_prompt:true` (in-slot LCP). The `--cache-reuse` flag only affects the across-slot/checkpoint path, which a single-slot back-to-back workload doesn't exercise.
+- `--swa-full` decode overhead: ~5% at 8k context, within noise at 500 tokens. No upstream perf bug.
+
+**Easy integration rerun (full logging, each config in isolation):**
+
+| Config | test_create_read | test_shell_write | test_multi_step | Total | Result |
+|---|---|---|---|---|---|
+| Phase 5 | 90.5s | 65.8s | 331.0s (replan) | 487s (8:07) | 3/3 pass |
+| Phase 6 | FAIL (timeouts) | 40.9s | 122.6s (replan) | 974s (16:13) | 2/3 pass |
+
+**Key findings:**
+- Model behavior variance (runaway 256-token generation, duplicate write loops) dominates wall time — not config.
+- Phase 5's 1:36 baseline was a single lucky run; this rerun took 8:07 with the same config.
+- When model cooperates, Phase 6 tests 2+3 ran faster (163s vs 397s) thanks to cache reuse.
+- Phase 6 test 1 failed due to cold-start decode slowdown (2.5 tok/s vs 8 tok/s normal), which compounded with runaway generation to trigger 120s transport timeouts.
+
+**Deterministic multi-turn benchmark (3 trials × 7 requests, temperature=0, seed=1):**
+
+| Metric | Phase 5 | Phase 6 | Δ |
+|---|---|---|---|
+| Total wall (median) | 25.03s | 23.90s | -4.5% |
+| Decode tok/s (median) | 10.7 | 10.6 | identical |
+| Executor prompt_n (first) | 266 | 266 | same |
+| Executor prompt_n (avg rest) | 95 | 94 | same |
+
+Both configs use the same in-slot LCP prefix reuse via `cache_prompt:true`. The `--cache-reuse 256` across-slot path is never exercised in a single-slot sequential workload. No decode penalty from `--swa-full`.
+
+**Verdict:** Phase 6 (`--swa-full --cache-reuse 256`) is the new recommended default. No downside vs Phase 5 — same cache behavior, same decode speed, marginally faster prompt eval. Earlier integration regressions were model output variance, not config effects. See [caching_analysis.md](caching_analysis.md) for full data.
 
 ## Model Comparison
 
@@ -98,6 +132,39 @@ Key observations:
 - **fix_wrong_command**: Model tried `datex` (failed), thinking=medium recovered with `date > path/today.txt` in a single command (combined date + redirect). Re-tried `datex` again (step 3), thinking=medium produced `done`. No replan needed despite test expecting one — recovered within task via thinking.
 - **multi_step_recovery**: Cleanest hard test — 4 steps total, no errors, no thinking retries. Planner correctly identified dependency order without needing to fail first.
 - Write-action JSON truncation — this observation motivated the `edit` action (see 2026-04-08 below).
+
+## OpenRouter Integration Test Results — 2026-04-20 (fast-prototyping re-run)
+
+Full regression on `google/gemma-4-26b-a4b-it` via Parasail. All suites green. Local gemma4 skipped — too slow for medium/hard in a prototyping loop.
+
+| Suite | Result | Wall time | vs 2026-04-08 baseline |
+|---|---|---|---|
+| Unit (mocked, 159 tests incl. `TestRunLogSink`) | 159/159 pass | 31.0s | +3 tests (run-log sink) |
+| `TestOpenRouterEasy` | 3/3 pass | 26.7s | 37.6s → **-29%** |
+| `TestOpenRouterMedium` | 3/3 pass | 127.5s | 86.9s → +47% |
+| `TestOpenRouterHard` | 3/3 pass | 106.7s | 176.0s → **-39%** |
+| `TestPlannerReasoningOpenRouter` | 2/2 pass | 68.0s | (new coverage since 04-08) |
+
+Notes:
+- Hard suite materially faster; one test (`test_plan_specificity`) finished in 10s — planner emitted a complete plan on attempt 1, replan #2 returned `tasks: []` and the loop short-circuited to success.
+- Medium slower than 04-08 (127s vs 87s) but still well within budgets; no replans observed on the happy path. Suspect provider-side latency variance — re-run if the gap sticks.
+- OpenRouter planner wall-time averaged 0.6–1.0s per plan, executor steps 0.6–5.0s (matches the 1–2s/step baseline).
+
+### Tracking / observability — new this run
+
+Added `AGENT_RUN_LOG=path.jsonl` sink in `askme.py`. Each run appends one JSON object per event:
+
+- `run_start` — prompt, working dir, backend, model, limits
+- `plan` / `plan_error` — task list + planner wall time per replan
+- `tokens` — prompt/completion/total + `thinking` level + retry `attempt` (emitted per `ask_llm` call)
+- `step` — task index, step index, action, arg (≤120 chars), ok, error_type, wall time
+- `task_complete` / `task_failed` — per-task wall time
+- `validation` — `valid` + `reason`/`missing` when gated validator fires
+- `run_end` — status (`complete`/`exhausted`), total replans used, total wall time, tail of errors
+
+Backfills the gap called out previously — token/timing/replan history now survives to disk for `PERFORMANCE.md` comparisons without scraping pytest stdout. Sink is off by default (zero overhead when unset) and failure-tolerant (never crashes the run).
+
+Verified with: 3 unit tests (`TestRunLogSink`: lifecycle events emitted, disabled when unset, unwritable path is non-fatal) + one live OpenRouter run to confirm ordering and token capture.
 
 ## OpenRouter Integration Test Results — 2026-04-08 (post `edit` action)
 

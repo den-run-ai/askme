@@ -287,3 +287,66 @@ class TestWriteContentSerialization:
         assert result["ok"] is True
         import json as _json
         assert _json.loads((Path(work_dir) / "empty.json").read_text()) == {}
+
+
+class TestRunLogSink:
+    """AGENT_RUN_LOG JSONL sink — append-only, never crashes the run."""
+
+    @patch("askme.ask_llm")
+    def test_run_log_emits_lifecycle_events(self, mock_llm, tmp_path, work_dir):
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["echo hi"]},
+            {"action": "shell", "arg": "echo hi", "reasoning": "hi"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            askme.run("say hi", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        kinds = [e["event"] for e in events]
+        assert kinds[0] == "run_start"
+        assert "plan" in kinds
+        assert "step" in kinds
+        assert "task_complete" in kinds
+        assert kinds[-1] == "run_end"
+        assert events[-1]["status"] == "complete"
+        # Every event carries a timestamp
+        assert all("ts" in e for e in events)
+
+    @patch("askme.ask_llm")
+    def test_run_log_disabled_when_env_unset(self, mock_llm, tmp_path, work_dir):
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["x"]},
+            {"action": "done", "reasoning": "done"},
+        ]
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = ""
+        try:
+            askme.run("noop", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        # No log file created in tmp_path
+        assert not any(p.suffix == ".jsonl" for p in tmp_path.iterdir())
+
+    @patch("askme.ask_llm")
+    def test_run_log_failure_is_nonfatal(self, mock_llm, tmp_path, work_dir):
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["x"]},
+            {"action": "done", "reasoning": "done"},
+        ]
+        # Point at an unwritable path; run must still succeed
+        bad_path = tmp_path / "nonexistent_dir" / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(bad_path)
+        try:
+            result = askme.run("noop", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result is True

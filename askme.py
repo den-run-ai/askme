@@ -167,6 +167,22 @@ Format: {"valid": true} or {"valid": false, "reason": "what is missing or wrong"
 
 # Final validation config
 FINAL_VALIDATE = os.environ.get("AGENT_FINAL_VALIDATE", "auto")
+
+# Structured run log: when set to a path, each run appends JSONL events.
+# Surfaces tokens / wall times / plan+step events for PERFORMANCE.md comparisons.
+RUN_LOG_PATH = os.environ.get("AGENT_RUN_LOG", "")
+
+
+def _run_log(event):
+    """Append one JSON event to AGENT_RUN_LOG. Never fails the run."""
+    if not RUN_LOG_PATH:
+        return
+    try:
+        event = {"ts": time.time(), **event}
+        with open(RUN_LOG_PATH, "a") as f:
+            f.write(json.dumps(event, default=str) + "\n")
+    except Exception:
+        pass
 _VALIDATE_KEYWORDS = re.compile(
     r'\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b', re.I)
 
@@ -270,6 +286,14 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             if effective_think_level:
                 tok_msg += f" thinking={effective_think_level}"
             log(tok_msg)
+            _run_log({
+                "event": "tokens",
+                "prompt": usage.get("prompt_tokens", 0),
+                "completion": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+                "thinking": effective_think_level,
+                "attempt": attempt,
+            })
         msg = rj["choices"][0]["message"]
         text = msg.get("content") or ""
         # OpenRouter reasoning: if content is null/empty, try reasoning_content
@@ -609,6 +633,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
+    _run_log({"event": "run_start", "prompt": user_prompt, "working_dir": working_dir,
+              "backend": LLM_BACKEND, "model": MODEL,
+              "limits": {"max_replans": max_replans, "max_tasks": max_tasks, "max_steps": max_steps}})
     # Preflight: probe environment and set policy
     env = preflight_probe(working_dir)
     state["environment"] = env
@@ -631,12 +658,16 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             log(f"  Planner transport error: {e}")
             state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
             history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
+            _run_log({"event": "plan_error", "replan": replan, "error": str(e)[:200],
+                      "wall_s": round(time.time() - t_plan, 2)})
             continue  # consumes a plan attempt
         state["errors"] = []  # reset errors each replan; planner already saw them
         tasks = plan.get("tasks", [])[:max_tasks]
         plan_wall = time.time() - t_plan
         log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         history.append({"event": "plan", "replan": replan, "tasks": tasks})
+        _run_log({"event": "plan", "replan": replan, "tasks": tasks,
+                  "wall_s": round(plan_wall, 2)})
 
         all_done = True
         for i, task in enumerate(tasks):
@@ -754,6 +785,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 state["last_steps"].append(step_entry)
                 history.append({"event": "step", "task": i, "step": step, "action": action,
                                 "result": {"ok": result["ok"], "output": result["output"][:100]}})
+                _run_log({"event": "step", "task_index": i, "step": step,
+                          "action": act, "arg": action.get("arg", "")[:120],
+                          "ok": result["ok"], "error_type": result.get("error_type"),
+                          "wall_s": round(time.time() - t_step, 2)})
 
                 if not result["ok"]:
                     etype = result.get("error_type", "unknown")
@@ -767,9 +802,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 state["completed_tasks"].append(task)
                 state["completed_step_groups"].append(task_steps)
                 log(f"  Task complete. ({time.time()-t_task:.1f}s)")
+                _run_log({"event": "task_complete", "task_index": i, "task": task,
+                          "wall_s": round(time.time() - t_task, 2)})
             else:
                 all_done = False
                 log(f"  Task failed, will replan. ({time.time()-t_task:.1f}s)")
+                _run_log({"event": "task_failed", "task_index": i, "task": task,
+                          "wall_s": round(time.time() - t_task, 2)})
                 break
 
         if all_done:
@@ -784,17 +823,28 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         error_msg += f" missing: {', '.join(missing)}"
                     state["errors"].append(error_msg)
                     log(f"  Validation failed: {reason}")
+                    _run_log({"event": "validation", "valid": False, "reason": reason,
+                              "missing": missing})
                     all_done = False
                     continue  # replan
                 else:
                     log(f"  Validation passed.")
-            log(f"All tasks complete. ({time.time()-t_run:.1f}s total)")
+                    _run_log({"event": "validation", "valid": True})
+            total_wall = time.time() - t_run
+            log(f"All tasks complete. ({total_wall:.1f}s total)")
             log(f"Output in: {working_dir}")
+            _run_log({"event": "run_end", "status": "complete",
+                      "replans": replan, "wall_s": round(total_wall, 2),
+                      "completed_tasks": len(state["completed_tasks"])})
             return {"status": "complete", "state": state, "log": history}
 
-    log(f"Exhausted {max_replans} replan attempts. ({time.time()-t_run:.1f}s total)")
+    total_wall = time.time() - t_run
+    log(f"Exhausted {max_replans} replan attempts. ({total_wall:.1f}s total)")
     log(f"Errors: {state['errors']}")
     log(f"Output in: {working_dir}")
+    _run_log({"event": "run_end", "status": "exhausted",
+              "replans": max_replans, "wall_s": round(total_wall, 2),
+              "errors": state["errors"][-5:]})
     return {"status": "exhausted", "state": state, "log": history}
 
 
