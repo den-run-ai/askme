@@ -33,30 +33,31 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 |-----|-----|---------------------------------------------------------|------|----------|--------|----------|
 | 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
-| 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | planned  |
-| 3   | E06 | Typed recovery templates by `error_type`                | 2    | P1       | M      | planned  |
-| 4   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | planned  |
-| 5   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
-| 6   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
-| 7   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned  |
-| 8   | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
-| 9   | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
-| 10  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
-| 11  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
-| 12  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
-| 13  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
-| 14  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
+| 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | done     |
+| 3   | E06 | Typed recovery templates by `error_type`                | 2    | P1       | M      | done     |
+| 4   | E16 | Compiler-aware shell error classification               | 2    | P1       | S      | planned  |
+| 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | planned  |
+| 6   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
+| 7   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
+| 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned  |
+| 9   | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
+| 10  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
+| 11  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
+| 12  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
+| 13  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
+| 14  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
+| 15  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
 
-Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis (PERFORMANCE.md). The data shows E05/E06 is the highest-leverage scaffold fix — thinking-inflated reads after edit failures account for ~250–300s per `fix_missing_include` trial. This reprices Wave 2 vs Wave 3 priority.
+Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/E06 rerun in PERFORMANCE.md. E05/E06 removed the targeted edit-recovery waste; `ask_llm` parse-retry thinking escalation is now the highest-leverage remaining scaffold fix.
 
-- **Wave 2 promotes E05/E06 alongside E03.** E05/E06 targets the single biggest time sink (thinking escalation on edit failures → 140–253s reads). E03 (JSON repair) is complementary — repairs avoid the retry entirely. E02 and E07 remain in Wave 2 as independent S-effort items.
-- **Wave 1 runs E09 next** — E08 archived (subsumed by Phase 6). E09 is the remaining zero-code baseline that can reprice the backlog. E09 could reduce the underlying edit failure rate from the model side, potentially obviating some scaffold fixes.
-- **Wave 3 clusters E11, E04** — E11 (task-local replan) saves ~60–90s per replan on local but is lower leverage than E05/E06. E04 is independent.
+- **E05/E06 completed; E16 is a small hardening follow-up, then E03.** E05/E06 validated the targeted edit-recovery mechanism: failed edit recovery fell from 140–253s thinking-inflated reads to ~36s total in both rerun trials. End-to-end wall time was roughly break-even because `ask_llm` internal parse-retry thinking escalation became the dominant bottleneck.
+- **E09 stays after E03.** E09 could reduce the underlying edit failure rate from the model side, but E03 targets the larger observed scaffold bottleneck first.
+- **Wave 3 clusters E11, E04** — E11 (task-local replan) saves ~60–90s per replan on local but is lower leverage than the current E03 parse-retry target. E04 is independent.
 - **Wave 4 is effort-ascending then dependency** — E12 and E15 are S-effort standalones. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
 - **Wave 5 (E10) stays deferred** — redesign-scale; do not start until Waves 2–4 close and the harness can detect reliability regressions.
-- **Recommended execution order within waves:** E05/E06 → E03 → E11 → E09. Data-backed: E05/E06 targets ~300s/trial waste, E03 targets ~30–60s/trial, E11 targets ~60–90s/trial, E09 reduces root cause.
+- **Recommended execution order within waves:** E16 → E03 → E02/E11 → E09. Data-backed: E16 is a small correctness hardening pass; after E05/E06, parse-retry escalation costs 150–230s on single failed attempts; E11 targets ~60–90s replans; E09 reduces root-cause edit failure rate.
 
 ## Prerequisite
 
@@ -100,12 +101,13 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis (PERFORMANCE
 
 - **Hypothesis.** Parse retries dominate medium-test time (PERFORMANCE.md:82, 5× retries on `fix_python_syntax`). Most failures are truncation or verbose-reasoning leaks, not semantic errors. Current retry only changes thinking level, not the output contract.
 - **Evidence (2026-04-26).** Local E4B: 2–3 failed edit attempts per `fix_missing_include` trial at ~30–60s each. If JSON repair salvages even one, that's one fewer thinking retry saved.
+- **Evidence after E05/E06 (2026-04-26).** `fix_missing_include` Trial 1 spent 303s on the first shell compile step (73s parse-failed attempt + 230s thinking retry) and later hit a 217s read step from the same `ask_llm` retry ladder. Trial 2 repeated the first-step pattern (109s + 183s = 292s). E05/E06 removed step-level thinking after `edit_failed`; parse-retry thinking is now the highest-leverage remaining scaffold bottleneck.
 - **Change.** On parse fail:
   1. First retry: same contract, same thinking.
   2. Second retry: strict contract — "Output only the JSON object, shortest possible, no reasoning".
   3. Before retrying, attempt JSON repair: close missing brace, trim trailing commas, strip partial key.
-- **Metric.** Parse-retry count across integration tests; total test time.
-- **Upside.** Could cut medium-test time materially (PERFORMANCE.md:82 implies ≥30% waste on retries).
+- **Metric.** Parse-retry count across integration tests; total test time; per-call retry wall time.
+- **Upside.** Could cut medium-test time materially. Current observed parse-retry inflation is 150–230s on single local E4B attempts.
 - **Risk.** Low. Repair is idempotent — if repair succeeds, no model call was wasted.
 - **Code.** `askme.py:205` (`ask_llm`), `askme.py:326` (`except json.JSONDecodeError` — parse block).
 - **Effort.** S.
@@ -148,27 +150,39 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis (PERFORMANCE
 
 - **Hypothesis.** Current retry always escalates thinking (medium → high) regardless of error class. But `missing_tool` is not fixable by more thinking; `timeout` wants a longer timeout; `compile_error` wants to re-read the file first.
 - **Evidence (2026-04-26).** JSONL analysis of `fix_missing_include` on local E4B: failed edit → thinking escalation → next `read` takes 140–253s because thinking tokens consume budget. This pattern accounts for ~250–300s per trial (~45% of wall time). The edit failure doesn't need more thinking — it needs to read the file first.
-- **Change.** Branch on `classify_error` output before choosing retry strategy:
-  - `missing_tool` → fail fast with prerequisite message, skip thinking escalation.
-  - `timeout` → bump timeout, no thinking.
-  - `compile_error` / `missing_file` → inject "read before edit" template (see E06).
-  - `unknown` → current behavior (escalate thinking).
-- **Metric.** Wasted-thinking-time on unrecoverable failures; replan count.
-- **Upside.** Highest-leverage scaffold fix — targets ~300s/trial waste on `fix_missing_include`.
-- **Risk.** Low. Easy to ablate per type.
+- **Change.** Deterministically tag edit mismatch/ambiguous/empty-find failures as `edit_failed`; skip step-level thinking escalation for structural errors (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`). Semantic failures (`compile_error`, `unknown`) still escalate.
+- **Metric.** Wasted-thinking-time on unrecoverable failures; edit recovery path latency; replan count.
+- **Result (2026-04-26).** Done. Two `fix_missing_include` rerun trials reduced the targeted edit recovery path to 36s in both trials, down from 140–253s thinking-inflated reads in baseline. Overall wall time was mixed (686.6s, 552.9s vs 609.1s baseline median) because `ask_llm` parse-retry thinking inflation dominated unrelated steps.
+- **Upside.** Validated targeted scaffold fix. Does not reduce the underlying edit failure rate.
+- **Follow-up caveat.** The result is robust for deterministic edit scaffold errors. Shell-origin errors still use `classify_error()` heuristics; compiler diagnostics containing `No such file or directory` can be misclassified as `missing_file`, which skips thinking. See E16.
+- **Risk.** Low for edit-origin failures. Shell-origin structural/semantic classification needs E16 hardening.
 - **Code.** `askme.py:512` (`classify_error`), `askme.py:785` (error handling in step loop), `askme.py:205` (`ask_llm` — retry ladder).
 - **Effort.** M.
+- **Status.** Done (2026-04-26). See PERFORMANCE.md E05/E06 Edit Recovery.
 
 ### E06 — Typed recovery templates by `error_type`
 
 - **Hypothesis.** After a `compile_error`, the next action is almost always `read` the offending file, then `edit`. After `missing_file`, the next action is often `search` or `ls`. Encoding this as a template is cheaper than asking the model to rediscover it.
 - **Evidence (2026-04-26).** In all 9 `fix_missing_include` trials (local E4B), the successful recovery pattern is always: failed edit → read file → successful edit. But the scaffold currently lets the model rediscover this at ~150s cost per cycle (thinking-inflated). A template injection would short-circuit to the read immediately.
-- **Change.** On failed step, inject a short per-error-type observation into `last_steps` that nudges the next action. E.g., for `compile_error`: `"Read the file before editing. Prefer edit over write for localized fixes."`
+- **Change.** On failed step, inject a short per-error-type observation into `last_steps` that nudges the next action. Current hints: `edit_failed` → read the file first and retry exact text; `missing_file` → check filename with `ls`.
 - **Metric.** Steps-to-recovery after typed failure; replan count.
+- **Result (2026-04-26).** Done. In both rerun trials, failed edit recovery followed the intended cheap pattern: failed edit, no-thinking read at ~7.6s, then edit retry at ~16–17s. Trial 2 also confirmed repeated post-`edit_failed` retries stayed cheap until the consecutive failed-edit guard triggered replan.
 - **Upside.** Compounds with E05. Addresses the `fix_python_syntax` / `fix_missing_include` slow-recovery pattern directly.
 - **Risk.** Low. If template is wrong, model can still override.
 - **Code.** `askme.py:785` (error handling — `state["errors"].append`), `askme.py:512` (`classify_error`).
 - **Effort.** M.
+- **Status.** Done (2026-04-26). See PERFORMANCE.md E05/E06 Edit Recovery.
+
+### E16 — Compiler-aware shell error classification
+
+- **Hypothesis.** E05's no-thinking policy is only safe when the error type is correct. Shell-origin `missing_file` is ambiguous: real missing files are structural, but compiler/header diagnostics like `stdio.h: No such file or directory` are semantic compile failures and should usually escalate thinking.
+- **Evidence (2026-04-26).** Direct checks found `stdio.h: No such file or directory` classifies as `missing_file` because `classify_error()` checks `"no such file"` before `"error:"`. Since `missing_file` is in `_NO_THINK_ERRORS`, this can skip thinking on compiler errors. Edit-origin failures are unaffected because they are tagged deterministically in `execute()`.
+- **Change.** Make shell classification command-aware. For compiler-like shell commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.), prefer `compile_error` for diagnostics even when they contain `No such file or directory`. Keep non-compiler missing-file shell failures structural where possible.
+- **Metric.** Classification unit tests for compiler header errors, missing source paths, and non-compiler missing-file commands; no regression in E05/E06 recovery tests.
+- **Upside.** Hardens E05 against the dangerous misclassification direction: semantic shell error -> structural no-thinking error.
+- **Risk.** Low if scoped to compiler command families. Global check reordering is simpler but semantically noisier.
+- **Code.** `askme.py:512` (`classify_error`), shell execute call site passing enough command context if needed.
+- **Effort.** S.
 
 ### E11 — Task-local replan before full replan
 
@@ -202,10 +216,10 @@ Moved to [Archived / rejected](#archived--rejected).
 ### E09 — Q8_0 model trial
 
 - **Hypothesis.** `gemma4-setup.md:22` notes Q8_0 (8 GB) is viable and "higher quality." Parse retries likely drop with better token probabilities. On a 16 GB M1 with q4_0 KV the memory headroom exists.
-- **Evidence (2026-04-26).** Local E4B generates bad edit JSON ~60% of first attempts (vs near-zero on OpenRouter 26B). Q8_0 could reduce this underlying failure rate. However, JSONL analysis shows ~60% of `fix_missing_include` wall time is scaffold-addressable — run E05/E06/E03 first.
+- **Evidence (2026-04-26).** Local E4B generates bad edit JSON ~60% of first attempts (vs near-zero on OpenRouter 26B). Q8_0 could reduce this underlying failure rate. However, the E05/E06 rerun shows parse-retry thinking inflation is the largest remaining scaffold-addressable bottleneck — run E03 first.
 - **Change.** Download Q8_0 GGUF, launch with same flags, run easy + medium integration under E01's harness.
 - **Metric.** Parse-retry count, total test time, especially on `fix_missing_include` (currently 609s median).
-- **Upside.** Reduces root-cause edit failure rate, but scaffold fixes (E05/E06/E03) target the same symptom more directly.
+- **Upside.** Reduces root-cause edit failure rate. After E05/E06, repeated edit failures are cheaper but still cause replans; model quality remains a separate lever.
 - **Risk.** Low. Model is a swap; reverts trivially. Decode throughput may drop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
 - **Effort.** S.

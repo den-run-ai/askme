@@ -55,6 +55,30 @@ The dominant waste pattern: model fails an `edit` (bad JSON or wrong `old` strin
 
 ~60% of `fix_missing_include` wall time is scaffold-addressable. The remaining ~40% is irreducible model quality (E4B generates bad edit JSON ~60% of first attempts vs near-zero on OpenRouter 26B).
 
+## E05/E06 Edit Recovery — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
+
+Two-trial targeted rerun of `fix_missing_include` after E05/E06:
+
+- E05: structural failures (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`) skip step-level thinking escalation.
+- E06: `edit_failed` and `missing_file` inject short recovery hints into step output.
+- Guard: consecutive identical failed edits auto-fail the task and trigger replan instead of burning `MAX_STEPS`.
+
+| Metric | Baseline (median of 3) | Trial 1 | Trial 2 |
+|---|---|---|---|
+| Wall time | 609.1s | 686.6s (+13%) | 552.9s (-9%) |
+| Replans | 1 | 0 | 1 |
+| Edit recovery path | 140-253s reads after failed edit | 36s | 36s |
+| Failed steps | 3-4 | 1 | 3 |
+| Status | PASS | PASS | PASS |
+
+**Finding:** E05/E06 validates on the targeted mechanism but is roughly break-even end-to-end in this sample. Failed edit recovery collapsed from 140-253s thinking-inflated reads to ~36s total (`edit_failed` -> no-thinking `read` -> successful `edit`). Trial 2 also showed repeated post-`edit_failed` retries staying cheap at 7-17s per step until the consecutive failed-edit guard forced a replan.
+
+**New bottleneck:** `ask_llm` internal parse-retry escalation now dominates the slow path. Trial 1 spent 303s on the first shell compile step (73s parse-failed attempt, then 230s thinking retry) and later hit a 217s read step from the same retry ladder. Trial 2 showed the same first-step pattern (109s + 183s = 292s). E05 controls step-level `use_think`; it does not prevent `ask_llm` from escalating thinking internally after JSON parse failures. This makes E03 (JSON repair / stricter retry contract before another model call) the highest-leverage remaining scaffold fix.
+
+**Robustness caveat:** The validated path is edit recovery. Edit mismatch/ambiguous/empty-find failures are deterministic scaffold outcomes, but shell failures still go through `classify_error()` substring heuristics. A compiler diagnostic such as `stdio.h: No such file or directory` can be classified as `missing_file` instead of `compile_error`, which would wrongly skip step-level thinking. This does not invalidate the edit-recovery result, but it narrows the E05/E06 robustness claim to deterministic scaffold-origin errors until shell classification is hardened.
+
+**Verdict:** Keep E05/E06. The edit-recovery classification is structural rather than message-heuristic, and the recovery path is consistently faster. Do not claim a general end-to-end wall-time win until E03 removes parse-retry thinking inflation and shell-origin error classification is made compiler-aware.
+
 ## E01 Harness Baseline — 2026-04-26, OpenRouter (Gemma 4 26B-A4B)
 
 First multi-trial harness run (E01). 3 trials per test, all suites. Establishes the baseline for Wave 1+ experiments. 27/27 passed.

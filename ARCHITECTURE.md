@@ -100,11 +100,14 @@ State design:
 ## Failure and Replanning
 
 On task failure:
-1. Error is classified (`classify_error`) into one of six types
-2. Errors are collected in state, grouped and capped at 3 per type (`summarize_errors`)
-3. The full loop restarts with a new plan (`get_plan` with `think=True`); errors reset after each replan
-4. `completed_tasks` carries forward — the new plan can build on what's already done
-5. Up to `MAX_REPLANS` replan attempts; after that the run exits as `exhausted`
+1. Error is classified into a typed category — deterministic tags for edit scaffold failures (`edit_failed`) and missing edit targets (`missing_file`), heuristic `classify_error()` for shell output and exception paths
+2. Error-class-specific retry policy (E05): structural failures (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`) skip thinking escalation; semantic failures (`compile_error`, `unknown`) escalate thinking
+3. Recovery hints (E06): typed failures inject a short hint into step output (e.g., "Read the file first" for `edit_failed`) so the model knows what to do next without thinking tokens
+4. Repeated identical failed edits are treated as stuck and force replan instead of burning `MAX_STEPS`
+5. Errors are collected in state, grouped and capped at 3 per type (`summarize_errors`)
+6. The full loop restarts with a new plan (`get_plan` with `think=True`); errors reset after each replan
+7. `completed_tasks` carries forward — the new plan can build on what's already done
+8. Up to `MAX_REPLANS` replan attempts; after that the run exits as `exhausted`
 
 If `ask_llm` exhausts its retries, `LLMTransportError` is raised: planner catches it as a failed plan attempt, executor catches it as a task failure (triggering replan).
 
@@ -163,7 +166,9 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Basename args | Slim step history uses basename for write/read `arg` fields |
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models sometimes output objects instead of escaped strings |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
-| Thinking-on-retry | Zero cost on happy path; enabled only after a failed step. Escalates: none → medium → high |
+| Thinking-on-retry | Zero cost on happy path; escalation gated by error class (E05). Structural failures (edit mismatch, missing file) skip thinking; semantic failures (compile error, unknown) escalate none → medium → high |
+| Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. Only `edit_failed` and `missing_file` have hints; adding more requires evidence of wasted thinking cycles |
+| Failed edit stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. This preserves cheap first recovery while preventing no-thinking loops |
 | Planner thinking | Off for first plan, on for replans (`think=bool(errors or completed_tasks)`). Benchmarked: `think=True` on first plan caused JSON truncation on local 768-token budget and no quality gain on either backend |
 | Duplicate action guard | Per-action-type loop detection. `write(same content)` → skip+continue. `shell(same+ok)` → auto-done. `shell(same+fail)` → auto-fail (stuck). `read` excluded (re-reads legitimate). First skip injects corrective observation only; 2+ consecutive skips activate thinking |
 | Write content comparison | Duplicate guard on `write` must compare content, not just arg — matching only on `(action, arg)` would kill the write → compile fail → write fix pattern |
@@ -183,6 +188,8 @@ Active limitations that still shape the design.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
 - **`--cache-reuse` requires `--swa-full` for Gemma 4 iSWA.** Fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (build `a702f395`+). Current default: `--swa-full --cache-reuse 256`. Not compatible with `--mmproj`. See [gemma4-setup.md](gemma4-setup.md).
 - **Replan thinking latency.** ~73s per replan on local (thinking shares the 768-token planner budget). Justified by better error analysis on recovery plans; not justified on first plans.
+- **Parse-retry thinking latency.** E05/E06 only controls step-level `use_think`. `ask_llm` can still escalate thinking internally after JSON parse failures, and local E4B measurements showed 150–230s single-call retry inflation on `fix_missing_include`. This is E03's target.
+- **Shell error classification is heuristic.** `classify_error()` uses substring matching for shell output. Compiler diagnostics that include `No such file or directory` for missing headers can currently be typed as `missing_file` instead of `compile_error`, causing E05 to skip thinking when semantic recovery may be useful. Edit-origin errors are not affected because they are tagged deterministically in `execute()`.
 
 ## Multi-Backend Support
 

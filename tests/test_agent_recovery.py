@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+import askme
 from askme import (execute, ask_llm, get_plan, get_step, run, _run_loop,
                    _should_validate, _validate_completion, LLMTransportError)
 from _test_support import mock_response
@@ -207,6 +208,26 @@ class TestDuplicateGuard:
         ]
         with patch("askme.ask_llm", side_effect=responses):
             run("compile")
+
+    def test_edit_same_failed_find_triggers_auto_fail(self, tmp_path):
+        """Consecutive identical failed edits should bail out, not loop MAX_STEPS."""
+        src = tmp_path / "main.c"
+        src.write_text("int main() { return 0; }")
+        responses = [
+            {"tasks": ["fix code"]},
+            {"action": "edit", "arg": str(src),
+             "find": "nonexistent text", "replace": "new text"},
+            {"action": "edit", "arg": str(src),
+             "find": "nonexistent text", "replace": "new text"},
+            {"action": "done"},  # never reached — auto-fail breaks the task
+        ] * 3
+        with patch("askme.ask_llm", side_effect=responses):
+            result = _run_loop("fix code", str(tmp_path))
+        # Only 1 edit step should actually execute (the 2nd triggers auto-fail before execute)
+        edit_steps = [h for h in result["log"]
+                      if h.get("event") == "step"
+                      and h.get("action", {}).get("action") == "edit"]
+        assert len(edit_steps) == 1, f"Expected 1 edit step (auto-fail on 2nd), got {len(edit_steps)}"
 
     def test_content_not_in_slim_state(self):
         """_content field should not appear in messages sent to LLM by get_step()."""
@@ -438,6 +459,159 @@ class TestFailureClassification:
         ] * 3
         with patch("askme.ask_llm", side_effect=responses):
             run("run bad cmd", working_dir=work_dir)
+
+    def test_edit_no_match_returns_edit_failed(self, work_dir):
+        """Edit with no matching find string should return error_type=edit_failed."""
+        p = Path(work_dir) / "test.txt"
+        p.write_text("hello world")
+        result = execute({"action": "edit", "arg": "test.txt",
+                          "find": "nonexistent text", "replace": "new"}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "edit_failed"
+
+    def test_edit_ambiguous_returns_edit_failed(self, work_dir):
+        """Edit with ambiguous match should return error_type=edit_failed."""
+        p = Path(work_dir) / "test.txt"
+        p.write_text("aaa\naaa\naaa")
+        result = execute({"action": "edit", "arg": "test.txt",
+                          "find": "aaa", "replace": "bbb"}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "edit_failed"
+
+    def test_edit_empty_find_returns_edit_failed(self, work_dir):
+        """Edit with empty find string should return error_type=edit_failed."""
+        p = Path(work_dir) / "test.txt"
+        p.write_text("hello")
+        result = execute({"action": "edit", "arg": "test.txt",
+                          "find": "", "replace": "new"}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "edit_failed"
+
+
+# --- E05/E06: Error-class retry policy and recovery hints ---
+
+class TestErrorClassRetryPolicy:
+    """E05: Structural failures skip thinking; semantic failures escalate."""
+
+    def test_edit_failure_skips_thinking(self, work_dir):
+        """After edit_failed, next step should NOT get thinking escalation."""
+        p = Path(work_dir) / "test.c"
+        p.write_text("#include <stdio.h>\nint main() { return 0; }")
+        responses = [
+            {"tasks": ["fix the include"]},
+            # Step 1: edit with wrong find string → edit_failed
+            {"action": "edit", "arg": "test.c",
+             "find": "wrong text", "replace": "right text"},
+            # Step 2: read (should NOT have thinking)
+            {"action": "read", "arg": "test.c"},
+            # Step 3: correct edit
+            {"action": "edit", "arg": "test.c",
+             "find": "#include <stdio.h>", "replace": "#include <stdlib.h>"},
+            {"action": "done"},
+        ]
+        think_values = []
+        original_get_step = None
+        import askme
+        original_get_step = askme.get_step
+
+        def spy_get_step(*args, **kwargs):
+            think_values.append(kwargs.get("think", False))
+            return original_get_step(*args, **kwargs)
+
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.get_step", side_effect=spy_get_step):
+                run("fix the include", working_dir=work_dir)
+        # Step 1 starts with think=False (no prior failure)
+        # Step 2 after edit_failed should have think=False (E05: structural failure)
+        assert len(think_values) >= 2
+        assert think_values[1] is False, f"Expected no thinking after edit_failed, got {think_values}"
+
+    def test_compile_error_escalates_thinking(self, work_dir):
+        """After compile_error, next step SHOULD get thinking escalation."""
+        # Write a file with a syntax error so gcc produces a real compile error
+        p = Path(work_dir) / "test.c"
+        p.write_text("int main() { return }")  # missing value
+        responses = [
+            {"tasks": ["compile test.c"]},
+            {"action": "shell", "arg": "gcc -o test test.c"},
+            # After compile error, model reads and fixes
+            {"action": "read", "arg": "test.c"},
+            {"action": "edit", "arg": "test.c",
+             "find": "return }", "replace": "return 0; }"},
+            {"action": "done"},
+        ]
+        think_values = []
+        original_get_step = askme.get_step
+
+        def spy_get_step(*args, **kwargs):
+            think_values.append(kwargs.get("think", False))
+            return original_get_step(*args, **kwargs)
+
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.get_step", side_effect=spy_get_step):
+                run("compile test.c", working_dir=work_dir)
+        # After a shell failure with compile_error, thinking should escalate
+        assert len(think_values) >= 2, f"Expected at least 2 steps, got {think_values}"
+        assert think_values[1] is True, f"Expected thinking after compile_error, got {think_values}"
+
+
+class TestRecoveryHints:
+    """E06: Recovery hints injected into step output after typed failures."""
+
+    def test_edit_failed_hint_in_step_output(self, work_dir):
+        """After edit_failed, the step output seen by the next step should contain the hint."""
+        p = Path(work_dir) / "test.c"
+        p.write_text("#include <stdio.h>\nint main() { return 0; }")
+        responses = [
+            {"tasks": ["fix the code"]},
+            {"action": "edit", "arg": "test.c",
+             "find": "nonexistent", "replace": "replacement"},
+            {"action": "read", "arg": "test.c"},
+            {"action": "done"},
+        ]
+        captured_states = []
+        original_get_step = askme.get_step
+
+        def spy_get_step(task, state, **kwargs):
+            captured_states.append(
+                [s.get("output", "") for s in state.get("last_steps", [])])
+            return original_get_step(task, state, **kwargs)
+
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.get_step", side_effect=spy_get_step):
+                run("fix the code", working_dir=work_dir)
+        has_hint = any(
+            any("Read the file first" in out for out in outputs)
+            for outputs in captured_states
+        )
+        assert has_hint, f"Expected edit_failed hint in step outputs: {captured_states}"
+
+    def test_missing_file_hint_in_step_output(self, work_dir):
+        """After missing_file edit, the step output should contain a recovery hint."""
+        responses = [
+            {"tasks": ["edit the file"]},
+            {"action": "edit", "arg": "nonexistent.c",
+             "find": "old", "replace": "new"},
+            {"action": "fail", "reasoning": "file not found"},
+        ] * 3
+        import askme
+        captured_states = []
+        original_get_step = askme.get_step
+
+        def spy_get_step(task, state, **kwargs):
+            captured_states.append(
+                [s.get("output", "") for s in state.get("last_steps", [])])
+            return original_get_step(task, state, **kwargs)
+
+        with patch("askme.ask_llm", side_effect=responses):
+            with patch("askme.get_step", side_effect=spy_get_step):
+                run("edit the file", working_dir=work_dir)
+        # Check that at least one captured state has a hint about listing directory
+        has_hint = any(
+            any("Check the filename" in out for out in outputs)
+            for outputs in captured_states
+        )
+        assert has_hint, f"Expected missing_file hint in step outputs: {captured_states}"
 
 
 # --- Error summarization tests ---

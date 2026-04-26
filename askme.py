@@ -332,7 +332,21 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
 
 
 _KNOWN_ERROR_TYPES = {"timeout", "missing_tool", "permission_denied", "missing_file",
-                      "compile_error", "stuck_loop", "unknown"}
+                      "compile_error", "edit_failed", "stuck_loop", "unknown"}
+
+# E05: Error types where thinking escalation is counterproductive.
+# These are structural failures — the scaffold knows what went wrong and the model
+# needs different information or parameters, not deeper reasoning.
+# Semantic failures (compile_error, unknown) keep thinking escalation.
+_NO_THINK_ERRORS = frozenset({"edit_failed", "missing_file", "timeout",
+                              "missing_tool", "permission_denied"})
+
+# E06: Short recovery hints injected into step output after typed failures.
+# Tells the model what to do next without needing thinking tokens to rediscover it.
+_RECOVERY_HINTS = {
+    "edit_failed": "Read the file first, then retry edit with exact text from the file.",
+    "missing_file": "Check the filename. Use shell ls to list directory contents.",
+}
 
 
 def _extract_error_type(err):
@@ -591,13 +605,16 @@ def execute(action, working_dir="."):
             find = action.get("find", "")
             replace = action.get("replace", "")
             if not find:
-                return {"ok": False, "output": "edit requires non-empty 'find'"}
+                return {"ok": False, "output": "edit requires non-empty 'find'",
+                        "error_type": "edit_failed"}
             count = text.count(find)
             if count == 0:
-                return {"ok": False, "output": f"No match for find string in {p.name}"}
+                return {"ok": False, "output": f"No match for find string in {p.name}",
+                        "error_type": "edit_failed"}
             if count > 1:
                 return {"ok": False,
-                        "output": f"Ambiguous: find string matches {count} times in {p.name}"}
+                        "output": f"Ambiguous: find string matches {count} times in {p.name}",
+                        "error_type": "edit_failed"}
             p.write_text(text.replace(find, replace, 1))
             return {"ok": True, "output": f"Edited {p.name}"}
         except Exception as e:
@@ -723,6 +740,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             is_dup = True
                         elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
                             is_dup = True
+                        # Consecutive identical failed edit → stuck; bail to replan
+                        elif act == "edit" and not prev.get("ok") and prev.get("_find", "") == action.get("find", ""):
+                            log(f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg','')[:40]})")
+                            state["errors"].append(f"[stuck_loop] edit {action.get('arg','')[:60]}: same find string failed twice")
+                            break
                         if is_dup:
                             dup_skip_count += 1
                             log(f"  [{step + 1}] skip (duplicate {act}, same content)")
@@ -792,8 +814,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
                 if not result["ok"]:
                     etype = result.get("error_type", "unknown")
-                    state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {result['output'][:100]}")
-                    use_think = True  # think harder on next step after failure
+                    err_output = result['output'][:100]
+                    hint = _RECOVERY_HINTS.get(etype)
+                    if hint:
+                        err_output = f"{err_output} → {hint}"
+                        state["last_steps"][-1]["output"] = state["last_steps"][-1]["output"][:100] + f" → {hint}"
+                    state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
+                    use_think = etype not in _NO_THINK_ERRORS
                 else:
                     use_think = False
                     task_steps.append(step_entry)
