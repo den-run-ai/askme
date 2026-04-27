@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
-from askme import execute, ask_llm, run, _run_loop, LLMTransportError, LLM_TIMEOUT
+from askme import execute, ask_llm, run, _run_loop, LLMTransportError, LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX
 from _test_support import mock_response, mock_response_raw
 
 
@@ -493,3 +493,153 @@ class TestLLMTransport:
         mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "done"}
+
+
+# --- E03: JSON repair tests ---
+
+class TestJsonRepair:
+    """E03: _repair_json salvages mechanically broken JSON from truncation."""
+
+    def test_trailing_comma(self):
+        result = _repair_json('{"action": "done", "arg": "f.txt",}')
+        assert result == {"action": "done", "arg": "f.txt"}
+
+    def test_unclosed_brace(self):
+        result = _repair_json('{"action": "shell", "arg": "echo hi"')
+        assert result == {"action": "shell", "arg": "echo hi"}
+
+    def test_truncated_key(self):
+        result = _repair_json('{"action": "done", "reas')
+        assert result == {"action": "done"}
+
+    def test_truncated_value(self):
+        result = _repair_json('{"action": "edit", "arg": "main.c", "find": "old tex')
+        assert result is not None
+        assert result["action"] == "edit"
+        assert result["arg"] == "main.c"
+
+    def test_valid_json_passthrough(self):
+        result = _repair_json('{"action": "done"}')
+        assert result == {"action": "done"}
+
+    def test_empty_string(self):
+        assert _repair_json("") is None
+
+    def test_no_brace(self):
+        assert _repair_json("just some text") is None
+
+    def test_unfixable_garbage(self):
+        assert _repair_json('{{{broken') is None
+
+    def test_non_dict_rejected(self):
+        assert _repair_json("[1, 2, 3]") is None
+
+    def test_extra_close_brace(self):
+        assert _repair_json('{"a": 1}}') is None
+
+    def test_trailing_prose(self):
+        raw = '{"action": "shell", "arg": "python3 greet.py"}` - This suggests the initial run *'
+        result = _repair_json(raw)
+        assert result == {"action": "shell", "arg": "python3 greet.py"}
+
+    def test_trailing_prose_with_backtick(self):
+        raw = '{"action": "done"}\n\nSome commentary about what happened.'
+        result = _repair_json(raw)
+        assert result == {"action": "done"}
+
+
+# --- E03: Tiered retry contract tests ---
+
+class TestTieredRetryContract:
+    """E03: Final auto-retry uses strict contract, no thinking."""
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_final_retry_no_auto_thinking(self, mock_post):
+        """Attempt 2 (final) should NOT escalate to high thinking for auto retries."""
+        mock_post.side_effect = [
+            mock_response_raw("bad1"),
+            mock_response_raw("bad2"),
+            mock_response({"action": "done"}),
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        # Attempt 0: no reasoning
+        assert "reasoning" not in mock_post.call_args_list[0][1]["json"]
+        # Attempt 1: medium reasoning
+        assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "medium"
+        # Attempt 2: no reasoning (strict contract instead)
+        assert "reasoning" not in mock_post.call_args_list[2][1]["json"]
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_final_retry_injects_strict_suffix(self, mock_post):
+        """Attempt 2 should append strict JSON-only instruction."""
+        mock_post.side_effect = [
+            mock_response_raw("bad1"),
+            mock_response_raw("bad2"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([
+            {"role": "system", "content": "You are a helper."},
+            {"role": "user", "content": "test"},
+        ])
+        third_msgs = mock_post.call_args_list[2][1]["json"]["messages"]
+        assert third_msgs[-1]["content"] == _STRICT_JSON_SUFFIX
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_explicit_think_level_preserved_on_final_retry(self, mock_post):
+        """Explicit think_level should override E03 strict behavior."""
+        mock_post.side_effect = [
+            mock_response_raw("bad1"),
+            mock_response_raw("bad2"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([{"role": "user", "content": "test"}], think_level="high")
+        # All three attempts should have high thinking
+        for i, call in enumerate(mock_post.call_args_list):
+            body = call[1]["json"]
+            assert body["reasoning"]["effort"] == "high", f"attempt {i} lost think_level"
+            # No strict suffix when think_level is explicit
+            msgs = body["messages"]
+            assert msgs[-1]["content"] != _STRICT_JSON_SUFFIX
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "local")
+    def test_final_retry_no_think_prefix_local(self, mock_post):
+        """Local backend: attempt 2 should not prepend <|think|>."""
+        mock_post.side_effect = [
+            mock_response_raw("bad1"),
+            mock_response_raw("bad2"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([
+            {"role": "system", "content": "You are a helper."},
+            {"role": "user", "content": "test"},
+        ])
+        third_body = mock_post.call_args_list[2][1]["json"]
+        sys_content = third_body["messages"][0]["content"]
+        assert not sys_content.startswith("<|think|>"), "Final retry should not use thinking"
+
+    @patch("askme.requests.post")
+    def test_repair_avoids_retry(self, mock_post):
+        """If _repair_json succeeds, no additional LLM call is made."""
+        mock_post.return_value = mock_response_raw('{"action": "done", "arg": "f.txt",}')
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result["action"] == "done"
+        assert mock_post.call_count == 1
+
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_think_true_final_retry_drops_thinking(self, mock_post):
+        """think=True: attempt 0=medium, attempt 1=high, attempt 2=none (strict)."""
+        mock_post.side_effect = [
+            mock_response_raw("bad"),
+            mock_response_raw("bad"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([{"role": "user", "content": "test"}], think=True)
+        assert mock_post.call_args_list[0][1]["json"]["reasoning"]["effort"] == "medium"
+        assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "high"
+        assert "reasoning" not in mock_post.call_args_list[2][1]["json"]

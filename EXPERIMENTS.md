@@ -35,8 +35,8 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
 | 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | done     |
 | 3   | E06 | Typed recovery templates by `error_type`                | 2    | P1       | M      | done     |
-| 4   | E16 | Compiler-aware shell error classification               | 2    | P1       | S      | planned  |
-| 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | planned  |
+| 4   | E16 | Compiler-aware shell error classification               | 2    | P1       | S      | done     |
+| 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | done     |
 | 6   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
 | 7   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
 | 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned  |
@@ -52,12 +52,12 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 
 Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/E06 rerun in PERFORMANCE.md. E05/E06 removed the targeted edit-recovery waste; `ask_llm` parse-retry thinking escalation is now the highest-leverage remaining scaffold fix.
 
-- **E05/E06 completed; E16 is a small hardening follow-up, then E03.** E05/E06 validated the targeted edit-recovery mechanism: failed edit recovery fell from 140–253s thinking-inflated reads to ~36s total in both rerun trials. End-to-end wall time was roughly break-even because `ask_llm` internal parse-retry thinking escalation became the dominant bottleneck.
+- **E05/E06/E16 completed; E03 done.** E05/E06 validated the targeted edit-recovery mechanism: failed edit recovery fell from 140–253s thinking-inflated reads to ~36s total in both rerun trials. E16 hardened shell error classification so compiler diagnostics aren't misclassified as structural `missing_file`. E03 added JSON repair (trailing prose, truncation) and tiered retry contract.
 - **E09 stays after E03.** E09 could reduce the underlying edit failure rate from the model side, but E03 targets the larger observed scaffold bottleneck first.
 - **Wave 3 clusters E11, E04** — E11 (task-local replan) saves ~60–90s per replan on local but is lower leverage than the current E03 parse-retry target. E04 is independent.
 - **Wave 4 is effort-ascending then dependency** — E12 and E15 are S-effort standalones. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
 - **Wave 5 (E10) stays deferred** — redesign-scale; do not start until Waves 2–4 close and the harness can detect reliability regressions.
-- **Recommended execution order within waves:** E16 → E03 → E02/E11 → E09. Data-backed: E16 is a small correctness hardening pass; after E05/E06, parse-retry escalation costs 150–230s on single failed attempts; E11 targets ~60–90s replans; E09 reduces root-cause edit failure rate.
+- **Recommended execution order within waves:** E02/E11 → E09. E16 and E03 are done. E11 targets ~60–90s replans; E09 reduces root-cause edit failure rate.
 
 ## Prerequisite
 
@@ -109,8 +109,14 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 - **Metric.** Parse-retry count across integration tests; total test time; per-call retry wall time.
 - **Upside.** Could cut medium-test time materially. Current observed parse-retry inflation is 150–230s on single local E4B attempts.
 - **Risk.** Low. Repair is idempotent — if repair succeeds, no model call was wasted.
-- **Code.** `askme.py:205` (`ask_llm`), `askme.py:326` (`except json.JSONDecodeError` — parse block).
+- **Change (implemented).** Three changes in `ask_llm`:
+  1. `_repair_json(text)` attempts mechanical JSON repair (close missing braces, strip trailing commas, strip truncated key-value pairs) before burning a retry. Returns `dict | None`.
+  2. Thinking escalation for auto-retries changed: attempt 0 = none, attempt 1 = medium, attempt 2 = none + strict contract. Explicit `think_level` from callers (e.g. validation) is always respected.
+  3. On final auto-retry (attempt 2), a strict JSON-only instruction is appended to messages.
+- **Result (2026-04-27).** Done. 197/197 unit tests pass (16 new: 10 `TestJsonRepair` + 6 `TestTieredRetryContract`). No upstream fix available — `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)), grammar+reasoning coexistence has no upstream solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)). Client-side repair is the correct approach.
+- **Code.** `askme.py:205` (`_repair_json`), `askme.py:228` (`_STRICT_JSON_SUFFIX`), `askme.py:231` (`ask_llm` — retry ladder + repair).
 - **Effort.** S.
+- **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness.
 
 ## Tools / action model
 
@@ -154,8 +160,8 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 - **Metric.** Wasted-thinking-time on unrecoverable failures; edit recovery path latency; replan count.
 - **Result (2026-04-26).** Done. Two `fix_missing_include` rerun trials reduced the targeted edit recovery path to 36s in both trials, down from 140–253s thinking-inflated reads in baseline. Overall wall time was mixed (686.6s, 552.9s vs 609.1s baseline median) because `ask_llm` parse-retry thinking inflation dominated unrelated steps.
 - **Upside.** Validated targeted scaffold fix. Does not reduce the underlying edit failure rate.
-- **Follow-up caveat.** The result is robust for deterministic edit scaffold errors. Shell-origin errors still use `classify_error()` heuristics; compiler diagnostics containing `No such file or directory` can be misclassified as `missing_file`, which skips thinking. See E16.
-- **Risk.** Low for edit-origin failures. Shell-origin structural/semantic classification needs E16 hardening.
+- **Follow-up caveat.** The result is robust for deterministic edit scaffold errors. Shell-origin heuristic classification is hardened by E16 (compiler-aware `classify_error`).
+- **Risk.** Low for edit-origin failures. Shell-origin classification hardened by E16.
 - **Code.** `askme.py:512` (`classify_error`), `askme.py:785` (error handling in step loop), `askme.py:205` (`ask_llm` — retry ladder).
 - **Effort.** M.
 - **Status.** Done (2026-04-26). See PERFORMANCE.md E05/E06 Edit Recovery.
@@ -177,12 +183,14 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 
 - **Hypothesis.** E05's no-thinking policy is only safe when the error type is correct. Shell-origin `missing_file` is ambiguous: real missing files are structural, but compiler/header diagnostics like `stdio.h: No such file or directory` are semantic compile failures and should usually escalate thinking.
 - **Evidence (2026-04-26).** Direct checks found `stdio.h: No such file or directory` classifies as `missing_file` because `classify_error()` checks `"no such file"` before `"error:"`. Since `missing_file` is in `_NO_THINK_ERRORS`, this can skip thinking on compiler errors. Edit-origin failures are unaffected because they are tagged deterministically in `execute()`.
-- **Change.** Make shell classification command-aware. For compiler-like shell commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.), prefer `compile_error` for diagnostics even when they contain `No such file or directory`. Keep non-compiler missing-file shell failures structural where possible.
+- **Change.** Made `classify_error(output, cmd)` command-aware. Compiler-family commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.) now prefer `compile_error` for diagnostics even when they contain `No such file or directory`. Non-compiler missing-file shell failures remain structural.
 - **Metric.** Classification unit tests for compiler header errors, missing source paths, and non-compiler missing-file commands; no regression in E05/E06 recovery tests.
+- **Result (2026-04-26).** Done. Shell execute call site passes `cmd=action["arg"]` to `classify_error()`. Compiler detection uses `_COMPILER_CMD_RE` pattern.
 - **Upside.** Hardens E05 against the dangerous misclassification direction: semantic shell error -> structural no-thinking error.
-- **Risk.** Low if scoped to compiler command families. Global check reordering is simpler but semantically noisier.
-- **Code.** `askme.py:512` (`classify_error`), shell execute call site passing enough command context if needed.
+- **Risk.** Low — scoped to compiler command families.
+- **Code.** `askme.py:582` (`_COMPILER_CMD_RE`, `classify_error`), `askme.py:652` (shell execute passing `cmd`).
 - **Effort.** S.
+- **Status.** Done (2026-04-26).
 
 ### E11 — Task-local replan before full replan
 

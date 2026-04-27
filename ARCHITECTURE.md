@@ -37,10 +37,11 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 **Key functions:**
 - `preflight_probe(working_dir)` — environment probe (platform, arch, tools, package managers, dir listing)
 - `get_policy()` — execution policy (`allow_system_installs`, `allow_network`)
-- `ask_llm(messages, max_tokens, think)` — calls backend, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, retries on parse failure (up to 2)
+- `_repair_json(text)` — mechanical JSON repair for truncation artifacts (trailing commas, unclosed braces, truncated keys); returns dict or None
+- `ask_llm(messages, max_tokens, think)` — calls backend, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, attempts repair then retries on parse failure (up to 2). E03: final auto-retry uses strict contract with no thinking
 - `get_plan(user_prompt, state)` — task list. Thinking conditional: `think=bool(errors or completed_tasks)` — off for first plan, on for replans
 - `get_step(task, state, goal)` — next action within a task. Goal-aware completion — executor must satisfy the full task, not just one step
-- `classify_error(output, action)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`
+- `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
 - `execute(action, working_dir)` — runs shell/write/edit/read/done/fail with command-aware timeouts
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`
@@ -166,7 +167,9 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Basename args | Slim step history uses basename for write/read `arg` fields |
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models sometimes output objects instead of escaped strings |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
-| Thinking-on-retry | Zero cost on happy path; escalation gated by error class (E05). Structural failures (edit mismatch, missing file) skip thinking; semantic failures (compile error, unknown) escalate none → medium → high |
+| Thinking-on-retry | Zero cost on happy path; escalation gated by error class (E05). Structural failures (edit mismatch, missing file) skip thinking; semantic failures (compile error, unknown) escalate none → medium → strict-no-thinking (E03). Explicit `think_level` from callers overrides |
+| JSON repair (E03) | `_repair_json` attempts mechanical fixes (close braces, strip trailing commas/truncated fields) before burning a retry. Guarantees valid JSON structure but not complete action fields — downstream KeyError/validation paths still handle missing fields |
+| Strict final retry (E03) | Final auto-retry (attempt 2) disables thinking and appends a strict JSON-only instruction. Explicit `think_level` from callers (e.g. `_validate_completion`) is always respected. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. Only `edit_failed` and `missing_file` have hints; adding more requires evidence of wasted thinking cycles |
 | Failed edit stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. This preserves cheap first recovery while preventing no-thinking loops |
 | Planner thinking | Off for first plan, on for replans (`think=bool(errors or completed_tasks)`). Benchmarked: `think=True` on first plan caused JSON truncation on local 768-token budget and no quality gain on either backend |
@@ -188,8 +191,8 @@ Active limitations that still shape the design.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
 - **`--cache-reuse` requires `--swa-full` for Gemma 4 iSWA.** Fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (build `a702f395`+). Current default: `--swa-full --cache-reuse 256`. Not compatible with `--mmproj`. See [gemma4-setup.md](gemma4-setup.md).
 - **Replan thinking latency.** ~73s per replan on local (thinking shares the 768-token planner budget). Justified by better error analysis on recovery plans; not justified on first plans.
-- **Parse-retry thinking latency.** E05/E06 only controls step-level `use_think`. `ask_llm` can still escalate thinking internally after JSON parse failures, and local E4B measurements showed 150–230s single-call retry inflation on `fix_missing_include`. This is E03's target.
-- **Shell error classification is heuristic.** `classify_error()` uses substring matching for shell output. Compiler diagnostics that include `No such file or directory` for missing headers can currently be typed as `missing_file` instead of `compile_error`, causing E05 to skip thinking when semantic recovery may be useful. Edit-origin errors are not affected because they are tagged deterministically in `execute()`.
+- **Parse-retry thinking latency.** E03 mitigates: `_repair_json` salvages truncated JSON without retrying; final auto-retry (attempt 2) uses strict contract with no thinking instead of escalating to high. Explicit `think_level` callers (validation) are unaffected. Upstream has no grammar+reasoning coexistence solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)) and `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)).
+- **Shell error classification is heuristic.** `classify_error(output, cmd)` uses substring matching for shell output. E16 hardened this: compiler-family commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.) now prefer `compile_error` for ambiguous diagnostics like `No such file or directory`. Edit-origin errors are not affected because they are tagged deterministically in `execute()`.
 
 ## Multi-Backend Support
 

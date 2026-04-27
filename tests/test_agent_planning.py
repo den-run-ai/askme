@@ -17,43 +17,43 @@ class TestPlannerReasoning:
         """First plan (empty state) should pass think=False — thinking wastes token budget."""
         from askme import PLANNER_MAX_TOKENS
         captured = {}
-        def capture_llm(messages, max_tokens=256, think=False):
-            captured["max_tokens"] = max_tokens
-            captured["think"] = think
+        def capture_llm(messages, max_tokens=256, think=False, **kwargs):
+            captured.update(max_tokens=max_tokens, think=think, timeout=kwargs.get("timeout"))
             return {"tasks": ["do something"]}
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_plan("test request", {"completed_tasks": [], "errors": []})
         assert captured["think"] is False, "First plan should have think=False"
         assert captured["max_tokens"] == PLANNER_MAX_TOKENS, \
             f"Expected max_tokens={PLANNER_MAX_TOKENS}, got {captured['max_tokens']}"
+        assert captured["timeout"] is None, "First plan should use default timeout"
 
     def test_replan_has_thinking(self):
-        """Replan (state has errors) should pass think=True and max_tokens=PLANNER_MAX_TOKENS."""
-        from askme import PLANNER_MAX_TOKENS
+        """Replan (state has errors) should pass think=True and extended timeout."""
+        from askme import PLANNER_MAX_TOKENS, LLM_TIMEOUT_REPLAN
         captured = {}
-        def capture_llm(messages, max_tokens=256, think=False):
-            captured["max_tokens"] = max_tokens
-            captured["think"] = think
+        def capture_llm(messages, max_tokens=256, think=False, **kwargs):
+            captured.update(max_tokens=max_tokens, think=think, timeout=kwargs.get("timeout"))
             return {"tasks": ["retry something"]}
         state = {"completed_tasks": [], "errors": ["Task 'build' failed: missing header"]}
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_plan("test request", state)
         assert captured["think"] is True
         assert captured["max_tokens"] == PLANNER_MAX_TOKENS
+        assert captured["timeout"] == LLM_TIMEOUT_REPLAN
 
     def test_replan_with_completed_tasks_has_thinking(self):
-        """Partial completion replan should still use think=True and PLANNER_MAX_TOKENS."""
-        from askme import PLANNER_MAX_TOKENS
+        """Partial completion replan should still use think=True and extended timeout."""
+        from askme import PLANNER_MAX_TOKENS, LLM_TIMEOUT_REPLAN
         captured = {}
-        def capture_llm(messages, max_tokens=256, think=False):
-            captured["max_tokens"] = max_tokens
-            captured["think"] = think
+        def capture_llm(messages, max_tokens=256, think=False, **kwargs):
+            captured.update(max_tokens=max_tokens, think=think, timeout=kwargs.get("timeout"))
             return {"tasks": ["finish remaining"]}
         state = {"completed_tasks": ["create header"], "errors": ["compile failed"]}
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_plan("test request", state)
         assert captured["think"] is True
         assert captured["max_tokens"] == PLANNER_MAX_TOKENS
+        assert captured["timeout"] == LLM_TIMEOUT_REPLAN
 
     def test_system_plan_includes_hints(self):
         """Updated SYSTEM_PLAN should contain specificity guidance."""

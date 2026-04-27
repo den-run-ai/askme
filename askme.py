@@ -132,6 +132,7 @@ class LLMTransportError(Exception):
 
 
 LLM_TIMEOUT = 120  # seconds; covers slow first-token on local LLM
+LLM_TIMEOUT_REPLAN = 180  # replans carry heavier state + thinking
 
 MAX_REPLANS = 3  # Total planning attempts (initial plan + up to 2 replans)
 MAX_TASKS = 10
@@ -202,16 +203,59 @@ Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"
 MAX_LLM_RETRIES = 2
 
 
+def _repair_json(text):
+    """Try to salvage broken JSON from truncation artifacts. Returns dict or None."""
+    if not text or "{" not in text:
+        return None
+    # Strip trailing prose after a complete JSON object (model commentary after })
+    # Find the last } and discard everything after it
+    last_brace = text.rfind('}')
+    if last_brace >= 0 and last_brace < len(text) - 1:
+        candidate = text[:last_brace + 1]
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass  # fall through to other repairs
+    # Strip trailing incomplete key-value pair (truncation mid-field)
+    text = re.sub(r',\s*"[^"]*$', '', text)
+    # Strip trailing incomplete value after a key (e.g. "key": "val...)
+    text = re.sub(r',\s*"[^"]*":\s*"?[^"}\]]*$', '', text)
+    # Strip trailing commas before close
+    text = re.sub(r',\s*}', '}', text)
+    # Close missing braces
+    opens = text.count('{') - text.count('}')
+    if opens > 0:
+        text = text + '}' * opens
+    elif opens < 0:
+        return None
+    try:
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+_STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
+
+
 def ask_llm(messages, max_tokens=256, think=False, think_level=None,
-            max_retries=MAX_LLM_RETRIES, raw=False):
+            max_retries=MAX_LLM_RETRIES, raw=False, timeout=None):
     for attempt in range(max_retries + 1):
-        # Determine thinking level: explicit think_level overrides auto-escalation
+        # Determine thinking level: explicit think_level overrides auto-escalation.
+        # E03: on final auto-retry (attempt 2), disable thinking and use strict
+        # contract instead — more thinking doesn't fix truncation/format errors.
+        # Explicit think_level from callers (e.g. validation) is always respected.
         if think_level:
             effective_think_level = think_level
         elif think:
-            effective_think_level = "high" if attempt >= 1 else "medium"
-        elif attempt >= 1:
-            effective_think_level = "high" if attempt >= 2 else "medium"
+            if attempt >= 2:
+                effective_think_level = None
+            else:
+                effective_think_level = "high" if attempt >= 1 else "medium"
+        elif attempt >= 1 and attempt < 2:
+            effective_think_level = "medium"
         else:
             effective_think_level = None
 
@@ -240,13 +284,19 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             body["messages"] = msgs
             body["max_tokens"] = max(max_tokens, 768 if effective_think_level == "high" else 512)
 
+        # E03: strict contract on final auto-retry — suppress reasoning leaks
+        if attempt >= 2 and not think_level:
+            msgs = list(body["messages"])
+            msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
+            body["messages"] = msgs
+
         headers = {"Content-Type": "application/json"}
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
         _restore_cache()
         # Transport-level error handling with retry + backoff
         try:
-            resp = requests.post(API, json=body, headers=headers, timeout=LLM_TIMEOUT)
+            resp = requests.post(API, json=body, headers=headers, timeout=timeout or LLM_TIMEOUT)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
                 requests.exceptions.RequestException) as e:
             log(f"  Transport error: {type(e).__name__}: {e}")
@@ -324,6 +374,11 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
             return parsed
         except json.JSONDecodeError:
+            # E03: attempt mechanical repair before burning a retry
+            repaired = _repair_json(text)
+            if repaired is not None:
+                log(f"  JSON repaired on attempt {attempt}")
+                return repaired
             if attempt < max_retries:
                 think_str = f" thinking={effective_think_level}" if effective_think_level else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
@@ -413,7 +468,8 @@ def get_plan(user_prompt, state):
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
-    ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan)
+    ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan,
+       timeout=LLM_TIMEOUT_REPLAN if is_replan else None)
 
 
 MAX_INPUT = 300  # max chars per field sent to executor
