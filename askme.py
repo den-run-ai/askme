@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import sys, json, subprocess, requests, re, time, os, tempfile, shutil
+import sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex
 from pathlib import Path
 
 
@@ -523,7 +523,25 @@ def _validate_completion(user_prompt, state, working_dir):
         return None
 
 
-def classify_error(output, action="shell"):
+_COMPILER_EXES = frozenset({
+    "cc", "gcc", "g++", "clang", "clang++", "c++", "rustc", "javac",
+    "make", "cmake", "cargo", "go", "tsc", "swiftc",
+})
+
+
+def _is_compiler_command(cmd):
+    """Check if a shell command invokes a compiler or build tool."""
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        parts = cmd.split()
+    if not parts:
+        return False
+    exe = os.path.basename(parts[0])
+    return exe in _COMPILER_EXES
+
+
+def classify_error(output, action="shell", cmd=""):
     """Classify an error output into a typed category for structured diagnostics."""
     out = output.lower()
     if "timeout" in out or output == "TIMEOUT":
@@ -533,6 +551,8 @@ def classify_error(output, action="shell"):
     if "permission denied" in out:
         return "permission_denied"
     if "no such file" in out or "no such file or directory" in out:
+        if action == "shell" and cmd and _is_compiler_command(cmd):
+            return "compile_error"
         return "missing_file"
     if "syntax error" in out or "error:" in out:
         return "compile_error"
@@ -573,7 +593,7 @@ def execute(action, working_dir="."):
             out = r.stdout[:MAX_RESULT] + r.stderr[-MAX_RESULT:]
             result = {"ok": r.returncode == 0, "output": out.strip() or "(no output)"}
             if not result["ok"]:
-                result["error_type"] = classify_error(result["output"], "shell")
+                result["error_type"] = classify_error(result["output"], "shell", cmd=action["arg"])
             return result
         except subprocess.TimeoutExpired:
             return {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}

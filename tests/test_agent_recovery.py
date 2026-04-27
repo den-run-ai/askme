@@ -488,6 +488,96 @@ class TestFailureClassification:
         assert result["error_type"] == "edit_failed"
 
 
+# --- E16: Compiler-aware shell error classification ---
+
+class TestCompilerAwareClassification:
+    """E16: Compiler diagnostics with 'No such file' should be compile_error, not missing_file."""
+
+    def test_compiler_header_not_found(self):
+        from askme import classify_error
+        assert classify_error(
+            "fatal error: stdio.h: No such file or directory",
+            "shell", cmd="gcc -o main main.c") == "compile_error"
+
+    def test_compiler_source_not_found(self):
+        from askme import classify_error
+        assert classify_error(
+            "cc: error: main.c: No such file or directory",
+            "shell", cmd="cc -o main main.c") == "compile_error"
+
+    def test_make_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "fatal error: config.h: No such file or directory",
+            "shell", cmd="make") == "compile_error"
+
+    def test_clang_missing_header(self):
+        from askme import classify_error
+        assert classify_error(
+            "fatal error: 'missing.h' file not found",
+            "shell", cmd="/usr/bin/clang -c test.c") == "compile_error"
+
+    def test_path_prefixed_gcc(self):
+        """Path-prefixed compiler should still be detected."""
+        from askme import classify_error
+        assert classify_error(
+            "stdio.h: No such file or directory",
+            "shell", cmd="/usr/bin/gcc -o main main.c") == "compile_error"
+
+    def test_non_compiler_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "cat: foo.txt: No such file or directory",
+            "shell", cmd="cat foo.txt") == "missing_file"
+
+    def test_no_cmd_missing_file(self):
+        """Backward compat: no cmd argument preserves missing_file."""
+        from askme import classify_error
+        assert classify_error("No such file or directory", "shell") == "missing_file"
+
+    def test_edit_action_unaffected(self):
+        """Edit-origin missing file is unaffected by E16."""
+        from askme import classify_error
+        assert classify_error("No such file or directory", "edit") == "missing_file"
+
+    def test_cargo_build_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "error: file not found: No such file or directory",
+            "shell", cmd="cargo build") == "compile_error"
+
+    def test_rustc_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "error: no such file: No such file or directory",
+            "shell", cmd="rustc main.rs") == "compile_error"
+
+    def test_go_build_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "stat main.go: No such file or directory",
+            "shell", cmd="go build main.go") == "compile_error"
+
+    def test_tsc_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "error TS6053: File 'index.ts' not found. No such file or directory",
+            "shell", cmd="tsc index.ts") == "compile_error"
+
+    def test_swiftc_missing_file(self):
+        from askme import classify_error
+        assert classify_error(
+            "error: no such file or directory: 'main.swift'",
+            "shell", cmd="swiftc main.swift") == "compile_error"
+
+    def test_shell_execute_passes_cmd_to_classify(self, work_dir):
+        """execute() for shell actions should pass the command to classify_error."""
+        p = Path(work_dir) / "nonexistent.c"
+        result = execute({"action": "shell", "arg": f"gcc -o out {p}"}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "compile_error"
+
+
 # --- E05/E06: Error-class retry policy and recovery hints ---
 
 class TestErrorClassRetryPolicy:
