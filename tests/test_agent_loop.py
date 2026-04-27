@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from askme import execute, run, get_step, MAX_STEP_HISTORY, MAX_INPUT
+from askme import execute, run, get_step, _run_loop, MAX_STEP_HISTORY, MAX_INPUT
 from _test_support import mock_response
 
 
@@ -23,8 +23,9 @@ class TestRunLoop:
         assert "All tasks complete" in out
         assert result is True
 
+    @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_task_failure_triggers_replan(self, mock_llm, capsys):
+    def test_task_failure_triggers_replan(self, mock_llm, mock_replan, capsys):
         """Task fails, agent replans, second plan succeeds."""
         mock_llm.side_effect = [
             {"tasks": ["compile code"]},
@@ -41,8 +42,9 @@ class TestRunLoop:
         assert "All tasks complete" in out
         assert result is True
 
+    @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_max_replans_exhausted(self, mock_llm, capsys):
+    def test_max_replans_exhausted(self, mock_llm, mock_replan, capsys):
         """All plans fail, agent stops after MAX_REPLANS."""
         mock_llm.side_effect = [
             {"tasks": ["do thing"]},
@@ -109,8 +111,9 @@ class TestRunLoop:
         assert "Output in:" in out
         assert result is True
 
+    @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_working_dir_printed_on_failure(self, mock_llm, capsys, tmp_path):
+    def test_working_dir_printed_on_failure(self, mock_llm, mock_replan, capsys, tmp_path):
         """Working dir is printed even when agent fails."""
         mock_llm.side_effect = [
             {"tasks": ["fail"]},
@@ -350,3 +353,249 @@ class TestRunLogSink:
         finally:
             askme.RUN_LOG_PATH = old
         assert result is True
+
+
+# --- E11: Task-local replan loop tests ---
+
+class TestTaskLocalReplan:
+    """Verify task-local replan behavior in the run loop."""
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_succeeds_no_full_replan(self, mock_llm, mock_replan, capsys):
+        """Task fails, local replan returns replacement, replacement succeeds, no full replan."""
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},            # plan
+            {"action": "fail", "reasoning": "gcc error"},  # task 1 fails
+            # replacement task execution:
+            {"action": "shell", "arg": "echo fixed", "reasoning": "fix"},
+            {"action": "done", "reasoning": "compiled"},
+        ]
+        mock_replan.return_value = "fix gcc path and compile"
+        result = run("compile my code")
+        out = capsys.readouterr().out
+        assert result is True
+        assert "All tasks complete" in out
+        assert "Task-local replan" in out
+        assert mock_replan.called
+        # "will replan" should NOT appear (that's the full replan message)
+        assert "will replan" not in out
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_fails_triggers_full_replan(self, mock_llm, mock_replan, capsys):
+        """Task fails, local replan returns replacement, replacement also fails, triggers full replan."""
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},                    # plan 1
+            {"action": "fail", "reasoning": "gcc error"},   # task 1 fails
+            # replacement task execution:
+            {"action": "fail", "reasoning": "still broken"},  # replacement also fails
+            # full replan:
+            {"tasks": ["install gcc then compile"]},         # plan 2
+            {"action": "shell", "arg": "echo ok", "reasoning": "fix"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        mock_replan.return_value = "try different gcc path"
+        result = run("compile my code")
+        out = capsys.readouterr().out
+        assert result is True
+        assert "Task-local replan" in out
+        assert "will replan" in out  # full replan triggered
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_none_triggers_full_replan(self, mock_llm, mock_replan, capsys):
+        """Task fails, replan_task returns None, falls through to full replan immediately."""
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},                    # plan 1
+            {"action": "fail", "reasoning": "gcc error"},   # task 1 fails
+            # full replan (no local replan attempted):
+            {"tasks": ["fix and compile"]},                  # plan 2
+            {"action": "shell", "arg": "echo ok", "reasoning": "fix"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        mock_replan.return_value = None
+        result = run("compile my code")
+        out = capsys.readouterr().out
+        assert result is True
+        assert "Task-local replan failed" in out  # replan_task was called but returned None
+        assert "will replan" in out
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_capped_at_one(self, mock_llm, mock_replan, capsys):
+        """Only one task-local replan attempt per task, then full replan."""
+        call_count = {"replan": 0}
+        def counting_replan(*args, **kwargs):
+            call_count["replan"] += 1
+            return "replacement task"
+        mock_replan.side_effect = counting_replan
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},                    # plan 1
+            {"action": "fail", "reasoning": "error 1"},     # task 1 fails
+            {"action": "fail", "reasoning": "error 2"},     # replacement also fails
+            # full replan:
+            {"tasks": ["new approach"]},                     # plan 2
+            {"action": "done", "reasoning": "done"},
+        ]
+        result = run("compile my code")
+        assert result is True
+        assert call_count["replan"] == 1, "replan_task should be called exactly once per task"
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_preserves_errors_for_full_replan(self, mock_llm, mock_replan, capsys):
+        """When both original and replacement fail, full replan should see errors from both."""
+        plan_states = []
+        call_idx = {"n": 0}
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["compile code"]}
+            if n == 2:
+                return {"action": "fail", "reasoning": "original gcc error"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "replacement also failed"}
+            if n == 4:
+                # This is the full replan — capture what the planner sees
+                user_msg = messages[-1]["content"]
+                plan_states.append(user_msg)
+                return {"tasks": ["final fix"]}
+            if n == 5:
+                return {"action": "done", "reasoning": "done"}
+            return {"action": "done"}
+        mock_llm.side_effect = tracking_llm
+        mock_replan.return_value = "try alternative approach"
+        result = run("compile my code")
+        assert result is True
+        assert len(plan_states) == 1, "Should have captured one full replan state"
+        replan_state = plan_states[0]
+        assert "original gcc error" in replan_state, \
+            f"Full replan should see original error, got: {replan_state[-300:]}"
+        assert "replacement also failed" in replan_state, \
+            f"Full replan should see replacement error, got: {replan_state[-300:]}"
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_resets_execution_state(self, mock_llm, mock_replan, capsys):
+        """Replacement attempt should start with fresh execution state (steps, think, etc.)."""
+        step_nums = []
+        call_idx = {"n": 0}
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["compile code"]}
+            if n == 2:
+                return {"action": "shell", "arg": "gcc main.c", "reasoning": "compile"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "compile error"}
+            if n >= 4:
+                # Replacement task steps — check step numbering
+                user_msg = messages[-1]["content"]
+                if '"step":' in user_msg:
+                    import re
+                    m = re.search(r'"step":\s*"(\d+)/\d+"', user_msg)
+                    if m:
+                        step_nums.append(int(m.group(1)))
+            if n == 4:
+                return {"action": "done", "reasoning": "done"}
+            return {"action": "done"}
+        mock_llm.side_effect = tracking_llm
+        mock_replan.return_value = "recompile with fix"
+        result = run("compile my code")
+        assert result is True
+        if step_nums:
+            assert step_nums[0] == 1, f"Replacement should start at step 1, got {step_nums[0]}"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_duplicate_read_auto_fails_task(self, mock_llm, mock_replan, capsys, tmp_path):
+        """Repeated reads of the same file should trip the stuck-loop guard."""
+        (tmp_path / "fix_me.c").write_text("int main(void) { return 0; }\n")
+        mock_llm.side_effect = [
+            {"tasks": ["inspect fix_me.c"]},
+            {"action": "read", "arg": "fix_me.c", "reasoning": "read"},
+            {"action": "read", "arg": "fix_me.c", "reasoning": "read again"},
+            {"action": "read", "arg": "fix_me.c", "reasoning": "still reading"},
+        ]
+        result = _run_loop("inspect fix_me.c", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        out = capsys.readouterr().out
+        assert result["status"] == "exhausted"
+        assert "skip (duplicate read)" in out
+        assert "auto-fail (same read repeated" in out
+        assert mock_replan.called
+
+    @patch("askme.replan_task")
+    @patch("askme.ask_llm")
+    def test_local_replan_emits_jsonl_event(self, mock_llm, mock_replan, tmp_path, work_dir):
+        """task_local_replan event should appear in JSONL log."""
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},
+            {"action": "fail", "reasoning": "error"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        mock_replan.return_value = "fixed compile task"
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            askme.run("compile", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        lr_events = [e for e in events if e["event"] == "task_local_replan"]
+        assert len(lr_events) == 1
+        assert lr_events[0]["original"] == "compile code"
+        assert lr_events[0]["replacement"] == "fixed compile task"
+        assert lr_events[0]["ok"] is True
+        assert "llm_wall_s" in lr_events[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_local_replan_emits_jsonl_event(self, mock_llm, mock_replan, tmp_path, work_dir):
+        """Failed task_local_replan event should appear with ok=False and replacement=None."""
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["compile code"]},
+            {"action": "fail", "reasoning": "error"},
+        ] * 3  # enough for full replans
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            askme.run("compile", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        lr_events = [e for e in events if e["event"] == "task_local_replan"]
+        assert len(lr_events) >= 1
+        assert lr_events[0]["ok"] is False
+        assert lr_events[0]["replacement"] is None
+        assert "llm_wall_s" in lr_events[0]
+        assert "reject_reason" in lr_events[0]
+
+    @patch("askme.ask_llm")
+    def test_failed_local_replan_logs_reject_reason(self, mock_llm, tmp_path, work_dir):
+        """Guard-rejected replacements should log why they were rejected."""
+        import askme
+        mock_llm.side_effect = [
+            {"tasks": ["add missing include"]},
+            {"action": "fail", "reasoning": "same edit failed"},
+            {"task": "add missing include"},
+        ] * 2
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            askme._run_loop("compile", work_dir, max_replans=1, max_tasks=1, max_steps=1)
+        finally:
+            askme.RUN_LOG_PATH = old
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        lr_events = [e for e in events if e["event"] == "task_local_replan"]
+        assert lr_events
+        assert lr_events[0]["ok"] is False
+        assert lr_events[0]["reject_reason"] == "exact_duplicate"

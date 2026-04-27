@@ -110,6 +110,7 @@ def parse_log(log_path):
     task_completes = [e for e in events if e["event"] == "task_complete"]
     task_fails = [e for e in events if e["event"] == "task_failed"]
     validations = [e for e in events if e["event"] == "validation"]
+    local_replans = [e for e in events if e["event"] == "task_local_replan"]
 
     ok_steps = [s for s in steps if s.get("ok")]
     fail_steps = [s for s in steps if not s.get("ok")]
@@ -137,6 +138,9 @@ def parse_log(log_path):
         "total_tokens": total_prompt_tokens + total_completion_tokens,
         "llm_calls": len(tokens_events),
         "validation": validations[0].get("valid") if validations else None,
+        "local_replans": len(local_replans),
+        "local_replans_ok": len([lr for lr in local_replans if lr.get("ok")]),
+        "local_replan_wall_s": sum(lr.get("llm_wall_s", 0) for lr in local_replans),
     }
 
 
@@ -163,11 +167,15 @@ def fmt_int_range(values):
 def print_report(test_name, trial_results):
     """Print summary table for one test across trials."""
     metrics = [r["metrics"] for r in trial_results if r["metrics"]]
-    passes = sum(1 for r in trial_results if r["passed"])
+    pytest_passes = sum(1 for r in trial_results if r["passed"])
+    agent_completes = sum(
+        1 for r in trial_results
+        if r["metrics"] and r["metrics"].get("status") == "complete"
+    )
     total = len(trial_results)
 
     print(f"\n{'─' * 60}")
-    print(f"  {test_name}  [{passes}/{total} passed]")
+    print(f"  {test_name}  [pytest {pytest_passes}/{total}, agent complete {agent_completes}/{total}]")
     print(f"{'─' * 60}")
 
     if not metrics:
@@ -176,7 +184,11 @@ def print_report(test_name, trial_results):
 
     rows = [
         ("Wall time (s)", fmt_range([m["wall_s"] for m in metrics])),
-        ("Replans", fmt_int_range([m["replans"] for m in metrics])),
+        ("Agent complete", f"{agent_completes}/{total}"),
+        ("Replans (full)", fmt_int_range([m["replans"] for m in metrics])),
+        ("Local replans", fmt_int_range([m["local_replans"] for m in metrics])),
+        ("Local replans ok", fmt_int_range([m["local_replans_ok"] for m in metrics])),
+        ("Local replan (s)", fmt_range([m["local_replan_wall_s"] for m in metrics])),
         ("Steps", fmt_int_range([m["steps"] for m in metrics])),
         ("Steps failed", fmt_int_range([m["steps_failed"] for m in metrics])),
         ("Thinking retries", fmt_int_range([m["thinking_retries"] for m in metrics])),
@@ -188,12 +200,14 @@ def print_report(test_name, trial_results):
         print(f"  {label:<22} {value}")
 
     for i, r in enumerate(trial_results):
-        status = "PASS" if r["passed"] else "FAIL"
+        status = "PYTEST_PASS" if r["passed"] else "PYTEST_FAIL"
         wall = r["metrics"]["wall_s"] if r["metrics"] else r["wall_s"]
         print(f"  trial {i+1}: {status}  {wall:.1f}s", end="")
         if r["metrics"]:
             m = r["metrics"]
-            print(f"  (steps={m['steps']}, replans={m['replans']}, "
+            agent = m.get("status", "unknown")
+            lr = f", lr={m['local_replans_ok']}/{m['local_replans']}" if m['local_replans'] else ""
+            print(f"  (agent={agent}, steps={m['steps']}, replans={m['replans']}{lr}, "
                   f"retries={m['thinking_retries']})", end="")
         print()
 
@@ -280,11 +294,17 @@ def main():
     }
     for test_name, results in all_results.items():
         metrics_list = [r["metrics"] for r in results if r["metrics"]]
+        pytest_passed = sum(1 for r in results if r["passed"])
         summary["tests"][test_name] = {
-            "passed": sum(1 for r in results if r["passed"]),
+            "passed": pytest_passed,  # Back-compat alias for pytest_passed.
+            "pytest_passed": pytest_passed,
+            "agent_complete": sum(1 for m in metrics_list if m.get("status") == "complete"),
             "total": len(results),
+            "agent_status": [m["status"] for m in metrics_list],
             "wall_s": [m["wall_s"] for m in metrics_list],
             "replans": [m["replans"] for m in metrics_list],
+            "local_replans": [m["local_replans"] for m in metrics_list],
+            "local_replans_ok": [m["local_replans_ok"] for m in metrics_list],
             "steps": [m["steps"] for m in metrics_list],
             "thinking_retries": [m["thinking_retries"] for m in metrics_list],
             "llm_calls": [m["llm_calls"] for m in metrics_list],

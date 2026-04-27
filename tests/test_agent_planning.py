@@ -3,7 +3,7 @@ command-aware timeouts, server config."""
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from askme import get_plan, get_step, run
+from askme import get_plan, get_step, run, replan_task, LLMTransportError, TASK_REPLAN_MAX_TOKENS
 from _test_support import mock_response
 from conftest import skip_no_llm
 
@@ -400,3 +400,102 @@ class TestServerConfig:
         saved = list(cache_dir.glob("test-config-check"))
         assert len(saved) == 1, f"Expected saved cache file, found: {list(cache_dir.iterdir())}"
         assert saved[0].stat().st_size > 0, "Saved cache file is empty"
+
+
+# --- E11: Task-local replan function tests ---
+
+class TestReplanTask:
+    """Unit tests for replan_task() — the mini-planner for single failed tasks."""
+
+    @patch("askme.ask_llm")
+    def test_returns_replacement_string(self, mock_llm):
+        mock_llm.return_value = {"task": "fix the include path using relative name"}
+        state = {"environment": {"missing_tools": []}, "policy": {"allow_system_installs": False}}
+        result = replan_task("add missing include", ["[compile_error] gcc: missing header"],
+                             ["create main.c"], state, "compile hello.c")
+        assert result == "fix the include path using relative name"
+        assert mock_llm.called
+
+    @patch("askme.ask_llm")
+    def test_includes_policy_and_missing_tools(self, mock_llm):
+        """replan_task should pass policy and missing_tools to the mini-planner."""
+        captured = {}
+        def capture(messages, **kwargs):
+            captured["user_msg"] = messages[-1]["content"]
+            return {"task": "replacement"}
+        mock_llm.side_effect = capture
+        state = {"environment": {"missing_tools": ["go"]},
+                 "policy": {"allow_system_installs": False}}
+        replan_task("run go test", ["[missing_tool] go not found"],
+                    [], state, "test the project")
+        assert "missing_tools" in captured["user_msg"]
+        assert "go" in captured["user_msg"]
+        assert "allow_system_installs" in captured["user_msg"]
+
+    @patch("askme.ask_llm")
+    def test_transport_error_returns_none(self, mock_llm):
+        mock_llm.side_effect = LLMTransportError("timeout")
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result is None
+
+    @patch("askme.ask_llm")
+    def test_empty_response_returns_none(self, mock_llm):
+        mock_llm.return_value = {"task": ""}
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result is None
+
+    @patch("askme.ask_llm")
+    def test_short_response_returns_none(self, mock_llm):
+        mock_llm.return_value = {"task": "no"}
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result is None
+
+    @patch("askme.ask_llm")
+    def test_noop_replacement_returns_none(self, mock_llm):
+        """Returning the same task description should be treated as a failed replan."""
+        mock_llm.return_value = {"task": "add missing include"}
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("add missing include", ["error"], [], state, "goal")
+        assert result is None
+
+    @patch("askme.ask_llm")
+    def test_near_duplicate_replacement_returns_none(self, mock_llm):
+        """Small wording changes should not count as useful task-local replans."""
+        import askme
+        mock_llm.return_value = {"task": "Edit fix_me.c to include <stdio.h> and recompile"}
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("Add '#include <stdio.h>' to fix_me.c",
+                             ["[edit_failed] same find failed twice"],
+                             [], state, "fix missing include")
+        assert result is None
+        assert askme._last_task_replan_reject_reason == "near_duplicate"
+
+    @patch("askme.ask_llm")
+    def test_uses_cheap_no_thinking_call(self, mock_llm):
+        """Task-local replan must stay cheaper than a full planner replan."""
+        captured = {}
+        def capture(messages, **kwargs):
+            captured.update(kwargs)
+            return {"task": "replacement task"}
+        mock_llm.side_effect = capture
+        state = {"environment": {}, "policy": {}}
+        replan_task("do thing", ["error"], [], state, "goal")
+        assert captured.get("think") is False
+        assert captured.get("max_tokens") == TASK_REPLAN_MAX_TOKENS
+        assert captured.get("max_retries") == 0
+        assert "think_level" not in captured
+
+    @patch("askme.ask_llm")
+    def test_rejects_passive_replacement_for_action_task(self, mock_llm):
+        """Do not downgrade an edit/fix task into a read-only prep task."""
+        import askme
+        mock_llm.return_value = {"task": "Read the contents of fix_me.c to prepare for editing"}
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("Edit fix_me.c to include #include <stdio.h>",
+                             ["[stuck_loop] read fix_me.c repeatedly"],
+                             [], state, "fix the missing include")
+        assert result is None
+        assert askme._last_task_replan_reject_reason == "passive_downgrade"

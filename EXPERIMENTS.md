@@ -39,14 +39,17 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | done     |
 | 6   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
 | 7   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
-| 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | planned  |
-| 9   | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
-| 10  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
-| 11  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
-| 12  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
-| 13  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
-| 14  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
-| 15  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
+| 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | done     |
+| 9   | E17 | Expected-failure task completion semantics              | 3    | P1       | S      | planned  |
+| 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | planned  |
+| 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
+| 12  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
+| 13  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
+| 14  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
+| 15  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
+| 16  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
+| 17  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
+| 18  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
 
@@ -54,10 +57,10 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 
 - **E05/E06/E16 completed; E03 done.** E05/E06 validated the targeted edit-recovery mechanism: failed edit recovery fell from 140–253s thinking-inflated reads to ~36s total in both rerun trials. E16 hardened shell error classification so compiler diagnostics aren't misclassified as structural `missing_file`. E03 added JSON repair (trailing prose, truncation) and tiered retry contract.
 - **E09 stays after E03.** E09 could reduce the underlying edit failure rate from the model side, but E03 targets the larger observed scaffold bottleneck first.
-- **Wave 3 clusters E11, E04** — E11 (task-local replan) saves ~60–90s per replan on local but is lower leverage than the current E03 parse-retry target. E04 is independent.
-- **Wave 4 is effort-ascending then dependency** — E12 and E15 are S-effort standalones. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
+- **E11 completed.** Task-local replan before full replan is cheap and bounded, but benchmark data shows it acts more like a filter than a primary recovery worker. E17/E18 target the remaining `fix_missing_include` semantic failures. E04 remains in Wave 3.
+- **Wave 4 is effort-ascending then dependency** — E12, E15, and E19 are S-effort standalones. E19 is explicitly gated behind the cheap/no-thinking E11 result; do not make reasoning the default without A/B data. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
 - **Wave 5 (E10) stays deferred** — redesign-scale; do not start until Waves 2–4 close and the harness can detect reliability regressions.
-- **Recommended execution order within waves:** E02/E11 → E09. E16 and E03 are done. E11 targets ~60–90s replans; E09 reduces root-cause edit failure rate.
+- **Recommended execution order within waves:** E02 → E17 → E18 → E09. E16, E03, and E11 are done. E17/E18 address the observed `fix_missing_include` gap before spending time on model-side quality experiments.
 
 ## Prerequisite
 
@@ -83,7 +86,7 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 - **Risk.** Low. Harness is additive; no production code changes.
 - **Code.** `tests/bench_harness.py` (standalone CLI). No `askme.py` changes.
 - **Effort.** S.
-- **Status.** Done (2026-04-26). Harness discovers tests via `pytest --collect-only`, runs N trials as subprocesses with per-trial `AGENT_RUN_LOG`, parses JSONL, reports median+range for wall time, replans, steps, thinking retries, LLM calls, and tokens. Saves `summary.json` for programmatic comparison. Documented in README.md and CLAUDE.md.
+- **Status.** Done (2026-04-26). Harness discovers tests via `pytest --collect-only`, runs N trials as subprocesses with per-trial `AGENT_RUN_LOG`, parses JSONL, reports median+range for wall time, pytest pass, agent completion status, full/local replans, steps, thinking retries, LLM calls, and tokens. Saves `summary.json` for programmatic comparison. Documented in README.md and CLAUDE.md.
 
 ## Prompts / output format
 
@@ -196,11 +199,35 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 
 - **Hypothesis.** Full replan costs ~73s on local (planner thinking budget, ARCHITECTURE.md:185). Most failures are task-local: one task's plan was wrong, the others are fine. A scoped "re-plan this task only" is dramatically cheaper.
 - **Evidence (2026-04-26).** All 3 `fix_missing_include` trials replan once at 69–112s. The replan produces essentially the same 3-task plan. Task-local replan would save ~60–90s per trial.
-- **Change.** On task failure, call a mini-planner with `(failed_task, errors, completed_tasks)` that returns only a replacement task description. Reserve full `run()` replan for when task-local replan itself fails.
-- **Metric.** Replan count; total test time on failure-heavy medium/hard tests.
+- **Change (implemented).** On task failure, `replan_task()` calls a mini-planner (`SYSTEM_TASK_REPLAN`) with `(failed_task, errors, completed_tasks, policy, missing_tools)` that returns a replacement task description. The call is deliberately cheap: `think=False`, `max_tokens=96`, `max_retries=0`. Inner retry loop (Option A) wraps the per-task body: first failure → local replan → retry with replacement. If replacement also fails or replan returns None, fall through to existing full replan. Original errors are saved and merged back so the full replan sees both failure contexts. `MAX_TASK_LOCAL_REPLANS = 1` prevents infinite loops. Exact duplicates, near duplicates, and passive downgrades are rejected; rejection reasons are logged in `task_local_replan.reject_reason`. Per-attempt execution state (task_done, task_steps, use_think, dup_skip_count) is reset.
+- **Metric.** Replan count; total test time on failure-heavy medium/hard tests; `task_local_replan` JSONL events.
 - **Upside.** Medium — saves ~60–90s per replan on local, but lower leverage than E05/E06.
-- **Risk.** Medium. Must avoid infinite task-local loop — cap at 1 task-local attempt before escalating to full replan.
-- **Code.** `askme.py:651` (replan loop), `askme.py:384` (`get_plan`).
+- **Risk.** Low. Additive change — any failure falls through to existing behavior. Cap at 1 local attempt.
+- **Code.** `askme.py:517` (`SYSTEM_TASK_REPLAN`, `replan_task()`), `askme.py:808` (inner retry loop in `_run_loop()`).
+- **Effort.** M.
+- **Result (2026-04-26).** Full medium bench after E11: pytest 8/9, agent complete 6/9. `fix_missing_include` exposed the important asymmetry: pytest 3/3 but agent complete 1/3. Mini-replan cost was solved (8/8 calls in 1.46-5.09s vs 64-122s pre-fix), but generated replacements helped only 1/6 times; bad replacements fell through or were rejected. After adding near-duplicate/passive rejection, targeted `fix_missing_include` rerun improved to pytest 3/3, agent complete 3/3, median 203s (range 59-413s) vs prior median 466s (range 234-660s). The mechanism is best understood as a cheap filter before full replan, not a primary semantic recovery worker.
+- **Status.** Done (2026-04-26). 218/218 non-integration tests pass, 4 skipped. Integration artifacts: `/tmp/bench_logs/` and `/tmp/bench_logs_missing_include_rerun/`.
+
+### E17 — Expected-failure task completion semantics
+
+- **Hypothesis.** `fix_missing_include` often starts with a task like "compile to observe the initial failure." The executor treats the failed compile as task failure, even though the task's success criterion is observing the expected error. This burns local replans and sometimes sends recovery down the wrong branch.
+- **Evidence (2026-04-26).** In the targeted rerun, trial 1 spent 324s on the "observe initial failure" task before full replan did the useful work. The kept mini-replan changed "observe" to "fix" but still fell to task failure. A deterministic expected-failure completion rule would finish that task immediately after the compile error is observed and move to the edit task.
+- **Change.** Detect task descriptions containing `observe|confirm|initial failure|will fail|read the error` and mark a failed shell step as task-complete when it produces a compile/error diagnostic. Preserve the error evidence for the next task.
+- **Metric.** `fix_missing_include` step count, task-local replan count, full replan count, agent_complete rate.
+- **Upside.** High for tests/prompts that explicitly ask to observe an expected failure.
+- **Risk.** Medium. Must not mark unexpected failures complete. Limit to tasks whose wording clearly expects failure.
+- **Code.** `askme.py` task loop around failed shell handling and `task_steps` evidence.
+- **Effort.** S.
+
+### E18 — Deterministic compile-repair templates
+
+- **Hypothesis.** Some compile errors map to safe, deterministic source edits. The local model repeatedly struggles to add `#include <stdio.h>` after `printf` diagnostics. A narrow template can fix that class faster than either mini-replan or full replan.
+- **Evidence (2026-04-26).** `fix_missing_include` remains the slowest medium test. Even after E11 guards, mini-replan helped 0/2 times in the targeted rerun; full replan did the real recovery.
+- **Change.** Add a guarded recovery template for C compile diagnostics: if compile output references `printf`/`stdio.h` or implicit declaration of `printf`, and the target `.c` file lacks `#include <stdio.h>`, insert it at the top before asking the model again.
+- **Metric.** `fix_missing_include` median wall time, edit failure count, full replan count, agent_complete rate.
+- **Upside.** High for a known benchmark bottleneck; may generalize to a small set of C/Python repair patterns.
+- **Risk.** Medium. Keep templates narrow and observable; log template application explicitly.
+- **Code.** `askme.py` execute/error-recovery path.
 - **Effort.** M.
 
 ## Verification
@@ -240,6 +267,17 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Upside.** Low-medium, but makes the system easier to tune.
 - **Risk.** Low. Gated on E03 landing first — otherwise no meaningful contract ladder to run on.
 - **Code.** `askme.py:202` (`MAX_LLM_RETRIES`), `askme.py:205` (`ask_llm`).
+- **Effort.** S.
+
+### E19 — Capped low-reasoning task-local replan A/B
+
+- **Hypothesis.** Medium/high reasoning made task-local replans too expensive (64-122s pre-fix), but a genuinely capped low-reasoning variant might improve replacement quality without giving back the cost win.
+- **Evidence (2026-04-26).** No-thinking E11 replans are cheap (1.46-5.09s) but only helped directly 1/6 times in the full medium bench and 0/2 times in the `fix_missing_include` rerun. The value is currently cheap rejection/fallback, not primary recovery.
+- **Change.** Add an env-gated A/B mode for `replan_task()` only: low reasoning, `max_retries=0`, hard `max_tokens` cap around 128-192, no escalation. Compare against default no-thinking mode on `fix_missing_include` and `fix_python_syntax_error`.
+- **Metric.** Replacement helped rate (`task_local_replan` followed by `task_complete`), local replan wall time, agent_complete rate, full replan count.
+- **Upside.** Could improve mini-replan quality while preserving cheap failure behavior.
+- **Risk.** Medium. Any local thinking path can inflate wall time. Abort if p95 local-replan wall exceeds ~10s.
+- **Code.** `askme.py:replan_task()`, `tests/bench_harness.py` local-replan correlation metrics.
 - **Effort.** S.
 
 ## Planning

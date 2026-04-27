@@ -514,6 +514,129 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
     ], max_tokens=step_tokens, think=think)
 
 
+SYSTEM_TASK_REPLAN = """You are a task replanner. A single task failed. Given the failed task, errors, and completed tasks, propose a replacement task description.
+Do NOT repeat completed work. The replacement must address the failure.
+Preserve the original task's outcome. If it was to fix, edit, add, compile, run, create, or write something, do NOT replace it with a read/list/inspect-only preparation task.
+Keep the replacement short (under 15 words). Use relative filenames.
+Output ONLY valid JSON. No markdown, no explanation.
+Format: {"task": "replacement task description"}"""
+
+MAX_TASK_LOCAL_REPLANS = 1
+TASK_REPLAN_MAX_TOKENS = 96
+_last_task_replan_reject_reason = None
+
+_PASSIVE_TASK_RE = re.compile(r"^\s*(read|inspect|view|open|list|check|examine)\b", re.I)
+_ACTION_TASK_RE = re.compile(
+    r"\b(fix|edit|add|insert|include|compile|build|run|create|write|update|replace|execute|remove)\b",
+    re.I,
+)
+_LOW_VALUE_TASK_WORDS = frozenset({
+    "a", "an", "and", "again", "code", "correct", "file", "for", "in",
+    "of", "rebuild", "recompile", "rerun", "run", "the", "then", "to",
+    "using", "with",
+})
+
+
+def _task_keywords(text):
+    """Normalized content words for rejecting near-duplicate task replans."""
+    text = text.lower().replace("#include", "include")
+    words = re.findall(r"[a-z0-9_.]+", text)
+    return {w for w in words if len(w) > 1 and w not in _LOW_VALUE_TASK_WORDS}
+
+
+def _task_entities(text):
+    """Extract concrete files/headers mentioned in a task."""
+    text = text.lower().replace("#include", "include")
+    return set(re.findall(r"\b[a-z0-9_./-]+\.(?:c|h|py|txt|json|md|js|ts|go|rs|java)\b", text))
+
+
+def _task_action_words(text):
+    """Normalized action words that define the kind of task."""
+    return _ACTION_TASK_RE.findall(text.lower())
+
+
+def _is_near_duplicate_task(original, replacement):
+    """True when a replacement only rephrases or appends low-value words."""
+    orig = _task_keywords(original)
+    repl = _task_keywords(replacement)
+    if not orig or not repl:
+        return False
+    orig_entities = _task_entities(original)
+    repl_entities = _task_entities(replacement)
+    orig_actions = set(_task_action_words(original))
+    repl_actions = set(_task_action_words(replacement))
+    if orig_entities and orig_entities == repl_entities:
+        edit_like = {"fix", "edit", "add", "insert", "include", "update", "replace", "write"}
+        if orig_actions & edit_like and repl_actions & edit_like:
+            return True
+    overlap = len(orig & repl)
+    jaccard = overlap / len(orig | repl)
+    coverage = overlap / min(len(orig), len(repl))
+    return jaccard >= 0.8 or coverage >= 0.9
+
+
+def _is_passive_replacement(original, replacement):
+    """Reject prep-only replacements that downgrade an actionable task."""
+    if not _ACTION_TASK_RE.search(original):
+        return False
+    if not _PASSIVE_TASK_RE.search(replacement):
+        return False
+    # Allow compact two-part tasks such as "check error and fix include".
+    return not re.search(
+        r"\b(then|and)\b.*\b(fix|edit|add|insert|include|compile|build|run|create|write|update|replace|execute|remove)\b",
+        replacement,
+        re.I,
+    )
+
+
+def replan_task(failed_task, errors, completed_tasks, state, user_prompt):
+    """Mini-planner: generate a replacement for one failed task.
+    Returns replacement task string, or None if replan fails."""
+    global _last_task_replan_reject_reason
+    _last_task_replan_reject_reason = None
+    replan_state = {
+        "failed_task": failed_task,
+        "errors": summarize_errors(errors),
+        "completed_tasks": [t[:80] for t in completed_tasks[-3:]],
+    }
+    env = state.get("environment", {})
+    if env.get("missing_tools"):
+        replan_state["missing_tools"] = env["missing_tools"]
+    replan_state["policy"] = state.get("policy", get_policy())
+    try:
+        result = ask_llm([
+            {"role": "system", "content": SYSTEM_TASK_REPLAN},
+            {"role": "user", "content": f"GOAL:\n{user_prompt[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(replan_state)}"}
+        ], max_tokens=TASK_REPLAN_MAX_TOKENS, think=False, max_retries=0)
+        task = result.get("task", "")
+        if not task or not isinstance(task, str):
+            _last_task_replan_reject_reason = "empty"
+            return None
+        task = task.strip()
+        if len(task) <= 3:
+            _last_task_replan_reject_reason = "too_short"
+            return None
+        if task == failed_task.strip():
+            _last_task_replan_reject_reason = "exact_duplicate"
+            return None
+        if _is_near_duplicate_task(failed_task, task):
+            _last_task_replan_reject_reason = "near_duplicate"
+            return None
+        if _is_passive_replacement(failed_task, task):
+            _last_task_replan_reject_reason = "passive_downgrade"
+            return None
+        return task
+    except LLMTransportError:
+        _last_task_replan_reject_reason = "transport_error"
+        return None
+    except json.JSONDecodeError:
+        _last_task_replan_reject_reason = "parse_error"
+        return None
+    except KeyError:
+        _last_task_replan_reject_reason = "missing_task_key"
+        return None
+
+
 def _should_validate(replan, history, state, user_prompt):
     """Decide whether to run final validation. Returns True if validation should run."""
     if FINAL_VALIDATE == "0":
@@ -764,142 +887,200 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
         all_done = True
         for i, task in enumerate(tasks):
-            state["current_task"] = task
-            state["task_index"] = f"{i + 1}/{len(tasks)}"
             # Carry over last step from previous task so executor has cross-task context
             prev_last = state["last_steps"][-1:] if state.get("last_steps") else []
-            state["last_steps"] = prev_last
             t_task = time.time()
-            log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
+            # E11: inner retry loop — try task-local replan before full replan
             task_done = False
-            task_steps = []  # successful steps for validation evidence
-            use_think = False  # enable thinking after failed step execution
-            dup_skip_count = 0  # consecutive duplicate write skips
-            for step in range(max_steps):
-                t_step = time.time()
-                try:
-                    action = get_step(task, state, goal=user_prompt, step_num=step,
-                                      max_steps=max_steps, think=use_think)
-                except LLMTransportError as e:
-                    log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
-                    state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
-                    break
-                except (json.JSONDecodeError, KeyError) as e:
-                    log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
-                    state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
-                    break
-                # Normalize None → "" for optional string fields (models emit "arg": null)
-                for _k in ("arg", "content", "reasoning", "find", "replace"):
-                    if action.get(_k) is None:
-                        action[_k] = ""
-                act = action.get("action", "")
-                log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
+            saved_errors = []
+            for task_attempt in range(1 + MAX_TASK_LOCAL_REPLANS):
+                state["current_task"] = task
+                state["task_index"] = f"{i + 1}/{len(tasks)}"
+                state["last_steps"] = list(prev_last)
+                log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
-                if act == "done":
-                    task_done = True
-                    break
-                if act == "fail":
-                    reason = action.get("reasoning", "no reason")
-                    log(f"  FAIL ({time.time()-t_step:.1f}s): {reason}")
-                    state["errors"].append(f"Task '{task}': {reason}")
-                    break
+                # Reset per-attempt execution state
+                task_done = False
+                task_steps = []
+                use_think = False
+                dup_skip_count = 0
+                for step in range(max_steps):
+                    t_step = time.time()
+                    try:
+                        action = get_step(task, state, goal=user_prompt, step_num=step,
+                                          max_steps=max_steps, think=use_think)
+                    except LLMTransportError as e:
+                        log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
+                        state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
+                        break
+                    except (json.JSONDecodeError, KeyError) as e:
+                        log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
+                        state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
+                        break
+                    # Normalize None → "" for optional string fields (models emit "arg": null)
+                    for _k in ("arg", "content", "reasoning", "find", "replace"):
+                        if action.get(_k) is None:
+                            action[_k] = ""
+                    act = action.get("action", "")
+                    log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
-                # Duplicate action guard — per-action-type loop detection
-                last = state["last_steps"][-1:] if state["last_steps"] else []
-                if last and last[0]["action"] == act:
-                    prev = last[0]
-                    if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
-                        # write: same content = duplicate; edit: same find+replace = duplicate
-                        is_dup = False
-                        if act == "write" and prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
-                            is_dup = True
-                        elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
-                            is_dup = True
-                        # Consecutive identical failed edit → stuck; bail to replan
-                        elif act == "edit" and not prev.get("ok") and prev.get("_find", "") == action.get("find", ""):
-                            log(f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg','')[:40]})")
-                            state["errors"].append(f"[stuck_loop] edit {action.get('arg','')[:60]}: same find string failed twice")
+                    if act == "done":
+                        task_done = True
+                        break
+                    if act == "fail":
+                        reason = action.get("reasoning", "no reason")
+                        log(f"  FAIL ({time.time()-t_step:.1f}s): {reason}")
+                        state["errors"].append(f"Task '{task}': {reason}")
+                        break
+
+                    # Duplicate action guard — per-action-type loop detection
+                    last = state["last_steps"][-1:] if state["last_steps"] else []
+                    if last and last[0]["action"] == act:
+                        prev = last[0]
+                        if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
+                            # write: same content = duplicate; edit: same find+replace = duplicate
+                            is_dup = False
+                            if act == "write" and prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                                is_dup = True
+                            elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
+                                is_dup = True
+                            # Consecutive identical failed edit → stuck; bail to replan
+                            elif act == "edit" and not prev.get("ok") and prev.get("_find", "") == action.get("find", ""):
+                                log(f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg','')[:40]})")
+                                state["errors"].append(f"[stuck_loop] edit {action.get('arg','')[:60]}: same find string failed twice")
+                                break
+                            if is_dup:
+                                dup_skip_count += 1
+                                log(f"  [{step + 1}] skip (duplicate {act}, same content)")
+                                entry = {
+                                    "action": act, "arg": action.get("arg", ""),
+                                    "ok": True,
+                                    "output": "Already done — file unchanged. Move to next action or emit done."
+                                }
+                                # Preserve match metadata so guard still detects duplicates on subsequent turns
+                                if act == "write":
+                                    entry["_content"] = action.get("content", "")
+                                elif act == "edit":
+                                    entry["_find"] = action.get("find", "")
+                                    entry["_replace"] = action.get("replace", "")
+                                state["last_steps"].append(entry)
+                                # Defer thinking escalation: first duplicate skip gets a
+                                # corrective observation only; escalate on 2+ consecutive skips.
+                                # Saves ~10s of thinking time on harmless first-time duplicates.
+                                if dup_skip_count >= 2:
+                                    use_think = True
+                                continue
+                        elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+                            if prev.get("ok"):
+                                log(f"  [{step + 1}] auto-done (duplicate successful shell)")
+                                task_done = True
+                                break
+                            elif prev.get("error_type") == "timeout":
+                                # Bump timeout for retry: read actual timeout from previous step,
+                                # not from fresh action (which won't have prior bumps)
+                                prev_timeout = prev.get("_timeout",
+                                                        _get_shell_timeout(action.get("arg", "")))
+                                bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
+                                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
+                                log(f"  [{step + 1}] retrying after timeout ({action['timeout']}s)")
+                            else:
+                                log(f"  [{step + 1}] auto-fail (same shell failed twice)")
+                                state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+                                break
+                        elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
+                            if prev.get("ok"):
+                                dup_skip_count += 1
+                                if dup_skip_count >= 2:
+                                    log(f"  [{step + 1}] auto-fail (same read repeated on {action.get('arg','')[:40]})")
+                                    state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]}: same file read repeatedly")
+                                    break
+                                log(f"  [{step + 1}] skip (duplicate read)")
+                                state["last_steps"].append({
+                                    "action": "read",
+                                    "arg": action.get("arg", ""),
+                                    "ok": True,
+                                    "output": "Already read. Use previous content; edit, write, shell, done, or fail."
+                                })
+                                continue
+                            log(f"  [{step + 1}] auto-fail (same read failed twice)")
+                            state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]} failed twice")
                             break
-                        if is_dup:
-                            dup_skip_count += 1
-                            log(f"  [{step + 1}] skip (duplicate {act}, same content)")
-                            entry = {
-                                "action": act, "arg": action.get("arg", ""),
-                                "ok": True,
-                                "output": "Already done — file unchanged. Move to next action or emit done."
-                            }
-                            # Preserve match metadata so guard still detects duplicates on subsequent turns
-                            if act == "write":
-                                entry["_content"] = action.get("content", "")
-                            elif act == "edit":
-                                entry["_find"] = action.get("find", "")
-                                entry["_replace"] = action.get("replace", "")
-                            state["last_steps"].append(entry)
-                            # Defer thinking escalation: first duplicate skip gets a
-                            # corrective observation only; escalate on 2+ consecutive skips.
-                            # Saves ~10s of thinking time on harmless first-time duplicates.
-                            if dup_skip_count >= 2:
-                                use_think = True
-                            continue
-                    elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
-                        if prev.get("ok"):
-                            log(f"  [{step + 1}] auto-done (duplicate successful shell)")
-                            task_done = True
-                            break
-                        elif prev.get("error_type") == "timeout":
-                            # Bump timeout for retry: read actual timeout from previous step,
-                            # not from fresh action (which won't have prior bumps)
-                            prev_timeout = prev.get("_timeout",
-                                                    _get_shell_timeout(action.get("arg", "")))
-                            bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
-                            action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
-                            log(f"  [{step + 1}] retrying after timeout ({action['timeout']}s)")
-                        else:
-                            log(f"  [{step + 1}] auto-fail (same shell failed twice)")
-                            state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
-                            break
 
-                dup_skip_count = 0  # reset on any non-skipped action
-                result = execute(action, working_dir)
-                ok_str = "OK" if result["ok"] else "FAIL"
-                log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
+                    dup_skip_count = 0  # reset on any non-skipped action
+                    result = execute(action, working_dir)
+                    ok_str = "OK" if result["ok"] else "FAIL"
+                    log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
-                step_entry = {
-                    "action": act,
-                    "arg": action.get("arg", ""),
-                    "ok": result["ok"],
-                    "output": result["output"][:100]
-                }
-                if not result["ok"] and "error_type" in result:
-                    step_entry["error_type"] = result["error_type"]
-                if act == "shell" and "timeout" in action:
-                    step_entry["_timeout"] = action["timeout"]
-                if act == "write":
-                    step_entry["_content"] = action.get("content", "")
-                if act == "edit":
-                    step_entry["_find"] = action.get("find", "")
-                    step_entry["_replace"] = action.get("replace", "")
-                state["last_steps"].append(step_entry)
-                history.append({"event": "step", "task": i, "step": step, "action": action,
-                                "result": {"ok": result["ok"], "output": result["output"][:100]}})
-                _run_log({"event": "step", "task_index": i, "step": step,
-                          "action": act, "arg": action.get("arg", "")[:120],
-                          "ok": result["ok"], "error_type": result.get("error_type"),
-                          "wall_s": round(time.time() - t_step, 2)})
+                    step_entry = {
+                        "action": act,
+                        "arg": action.get("arg", ""),
+                        "ok": result["ok"],
+                        "output": result["output"][:100]
+                    }
+                    if not result["ok"] and "error_type" in result:
+                        step_entry["error_type"] = result["error_type"]
+                    if act == "shell" and "timeout" in action:
+                        step_entry["_timeout"] = action["timeout"]
+                    if act == "write":
+                        step_entry["_content"] = action.get("content", "")
+                    if act == "edit":
+                        step_entry["_find"] = action.get("find", "")
+                        step_entry["_replace"] = action.get("replace", "")
+                    state["last_steps"].append(step_entry)
+                    history.append({"event": "step", "task": i, "step": step, "action": action,
+                                    "result": {"ok": result["ok"], "output": result["output"][:100]}})
+                    _run_log({"event": "step", "task_index": i, "step": step,
+                              "action": act, "arg": action.get("arg", "")[:120],
+                              "ok": result["ok"], "error_type": result.get("error_type"),
+                              "wall_s": round(time.time() - t_step, 2)})
 
-                if not result["ok"]:
-                    etype = result.get("error_type", "unknown")
-                    err_output = result['output'][:100]
-                    hint = _RECOVERY_HINTS.get(etype)
-                    if hint:
-                        err_output = f"{err_output} → {hint}"
-                        state["last_steps"][-1]["output"] = state["last_steps"][-1]["output"][:100] + f" → {hint}"
-                    state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
-                    use_think = etype not in _NO_THINK_ERRORS
+                    if not result["ok"]:
+                        etype = result.get("error_type", "unknown")
+                        err_output = result['output'][:100]
+                        hint = _RECOVERY_HINTS.get(etype)
+                        if hint:
+                            err_output = f"{err_output} → {hint}"
+                            state["last_steps"][-1]["output"] = state["last_steps"][-1]["output"][:100] + f" → {hint}"
+                        state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
+                        use_think = etype not in _NO_THINK_ERRORS
+                    else:
+                        use_think = False
+                        task_steps.append(step_entry)
+
+                if task_done:
+                    break  # break task_attempt loop — success
+
+                # E11: try task-local replan before falling through to full replan
+                if task_attempt < MAX_TASK_LOCAL_REPLANS:
+                    saved_errors = list(state["errors"])
+                    t_lr = time.time()
+                    replacement = replan_task(task, state["errors"],
+                                             state["completed_tasks"], state, user_prompt)
+                    lr_wall = time.time() - t_lr
+                    if replacement:
+                        log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
+                        _run_log({"event": "task_local_replan", "task_index": i,
+                                  "original": task[:120], "replacement": replacement[:120],
+                                  "ok": True, "llm_wall_s": round(lr_wall, 2)})
+                        task = replacement
+                        tasks[i] = replacement
+                        state["errors"] = []
+                        continue  # retry with replacement
+                    else:
+                        reject_reason = _last_task_replan_reject_reason or "unknown"
+                        log(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
+                        _run_log({"event": "task_local_replan", "task_index": i,
+                                  "original": task[:120], "replacement": None,
+                                  "ok": False, "llm_wall_s": round(lr_wall, 2),
+                                  "reject_reason": reject_reason})
+                        state["errors"] = saved_errors
                 else:
-                    use_think = False
-                    task_steps.append(step_entry)
+                    # Replacement attempt also failed — merge original errors back
+                    # so full replan sees both failure contexts
+                    state["errors"] = saved_errors + state["errors"]
+                # Fall through — task failed, no more local attempts
+                break
 
             if task_done:
                 state["completed_tasks"].append(task)

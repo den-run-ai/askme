@@ -41,6 +41,7 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 - `ask_llm(messages, max_tokens, think)` — calls backend, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, attempts repair then retries on parse failure (up to 2). E03: final auto-retry uses strict contract with no thinking
 - `get_plan(user_prompt, state)` — task list. Thinking conditional: `think=bool(errors or completed_tasks)` — off for first plan, on for replans
 - `get_step(task, state, goal)` — next action within a task. Goal-aware completion — executor must satisfy the full task, not just one step
+- `replan_task(failed_task, errors, completed_tasks, state, user_prompt)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (`max_tokens=96`, no retries). Returns string or None. Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
 - `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
 - `execute(action, working_dir)` — runs shell/write/edit/read/done/fail with command-aware timeouts
@@ -104,11 +105,12 @@ On task failure:
 1. Error is classified into a typed category — deterministic tags for edit scaffold failures (`edit_failed`) and missing edit targets (`missing_file`), heuristic `classify_error()` for shell output and exception paths
 2. Error-class-specific retry policy (E05): structural failures (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`) skip thinking escalation; semantic failures (`compile_error`, `unknown`) escalate thinking
 3. Recovery hints (E06): typed failures inject a short hint into step output (e.g., "Read the file first" for `edit_failed`) so the model knows what to do next without thinking tokens
-4. Repeated identical failed edits are treated as stuck and force replan instead of burning `MAX_STEPS`
-5. Errors are collected in state, grouped and capped at 3 per type (`summarize_errors`)
-6. The full loop restarts with a new plan (`get_plan` with `think=True`); errors reset after each replan
-7. `completed_tasks` carries forward — the new plan can build on what's already done
-8. Up to `MAX_REPLANS` replan attempts; after that the run exits as `exhausted`
+4. Repeated identical failed edits and repeated duplicate reads are treated as stuck and force replan instead of burning `MAX_STEPS`
+5. **Task-local replan (E11):** before a full replan, `replan_task()` calls a cheap mini-planner that generates a replacement task description for just the failed task. Capped at `MAX_TASK_LOCAL_REPLANS=1` — if the replacement also fails, fall through to full replan. Original errors are saved and merged back so the full planner sees both failure contexts. Exact duplicates, near duplicates, and passive downgrades are rejected; rejection reason is logged for JSONL analysis
+6. Errors are collected in state, grouped and capped at 3 per type (`summarize_errors`)
+7. The full loop restarts with a new plan (`get_plan` with `think=True`); errors reset after each replan
+8. `completed_tasks` carries forward — the new plan can build on what's already done
+9. Up to `MAX_REPLANS` replan attempts; after that the run exits as `exhausted`
 
 If `ask_llm` exhausts its retries, `LLMTransportError` is raised: planner catches it as a failed plan attempt, executor catches it as a task failure (triggering replan).
 
@@ -129,6 +131,7 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Constant | Value | Purpose |
 |---|---|---|
 | `MAX_REPLANS` | 3 | Max plan attempts before giving up |
+| `MAX_TASK_LOCAL_REPLANS` | 1 | Max task-local replan attempts before full replan (E11) |
 | `MAX_TASKS` | 10 | Max tasks per plan |
 | `MAX_STEPS` | 10 | Max actions per task |
 | `MAX_RESULT` | 300 | Chars kept from command output |
@@ -171,9 +174,10 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | JSON repair (E03) | `_repair_json` attempts mechanical fixes (close braces, strip trailing commas/truncated fields) before burning a retry. Guarantees valid JSON structure but not complete action fields — downstream KeyError/validation paths still handle missing fields |
 | Strict final retry (E03) | Final auto-retry (attempt 2) disables thinking and appends a strict JSON-only instruction. Explicit `think_level` from callers (e.g. `_validate_completion`) is always respected. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. Only `edit_failed` and `missing_file` have hints; adding more requires evidence of wasted thinking cycles |
-| Failed edit stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. This preserves cheap first recovery while preventing no-thinking loops |
+| Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, `max_tokens=96`, `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
+| Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once, then auto-fail as `stuck_loop`. This preserves cheap first recovery while preventing no-thinking loops |
 | Planner thinking | Off for first plan, on for replans (`think=bool(errors or completed_tasks)`). Benchmarked: `think=True` on first plan caused JSON truncation on local 768-token budget and no quality gain on either backend |
-| Duplicate action guard | Per-action-type loop detection. `write(same content)` → skip+continue. `shell(same+ok)` → auto-done. `shell(same+fail)` → auto-fail (stuck). `read` excluded (re-reads legitimate). First skip injects corrective observation only; 2+ consecutive skips activate thinking |
+| Duplicate action guard | Per-action-type loop detection. `write(same content)` → skip+continue. `shell(same+ok)` → auto-done. `shell(same+fail)` → auto-fail (stuck). `read(same+ok)` → skip once with "Already read" observation, then auto-fail if repeated. First skip injects corrective observation only; 2+ consecutive write skips activate thinking |
 | Write content comparison | Duplicate guard on `write` must compare content, not just arg — matching only on `(action, arg)` would kill the write → compile fail → write fix pattern |
 | `_content` in step dict | Stored for duplicate detection; excluded from slim state via underscore-prefix convention |
 | Multi-turn rejected | Accumulated prior turns bloat context (500-800 tokens across 3 turns) vs curated slim state (~150-200). Revisit with a stronger local model and more context headroom |
