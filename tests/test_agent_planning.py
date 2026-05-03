@@ -58,8 +58,8 @@ class TestPlannerReasoning:
     def test_system_plan_includes_hints(self):
         """Updated SYSTEM_PLAN should contain specificity guidance."""
         from askme import SYSTEM_PLAN
-        assert "File content hints" in SYSTEM_PLAN
-        assert "relative filenames" in SYSTEM_PLAN
+        assert "includes" in SYSTEM_PLAN
+        assert "Relative filenames" in SYSTEM_PLAN
         assert "completed_tasks" in SYSTEM_PLAN
 
     @patch("askme.requests.post")
@@ -272,7 +272,7 @@ class TestExecutionPolicy:
         from askme import SYSTEM_STEP
         assert "missing_tools" in SYSTEM_STEP
         assert "allow_system_installs" in SYSTEM_STEP
-        assert "Do NOT attempt to install" in SYSTEM_STEP
+        assert "do NOT install" in SYSTEM_STEP
 
 
 # --- Command-aware timeout tests ---

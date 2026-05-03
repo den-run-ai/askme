@@ -55,6 +55,43 @@ The dominant waste pattern: model fails an `edit` (bad JSON or wrong `old` strin
 
 ~60% of `fix_missing_include` wall time is scaffold-addressable. The remaining ~40% is irreducible model quality (E4B generates bad edit JSON ~60% of first attempts vs near-zero on OpenRouter 26B).
 
+## Hard Bench Post-E03/E05/E06/E11/E16 — 2026-05-03, Local (Gemma 4 E4B Q4_K_M)
+
+Hard suite rerun after five recovery experiments landed (E03 JSON repair + tiered retry, E05 error-class retry policy, E06 typed recovery hints, E11 task-local replan, E16 compiler-aware shell classification). 3 trials per test. Build `a702f395`, M1 16 GB, Phase 6 config.
+
+### Hard (3 trials each)
+
+| Test | Pass | Wall (median) | Steps | Failed | Replans (full) | Local replans | Thinking retries | LLM calls | Prompt tok | Completion tok |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `replan_build_with_dependency` | 3/3 | 903.7s (784.7–994.1) | 15 (13–28) | 2 (1–4) | 1 (0–2) | 1 (1–2), all ok | 7 (6–7) | 32 (30–53) | 20414 (20138–34062) | 6239 (5877–7436) |
+| `replan_fix_wrong_command` | 3/3 | 79.6s (63.5–264.3) | 2 (2–3) | 1 | 0 | 1 (0–1), all ok | 0 (0–3) | 8 (7–8) | 4611 (4018–5008) | 571 (410–2062) |
+| `replan_multi_step_recovery` | 3/3 | 88.0s (30.0–174.5) | 3 (3–4) | 0 | 0 | 0 | 0 (0–1) | 6 (6–8) | 4291 (3835–5759) | 577 (149–1284) |
+
+**9/9 PASS — 100% pytest, 100% agent complete.**
+
+**Observations:**
+- E11 task-local replans confirmed as a cheap recovery mechanism on hard tests: `build_with_dependency` used local replans in every trial (3.6–7.3s each) and they all succeeded. `fix_wrong_command` used them in 2/3 trials.
+- Zero full replans needed on the two faster tests — local replan absorbed the recovery.
+- `build_with_dependency` remains the expensive test (~15 min median), dominated by thinking retries (6–7 per trial). This is the E02 (prompt shrink) and E03 follow-up territory — parse-retry thinking inflation is the remaining scaffold bottleneck.
+- High variance on `fix_wrong_command` trial 2 (264.3s vs 63.5/79.6s) — 3 thinking retries in that trial vs 0 in the others.
+- `multi_step_recovery` is consistently fast (30–175s) with no replans needed.
+
+**Comparison to E01 Harness Baseline (same tests, pre-E03/E05/E06/E11/E16):**
+
+No prior local hard baseline exists in PERFORMANCE.md (E01 baseline only ran easy/medium locally; hard was OpenRouter-only). This is the first local hard harness run.
+
+**Comparison to OpenRouter E01 Hard Baseline:**
+
+| Test | Local median | OpenRouter median | Ratio |
+|---|---|---|---|
+| `replan_build_with_dependency` | 903.7s | 43.0s | 21× |
+| `replan_fix_wrong_command` | 79.6s | 19.6s | 4× |
+| `replan_multi_step_recovery` | 88.0s | 9.5s | 9× |
+
+Local is 4–21× slower than OpenRouter 26B on hard tests, consistent with the 5–24× range observed on easy/medium. The gap is widest on `build_with_dependency` where thinking retries compound (~7 per trial locally vs 0 on OpenRouter).
+
+Logs: `/tmp/bench_hard_20260503/`.
+
 ## E05/E06 Edit Recovery — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
 
 Two-trial targeted rerun of `fix_missing_include` after E05/E06:

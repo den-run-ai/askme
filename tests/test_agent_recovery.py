@@ -157,8 +157,8 @@ class TestDuplicateGuard:
             ok = run("fix include", working_dir=str(tmp_path))
         assert ok is True
 
-    def test_edit_triple_duplicate_still_detected(self, tmp_path):
-        """Three consecutive duplicate edits all detected — synthetic entries preserve _find/_replace."""
+    def test_edit_duplicate_after_success_auto_done(self, tmp_path, capsys):
+        """Two duplicate edit skips after a successful edit force task completion."""
         f = tmp_path / "main.c"
         f.write_text('#include "msg.h"\nint main(){return 0;}')
         responses = [
@@ -168,15 +168,14 @@ class TestDuplicateGuard:
             {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
              "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 1
             {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 2 -- thinking enabled
-            {"action": "done"},
+             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 2 -- auto-done
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("fix include", working_dir=str(tmp_path))
+        out = capsys.readouterr().out
         assert ok is True
-        # The done call (after skip 2) should have think=True
-        last_call = mock_llm.call_args_list[-1]
-        assert last_call[1].get("think") is True
+        assert "auto-done (edit already succeeded" in out
+        assert mock_llm.call_count == 4
 
     def test_edit_different_find_allowed(self, tmp_path):
         """Same file + different find -> allowed (different edit, not a duplicate)."""
@@ -192,6 +191,23 @@ class TestDuplicateGuard:
             ok = run("fix two lines", working_dir=str(tmp_path))
         assert ok is True
         assert f.read_text() == "AAA\nBBB"
+
+    @patch("askme.replan_task", return_value=None)
+    def test_edit_same_find_different_replace_not_auto_done(self, mock_replan, tmp_path, capsys):
+        """A different replacement is a new edit attempt, not an auto-done duplicate."""
+        f = tmp_path / "f.txt"
+        f.write_text("old")
+        responses = [
+            {"tasks": ["edit f.txt"]},
+            {"action": "edit", "arg": str(f), "find": "old", "replace": "new"},
+            {"action": "edit", "arg": str(f), "find": "old", "replace": "newer"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses):
+            result = _run_loop("edit f.txt", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=2)
+        out = capsys.readouterr().out
+        assert result["status"] == "exhausted"
+        assert "auto-done (edit already succeeded" not in out
 
     def test_edit_recompile_after_edit_not_blocked(self, tmp_path):
         """shell gcc (fail) -> edit fix -> shell gcc (same cmd) should NOT be blocked."""
@@ -577,6 +593,18 @@ class TestCompilerAwareClassification:
         assert result["ok"] is False
         assert result["error_type"] == "compile_error"
 
+    def test_truncated_clang_implicit_function_tail(self):
+        """Tail-truncated macOS clang diagnostics should still be compile_error."""
+        from askme import classify_error
+        output = (
+            "implicit function declarations [-Wimplicit-function-declaration]\n"
+            "int main() { printf(\"FIXED\\n\"); return 0; }\n"
+            "             ^\n"
+            "fix_me.c:1:14: note: include the header <stdio.h> or explicitly provide a declaration for 'printf'\n"
+            "1 error generated."
+        )
+        assert classify_error(output, "shell", cmd="cc -o fix_me fix_me.c") == "compile_error"
+
 
 # --- E05/E06: Error-class retry policy and recovery hints ---
 
@@ -806,6 +834,206 @@ class TestCompletionSemantics:
 
 # --- Final validation tests ---
 
+class TestExpectedFailureCompletion:
+    """E17: observing an expected failure can complete that task."""
+
+    def test_expected_failure_phrases(self):
+        assert askme._expects_failure("compile to observe the initial failure")
+        assert askme._expects_failure("run to confirm the bug")
+        assert askme._expects_failure("check the broken program error")
+
+    def test_expected_failure_negative_phrases(self):
+        assert not askme._expects_failure("fix the compile error")
+        assert not askme._expects_failure("create and compile the file")
+        assert not askme._expects_failure("verify no error")
+        assert not askme._expects_failure("verify the error is fixed")
+
+    @patch("askme.execute", return_value={
+        "ok": False, "output": "main.c:1: error: expected failure",
+        "error_type": "compile_error",
+    })
+    @patch("askme.ask_llm")
+    def test_expected_failure_shell_completes_task(self, mock_llm, mock_execute, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["compile to observe the initial failure"]},
+            {"action": "shell", "arg": "cc main.c"},
+        ]
+        result = _run_loop("observe the failure", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=1)
+        assert result["status"] == "complete"
+        assert result["state"]["completed_step_groups"][0][0]["expected_failure"] is True
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.execute", return_value={
+        "ok": False, "output": "main.c:1: error: unexpected",
+        "error_type": "compile_error",
+    })
+    @patch("askme.ask_llm")
+    def test_unexpected_shell_failure_still_fails(self, mock_llm, mock_execute, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["compile main.c"]},
+            {"action": "shell", "arg": "cc main.c"},
+        ]
+        result = _run_loop("compile main.c", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=1)
+        assert result["status"] == "exhausted"
+
+
+class TestCompileRepairTemplates:
+    """E18: narrow deterministic C include repairs."""
+
+    def test_try_compile_repair_adds_stdio(self, tmp_path):
+        src = tmp_path / "main.c"
+        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c")
+        assert repair == ("main.c", "Auto-inserted #include <stdio.h>")
+        assert src.read_text().startswith("#include <stdio.h>\n")
+
+    def test_try_compile_repair_handles_truncated_clang_tail(self, tmp_path):
+        src = tmp_path / "fix_me.c"
+        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        output = (
+            "implicit function declarations [-Wimplicit-function-declaration]\n"
+            "fix_me.c:1:14: note: include the header <stdio.h> or explicitly provide a declaration for 'printf'\n"
+            "1 error generated."
+        )
+        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o fix_me fix_me.c")
+        assert repair == ("fix_me.c", "Auto-inserted #include <stdio.h>")
+        assert src.read_text().startswith("#include <stdio.h>\n")
+
+    def test_try_compile_repair_skips_existing_include(self, tmp_path):
+        src = tmp_path / "main.c"
+        src.write_text('#include <stdio.h>\nint main(){ printf("hi"); }\n')
+        output = "main.c:2:13: error: implicit declaration of function 'printf'"
+        assert askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c") is None
+
+    def test_try_compile_repair_skips_non_c_targets(self, tmp_path):
+        (tmp_path / "app.py").write_text("print('hi')\n")
+        output = "app.py:1: error: implicit declaration of function 'printf'"
+        assert askme._try_compile_repair(output, str(tmp_path), "python3 app.py") is None
+
+    def test_try_compile_repair_skips_ambiguous_sources(self, tmp_path):
+        (tmp_path / "a.c").write_text("int main(){return 0;}\n")
+        (tmp_path / "b.c").write_text("int main(){return 0;}\n")
+        output = "error: implicit declaration of function 'printf'"
+        assert askme._try_compile_repair(output, str(tmp_path), "cc -o app") is None
+
+    def test_try_compile_repair_prefers_diagnostic_filename(self, tmp_path):
+        a = tmp_path / "a.c"
+        b = tmp_path / "b.c"
+        a.write_text("int a(void){return 0;}\n")
+        b.write_text('int b(void){ printf("hi"); return 0; }\n')
+        output = "b.c:1:14: error: implicit declaration of function 'printf'"
+        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o app a.c")
+        assert repair == ("b.c", "Auto-inserted #include <stdio.h>")
+        assert "#include <stdio.h>" not in a.read_text()
+        assert b.read_text().startswith("#include <stdio.h>\n")
+
+    @patch("askme.execute")
+    @patch("askme.ask_llm")
+    def test_run_loop_records_repair_and_retry(self, mock_llm, mock_execute, tmp_path):
+        src = tmp_path / "main.c"
+        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        mock_llm.side_effect = [
+            {"tasks": ["compile main.c"]},
+            {"action": "shell", "arg": "cc -o main main.c"},
+            {"action": "done"},
+        ]
+        mock_execute.side_effect = [
+            {
+                "ok": False,
+                "output": "main.c:1:13: error: implicit declaration of function 'printf'",
+                "error_type": "compile_error",
+            },
+            {"ok": True, "output": "(no output)"},
+        ]
+        result = _run_loop("compile main.c", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=3)
+        assert result["status"] == "complete"
+        assert src.read_text().startswith("#include <stdio.h>\n")
+        all_steps = result["state"]["all_steps"]
+        assert any(s.get("deterministic_repair") for s in all_steps)
+        assert any(s.get("deterministic_retry") and s.get("ok") for s in all_steps)
+
+    @patch("askme.execute")
+    @patch("askme.ask_llm")
+    def test_redundant_include_task_auto_completes_after_repair(self, mock_llm, mock_execute, tmp_path, capsys):
+        src = tmp_path / "fix_me.c"
+        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        mock_llm.side_effect = [
+            {"tasks": [
+                "Compile fix_me.c",
+                "Edit fix_me.c to add '#include <stdio.h>'",
+            ]},
+            {"action": "shell", "arg": "cc -o fix_me fix_me.c"},
+            {"action": "done"},
+        ]
+        mock_execute.side_effect = [
+            {
+                "ok": False,
+                "output": "fix_me.c:1:13: error: implicit declaration of function 'printf'",
+                "error_type": "compile_error",
+            },
+            {"ok": True, "output": "(no output)"},
+        ]
+        result = _run_loop("compile and fix include", str(tmp_path),
+                           max_replans=1, max_tasks=2, max_steps=3)
+        out = capsys.readouterr().out
+        assert result["status"] == "complete"
+        assert "auto-done (deterministic repair already satisfied task" in out
+        assert mock_llm.call_count == 3
+
+
+class TestDeterministicValidation:
+    """E07: conservative deterministic completion checks."""
+
+    def test_catches_empty_successful_write(self, tmp_path):
+        (tmp_path / "cli.py").write_text("")
+        state = {"all_steps": [
+            {"action": "write", "arg": "cli.py", "ok": True, "output": "Wrote cli.py"}
+        ]}
+        assert askme._deterministic_check("create cli.py", state, str(tmp_path)) is False
+
+    def test_ambiguous_without_evidence(self, tmp_path):
+        assert askme._deterministic_check("create something", {"all_steps": []}, str(tmp_path)) is None
+
+    def test_successful_shell_last_relevant_action_passes(self, tmp_path):
+        state = {"all_steps": [
+            {"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"}
+        ]}
+        assert askme._deterministic_check("run the program", state, str(tmp_path)) is True
+
+    def test_mutation_after_successful_shell_is_inconclusive(self, tmp_path):
+        state = {"all_steps": [
+            {"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"},
+            {"action": "edit", "arg": "app.py", "ok": True, "output": "Edited app.py"},
+        ]}
+        assert askme._deterministic_check("run the program", state, str(tmp_path)) is None
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_exhausted_reconciles_to_complete_on_confident_pass(self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["run check"]},
+            {"action": "shell", "arg": "true"},
+        ]
+        result = _run_loop("run check", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=1)
+        assert result["status"] == "complete"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_exhausted_stays_exhausted_when_inconclusive(self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["inspect file"]},
+            {"action": "read", "arg": "missing.txt"},
+        ]
+        result = _run_loop("inspect file", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=1)
+        assert result["status"] == "exhausted"
+
+
 class TestFinalValidation:
     """Verify end-to-end goal validation after all tasks complete."""
 
@@ -823,7 +1051,7 @@ class TestFinalValidation:
         Returns (result_bool, ask_llm_mock)."""
         responses = [
             {"tasks": ["do the thing"]},
-            {"action": "shell", "arg": "echo done"},
+            {"action": "write", "arg": str(tmp_path / "result.txt"), "content": "done"},
             {"action": "done"},
         ]
         if extra_responses:
@@ -919,11 +1147,11 @@ class TestFinalValidation:
         responses = [
             # Plan 1
             {"tasks": ["build it"]},
-            {"action": "shell", "arg": "echo building"},
+            {"action": "write", "arg": str(tmp_path / "build.txt"), "content": "building"},
             {"action": "done"},
             # Plan 2 (after validation failure)
             {"tasks": ["build it properly"]},
-            {"action": "shell", "arg": "echo built"},
+            {"action": "write", "arg": str(tmp_path / "built.txt"), "content": "built"},
             {"action": "done"},
         ]
         call_count = [0]
@@ -960,16 +1188,19 @@ class TestFinalValidation:
                                  validate_response=json.JSONDecodeError("bad", "", 0))
         assert ok is True
 
-    def test_validate_no_infinite_loop(self, tmp_path):
-        """validated_once flag prevents second validation after recovery replan."""
+    def test_validate_recheck_capped_after_recovery(self, tmp_path):
+        """Validation can re-run after recovery evidence, but stops after two tries."""
         responses = [
             # Plan 1
             {"tasks": ["build it"]},
-            {"action": "shell", "arg": "echo building"},
+            {"action": "write", "arg": str(tmp_path / "build.txt"), "content": "building"},
             {"action": "done"},
             # Plan 2 (after validation failure)
             {"tasks": ["build properly"]},
-            {"action": "shell", "arg": "echo ok"},
+            {"action": "write", "arg": str(tmp_path / "built.txt"), "content": "built"},
+            {"action": "done"},
+            # Plan 3 (after second validation failure; no third validation)
+            {"tasks": ["finalize"]},
             {"action": "done"},
         ]
         call_count = [0]
@@ -985,7 +1216,31 @@ class TestFinalValidation:
 
         with patch("askme.ask_llm", side_effect=mock_ask_llm):
             result = _run_loop("build it", str(tmp_path), max_replans=3)
-        # Validation should only run once (validated_once flag)
+        assert validate_count[0] == 2
+        assert result["status"] == "complete"
+
+    def test_validate_recheck_requires_new_evidence(self, tmp_path):
+        """A validation-failure recovery that only emits done is not revalidated."""
+        responses = [
+            {"tasks": ["build it"]},
+            {"action": "write", "arg": str(tmp_path / "build.txt"), "content": "building"},
+            {"action": "done"},
+            {"tasks": ["claim fixed"]},
+            {"action": "done"},
+        ]
+        call_count = [0]
+        validate_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                validate_count[0] += 1
+                return {"valid": False, "reason": "still wrong", "missing": ["x"]}
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        with patch("askme.ask_llm", side_effect=mock_ask_llm):
+            result = _run_loop("build it", str(tmp_path), max_replans=3)
         assert validate_count[0] == 1
         assert result["status"] == "complete"
 
@@ -1050,7 +1305,7 @@ class TestFinalValidation:
 
         responses = [
             {"tasks": ["build program"]},
-            {"action": "shell", "arg": "echo building"},
+            {"action": "write", "arg": str(tmp_path / "program.txt"), "content": "building"},
             {"action": "done"},
         ]
         call_count = [0]
@@ -1115,4 +1370,3 @@ class TestFinalValidation:
         assert "Task 1" in user_msg
         # Should contain step evidence (write action)
         assert "write" in user_msg
-

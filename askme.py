@@ -141,19 +141,16 @@ MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
 
-SYSTEM_PLAN = f"""You are a planner. Given a user request and current state, propose a list of tasks.
-If a previous plan failed, redesign it based on what went wrong.
-Prefer fewer tasks (1-3). Each task should be a complete goal, not a single command. Max {MAX_TASKS} tasks.
-Keep descriptions short (under 15 words each) but include key details:
-- File content hints: which includes, defines, or imports are needed
-- Use relative filenames (e.g. main.c not /full/path/main.c)
-- Never create a task for work already in completed_tasks
-POLICY RULES:
-- Check state.environment.missing_tools — if a required tool is missing and policy.allow_system_installs is false, do NOT plan installation tasks. Instead plan a single task that fails with a prerequisite message listing what is missing.
-- If policy.allow_system_installs is true, you may plan installation tasks using available package managers from state.environment.package_managers.
-- Respect state.environment.platform — do not use Linux commands on macOS or vice versa.
+SYSTEM_PLAN = f"""Planner. Propose tasks for the user request.
+Rules:
+- Prefer 1-3 tasks, max {MAX_TASKS}; each is a complete goal, not one command
+- Short tasks (<15 words) with key details: includes, imports, filenames
+- Relative filenames only. Match state.environment.platform
+- Never redo completed_tasks
+- If required tool in missing_tools and allow_system_installs=false: single prerequisite/fail task listing missing tools
+- If allow_system_installs=true: may use package_managers
 Output ONLY valid JSON. No markdown, no explanation.
-Format: {{"tasks": ["task1 description", "task2 description"]}}"""
+Format: {{"tasks":["task1","task2"]}}"""
 
 SYSTEM_VALIDATE = """You are a completion validator. Given a goal, completed tasks with their execution evidence, and the current working directory listing, determine if the goal was fully achieved.
 
@@ -187,17 +184,17 @@ def _run_log(event):
 _VALIDATE_KEYWORDS = re.compile(
     r'\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b', re.I)
 
-SYSTEM_STEP = """You are a task executor. Output ONLY valid JSON. No markdown, no explanation.
-Propose ONE action at a time. Use relative paths (e.g. main.c not /full/path/main.c).
-CRITICAL RULES:
-- Emit {"action":"done"} ONLY when the FULL task description is satisfied, not after a single successful step. Example: if the task is "create, compile, and run X", writing the file is not done — you must also compile and run.
-- If last_steps shows the same error 2+ times, emit {"action":"fail"}.
-- completed_tasks are DONE — never redo their work.
-- If a required tool is in missing_tools and policy.allow_system_installs is false, emit {"action":"fail"} with reasoning explaining the missing prerequisite. Do NOT attempt to install software.
-- To modify an existing file, prefer edit over write. edit replaces one exact match; write replaces the entire file. Use write only for new files or full rewrites.
+SYSTEM_STEP = """Executor. ONE action per turn as JSON. Output ONLY valid JSON. No markdown, no explanation.
+Rules:
+- done only when the FULL task description is satisfied
+- fail if same error appears 2+ times
+- Never redo completed_tasks
+- Relative paths. Reasoning max 10 words
+- If missing_tools required and allow_system_installs=false: fail; do NOT install
+- Prefer edit over write for existing files
 Actions: shell, write, edit, read, done, fail.
-edit format: {"action":"edit","arg":"file","find":"exact old text","replace":"new text","reasoning":"..."}
-Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}"""
+edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
+Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}"""
 
 
 MAX_LLM_RETRIES = 2
@@ -235,6 +232,35 @@ def _repair_json(text):
         return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _valid_nonempty_str(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_action_contract(obj):
+    """Return True for planner/validator dicts and complete action dicts."""
+    if not isinstance(obj, dict) or "action" not in obj:
+        return True
+    action = obj.get("action", "")
+    if action == "write":
+        content = obj.get("content")
+        return _valid_nonempty_str(obj.get("arg")) and (
+            _valid_nonempty_str(content) or isinstance(content, (dict, list))
+        )
+    if action == "edit":
+        return (_valid_nonempty_str(obj.get("arg"))
+                and _valid_nonempty_str(obj.get("find"))
+                and "replace" in obj)
+    if action in ("shell", "read"):
+        return _valid_nonempty_str(obj.get("arg"))
+    return True
+
+
+def _accept_or_raise(obj, text):
+    if _validate_action_contract(obj):
+        return obj
+    raise json.JSONDecodeError("Incomplete action JSON", text, 0)
 
 
 _STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
@@ -372,13 +398,17 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             parsed = json.loads(text)
             if not isinstance(parsed, dict):
                 raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
-            return parsed
+            return _accept_or_raise(parsed, text)
         except json.JSONDecodeError:
             # E03: attempt mechanical repair before burning a retry
             repaired = _repair_json(text)
             if repaired is not None:
-                log(f"  JSON repaired on attempt {attempt}")
-                return repaired
+                try:
+                    accepted = _accept_or_raise(repaired, text)
+                    log(f"  JSON repaired on attempt {attempt}")
+                    return accepted
+                except json.JSONDecodeError:
+                    pass
             if attempt < max_retries:
                 think_str = f" thinking={effective_think_level}" if effective_think_level else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
@@ -661,8 +691,59 @@ def _should_validate(replan, history, state, user_prompt):
     return False
 
 
+def _step_path(arg, working_dir):
+    p = Path(arg)
+    if not p.is_absolute():
+        p = Path(working_dir) / p
+    return p
+
+
+def _deterministic_check(user_prompt, state, working_dir):
+    """Conservative completion check. Returns True, False, or None."""
+    all_steps = state.get("all_steps", [])
+
+    # Successful writes should leave non-empty files.
+    for s in all_steps:
+        if s.get("action") == "write" and s.get("ok"):
+            arg = s.get("arg", "")
+            if not _valid_nonempty_str(arg):
+                return False
+            p = _step_path(arg, working_dir)
+            try:
+                if not p.exists() or p.stat().st_size == 0:
+                    return False
+            except OSError:
+                return False
+
+    shell_steps = [(i, s) for i, s in enumerate(all_steps)
+                   if s.get("action") == "shell"]
+    if _VALIDATE_KEYWORDS.search(user_prompt) and shell_steps:
+        last_shell_idx, last_shell = shell_steps[-1]
+        if not last_shell.get("ok"):
+            return False
+        later_mutation = any(
+            s.get("action") in ("write", "edit") and s.get("ok")
+            for s in all_steps[last_shell_idx + 1:]
+        )
+        if not later_mutation and not state.get("errors"):
+            return True
+
+    return None
+
+
 def _validate_completion(user_prompt, state, working_dir):
     """Run LLM-based final validation. Returns dict or None (fail-open)."""
+    deterministic = _deterministic_check(user_prompt, state, working_dir)
+    if deterministic is True:
+        return {"valid": True, "deterministic": True}
+    if deterministic is False:
+        return {
+            "valid": False,
+            "deterministic": True,
+            "reason": "deterministic completion check failed",
+            "missing": [],
+        }
+
     completed = state.get("completed_tasks", [])
     step_groups = state.get("completed_step_groups", [])
     # Build evidence: per-task step summaries (action + basename + output snippet, ≤5 per task)
@@ -702,6 +783,14 @@ def _validate_completion(user_prompt, state, working_dir):
         return None
 
 
+def _has_new_validation_evidence(state):
+    start = state.get("validated_step_count", 0)
+    return any(
+        s.get("action") in ("write", "edit", "shell")
+        for s in state.get("all_steps", [])[start:]
+    )
+
+
 _COMPILER_EXES = frozenset({
     "cc", "gcc", "g++", "clang", "clang++", "c++", "rustc", "javac",
     "make", "cmake", "cargo", "go", "tsc", "swiftc",
@@ -733,9 +822,165 @@ def classify_error(output, action="shell", cmd=""):
         if action == "shell" and cmd and _is_compiler_command(cmd):
             return "compile_error"
         return "missing_file"
+    if action == "shell" and cmd and _is_compiler_command(cmd):
+        if re.search(
+            r"error generated|implicit function declaration|undeclared (?:library )?function|"
+            r"include the header <[^>]+>|undefined reference|undefined symbols",
+            out,
+        ):
+            return "compile_error"
     if "syntax error" in out or "error:" in out:
         return "compile_error"
     return "unknown"
+
+
+_EXPECTED_FAILURE_POS_RE = re.compile(
+    r'\b(observe|confirm|verify|check)\b.*\b(fail|error|bug|broken)\b'
+    r'|\b(will fail|should fail|expect.*(fail|error)|initial failure|read the error)\b',
+    re.I,
+)
+_EXPECTED_FAILURE_NEG_RE = re.compile(
+    r'\b(no|not|without)\s+(fail|failure|error|bug|crash|broken)\b'
+    r'|\b(error|failure|bug)\b.{0,20}\b(fixed|resolved|gone)\b'
+    r'|\b(fix|repair|resolve)\b.*\b(error|failure|bug)\b',
+    re.I,
+)
+
+
+def _expects_failure(task):
+    return bool(_EXPECTED_FAILURE_POS_RE.search(task)
+                and not _EXPECTED_FAILURE_NEG_RE.search(task))
+
+
+_COMPILE_REPAIR_PATTERNS = [
+    {
+        "diagnostic_re": re.compile(
+            r"implicit declaration of function '(printf|puts|fprintf|scanf)'|"
+            r"implicitly declaring library function '(printf|puts|fprintf|scanf)'|"
+            r"undeclared library function '(printf|puts|fprintf|scanf)'|"
+            r"include the header <stdio\.h>|"
+            r"stdio\.h.*[Nn]o such file",
+            re.I,
+        ),
+        "fix_include": "#include <stdio.h>",
+        "file_pattern": re.compile(r"\.(c|h)$"),
+    },
+    {
+        "diagnostic_re": re.compile(
+            r"implicit declaration of function '(strlen|strcmp|strcpy|strcat|memcpy)'|"
+            r"undeclared library function '(strlen|strcmp|strcpy|strcat|memcpy)'|"
+            r"include the header <string\.h>|"
+            r"string\.h.*[Nn]o such file",
+            re.I,
+        ),
+        "fix_include": "#include <string.h>",
+        "file_pattern": re.compile(r"\.(c|h)$"),
+    },
+]
+
+
+def _resolve_existing_candidates(paths, working_dir):
+    root = Path(working_dir)
+    resolved = []
+    seen = set()
+    for p in paths:
+        p = Path(p)
+        if not p.is_absolute():
+            p = root / p
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if p.exists() and p.is_file() and key not in seen:
+            seen.add(key)
+            resolved.append(p)
+    return resolved
+
+
+def _compile_repair_candidates(error_output, cmd, working_dir):
+    """Return source-file candidates in safest priority order."""
+    diagnostic_paths = re.findall(
+        r'([A-Za-z0-9_./-]+\.(?:c|h)):\d+(?::\d+)?:',
+        error_output,
+    )
+    diagnostic_candidates = _resolve_existing_candidates(diagnostic_paths, working_dir)
+    if diagnostic_candidates:
+        return diagnostic_candidates
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        parts = cmd.split()
+    command_paths = []
+    skip_next = False
+    for part in parts[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if part == "-o":
+            skip_next = True
+            continue
+        if part.endswith((".c", ".h")):
+            command_paths.append(part)
+    command_candidates = _resolve_existing_candidates(command_paths, working_dir)
+    if command_candidates:
+        return command_candidates
+
+    c_files = sorted(Path(working_dir).glob("*.c"))
+    return c_files if len(c_files) == 1 else []
+
+
+def _try_compile_repair(error_output, working_dir, cmd):
+    """Apply a narrow deterministic source repair. Returns (file, desc) or None."""
+    for pattern in _COMPILE_REPAIR_PATTERNS:
+        if not pattern["diagnostic_re"].search(error_output):
+            continue
+        candidates = [
+            f for f in _compile_repair_candidates(error_output, cmd, working_dir)
+            if pattern["file_pattern"].search(f.name)
+        ]
+        if len(candidates) != 1:
+            return None
+        f = candidates[0]
+        text = f.read_text()
+        include = pattern["fix_include"]
+        if include in text:
+            return None
+        lines = text.split("\n")
+        insert_idx = 0
+        for j, line in enumerate(lines):
+            if line.startswith("#include"):
+                insert_idx = j + 1
+        lines.insert(insert_idx, include)
+        f.write_text("\n".join(lines))
+        return (f.name, f"Auto-inserted {include}")
+    return None
+
+
+def _task_satisfied_by_deterministic_repair(task, state):
+    """Return repair step if a planned edit task was already done deterministically."""
+    task_lower = task.lower()
+    if "include" not in task_lower or not re.search(r"\b(add|insert|edit|include|fix)\b", task_lower):
+        return None
+    requested_include = None
+    for include in ("#include <stdio.h>", "#include <string.h>"):
+        if include.lower() in task_lower or include.split("<", 1)[1].rstrip(">").lower() in task_lower:
+            requested_include = include
+            break
+    if not requested_include:
+        return None
+
+    entities = {Path(e).name for e in _task_entities(task)}
+    for step in reversed(state.get("all_steps", [])):
+        if not step.get("deterministic_repair"):
+            continue
+        if requested_include not in step.get("output", ""):
+            continue
+        arg_name = Path(step.get("arg", "")).name
+        if entities and arg_name not in entities:
+            continue
+        return dict(step)
+    return None
 
 
 # Command patterns that need longer timeouts
@@ -843,8 +1088,16 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     (needs rich dict with state + log). All production behavior lives here:
     preflight, policy, null normalization, error reset, timeout retry, etc.
     """
-    state = {"completed_tasks": [], "errors": [], "validated_once": False,
-             "completed_step_groups": []}
+    state = {
+        "completed_tasks": [],
+        "errors": [],
+        "validated_once": False,
+        "validation_attempts": 0,
+        "validation_recheck_needed": False,
+        "validated_step_count": 0,
+        "completed_step_groups": [],
+        "all_steps": [],
+    }
     history = []
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
@@ -905,6 +1158,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 task_steps = []
                 use_think = False
                 dup_skip_count = 0
+                last_successful_edit = None
+                completed_repair = _task_satisfied_by_deterministic_repair(task, state)
+                if completed_repair:
+                    log(f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})")
+                    task_steps.append(completed_repair)
+                    task_done = True
+                    break
                 for step in range(max_steps):
                     t_step = time.time()
                     try:
@@ -965,6 +1225,16 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     entry["_find"] = action.get("find", "")
                                     entry["_replace"] = action.get("replace", "")
                                 state["last_steps"].append(entry)
+                                if act == "edit" and last_successful_edit and dup_skip_count >= 2:
+                                    edit_key = (
+                                        action.get("arg", ""),
+                                        action.get("find", ""),
+                                        action.get("replace", ""),
+                                    )
+                                    if edit_key == last_successful_edit:
+                                        log(f"  [{step + 1}] auto-done (edit already succeeded, model re-emitting)")
+                                        task_done = True
+                                        break
                                 # Defer thinking escalation: first duplicate skip gets a
                                 # corrective observation only; escalate on 2+ consecutive skips.
                                 # Saves ~10s of thinking time on harmless first-time duplicates.
@@ -1028,6 +1298,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         step_entry["_find"] = action.get("find", "")
                         step_entry["_replace"] = action.get("replace", "")
                     state["last_steps"].append(step_entry)
+                    state["all_steps"].append(dict(step_entry))
                     history.append({"event": "step", "task": i, "step": step, "action": action,
                                     "result": {"ok": result["ok"], "output": result["output"][:100]}})
                     _run_log({"event": "step", "task_index": i, "step": step,
@@ -1037,16 +1308,98 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
                     if not result["ok"]:
                         etype = result.get("error_type", "unknown")
+                        if (act == "shell" and etype in ("compile_error", "unknown")
+                                and _expects_failure(task)):
+                            log("  Expected failure observed; completing task with evidence")
+                            step_entry["expected_failure"] = True
+                            state["last_steps"][-1]["expected_failure"] = True
+                            state["all_steps"][-1]["expected_failure"] = True
+                            task_steps.append(step_entry)
+                            task_done = True
+                            break
+
+                        if act == "shell" and etype == "compile_error":
+                            repair = _try_compile_repair(
+                                result["output"], working_dir, action.get("arg", "")
+                            )
+                            if repair:
+                                repair_step = {
+                                    "action": "edit",
+                                    "arg": repair[0],
+                                    "ok": True,
+                                    "output": repair[1],
+                                    "deterministic_repair": True,
+                                }
+                                log(f"  Deterministic repair: {repair[1]} in {repair[0]}")
+                                state["last_steps"].append(repair_step)
+                                state["all_steps"].append(dict(repair_step))
+                                task_steps.append(repair_step)
+                                history.append({
+                                    "event": "step", "task": i, "step": step,
+                                    "action": repair_step,
+                                    "result": {"ok": True, "output": repair[1]},
+                                    "deterministic_repair": True,
+                                })
+                                _run_log({"event": "deterministic_repair",
+                                          "kind": "compile_include",
+                                          "file": repair[0],
+                                          "description": repair[1]})
+
+                                retry_result = execute(action, working_dir)
+                                retry_step = {
+                                    "action": "shell",
+                                    "arg": action.get("arg", ""),
+                                    "ok": retry_result["ok"],
+                                    "output": retry_result["output"][:100],
+                                    "deterministic_retry": True,
+                                }
+                                if not retry_result["ok"] and "error_type" in retry_result:
+                                    retry_step["error_type"] = retry_result["error_type"]
+                                state["last_steps"].append(retry_step)
+                                state["all_steps"].append(dict(retry_step))
+                                history.append({
+                                    "event": "step", "task": i, "step": step,
+                                    "action": {"action": "shell", "arg": action.get("arg", "")},
+                                    "result": {
+                                        "ok": retry_result["ok"],
+                                        "output": retry_result["output"][:100],
+                                    },
+                                    "deterministic_retry": True,
+                                })
+                                _run_log({"event": "step", "task_index": i, "step": step,
+                                          "action": "shell",
+                                          "arg": action.get("arg", "")[:120],
+                                          "ok": retry_result["ok"],
+                                          "error_type": retry_result.get("error_type"),
+                                          "deterministic_retry": True,
+                                          "wall_s": round(time.time() - t_step, 2)})
+                                if retry_result["ok"]:
+                                    log(f"  -> OK deterministic retry: {retry_result['output'][:80]}")
+                                    task_steps.append(retry_step)
+                                    use_think = False
+                                    continue
+                                log(f"  -> FAIL deterministic retry: {retry_result['output'][:80]}")
+                                result = retry_result
+                                step_entry = retry_step
+                                etype = result.get("error_type", "unknown")
+
                         err_output = result['output'][:100]
                         hint = _RECOVERY_HINTS.get(etype)
                         if hint:
                             err_output = f"{err_output} → {hint}"
                             state["last_steps"][-1]["output"] = state["last_steps"][-1]["output"][:100] + f" → {hint}"
+                            state["all_steps"][-1]["output"] = state["all_steps"][-1]["output"][:100] + f" → {hint}"
                         state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
                         use_think = etype not in _NO_THINK_ERRORS
                     else:
                         use_think = False
                         task_steps.append(step_entry)
+                        if act == "edit":
+                            last_successful_edit = (
+                                action.get("arg", ""),
+                                action.get("find", ""),
+                                action.get("replace", ""),
+                            )
 
                 if task_done:
                     break  # break task_attempt loop — success
@@ -1096,8 +1449,16 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 break
 
         if all_done:
-            if not state.get("validated_once") and _should_validate(replan, history, state, user_prompt):
+            wants_validation = _should_validate(replan, history, state, user_prompt)
+            first_validation = state.get("validation_attempts", 0) == 0
+            recheck_validation = (
+                state.get("validation_recheck_needed")
+                and state.get("validation_attempts", 0) < 2
+                and _has_new_validation_evidence(state)
+            )
+            if wants_validation and (first_validation or recheck_validation):
                 state["validated_once"] = True
+                state["validation_attempts"] = state.get("validation_attempts", 0) + 1
                 vresult = _validate_completion(user_prompt, state, working_dir)
                 if vresult and vresult.get("valid") is False:
                     reason = vresult.get("reason", "validation failed")
@@ -1106,14 +1467,19 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     if missing:
                         error_msg += f" missing: {', '.join(missing)}"
                     state["errors"].append(error_msg)
+                    state["validation_recheck_needed"] = True
+                    state["validated_step_count"] = len(state.get("all_steps", []))
                     log(f"  Validation failed: {reason}")
                     _run_log({"event": "validation", "valid": False, "reason": reason,
-                              "missing": missing})
+                              "missing": missing,
+                              "deterministic": bool(vresult.get("deterministic"))})
                     all_done = False
                     continue  # replan
                 else:
+                    state["validation_recheck_needed"] = False
                     log(f"  Validation passed.")
-                    _run_log({"event": "validation", "valid": True})
+                    _run_log({"event": "validation", "valid": True,
+                              "deterministic": bool(vresult and vresult.get("deterministic"))})
             total_wall = time.time() - t_run
             log(f"All tasks complete. ({total_wall:.1f}s total)")
             log(f"Output in: {working_dir}")
@@ -1123,6 +1489,15 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             return {"status": "complete", "state": state, "log": history}
 
     total_wall = time.time() - t_run
+    deterministic = _deterministic_check(user_prompt, state, working_dir)
+    if deterministic is True:
+        log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
+        log(f"Output in: {working_dir}")
+        _run_log({"event": "run_end", "status": "complete_deterministic_after_exhausted",
+                  "replans": max_replans, "wall_s": round(total_wall, 2),
+                  "completed_tasks": len(state["completed_tasks"])})
+        return {"status": "complete", "state": state, "log": history}
+
     log(f"Exhausted {max_replans} replan attempts. ({total_wall:.1f}s total)")
     log(f"Errors: {state['errors']}")
     log(f"Output in: {working_dir}")

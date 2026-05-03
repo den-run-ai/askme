@@ -5,7 +5,9 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
-from askme import execute, ask_llm, run, _run_loop, LLMTransportError, LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX
+from askme import (execute, ask_llm, run, _run_loop, LLMTransportError,
+                   LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX,
+                   _validate_action_contract)
 from _test_support import mock_response, mock_response_raw
 
 
@@ -546,6 +548,72 @@ class TestJsonRepair:
         raw = '{"action": "done"}\n\nSome commentary about what happened.'
         result = _repair_json(raw)
         assert result == {"action": "done"}
+
+
+class TestActionContractValidation:
+    """E03 follow-up: incomplete action JSON must retry, not execute."""
+
+    def test_write_contract(self):
+        assert _validate_action_contract(
+            {"action": "write", "arg": "cli.py", "content": "print('hi')"}
+        )
+        assert _validate_action_contract(
+            {"action": "write", "arg": "config.json", "content": {"ok": True}}
+        )
+        assert _validate_action_contract(
+            {"action": "write", "arg": "items.json", "content": [1, 2]}
+        )
+        assert not _validate_action_contract({"action": "write", "arg": "cli.py"})
+        assert not _validate_action_contract(
+            {"action": "write", "arg": "cli.py", "content": ""}
+        )
+        assert not _validate_action_contract(
+            {"action": "write", "arg": "", "content": "x"}
+        )
+
+    def test_edit_contract(self):
+        assert _validate_action_contract(
+            {"action": "edit", "arg": "f.py", "find": "old", "replace": ""}
+        )
+        assert not _validate_action_contract(
+            {"action": "edit", "arg": "f.py", "find": "old"}
+        )
+        assert not _validate_action_contract(
+            {"action": "edit", "arg": "f.py", "find": "", "replace": "new"}
+        )
+        assert not _validate_action_contract(
+            {"action": "edit", "arg": "", "find": "old", "replace": "new"}
+        )
+
+    def test_shell_and_read_contract(self):
+        assert _validate_action_contract({"action": "shell", "arg": "echo hi"})
+        assert _validate_action_contract({"action": "read", "arg": "file.txt"})
+        assert not _validate_action_contract({"action": "shell", "arg": ""})
+        assert not _validate_action_contract({"action": "read"})
+
+    def test_non_action_dicts_pass_through(self):
+        assert _validate_action_contract({"tasks": ["one"]})
+        assert _validate_action_contract({"valid": False, "reason": "missing"})
+
+    @patch("askme.requests.post")
+    def test_valid_but_incomplete_action_retries(self, mock_post):
+        mock_post.side_effect = [
+            mock_response({"action": "write", "arg": "cli.py"}),
+            mock_response({"action": "done"}),
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        assert mock_post.call_count == 2
+
+    @patch("askme.requests.post")
+    def test_repaired_but_incomplete_action_retries(self, mock_post):
+        mock_post.side_effect = [
+            mock_response_raw('{"action":"write","arg":"cli.py","cont'),
+            mock_response({"action": "done"}),
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        assert mock_post.call_count == 2
 
 
 # --- E03: Tiered retry contract tests ---

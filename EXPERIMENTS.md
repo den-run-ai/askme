@@ -211,6 +211,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Code.** `askme.py:517` (`SYSTEM_TASK_REPLAN`, `replan_task()`), `askme.py:808` (inner retry loop in `_run_loop()`).
 - **Effort.** M.
 - **Result (2026-04-26).** Full medium bench after E11: pytest 8/9, agent complete 6/9. `fix_missing_include` exposed the important asymmetry: pytest 3/3 but agent complete 1/3. Mini-replan cost was solved (8/8 calls in 1.46-5.09s vs 64-122s pre-fix), but generated replacements helped only 1/6 times; bad replacements fell through or were rejected. After adding near-duplicate/passive rejection, targeted `fix_missing_include` rerun improved to pytest 3/3, agent complete 3/3, median 203s (range 59-413s) vs prior median 466s (range 234-660s). The mechanism is best understood as a cheap filter before full replan, not a primary semantic recovery worker.
+- **Hard bench confirmation (2026-05-03).** 9/9 hard PASS. Local replans were significantly more effective on hard tests than medium: `build_with_dependency` used local replans in every trial (5/5, all ok, 3.6-7.3s each), absorbing failures that would have cost ~70s+ as full replans. `fix_wrong_command` used them in 2/3 trials (all ok). Zero full replans needed on the two faster hard tests. On complex multi-step tasks, no-thinking local replans are an effective primary recovery mechanism, not just a cheap filter.
 - **Status.** Done (2026-04-26). 218/218 non-integration tests pass, 4 skipped. Integration artifacts: `/tmp/bench_logs/` and `/tmp/bench_logs_missing_include_rerun/`.
 
 ### E20 — Auto-done after consecutive duplicate-edit skip
@@ -291,6 +292,7 @@ Moved to [Archived / rejected](#archived--rejected).
 
 - **Hypothesis.** Medium/high reasoning made task-local replans too expensive (64-122s pre-fix), but a genuinely capped low-reasoning variant might improve replacement quality without giving back the cost win.
 - **Evidence (2026-04-26).** No-thinking E11 replans are cheap (1.46-5.09s) but only helped directly 1/6 times in the full medium bench and 0/2 times in the `fix_missing_include` rerun. The value is currently cheap rejection/fallback, not primary recovery.
+- **Evidence updated (2026-05-03, hard bench).** Hard tests tell a different story: no-thinking local replans succeeded 5/5 on `build_with_dependency` and 2/2 on `fix_wrong_command`. This weakens the premise that replacement quality is too low — complex multi-step tasks benefit more from task-level rewording than medium single-fix tasks. The case for adding reasoning overhead is weaker given the hard bench data.
 - **Change.** Add an env-gated A/B mode for `replan_task()` only: low reasoning, `max_retries=0`, hard `max_tokens` cap around 128-192, no escalation. Compare against default no-thinking mode on `fix_missing_include` and `fix_python_syntax_error`.
 - **Metric.** Replacement helped rate (`task_local_replan` followed by `task_complete`), local replan wall time, agent_complete rate, full replan count.
 - **Upside.** Could improve mini-replan quality while preserving cheap failure behavior.
