@@ -43,24 +43,28 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 9   | E17 | Expected-failure task completion semantics              | 3    | P1       | S      | planned  |
 | 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | planned  |
 | 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
-| 12  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
-| 13  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
-| 14  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
-| 15  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
-| 16  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
-| 17  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
-| 18  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
+| 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | planned  |
+| 13  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
+| 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
+| 15  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
+| 16  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
+| 17  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
+| 18  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
+| 19  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
 
-Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/E06 rerun in PERFORMANCE.md. E05/E06 removed the targeted edit-recovery waste; `ask_llm` parse-retry thinking escalation is now the highest-leverage remaining scaffold fix.
+Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions against local E4B, 2026-04-26/27). Prior update: 2026-04-26 E05/E06 rerun analysis.
 
-- **E05/E06/E16 completed; E03 done.** E05/E06 validated the targeted edit-recovery mechanism: failed edit recovery fell from 140–253s thinking-inflated reads to ~36s total in both rerun trials. E16 hardened shell error classification so compiler diagnostics aren't misclassified as structural `missing_file`. E03 added JSON repair (trailing prose, truncation) and tiered retry contract.
-- **E09 stays after E03.** E09 could reduce the underlying edit failure rate from the model side, but E03 targets the larger observed scaffold bottleneck first.
-- **E11 completed.** Task-local replan before full replan is cheap and bounded, but benchmark data shows it acts more like a filter than a primary recovery worker. E17/E18 target the remaining `fix_missing_include` semantic failures. E04 remains in Wave 3.
-- **Wave 4 is effort-ascending then dependency** — E12, E15, and E19 are S-effort standalones. E19 is explicitly gated behind the cheap/no-thinking E11 result; do not make reasoning the default without A/B data. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
+- **E05/E06/E16 completed; E03 done (with follow-up gap).** E05/E06 validated the targeted edit-recovery mechanism. E16 hardened shell error classification. E03 added JSON repair and tiered retry contract — but experience.md Run 4 exposed a gap: repair can strip required fields (empty `content` on `write`), producing a silently broken deliverable. The follow-up fix (reject repair when required fields are missing) is small and should land before E02.
+- **E07 elevated.** Experience.md's strongest finding is that the status field lies in both directions (Run 4: `complete` but broken; Run 6: `exhausted` but correct). E07's deterministic verification directly addresses both. Recommended to run immediately after the E03 follow-up fix.
+- **E20 added to Wave 3.** Experience.md Run 6 (783s, 42K tokens) exposed a new failure class: successful edit followed by 8 duplicate-edit loops the scaffold can't break. E20 is a surgical S-effort fix (auto-done after 2+ consecutive duplicate-skipped edits on the same target). Should run before E17/E18 because it addresses a broader pattern (any edit-heavy task, not just expected-failure or compile-repair).
+- **E09 stays after E20.** E09 could reduce the underlying edit failure rate from the model side, but E20 and the E03 follow-up target larger observed scaffold bottlenecks first.
+- **E11 completed.** Task-local replan confirmed as a cheap filter. Experience.md Runs 1, 5, 7 validated it in live use: 2-5s rescue cost vs ~70s for full replan. E17/E18 target remaining semantic failures. E04 remains in Wave 3.
+- **E13 repriced.** Experience.md Runs 4-7 all showed task conflation (model does all work in task 1). E13's planner critique is the structural fix, but at M-effort and Wave 4 priority it's behind the cheaper surgical fixes (E20, E03 follow-up, E07).
+- **Wave 4 is effort-ascending then dependency** — E12, E15, and E19 are S-effort standalones. E19 is explicitly gated behind the cheap/no-thinking E11 result. E13 needs redundancy-baseline data from prior waves. E14 is gated on E02 freeing planner-budget headroom.
 - **Wave 5 (E10) stays deferred** — redesign-scale; do not start until Waves 2–4 close and the harness can detect reliability regressions.
-- **Recommended execution order within waves:** E02 → E17 → E18 → E09. E16, E03, and E11 are done. E17/E18 address the observed `fix_missing_include` gap before spending time on model-side quality experiments.
+- **Recommended execution order within waves:** E03 follow-up → E02 → E07 → E20 → E17 → E18 → E09. The E03 follow-up and E07 address the status-field-lying problem (most dangerous for delegated use). E20 addresses the edit-loop exhaustion (most expensive single failure).
 
 ## Prerequisite
 
@@ -117,9 +121,10 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
   2. Thinking escalation for auto-retries changed: attempt 0 = none, attempt 1 = medium, attempt 2 = none + strict contract. Explicit `think_level` from callers (e.g. validation) is always respected.
   3. On final auto-retry (attempt 2), a strict JSON-only instruction is appended to messages.
 - **Result (2026-04-27).** Done. 197/197 unit tests pass (16 new: 10 `TestJsonRepair` + 6 `TestTieredRetryContract`). No upstream fix available — `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)), grammar+reasoning coexistence has no upstream solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)). Client-side repair is the correct approach.
+- **Follow-up gap (2026-05-03, experience.md Run 4).** `_repair_json` can structurally close truncated JSON but strip a required field (`content` for `write` actions). Run 4 wrote `cli.py` with empty content because repair closed the brace around a truncated `content` key. Fix: `_repair_json` should return `None` (let retry escalate) when a required field for the action type is missing. Required fields: `write` → `content`, `edit` → `find`+`replace`, `shell` → `arg`.
 - **Code.** `askme.py:205` (`_repair_json`), `askme.py:228` (`_STRICT_JSON_SUFFIX`), `askme.py:231` (`ask_llm` — retry ladder + repair).
 - **Effort.** S.
-- **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness.
+- **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness. Follow-up fix for required-field validation not yet implemented.
 
 ## Tools / action model
 
@@ -208,10 +213,22 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 - **Result (2026-04-26).** Full medium bench after E11: pytest 8/9, agent complete 6/9. `fix_missing_include` exposed the important asymmetry: pytest 3/3 but agent complete 1/3. Mini-replan cost was solved (8/8 calls in 1.46-5.09s vs 64-122s pre-fix), but generated replacements helped only 1/6 times; bad replacements fell through or were rejected. After adding near-duplicate/passive rejection, targeted `fix_missing_include` rerun improved to pytest 3/3, agent complete 3/3, median 203s (range 59-413s) vs prior median 466s (range 234-660s). The mechanism is best understood as a cheap filter before full replan, not a primary semantic recovery worker.
 - **Status.** Done (2026-04-26). 218/218 non-integration tests pass, 4 skipped. Integration artifacts: `/tmp/bench_logs/` and `/tmp/bench_logs_missing_include_rerun/`.
 
+### E20 — Auto-done after consecutive duplicate-edit skip
+
+- **Hypothesis.** When an `edit` succeeds and the model re-emits the same `(file, find_string)` edit, the duplicate-edit-skip guard catches it but only injects a soft observation. The model can reason past this indefinitely, burning all remaining steps on no-op edits. Auto-completing the task after 2+ consecutive duplicate-skipped edits on the same target would break the loop.
+- **Evidence (2026-05-03, experience.md Run 6).** Edit succeeded at step 2 (find `return 0` → replace `return 1`). Steps 3-10: 8 duplicate-edit calls on the same `(buggy.py, "return 0")` target, all skipped, thinking=medium from step 5 onward (32-58s per call). Model never pivoted to `shell` or `done`. MAX_STEPS hit → `exhausted`. On-disk deliverable was correct — the framework reported failure on a task that was already done.
+- **Change.** Track `last_successful_edit: {file, find_string}` in per-task execution state. When 2+ consecutive duplicate-skipped edits match the same `(file, find_string)`, force `done` for the task. Inject the successful edit evidence into `completed_tasks` for subsequent tasks.
+- **Metric.** Run 6-style edit-loop step count; `exhausted` rate on edit-heavy tasks; false-done rate (auto-done when edit was actually wrong).
+- **Upside.** High. Directly fixes the most expensive single-run failure (783s, 42K tokens) observed in experience.md. Simple, local, no model changes.
+- **Risk.** Low. Only fires after a confirmed successful edit followed by duplicates of the same edit. If the edit was wrong, the model would emit a *different* find_string, not the same one.
+- **Code.** `askme.py` duplicate-edit guard area (~askme.py:937), per-task state reset.
+- **Effort.** S.
+
 ### E17 — Expected-failure task completion semantics
 
 - **Hypothesis.** `fix_missing_include` often starts with a task like "compile to observe the initial failure." The executor treats the failed compile as task failure, even though the task's success criterion is observing the expected error. This burns local replans and sometimes sends recovery down the wrong branch.
 - **Evidence (2026-04-26).** In the targeted rerun, trial 1 spent 324s on the "observe initial failure" task before full replan did the useful work. The kept mini-replan changed "observe" to "fix" but still fell to task failure. A deterministic expected-failure completion rule would finish that task immediately after the compile error is observed and move to the edit task.
+- **Evidence (2026-05-03, experience.md Run 6).** The debugging prompt ("create buggy code, run to observe failure, edit to fix, run to verify") is a natural expected-failure pattern. The "run to observe initial failure" step would benefit from this mechanism. However, Run 6's primary bottleneck was the edit-loop (see E20), not expected-failure semantics — E17 would save one task's steps, E20 would save the 8 wasted duplicate-edit steps.
 - **Change.** Detect task descriptions containing `observe|confirm|initial failure|will fail|read the error` and mark a failed shell step as task-complete when it produces a compile/error diagnostic. Preserve the error evidence for the next task.
 - **Metric.** `fix_missing_include` step count, task-local replan count, full replan count, agent_complete rate.
 - **Upside.** High for tests/prompts that explicitly ask to observe an expected failure.
@@ -235,9 +252,10 @@ Updated 2026-04-26 based on local E4B JSONL time-breakdown analysis and the E05/
 ### E07 — Deterministic verification before LLM validator
 
 - **Hypothesis.** For goals matching `compile|build|test|run`, checking an exit code or file existence is cheaper and more reliable than the LLM validator. The LLM validator should only fire when deterministic checks are inconclusive.
-- **Change.** In `_validate_completion`, run deterministic checks first: if the goal mentions a built artifact, verify it exists + is executable; if it mentions "run X", verify exit 0 was recorded in `completed_step_groups`. Only fall through to the LLM call when checks can't answer.
-- **Metric.** LLM validator call count; false-positive/false-negative rate on integration fixtures.
-- **Upside.** Saves ~0.5-2s per validation on happy path; more reliable.
+- **Evidence (2026-05-03, experience.md Runs 4 + 6).** The status field lies in both directions. Run 4: `complete` but `cli.py` is empty (0 bytes) — LLM validation caught it, recovery faked the fix, single-shot prevented re-validation. Run 6: `exhausted` but `buggy.py` is correctly fixed — model looped on duplicate edits, MAX_STEPS hit, framework declared failure on a correct deliverable. Deterministic checks (file exists + non-empty, expected output in shell history) would catch both: Run 4's empty file would fail the check; Run 6's correct output would pass it regardless of step exhaustion.
+- **Change.** In `_validate_completion`, run deterministic checks first: if the goal mentions a built artifact, verify it exists + is executable; if it mentions "run X", verify exit 0 was recorded in `completed_step_groups`. Only fall through to the LLM call when checks can't answer. Additionally: allow re-validation after recovery replan when the recovery's task list contains writable/runnable steps (closes the Run 4 single-shot gap).
+- **Metric.** LLM validator call count; false-positive/false-negative rate on integration fixtures; status-field accuracy on experience.md-style runs.
+- **Upside.** Directly addresses the two most dangerous findings from experience.md. Saves ~0.5-2s per validation on happy path; more reliable.
 - **Risk.** Low — keeps LLM validator as fallback.
 - **Code.** `askme.py:471` (`_validate_completion`), `askme.py:447` (`_should_validate`).
 - **Effort.** S.
@@ -285,6 +303,7 @@ Moved to [Archived / rejected](#archived--rejected).
 ### E13 — Planner critique pass on redundancy-risk plans
 
 - **Hypothesis.** Redundant tasks are a real cost. PERFORMANCE.md:57 documents a **3-task** plan on `fix_python_syntax` where task 2 was already satisfied by task 1 — 370s wasted. A ≥4-task trigger would miss this case entirely. The right trigger is a redundancy-risk signal, not task count.
+- **Evidence (2026-05-03, experience.md Runs 4-7).** Task conflation is the dominant pattern across all hard runs: the model treats task 1 as license to do all work, then runs out of steps. Runs 4, 5, and 7 all hit this — Task 1 ("Create file A") wrote files A, B, and sometimes C within its step budget. The framework rescues via E11 or full replan, but at 60-400s latency cost. A planner critique that flags multi-file plans where tasks mention different files (but the model may conflate them) could preemptively split or merge tasks.
 - **Change.** After `get_plan`, run a one-shot critique (think=medium, max_tokens=256) that can drop tasks when **any** of the following is true:
   1. Two or more tasks mention the same filename or symbol.
   2. A task's verbs overlap with a verb already in `completed_tasks` for the same target.
@@ -314,6 +333,7 @@ Moved to [Archived / rejected](#archived--rejected).
 
 ## References
 
+- [experience.md](experience.md) — qualitative findings from 7 live runs as subagent (2026-04-26/27).
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history; completed experiments land here.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — design decisions + current constraints.
 - [gemma4-setup.md](gemma4-setup.md) — server config; runtime experiments (E08, E09) land here.
