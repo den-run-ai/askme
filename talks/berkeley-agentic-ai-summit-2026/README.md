@@ -7,7 +7,7 @@
 
 ## Contents
 
-- [`slides.md`](slides.md) - Marp source with speaker notes (about 4:40 at 120-125 wpm).
+- [`slides.md`](slides.md) - Marp source with 499-word speaker notes (about 4:00-4:10 read straight, leaving pause and transition buffer).
 - `slides.pdf` - rendered deck.
 - [`blog.md`](blog.md) - short companion post.
 - [`evals/README.md`](evals/README.md) - exact draft eval protocol and commands.

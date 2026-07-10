@@ -241,6 +241,30 @@ style: |
     padding: 13px 12px;
   }
   table.results td:first-child { font-weight: 800; }
+  .result-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1.55fr 1fr 1fr 0.78fr 0.9fr;
+    margin: 15px 8px 0;
+  }
+  .result-cell {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 18px;
+    min-height: 37px;
+    padding: 11px 12px;
+  }
+  .result-cell.head {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 800;
+    min-height: 24px;
+    padding-bottom: 4px;
+  }
+  .result-cell.model-name { font-weight: 800; }
   .pending { color: var(--amber); font-weight: 900; }
   .pass { color: var(--teal); font-weight: 900; }
   .fail { color: var(--coral); font-weight: 900; }
@@ -323,10 +347,10 @@ style: |
 <!--
 Speaker notes (~45s):
 I wanted to know whether small models are useful inside coding agents, not whether they
-can win a one-shot code benchmark. So I built the smallest harness I could: one Python
-file, real shell tools, and a plan-execute-recover loop. The surprising lesson was not
-"the tiny model is secretly frontier." It was that most of the useful reliability came
-from the loop around it. Let me show you one very ordinary bug that made that obvious.
+win a one-shot benchmark. So I built the smallest harness I could: one Python file, real
+shell tools, and a plan-execute-recover loop. The surprise was not that a tiny model is
+secretly frontier. Most of the useful reliability came from the loop. One ordinary bug
+made that obvious.
 -->
 
 ---
@@ -356,12 +380,11 @@ from the loop around it. Let me show you one very ordinary bug that made that ob
 
 <!--
 Speaker notes (~45s):
-This is the most boring C bug possible: call printf without including stdio. The compiler
-already tells us exactly what happened. But the early agent treated every failed step as
-"the model needs to think harder." On our slowest local microtask, a bad edit could trigger
-a thinking retry and then a huge re-read. In three traces that recovery call took 140 to
-253 seconds. This is narrow evidence from one task, but it exposed the design error: we
-were paying the model to rediscover a fact the compiler had already given us.
+This is the most boring C bug possible: call printf without stdio. The compiler already
+tells us what happened. But the early agent treated every failure as "think harder." On
+our slowest local microtask, a bad edit could trigger a thinking retry and a huge re-read.
+In three traces that recovery call took 140 to 253 seconds. It is narrow evidence from one
+task, but the design error was clear: we paid the model to rediscover a compiler fact.
 -->
 
 ---
@@ -386,12 +409,11 @@ compiler stderr → <span class="typed">[compile_error]</span> → repair / retr
 
 <!--
 Speaker notes (~45s):
-The fix is a sequence of small, explicit contracts. Classify the failure. Give the model
-the exact file content instead of asking it to guess. Apply deterministic repairs only
-when the compiler diagnostic is unambiguous. If a task still fails, replace that task
-instead of regenerating the whole plan. And finally, run the program. None of this makes
-the model smarter. It makes the system less dependent on intelligence for mechanical
-work. That is the part of agent engineering I expect to survive every model upgrade.
+The fix is a sequence of explicit contracts. Classify the failure. Give the model exact
+file content instead of asking it to guess. Apply deterministic repairs only when the
+diagnostic is unambiguous. If a task still fails, replace that task instead of the whole
+plan. Finally, run the program. None of this makes the model smarter. It makes the system
+less dependent on intelligence for mechanical work, and it survives model upgrades.
 -->
 
 ---
@@ -417,12 +439,11 @@ work. That is the part of agent engineering I expect to survive every model upgr
 
 <!--
 Speaker notes (~40s):
-For this talk I added a deliberately tiny hosted smoke test: three models, two jobs, one
-run per cell. Job one creates a header and source file, compiles them, and runs the binary.
-Job two repairs a broken Python file, which we execute independently. Provider, prompts,
-harness commit, and reasoning policy are pinned. Six runs are not a leaderboard or a
-reliability estimate. They are a receipt: can each model drive this exact tool loop and
-leave behind an artifact that really runs?
+For this talk I added a tiny hosted smoke: three models, two jobs, one run per cell. Job
+one creates a header and source file, then compiles and runs them. Job two repairs a broken
+Python file, which we execute independently. Provider, prompts, commit, and reasoning
+policy are pinned. Six runs are not a leaderboard or reliability estimate. They are a
+receipt: can each model drive this loop and leave an artifact that runs?
 -->
 
 ---
@@ -431,14 +452,12 @@ leave behind an artifact that really runs?
 
 # What happened?
 
-<table class="results">
-  <thead><tr><th>Model</th><th>Build + run</th><th>Repair + run</th><th>LLM calls</th><th>Billed credits</th></tr></thead>
-  <tbody>
-    <tr><td>Gemma 4 26B A4B</td><td><span class="pending">PENDING</span></td><td><span class="pending">PENDING</span></td><td>—</td><td>—</td></tr>
-    <tr><td>Qwen3.6-27B</td><td><span class="pending">PENDING</span></td><td><span class="pending">PENDING</span></td><td>—</td><td>—</td></tr>
-    <tr><td>Qwen3.6-35B-A3B</td><td><span class="pending">PENDING</span></td><td><span class="pending">PENDING</span></td><td>—</td><td>—</td></tr>
-  </tbody>
-</table>
+<div class="result-grid">
+  <div class="result-cell head">Model</div><div class="result-cell head">2-file build</div><div class="result-cell head">Repair</div><div class="result-cell head">LLM calls</div><div class="result-cell head">Billed credits</div>
+  <div class="result-cell model-name">Gemma 4 26B A4B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
+  <div class="result-cell model-name">Qwen3.6-27B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
+  <div class="result-cell model-name">Qwen3.6-35B-A3B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
+</div>
 
 <p class="tiny">Pass means both <strong>agent complete</strong> and the deterministic postcondition passed. Latency is shown per task because it is provider- and network-dependent.</p>
 
@@ -448,12 +467,11 @@ leave behind an artifact that really runs?
 
 <!--
 Speaker notes (~35s):
-This is where the six results go. I am keeping the definition of pass strict: the agent
-must report completion and the program must run under a deterministic postcondition.
-Calls and billed credits matter because they capture loop efficiency better than a single
-response score. One run can expose a parser, routing, or recovery incompatibility. It
-cannot tell us a model is 100 percent reliable. Treat these cells as a draft integration
-smoke, nothing more.
+The definition of pass is strict: the agent must report completion and the program must
+run under a deterministic postcondition. Calls and billed credits capture loop efficiency
+better than a response score. One run can expose a parser, routing, or recovery problem.
+It cannot tell us a model is reliable. Treat these cells as a draft integration smoke,
+nothing more.
 -->
 
 ---
@@ -488,10 +506,9 @@ smoke, nothing more.
 <!--
 Speaker notes (~40s):
 The claim has to stay the size of the evidence. We verify that structured actions survive
-the provider path, that the loop completes these two jobs, and that the resulting programs
-run. We do not verify full-app reliability, long-horizon refactors, code quality, or local
-speed. And I am intentionally not using LiveCodeBench here. Short contest problems are a
-useful raw-coding measure, but they do not exercise stateful tool use across multiple files
+the provider path, these two jobs complete, and the programs run. We do not verify full-app
+reliability, long refactors, code quality, or local speed. I am intentionally not using
+LiveCodeBench. Contest problems measure raw coding, but not stateful tool use across files
 and steps. For agent work, executable postconditions are closer to the question.
 -->
 
@@ -515,10 +532,10 @@ and steps. For agent work, executable postconditions are closer to the question.
 
 <!--
 Speaker notes (~35s):
-My conclusion is not that small models are ready for every coding job. It is that the
-agent loop is the durable product: typed actions, narrow guardrails, real tools, and
-external checks. Small models make weak loops painfully visible; frontier models often
-hide the same debt. Keep the standards high and shorten the feedback path. Then choose
-the smallest model that closes your real loop at the latency, privacy, and cost you need.
-The repo includes the deck, blog, exact protocol, and result data. Thank you.
+My conclusion is not that small models are ready for every coding job. The agent loop is
+the durable product: typed actions, narrow guardrails, real tools, and external checks.
+Small models make weak loops painfully visible; frontier models can hide the same debt.
+Keep the standards high and shorten the feedback path. Then choose the smallest model
+that closes your real loop at the latency, privacy, and cost you need. The repo has the
+deck, blog, protocol, and data. Thank you.
 -->
