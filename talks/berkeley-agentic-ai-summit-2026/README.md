@@ -1,34 +1,50 @@
-# Berkeley Agentic AI Summit 2026 — Lightning Talk
+# Agentic AI Summit 2026 - Lightning Talk
 
-**Title:** Are Small LLMs Ready for Coding Agents?
-**Slot:** Session 2 — Agentic AI Frameworks & Developer Platforms, Sat Aug 1, 1:00 PM PT
+**Title:** Small Models, Tight Loops: What a Coding-Agent Harness Is Actually Doing for You
+
+**Slot:** Compass (Saturday), Session 2: Frameworks & Dev Platforms, Aug 1, 2026, 1:00 PM PT
 **Format:** 5 minutes, 7 slides
 
 ## Contents
 
-- [`slides.md`](slides.md) — the deck, in [Marp](https://marp.app/) markdown. Speaker notes are inline as HTML comments under each slide (~40s each ≈ 4:50 total, leaving buffer for the walk-on).
-- `slides.pdf` — rendered deck (upload this to the speaker form).
+- [`slides.md`](slides.md) - Marp source with speaker notes (about 4:40 at 120-125 wpm).
+- `slides.pdf` - rendered deck.
+- [`blog.md`](blog.md) - short companion post.
+- [`evals/README.md`](evals/README.md) - exact draft eval protocol and commands.
+- `evals/draft-results.json` - compact result data once the authenticated run completes.
 
-## Rendering
+## Render
+
+From the repository root:
 
 ```bash
-npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md --pdf --allow-local-files
-# or for presenting with notes:
-npx @marp-team/marp-cli slides.md --preview
+npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+  --html --pdf --allow-local-files
 ```
 
-## Sources for the numbers
+For presenter mode:
 
-All harness/agent numbers come from this repo:
+```bash
+npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+  --html --preview
+```
 
-- [PERFORMANCE.md](../../PERFORMANCE.md) — E01 baseline (27/27 OpenRouter, easy/medium local), 2026-05-03 hard suite (9/9 local), 4–24× local-vs-hosted gap, the ~60% scaffold-addressable time breakdown of `fix_missing_include`, and the Qwen 3.5 → Gemma 4 switch rationale.
-- [ARCHITECTURE.md](../../ARCHITECTURE.md) — the harness mechanisms named on slide 2 (edit action, JSON repair, error-class retry policy, task-local replan, slim executor state).
+## Evidence Policy
 
-External references:
+The deck distinguishes three kinds of evidence:
 
-- Qwen3.6 sizes and coding focus: [Qwen3.6-27B blog](https://qwen.ai/blog?id=qwen3.6-27b), [Qwen3.6-35B-A3B on Hugging Face](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
-- [WebDev Arena](https://web.lmarena.ai/) — human-preference Elo on generated web apps
-- [WebCoderBench](https://arxiv.org/html/2601.02430v1) — 1,572 real user requirements for web app generation
-- [LiveCodeBench](https://livecodebench.github.io/) — contamination-free code generation
+1. **Historical local traces.** The missing-header timeline comes from three traces of one slow Gemma 4 E4B microtask in [`PERFORMANCE.md`](../../PERFORMANCE.md). It is not presented as a suite-wide percentage or an ablation.
+2. **Current hosted smoke.** Three models run two tasks once each through the same NanAgent commit and strictly pinned SiliconFlow routing with FP8 endpoints. A pass requires agent completion and an independently executed postcondition. This is an integration smoke (`n=1`), not a reliability estimate.
+3. **Architecture.** Typed errors, JSON repair, task-local replanning, deterministic repair, and completion checks are implementation features documented in [`ARCHITECTURE.md`](../../ARCHITECTURE.md). The talk does not claim each feature has a matched causal ablation.
 
-Note: Qwen3.6 (27B / 35B-A3B) appears on the models slide as the current open-coder size class; NanAgent's measured results in PERFORMANCE.md cover Gemma 4 E4B and Gemma 4 26B-A4B. Qwen3.6 harness runs are future work.
+These tasks are small C/Python build-and-repair jobs. They are not full-app generation. No LiveCodeBench result is used: contest-style single-problem coding does not test the stateful, multi-step tool loop discussed here.
+
+## Primary Sources
+
+- [Agentic AI Summit 2026 program](https://rdi.berkeley.edu/events/agentic-ai-summit-2026)
+- [Google Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) - E4B is dense (4.5B effective / 8B including embeddings); 26B A4B is MoE (25.2B total / 3.8B active).
+- [Qwen3.6-27B release](https://qwen.ai/blog?id=qwen3.6-27b) and [model card](https://huggingface.co/Qwen/Qwen3.6-27B)
+- [Qwen3.6-35B-A3B release](https://qwen.ai/blog?id=qwen3.6-35b-a3b) and [model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
+- [OpenRouter models API](https://openrouter.ai/api/v1/models) - exact model IDs and current endpoint metadata
+
+The public program confirms the session and start time. The five-minute duration comes from speaker communications rather than the public agenda.
