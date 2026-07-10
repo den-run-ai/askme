@@ -229,7 +229,7 @@ class TestThinkingRetry:
         assert second_call_body["reasoning"]["enabled"] is True
         assert second_call_body["reasoning"]["effort"] == "medium"
         first_call_body = mock_post.call_args_list[0][1]["json"]
-        assert "reasoning" not in first_call_body
+        assert first_call_body["reasoning"] == {"enabled": False}
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "local")
@@ -283,11 +283,11 @@ class TestThinkingRetry:
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
     def test_no_thinking_on_first_attempt(self, mock_post):
-        """First attempt should never include reasoning params."""
+        """First attempt should explicitly disable model-default reasoning."""
         mock_post.return_value = mock_response({"action": "done"})
         ask_llm([{"role": "user", "content": "test"}])
         call_body = mock_post.call_args_list[0][1]["json"]
-        assert "reasoning" not in call_body
+        assert call_body["reasoning"] == {"enabled": False}
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
@@ -298,6 +298,21 @@ class TestThinkingRetry:
         call_body = mock_post.call_args_list[0][1]["json"]
         assert "reasoning" in call_body
         assert call_body["reasoning"]["effort"] == "medium"
+
+    @patch("askme.OPENROUTER_ALLOW_FALLBACKS", False)
+    @patch("askme.OPENROUTER_PROVIDER", "siliconflow")
+    @patch("askme.OPENROUTER_API_KEY", "test-key")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_strict_provider_and_route_metadata(self, mock_post):
+        """Benchmark routing should be pinned and request actual endpoint metadata."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([{"role": "user", "content": "test"}])
+        call = mock_post.call_args_list[0]
+        assert call[1]["json"]["provider"] == {
+            "order": ["siliconflow"], "allow_fallbacks": False,
+        }
+        assert call[1]["headers"]["X-OpenRouter-Metadata"] == "enabled"
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
@@ -632,12 +647,12 @@ class TestTieredRetryContract:
         ]
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "done"}
-        # Attempt 0: no reasoning
-        assert "reasoning" not in mock_post.call_args_list[0][1]["json"]
+        # Attempt 0: reasoning explicitly disabled
+        assert mock_post.call_args_list[0][1]["json"]["reasoning"] == {"enabled": False}
         # Attempt 1: medium reasoning
         assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "medium"
-        # Attempt 2: no reasoning (strict contract instead)
-        assert "reasoning" not in mock_post.call_args_list[2][1]["json"]
+        # Attempt 2: reasoning disabled (strict contract instead)
+        assert mock_post.call_args_list[2][1]["json"]["reasoning"] == {"enabled": False}
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
@@ -710,4 +725,4 @@ class TestTieredRetryContract:
         ask_llm([{"role": "user", "content": "test"}], think=True)
         assert mock_post.call_args_list[0][1]["json"]["reasoning"]["effort"] == "medium"
         assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "high"
-        assert "reasoning" not in mock_post.call_args_list[2][1]["json"]
+        assert mock_post.call_args_list[2][1]["json"]["reasoning"] == {"enabled": False}

@@ -87,12 +87,11 @@ class TestPlannerReasoning:
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")
     def test_first_plan_openrouter_no_reasoning(self, mock_post):
-        """First plan (OpenRouter) should NOT include reasoning params."""
+        """First plan (OpenRouter) should explicitly disable reasoning."""
         mock_post.return_value = mock_response({"tasks": ["do thing"]})
         get_plan("test", {"completed_tasks": [], "errors": []})
         call_body = mock_post.call_args_list[0][1]["json"]
-        assert "reasoning" not in call_body, \
-            "First plan should not include reasoning params"
+        assert call_body["reasoning"] == {"enabled": False}
 
     @patch("askme.requests.post")
     @patch("askme.LLM_BACKEND", "openrouter")

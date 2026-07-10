@@ -73,34 +73,69 @@ def assert_file(path, content_contains=None):
             f"Expected '{content_contains}' in {p}, got: {text[:200]}"
 
 
+def assert_executable_output(path, expected):
+    """Verify a generated executable exists, runs, and prints expected output."""
+    p = Path(path)
+    assert p.exists(), f"Expected executable not found: {p}"
+    assert_command_output([str(p)], p.parent, expected)
+
+
+def assert_command_output(command, cwd, expected):
+    """Run a deterministic postcondition command and verify its output."""
+    import subprocess
+
+    result = subprocess.run(
+        command, cwd=str(cwd), capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, \
+        f"Postcondition command failed ({result.returncode}): {result.stderr[:200]}"
+    assert expected in result.stdout, \
+        f"Expected '{expected}' in command output, got: {result.stdout[:200]}"
+
+
 def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
            max_tasks=INT_MAX_TASKS, max_steps=INT_MAX_STEPS):
-    """Agent loop using OpenRouter backend (gemma-4-26b-a4b via Parasail)."""
-    # Temporarily switch backend to openrouter
-    old_backend = os.environ.get("LLM_BACKEND", "")
-    old_model = os.environ.get("OPENROUTER_MODEL", "")
+    """Agent loop using the configured OpenRouter model and provider."""
+    old_env = {
+        "LLM_BACKEND": os.environ.get("LLM_BACKEND"),
+        "OPENROUTER_MODEL": os.environ.get("OPENROUTER_MODEL"),
+        "OPENROUTER_PROVIDER": os.environ.get("OPENROUTER_PROVIDER"),
+        "OPENROUTER_ALLOW_FALLBACKS": os.environ.get("OPENROUTER_ALLOW_FALLBACKS"),
+    }
+    model = old_env["OPENROUTER_MODEL"] or "google/gemma-4-26b-a4b-it"
+    provider = (old_env["OPENROUTER_PROVIDER"]
+                if old_env["OPENROUTER_PROVIDER"] is not None else "Parasail")
+    allow_fallbacks = (old_env["OPENROUTER_ALLOW_FALLBACKS"] or "1") == "1"
     os.environ["LLM_BACKEND"] = "openrouter"
-    os.environ["OPENROUTER_MODEL"] = "google/gemma-4-26b-a4b-it"
+    os.environ["OPENROUTER_MODEL"] = model
+    os.environ["OPENROUTER_PROVIDER"] = provider
+    os.environ["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
 
     # Reload module-level config
     import askme
+    old_config = {
+        "LLM_BACKEND": askme.LLM_BACKEND,
+        "API": askme.API,
+        "MODEL": askme.MODEL,
+        "OPENROUTER_MODEL": askme.OPENROUTER_MODEL,
+        "OPENROUTER_PROVIDER": askme.OPENROUTER_PROVIDER,
+        "OPENROUTER_ALLOW_FALLBACKS": askme.OPENROUTER_ALLOW_FALLBACKS,
+    }
     askme.LLM_BACKEND = "openrouter"
     askme.API = "https://openrouter.ai/api/v1/chat/completions"
-    askme.MODEL = "google/gemma-4-26b-a4b-it"
+    askme.MODEL = model
+    askme.OPENROUTER_MODEL = model
+    askme.OPENROUTER_PROVIDER = provider
+    askme.OPENROUTER_ALLOW_FALLBACKS = allow_fallbacks
     askme.OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
     try:
         return int_run(user_prompt, work_dir, max_replans, max_tasks, max_steps)
     finally:
-        # Restore
-        if old_backend:
-            os.environ["LLM_BACKEND"] = old_backend
-        else:
-            os.environ.pop("LLM_BACKEND", None)
-        if old_model:
-            os.environ["OPENROUTER_MODEL"] = old_model
-        else:
-            os.environ.pop("OPENROUTER_MODEL", None)
-        askme.LLM_BACKEND = old_backend or "local"
-        askme.API = "http://localhost:8080/v1/chat/completions"
-        askme.MODEL = "gemma-4-e4b"
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for key, value in old_config.items():
+            setattr(askme, key, value)

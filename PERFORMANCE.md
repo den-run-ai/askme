@@ -190,22 +190,22 @@ Empirical behavior across the three models used during development.
 
 | Model | Architecture | "done" emission | Action looping | Speed | Test status |
 |---|---|---|---|---|---|
-| **Gemma 4 E4B** (local) | MoE 12B/4B active | Works after cross-task state fix | Duplicate write loops; write content truncation mitigated by `edit` | ~7 tok/s | 9/9 integration tests pass (easy 3:20, medium 20:20, hard 16:49) |
-| **Gemma 4 26B-A4B** (OpenRouter) | MoE 26B/4B active | Reliable | Occasional write loops (up to 3x before done); prefers `edit` for fixes | ~1-2s/step | 9/9 integration tests pass (easy 38s, medium 87s, hard 176s) |
+| **Gemma 4 E4B** (local) | Dense PLE, 4.5B effective / 8B incl. embeddings | Works after cross-task state fix | Duplicate write loops; write content truncation mitigated by `edit` | ~7 tok/s | 9/9 integration tests pass (easy 3:20, medium 20:20, hard 16:49) |
+| **Gemma 4 26B A4B** (OpenRouter) | MoE, 25.2B total / 3.8B active | Reliable | Occasional write loops (up to 3x before done); prefers `edit` for fixes | ~1-2s/step | 9/9 integration tests pass (easy 38s, medium 87s, hard 176s) |
 | Qwen 3.5 9B | Dense | Unreliable (think-tag issues) | N/A | ~3 tok/s | Legacy, no longer tested |
 
 ### Gemma 4 vs Qwen 3.5 — why we switched
 
-Qwen 3.5 has always-on thinking (`<think>` blocks) that caused major reliability issues:
+Qwen 3.5 defaults to thinking; in this llama.cpp integration its `<think>` blocks caused major reliability issues:
 - With `reasoning_format: "deepseek"` (default), thinking goes to `reasoning_content` — but if `max_tokens` is exhausted during thinking, `content` stays empty.
 - With `reasoning_format: "none"`, thinking leaks into `content` as literal `<think>` text.
 - Required extensive workarounds: think-tag stripping, JSON extraction, higher `max_tokens`, retries.
 
-Gemma 4 E4B has opt-in thinking (not always-on):
+Gemma 4 E4B has opt-in thinking (rather than default-on):
 - No `reasoning_format` parameter needed.
 - Think-tag stripping kept as safety net but rarely triggers.
 - More reliable JSON output with lower `max_tokens`.
-- MoE architecture (4B active) is faster than dense 9B in practice.
+- Its 4.5B-effective dense architecture is faster than the 9B model in this local setup.
 
 ## Local Integration Test Results — 2026-04-07, build `941146b3f`
 

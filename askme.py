@@ -26,6 +26,8 @@ _load_env()
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "local")  # "local" or "openrouter"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
+OPENROUTER_PROVIDER = os.environ.get("OPENROUTER_PROVIDER", "Parasail").strip()
+OPENROUTER_ALLOW_FALLBACKS = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "1") == "1"
 
 CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
 
@@ -292,7 +294,11 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             "max_tokens": max_tokens,
         }
         if LLM_BACKEND == "openrouter":
-            body["provider"] = {"order": ["Parasail"]}
+            if OPENROUTER_PROVIDER:
+                body["provider"] = {
+                    "order": [OPENROUTER_PROVIDER],
+                    "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+                }
             if effective_think_level:
                 body["reasoning"] = {
                     "enabled": True,
@@ -301,6 +307,9 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 # Reasoning tokens count against max_tokens with Parasail provider,
                 # despite OpenRouter docs claiming they're separate. Bump to compensate.
                 body["max_tokens"] = max(max_tokens, 2048 if effective_think_level == "high" else 1536)
+            else:
+                # Some models reason by default. Keep the harness policy model-independent.
+                body["reasoning"] = {"enabled": False}
         elif effective_think_level:
             # Local llama-server: prepend <|think|> to system prompt, bump max_tokens
             msgs = list(messages)
@@ -319,6 +328,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         headers = {"Content-Type": "application/json"}
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
+            headers["X-OpenRouter-Metadata"] = "enabled"
         _restore_cache()
         # Transport-level error handling with retry + backoff
         try:
@@ -358,6 +368,14 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         # Log token usage if available
         usage = rj.get("usage", {})
         if usage:
+            metadata = rj.get("openrouter_metadata") or {}
+            route = metadata.get("endpoints", {})
+            available = route.get("available", []) if isinstance(route, dict) else []
+            selected = next(
+                (endpoint for endpoint in available
+                 if isinstance(endpoint, dict) and endpoint.get("selected")),
+                {},
+            )
             tok_msg = f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}"
             if effective_think_level:
                 tok_msg += f" thinking={effective_think_level}"
@@ -367,6 +385,10 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 "prompt": usage.get("prompt_tokens", 0),
                 "completion": usage.get("completion_tokens", 0),
                 "total": usage.get("total_tokens", 0),
+                "openrouter_cost": usage.get("cost", 0),
+                "model": selected.get("model") or rj.get("model", MODEL),
+                "provider": selected.get("provider") or rj.get("provider", ""),
+                "route_attempt": selected.get("attempt"),
                 "thinking": effective_think_level,
                 "attempt": attempt,
             })
@@ -1104,6 +1126,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     log(f"Working directory: {working_dir}")
     _run_log({"event": "run_start", "prompt": user_prompt, "working_dir": working_dir,
               "backend": LLM_BACKEND, "model": MODEL,
+              "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
+              "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
               "limits": {"max_replans": max_replans, "max_tasks": max_tasks, "max_steps": max_steps}})
     # Preflight: probe environment and set policy
     env = preflight_probe(working_dir)

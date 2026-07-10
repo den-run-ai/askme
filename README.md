@@ -39,6 +39,8 @@ LLM_BACKEND=openrouter python3 askme.py "your task here"
 | `LLM_BACKEND` | `local` | `local` or `openrouter` |
 | `OPENROUTER_API_KEY` | (from `.env`) | API key for OpenRouter |
 | `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | OpenRouter model |
+| `OPENROUTER_PROVIDER` | `Parasail` | Preferred OpenRouter provider; empty means automatic routing |
+| `OPENROUTER_ALLOW_FALLBACKS` | `1` | Whether OpenRouter may leave the preferred provider |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Whether the agent may install software |
@@ -63,6 +65,8 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy o
 python3 tests/bench_harness.py                                    # 3 trials, easy, local
 python3 tests/bench_harness.py --suite medium --trials 5          # 5 trials, medium, local
 python3 tests/bench_harness.py --backend openrouter --suite hard  # 3 trials, hard, openrouter
+python3 tests/bench_harness.py --backend openrouter --suite easy --trials 1 \
+  --model qwen/qwen3.6-27b --provider siliconflow              # strict provider pin
 python3 tests/bench_harness.py --test test_shell_and_write        # single test
 python3 tests/bench_harness.py --list                             # show available tests
 ```

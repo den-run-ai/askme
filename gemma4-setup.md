@@ -14,7 +14,7 @@ Mac M1 16GB. Last updated 2026-05-03.
 
 | Model | File | Size | Architecture | GPU | Status |
 |-------|------|------|-------------|-----|--------|
-| **Gemma 4 E4B** Q4_K_M | `models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf` | ~5.0 GB | MoE 12B (4B active), iSWA | Full Metal | **Primary** |
+| **Gemma 4 E4B** Q4_K_M | `models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf` | ~5.0 GB | Dense PLE, 4.5B effective / 8B incl. embeddings, iSWA | Full Metal | **Primary** |
 
 - **iSWA** (Interleaved Sliding Window Attention) — 3 sliding-window layers + 1 global attention layer, repeating
 - Per-Layer Embeddings (PLE) make the file ~8B-sized despite 4.5B effective params
@@ -625,7 +625,7 @@ Phase 6 (cache-reuse unblock) — **COMPLETE (2026-04-25)**:
 
 ## 16GB M1 Lessons Learned
 
-- **Gemma 4 E4B is the sweet spot** — MoE with 4B active params, ~5.0GB Q4_K_M, full Metal GPU
+- **Gemma 4 E4B is the sweet spot** — dense PLE with 4.5B effective params (8B including embeddings), ~5.0GB Q4_K_M, full Metal GPU
 - **No forced thinking mode** — unlike Qwen 3.5, Gemma 4 doesn't leak `<think>` tags into responses
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
