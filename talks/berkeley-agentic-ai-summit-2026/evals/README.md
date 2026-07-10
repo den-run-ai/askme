@@ -5,8 +5,8 @@ This is a limited integration smoke for the Berkeley talk, not a leaderboard or 
 ## Protocol
 
 **Date:** 2026-07-10  
-**NanAgent commit:** `b9b92b6a2ff8a4d83b36b03ee6819804b083574d`  
-**Provider:** `siliconflow`, strict routing (`allow_fallbacks=false`)  
+**NanAgent implementation commit:** `04033b4750b4b4f0d2f31697dd2f65841307f870`
+**Provider:** `siliconflow`, strict routing (`allow_fallbacks=false`, `require_parameters=true`)
 **Endpoint precision:** FP8, as reported by OpenRouter endpoint metadata on the run date  
 **Trials:** one per model/task cell
 
