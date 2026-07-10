@@ -300,6 +300,7 @@ class TestThinkingRetry:
         assert call_body["reasoning"]["effort"] == "medium"
 
     @patch("askme.OPENROUTER_ALLOW_FALLBACKS", False)
+    @patch("askme.OPENROUTER_REQUIRE_PARAMETERS", True)
     @patch("askme.OPENROUTER_PROVIDER", "siliconflow")
     @patch("askme.OPENROUTER_API_KEY", "test-key")
     @patch("askme.requests.post")
@@ -311,6 +312,7 @@ class TestThinkingRetry:
         call = mock_post.call_args_list[0]
         assert call[1]["json"]["provider"] == {
             "order": ["siliconflow"], "allow_fallbacks": False,
+            "require_parameters": True,
         }
         assert call[1]["headers"]["X-OpenRouter-Metadata"] == "enabled"
 

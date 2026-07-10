@@ -41,6 +41,7 @@ LLM_BACKEND=openrouter python3 askme.py "your task here"
 | `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | OpenRouter model |
 | `OPENROUTER_PROVIDER` | `Parasail` | Preferred OpenRouter provider; empty means automatic routing |
 | `OPENROUTER_ALLOW_FALLBACKS` | `1` | Whether OpenRouter may leave the preferred provider |
+| `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Whether the agent may install software |

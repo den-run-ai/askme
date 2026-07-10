@@ -202,7 +202,7 @@ Active limitations that still shape the design.
 
 `askme.py` supports two backends, selected by `LLM_BACKEND`:
 - **Local** (default): llama-server on `localhost:8080`, model configured at server launch.
-- **OpenRouter**: any OpenAI-compatible model via OpenRouter API. `OPENROUTER_PROVIDER` sets the provider preference (Parasail by default); `OPENROUTER_ALLOW_FALLBACKS=0` makes that selection strict for reproducible evals.
+- **OpenRouter**: any OpenAI-compatible model via OpenRouter API. `OPENROUTER_PROVIDER` sets the provider preference (Parasail by default); `OPENROUTER_ALLOW_FALLBACKS=0` makes that selection strict, and `OPENROUTER_REQUIRE_PARAMETERS=1` rejects endpoints that do not advertise every requested parameter.
 
 Thinking mechanisms differ:
 - **OpenRouter**: `reasoning.enabled=true` with `reasoning.effort` ("medium"/"high"). Reasoning tokens share the outer `max_tokens` on Parasail; `content` can be `null` if reasoning exhausts the budget.

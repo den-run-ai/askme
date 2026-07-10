@@ -101,15 +101,18 @@ def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
         "OPENROUTER_MODEL": os.environ.get("OPENROUTER_MODEL"),
         "OPENROUTER_PROVIDER": os.environ.get("OPENROUTER_PROVIDER"),
         "OPENROUTER_ALLOW_FALLBACKS": os.environ.get("OPENROUTER_ALLOW_FALLBACKS"),
+        "OPENROUTER_REQUIRE_PARAMETERS": os.environ.get("OPENROUTER_REQUIRE_PARAMETERS"),
     }
     model = old_env["OPENROUTER_MODEL"] or "google/gemma-4-26b-a4b-it"
     provider = (old_env["OPENROUTER_PROVIDER"]
                 if old_env["OPENROUTER_PROVIDER"] is not None else "Parasail")
     allow_fallbacks = (old_env["OPENROUTER_ALLOW_FALLBACKS"] or "1") == "1"
+    require_parameters = (old_env["OPENROUTER_REQUIRE_PARAMETERS"] or "0") == "1"
     os.environ["LLM_BACKEND"] = "openrouter"
     os.environ["OPENROUTER_MODEL"] = model
     os.environ["OPENROUTER_PROVIDER"] = provider
     os.environ["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
+    os.environ["OPENROUTER_REQUIRE_PARAMETERS"] = "1" if require_parameters else "0"
 
     # Reload module-level config
     import askme
@@ -120,6 +123,7 @@ def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
         "OPENROUTER_MODEL": askme.OPENROUTER_MODEL,
         "OPENROUTER_PROVIDER": askme.OPENROUTER_PROVIDER,
         "OPENROUTER_ALLOW_FALLBACKS": askme.OPENROUTER_ALLOW_FALLBACKS,
+        "OPENROUTER_REQUIRE_PARAMETERS": askme.OPENROUTER_REQUIRE_PARAMETERS,
     }
     askme.LLM_BACKEND = "openrouter"
     askme.API = "https://openrouter.ai/api/v1/chat/completions"
@@ -127,6 +131,7 @@ def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
     askme.OPENROUTER_MODEL = model
     askme.OPENROUTER_PROVIDER = provider
     askme.OPENROUTER_ALLOW_FALLBACKS = allow_fallbacks
+    askme.OPENROUTER_REQUIRE_PARAMETERS = require_parameters
     askme.OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
     try:

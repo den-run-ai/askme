@@ -68,7 +68,7 @@ def discover_tests(suite, backend):
 
 
 def run_single_test(test_name, suite, backend, log_path, model=None, provider=None,
-                    allow_fallbacks=False):
+                    allow_fallbacks=False, require_parameters=True):
     """Run one pytest test with AGENT_RUN_LOG set. Returns (passed, wall_seconds)."""
     class_name = SUITES[suite][backend]
     if class_name == "TestIntegration":
@@ -82,6 +82,7 @@ def run_single_test(test_name, suite, backend, log_path, model=None, provider=No
         if provider is not None:
             env["OPENROUTER_PROVIDER"] = provider
         env["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
+        env["OPENROUTER_REQUIRE_PARAMETERS"] = "1" if require_parameters else "0"
     t0 = time.time()
     result = subprocess.run(
         [sys.executable, "-m", "pytest",
@@ -257,12 +258,18 @@ def main():
         "--allow-provider-fallbacks", action="store_true",
         help="Allow OpenRouter to leave the requested provider (disabled by default)",
     )
+    parser.add_argument(
+        "--no-require-provider-parameters", dest="require_provider_parameters",
+        action="store_false", default=True,
+        help="Allow a provider that does not advertise all request parameters",
+    )
     parser.add_argument("--list", action="store_true", help="List available tests")
     parser.add_argument("--log-dir", help="Directory for JSONL logs (default: auto tmpdir)")
     args = parser.parse_args()
 
     if args.backend != "openrouter" and (
-            args.model or args.provider or args.allow_provider_fallbacks):
+            args.model or args.provider or args.allow_provider_fallbacks
+            or not args.require_provider_parameters):
         parser.error("OpenRouter routing options require --backend openrouter")
 
     model = None
@@ -301,6 +308,7 @@ def main():
         print(f"Model: {model} | Provider: {provider or 'auto'}")
         if provider:
             print(f"Provider fallbacks: {'enabled' if args.allow_provider_fallbacks else 'disabled'}")
+            print(f"Require parameters: {'yes' if args.require_provider_parameters else 'no'}")
         else:
             print("Provider routing: automatic (fallback setting does not apply)")
     print(f"Tests: {tests}")
@@ -318,7 +326,7 @@ def main():
             try:
                 passed, wall, stdout, stderr = run_single_test(
                     test_name, args.suite, args.backend, log_path, model, provider,
-                    args.allow_provider_fallbacks)
+                    args.allow_provider_fallbacks, args.require_provider_parameters)
             except subprocess.TimeoutExpired:
                 passed, wall = False, 1200.0
                 print(f" TIMEOUT", flush=True)
@@ -355,6 +363,7 @@ def main():
         "suite": args.suite, "backend": args.backend, "trials": args.trials,
         "model": model, "provider": provider,
         "allow_provider_fallbacks": args.allow_provider_fallbacks if provider else None,
+        "require_provider_parameters": args.require_provider_parameters if provider else None,
         "git_commit": git_commit, "git_dirty": git_dirty,
         "total_wall_s": round(total_wall, 1),
         "tests": {},

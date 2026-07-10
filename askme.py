@@ -28,6 +28,7 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
 OPENROUTER_PROVIDER = os.environ.get("OPENROUTER_PROVIDER", "Parasail").strip()
 OPENROUTER_ALLOW_FALLBACKS = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "1") == "1"
+OPENROUTER_REQUIRE_PARAMETERS = os.environ.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1"
 
 CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
 
@@ -298,6 +299,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 body["provider"] = {
                     "order": [OPENROUTER_PROVIDER],
                     "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+                    "require_parameters": OPENROUTER_REQUIRE_PARAMETERS,
                 }
             if effective_think_level:
                 body["reasoning"] = {
@@ -1128,6 +1130,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
               "backend": LLM_BACKEND, "model": MODEL,
               "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
               "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+              "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
               "limits": {"max_replans": max_replans, "max_tasks": max_tasks, "max_steps": max_steps}})
     # Preflight: probe environment and set policy
     env = preflight_probe(working_dir)
