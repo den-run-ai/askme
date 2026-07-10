@@ -4,6 +4,8 @@ Benchmark history and test-run matrices for NanAgent. Each entry is a point-in-t
 
 **Staleness policy.** Each section is dated. If an entry is more than ~6 months old and the code that produced it has changed materially, treat it as historical only — re-run before citing numbers. Sections marked `[stale]` have known divergence from current code.
 
+**Assertion caveat (2026-07-10).** Historical integration runs below used the assertions present at the time. Several build/repair tests verified file content without requiring `agent_complete` and independently executing the final artifact. Those tests now require both completion and a deterministic execution postcondition. Treat older pytest pass counts as harness-history signals, not strict end-to-end success rates.
+
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
 ## E01 Harness Baseline — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
