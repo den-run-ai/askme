@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic multi-turn cache benchmark for llama-server.
 
-Simulates a NanAgent workload: 1 planner call + 6 executor calls, all
+Simulates an AskMe workload: 1 planner call + 6 executor calls, all
 sharing the same system prompt within type.  Measures server-side prompt
 eval and decode per request to isolate cache-reuse behaviour from model
 output variance.

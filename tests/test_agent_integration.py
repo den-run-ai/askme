@@ -6,7 +6,7 @@ from _test_support import (
     INT_MAX_REPLANS, INT_MAX_TASKS, INT_MAX_STEPS,
     MED_MAX_REPLANS, MED_MAX_TASKS, MED_MAX_STEPS,
     HARD_MAX_REPLANS, HARD_MAX_TASKS, HARD_MAX_STEPS,
-    log, int_run, assert_file, or_run,
+    log, int_run, assert_file, assert_executable_output, assert_command_output, or_run,
 )
 
 
@@ -44,16 +44,9 @@ class TestIntegration:
         )
         state = result["state"]
         assert_file(tmp_path / "main.c", "AGENT_OK")
-        if result["status"] == "complete":
-            all_outputs = " ".join(
-                s.get("output", "") for s in state.get("last_steps", [])
-            )
-            all_outputs += " ".join(
-                e["action"].get("reasoning", "")
-                for e in result["log"] if e["event"] == "step"
-            )
-            assert "AGENT_OK" in all_outputs or len(state["completed_tasks"]) >= 2, \
-                f"Expected AGENT_OK in output or >=2 tasks done. Completed: {state['completed_tasks']}"
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {state['errors']}"
+        assert_executable_output(tmp_path / "main", "AGENT_OK")
 
 
 @skip_no_llm
@@ -73,6 +66,7 @@ class TestIntegrationMedium:
             f"Agent failed to self-correct. Errors: {result['state']['errors']}"
         fixed_text = broken.read_text()
         assert "print" in fixed_text, f"File was overwritten unexpectedly: {fixed_text[:200]}"
+        assert_command_output(["python3", "greet.py"], tmp_path, "hello")
 
     def test_fix_missing_include(self, tmp_path):
         """LLM compiles a C file missing #include <stdio.h>, fixes it, compiles again."""
@@ -88,14 +82,9 @@ class TestIntegrationMedium:
         fixed_text = broken_c.read_text()
         assert "stdio.h" in fixed_text, \
             f"Expected #include <stdio.h> in fixed file, got: {fixed_text[:200]}"
-        if result["status"] == "complete":
-            all_outputs = " ".join(
-                s.get("output", "") for s in result["state"].get("last_steps", [])
-            )
-            all_outputs += " ".join(
-                e["action"].get("arg", "") + " " + e["action"].get("reasoning", "")
-                for e in result["log"] if e["event"] == "step"
-            )
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        assert_executable_output(tmp_path / "fix_me", "FIXED")
 
     def test_create_missing_file_then_use(self, tmp_path):
         """LLM tries to read a non-existent file, then creates and reads it."""
@@ -125,16 +114,9 @@ class TestIntegrationHard:
         )
         assert_file(tmp_path / "main.c", "msg.h")
         assert_file(tmp_path / "msg.h", "REPLAN_OK")
-        if result["status"] == "complete":
-            all_outputs = " ".join(
-                s.get("output", "") for s in result["state"].get("last_steps", [])
-            )
-            all_outputs += " ".join(
-                e["action"].get("reasoning", "")
-                for e in result["log"] if e["event"] == "step"
-            )
-            assert "REPLAN_OK" in all_outputs or len(result["state"]["completed_tasks"]) >= 2, \
-                f"Expected REPLAN_OK in output. Completed: {result['state']['completed_tasks']}"
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        assert_executable_output(tmp_path / "main", "REPLAN_OK")
 
     def test_replan_fix_wrong_command(self, tmp_path):
         """Agent tries a command that doesn't exist, replans with the correct approach."""
@@ -209,6 +191,7 @@ class TestOpenRouterEasy:
         assert_file(tmp_path / "main.c", "AGENT_OK")
         assert result["status"] == "complete", \
             f"Agent failed. Errors: {result['state']['errors']}"
+        assert_executable_output(tmp_path / "main", "AGENT_OK")
 
 
 @skip_no_openrouter
@@ -227,6 +210,7 @@ class TestOpenRouterMedium:
             f"Agent failed. Errors: {result['state']['errors']}"
         fixed_text = broken.read_text()
         assert "print" in fixed_text
+        assert_command_output(["python3", "greet.py"], tmp_path, "hello")
 
     def test_fix_missing_include(self, tmp_path):
         broken_c = tmp_path / "fix_me.c"
@@ -240,6 +224,9 @@ class TestOpenRouterMedium:
         )
         fixed_text = broken_c.read_text()
         assert "stdio.h" in fixed_text
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        assert_executable_output(tmp_path / "fix_me", "FIXED")
 
     def test_create_missing_file_then_use(self, tmp_path):
         result = or_run(
@@ -267,6 +254,9 @@ class TestOpenRouterHard:
         )
         assert_file(tmp_path / "main.c", "msg.h")
         assert_file(tmp_path / "msg.h", "REPLAN_OK")
+        assert result["status"] == "complete", \
+            f"Agent failed. Errors: {result['state']['errors']}"
+        assert_executable_output(tmp_path / "main", "REPLAN_OK")
 
     def test_replan_fix_wrong_command(self, tmp_path):
         result = or_run(

@@ -6,7 +6,7 @@ IMPORTANT: Review [../AGENTS.md](../AGENTS.md) before beginning any work. It gov
 
 ## Orientation
 
-NanAgent is a minimal, self-contained agent in a single file (`askme.py`). It takes a user prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. No frameworks, only `requests` as a dependency. Each run uses an isolated `/tmp/nanagent_*` directory, so agent-created files never pollute the repo.
+AskMe is a minimal, self-contained agent in a single file (`askme.py`). It takes a user prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. No frameworks, only `requests` as a dependency. Each run uses an isolated `/tmp/askme_*` directory, so agent-created files never pollute the repo.
 
 Where to look:
 - [README.md](README.md) — usage, quickstart, test commands

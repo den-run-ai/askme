@@ -67,7 +67,8 @@ def discover_tests(suite, backend):
     return tests
 
 
-def run_single_test(test_name, suite, backend, log_path):
+def run_single_test(test_name, suite, backend, log_path, model=None, provider=None,
+                    allow_fallbacks=False, require_parameters=True):
     """Run one pytest test with AGENT_RUN_LOG set. Returns (passed, wall_seconds)."""
     class_name = SUITES[suite][backend]
     if class_name == "TestIntegration":
@@ -75,6 +76,13 @@ def run_single_test(test_name, suite, backend, log_path):
     else:
         k_expr = f"{class_name} and {test_name}"
     env = {**os.environ, "AGENT_RUN_LOG": str(log_path)}
+    if backend == "openrouter":
+        if model:
+            env["OPENROUTER_MODEL"] = model
+        if provider is not None:
+            env["OPENROUTER_PROVIDER"] = provider
+        env["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
+        env["OPENROUTER_REQUIRE_PARAMETERS"] = "1" if require_parameters else "0"
     t0 = time.time()
     result = subprocess.run(
         [sys.executable, "-m", "pytest",
@@ -103,6 +111,7 @@ def parse_log(log_path):
         return None
 
     run_end = next((e for e in events if e["event"] == "run_end"), None)
+    run_start = next((e for e in events if e["event"] == "run_start"), {})
     plans = [e for e in events if e["event"] == "plan"]
     plan_errors = [e for e in events if e["event"] == "plan_error"]
     steps = [e for e in events if e["event"] == "step"]
@@ -119,6 +128,9 @@ def parse_log(log_path):
 
     total_prompt_tokens = sum(t.get("prompt", 0) for t in tokens_events)
     total_completion_tokens = sum(t.get("completion", 0) for t in tokens_events)
+    total_openrouter_cost = sum(float(t.get("openrouter_cost") or 0) for t in tokens_events)
+    served_models = sorted({t.get("model") for t in tokens_events if t.get("model")})
+    served_providers = sorted({t.get("provider") for t in tokens_events if t.get("provider")})
 
     return {
         "status": run_end["status"] if run_end else "unknown",
@@ -136,6 +148,11 @@ def parse_log(log_path):
         "prompt_tokens": total_prompt_tokens,
         "completion_tokens": total_completion_tokens,
         "total_tokens": total_prompt_tokens + total_completion_tokens,
+        "openrouter_cost": total_openrouter_cost,
+        "requested_model": run_start.get("model", ""),
+        "requested_provider": run_start.get("provider", ""),
+        "served_models": served_models,
+        "served_providers": served_providers,
         "llm_calls": len(tokens_events),
         "validation": validations[0].get("valid") if validations else None,
         "local_replans": len(local_replans),
@@ -162,6 +179,22 @@ def fmt_int_range(values):
     if len(values) == 1:
         return f"{int(med)}"
     return f"{int(med)} ({min(values)}–{max(values)})"
+
+
+def git_state():
+    """Return the source revision used for a benchmark run."""
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(AGENT_DIR),
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(AGENT_DIR),
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        return revision, dirty
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown", None
 
 
 def print_report(test_name, trial_results):
@@ -195,6 +228,7 @@ def print_report(test_name, trial_results):
         ("LLM calls", fmt_int_range([m["llm_calls"] for m in metrics])),
         ("Prompt tokens", fmt_int_range([m["prompt_tokens"] for m in metrics])),
         ("Completion tokens", fmt_int_range([m["completion_tokens"] for m in metrics])),
+        ("OpenRouter cost", f"${sum(m['openrouter_cost'] for m in metrics):.4f} credits"),
     ]
     for label, value in rows:
         print(f"  {label:<22} {value}")
@@ -218,9 +252,36 @@ def main():
     parser.add_argument("--backend", choices=["local", "openrouter"], default="local")
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--test", help="Run a single test by name")
+    parser.add_argument("--model", help="OpenRouter model ID (honors OPENROUTER_MODEL by default)")
+    parser.add_argument("--provider", help="OpenRouter provider slug; use 'auto' for automatic routing")
+    parser.add_argument(
+        "--allow-provider-fallbacks", action="store_true",
+        help="Allow OpenRouter to leave the requested provider (disabled by default)",
+    )
+    parser.add_argument(
+        "--no-require-provider-parameters", dest="require_provider_parameters",
+        action="store_false", default=True,
+        help="Allow a provider that does not advertise all request parameters",
+    )
     parser.add_argument("--list", action="store_true", help="List available tests")
     parser.add_argument("--log-dir", help="Directory for JSONL logs (default: auto tmpdir)")
     args = parser.parse_args()
+
+    if args.backend != "openrouter" and (
+            args.model or args.provider or args.allow_provider_fallbacks
+            or not args.require_provider_parameters):
+        parser.error("OpenRouter routing options require --backend openrouter")
+
+    model = None
+    provider = None
+    if args.backend == "openrouter":
+        model = args.model or os.environ.get(
+            "OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
+        provider_arg = args.provider
+        if provider_arg is None:
+            provider = os.environ.get("OPENROUTER_PROVIDER", "Parasail")
+        else:
+            provider = "" if provider_arg.lower() == "auto" else provider_arg
 
     if args.list:
         for suite in SUITES:
@@ -239,9 +300,17 @@ def main():
         print(f"No tests found for suite={args.suite} backend={args.backend}")
         sys.exit(1)
 
+    git_commit, git_dirty = git_state()
     log_dir = Path(args.log_dir) if args.log_dir else Path(tempfile.mkdtemp(prefix="bench_"))
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"Suite: {args.suite} | Backend: {args.backend} | Trials: {args.trials}")
+    if args.backend == "openrouter":
+        print(f"Model: {model} | Provider: {provider or 'auto'}")
+        if provider:
+            print(f"Provider fallbacks: {'enabled' if args.allow_provider_fallbacks else 'disabled'}")
+            print(f"Require parameters: {'yes' if args.require_provider_parameters else 'no'}")
+        else:
+            print("Provider routing: automatic (fallback setting does not apply)")
     print(f"Tests: {tests}")
     print(f"Logs:  {log_dir}")
 
@@ -256,12 +325,15 @@ def main():
                   f"{test_name} trial {trial+1}/{args.trials} ...", end="", flush=True)
             try:
                 passed, wall, stdout, stderr = run_single_test(
-                    test_name, args.suite, args.backend, log_path)
+                    test_name, args.suite, args.backend, log_path, model, provider,
+                    args.allow_provider_fallbacks, args.require_provider_parameters)
             except subprocess.TimeoutExpired:
                 passed, wall = False, 1200.0
                 print(f" TIMEOUT", flush=True)
+                metrics = parse_log(log_path)
                 all_results[test_name].append({
-                    "passed": False, "wall_s": wall, "metrics": None})
+                    "passed": False, "wall_s": wall, "metrics": metrics,
+                    "timed_out": True})
                 continue
 
             metrics = parse_log(log_path)
@@ -289,6 +361,10 @@ def main():
     summary_path = log_dir / "summary.json"
     summary = {
         "suite": args.suite, "backend": args.backend, "trials": args.trials,
+        "model": model, "provider": provider,
+        "allow_provider_fallbacks": args.allow_provider_fallbacks if provider else None,
+        "require_provider_parameters": args.require_provider_parameters if provider else None,
+        "git_commit": git_commit, "git_dirty": git_dirty,
         "total_wall_s": round(total_wall, 1),
         "tests": {},
     }
@@ -309,6 +385,11 @@ def main():
             "thinking_retries": [m["thinking_retries"] for m in metrics_list],
             "llm_calls": [m["llm_calls"] for m in metrics_list],
             "prompt_tokens": [m["prompt_tokens"] for m in metrics_list],
+            "completion_tokens": [m["completion_tokens"] for m in metrics_list],
+            "total_tokens": [m["total_tokens"] for m in metrics_list],
+            "openrouter_cost": [m["openrouter_cost"] for m in metrics_list],
+            "served_models": [m["served_models"] for m in metrics_list],
+            "served_providers": [m["served_providers"] for m in metrics_list],
         }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)

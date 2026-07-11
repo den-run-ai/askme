@@ -1,6 +1,6 @@
-# NanAgent — Minimal Local Agent for Constrained LLMs
+# AskMe — Minimal Local Agent for Constrained LLMs
 
-Designed for: Gemma 4 E4B (MoE 12B/4B active), 16K context, 16GB M1 Mac.
+Designed for: Gemma 4 E4B (dense PLE, 4.5B effective / 8B including embeddings), 16K context, 16GB M1 Mac.
 
 For usage, quickstart, and test commands see [README.md](README.md). For model/server/runtime configuration see [gemma4-setup.md](gemma4-setup.md). For benchmark history and test-run matrices see [PERFORMANCE.md](PERFORMANCE.md).
 
@@ -202,7 +202,7 @@ Active limitations that still shape the design.
 
 `askme.py` supports two backends, selected by `LLM_BACKEND`:
 - **Local** (default): llama-server on `localhost:8080`, model configured at server launch.
-- **OpenRouter**: any OpenAI-compatible model via OpenRouter API. Requests pin `"provider": {"order": ["Parasail"]}` for reliable bf16 throughput.
+- **OpenRouter**: any OpenAI-compatible model via OpenRouter API. `OPENROUTER_PROVIDER` sets the provider preference (Parasail by default); `OPENROUTER_ALLOW_FALLBACKS=0` makes that selection strict, and `OPENROUTER_REQUIRE_PARAMETERS=1` rejects endpoints that do not advertise every requested parameter.
 
 Thinking mechanisms differ:
 - **OpenRouter**: `reasoning.enabled=true` with `reasoning.effort` ("medium"/"high"). Reasoning tokens share the outer `max_tokens` on Parasail; `content` can be `null` if reasoning exhausts the budget.

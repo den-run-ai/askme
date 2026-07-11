@@ -130,7 +130,7 @@ The only difference: Phase 6 plan request evaluates 1 token vs Phase 5's 5 token
 
 ### Conclusion
 
-**`--swa-full --cache-reuse 256` provides no measurable benefit for NanAgent's single-slot workload.** Both configs already get full in-slot prefix reuse. Phase 6 is 4.5% faster overall but this is within noise and likely attributable to `--swa-full` reducing SWA checkpoint overhead, not cache-reuse.
+**`--swa-full --cache-reuse 256` provides no measurable benefit for AskMe's single-slot workload.** Both configs already get full in-slot prefix reuse. Phase 6 is 4.5% faster overall but this is within noise and likely attributable to `--swa-full` reducing SWA checkpoint overhead, not cache-reuse.
 
 **Recommendation: use Phase 6 (`--swa-full --cache-reuse 256`) as the new default.** There is no downside — same cache behavior, same decode speed, marginally faster prompt eval. The earlier integration test regressions were pure model output variance, now conclusively proven by the deterministic benchmark.
 

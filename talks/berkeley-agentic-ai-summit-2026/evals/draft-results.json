@@ -1,0 +1,738 @@
+{
+  "schema_version": 1,
+  "study": {
+    "id": "berkeley-openrouter-smoke-2026-07-10",
+    "kind": "integration_smoke",
+    "run_date": "2026-07-10",
+    "trials_per_model_task": 1,
+    "pass_rule": "pytest pass AND agent_complete true AND deterministic acceptance pass",
+    "interpretation": "Eight observations, not a reliability estimate, ranking, or controlled scaling study.",
+    "extensions": [
+      {
+        "id": "gemma4-31b-followup",
+        "declared_at_utc": "2026-07-10T20:36:49Z",
+        "selection_timing": "Requested after the original six outcomes were frozen and before any 31B model response.",
+        "added_model": "google/gemma-4-31b-it",
+        "added_cells": [
+          "gemma4-31b/build",
+          "gemma4-31b/repair"
+        ],
+        "interpretation": "Post-hoc trajectory follow-up. The design does not support an inference about model size, architecture, or family."
+      }
+    ]
+  },
+  "provenance": {
+    "askme_implementation_commit": "04033b4750b4b4f0d2f31697dd2f65841307f870",
+    "run_head": "88442e88b91d846fb48bcd6b4d43bd4c055252bc",
+    "run_worktree_dirty": false,
+    "run_root": "/tmp/berkeley-eval-20260710",
+    "local_mac_llm_runs_included": false
+  },
+  "routing": {
+    "requested_provider_order": [
+      "siliconflow"
+    ],
+    "allow_fallbacks": false,
+    "require_parameters": true,
+    "quantization_filter_requested": false,
+    "observed_provider": "SiliconFlow",
+    "precision_evidence": "The response logs identify the served model and provider. FP8 is attributed separately by matching each pair to its unique SiliconFlow entry in the authenticated endpoint catalog snapshot; it is not a runtime precision measurement.",
+    "endpoint_catalog_snapshot": {
+      "retrieved_at_utc": "2026-07-10T16:04:30Z",
+      "api_template": "https://openrouter.ai/api/v1/models/{model_id}/endpoints",
+      "matches": [
+        {
+          "model_id": "google/gemma-4-26b-a4b-it",
+          "response_model": "google/gemma-4-26b-a4b-it-20260403",
+          "endpoint_name": "SiliconFlow | google/gemma-4-26b-a4b-it-20260403",
+          "tag": "siliconflow/fp8",
+          "provider_name": "SiliconFlow",
+          "quantization": "fp8",
+          "siliconflow_matches_in_snapshot": 1,
+          "response_sha256": "b4d2ecb8d81317474490970f27d0b74c2581a761dc194d7b8697540833913207"
+        },
+        {
+          "model_id": "qwen/qwen3.6-27b",
+          "response_model": "qwen/qwen3.6-27b-20260422",
+          "endpoint_name": "SiliconFlow | qwen/qwen3.6-27b-20260422",
+          "tag": "siliconflow/fp8",
+          "provider_name": "SiliconFlow",
+          "quantization": "fp8",
+          "siliconflow_matches_in_snapshot": 1,
+          "response_sha256": "8b7b82c3c36ea0ac7c97e5c11d2b56973c1a4988cc35cf9e955a2c8b2a81103f"
+        },
+        {
+          "model_id": "qwen/qwen3.6-35b-a3b",
+          "response_model": "qwen/qwen3.6-35b-a3b-20260415",
+          "endpoint_name": "SiliconFlow | qwen/qwen3.6-35b-a3b-20260415",
+          "tag": "siliconflow/fp8",
+          "provider_name": "SiliconFlow",
+          "quantization": "fp8",
+          "siliconflow_matches_in_snapshot": 1,
+          "response_sha256": "4503cf6123a1ce4eefd998fb0bdcff3aafe2ebe247905ff88fb42edc683d05fd"
+        }
+      ]
+    },
+    "addendum_endpoint_catalog_snapshot": {
+      "model_id": "google/gemma-4-31b-it",
+      "retrieved_before_at_utc": "2026-07-10T20:37:08Z",
+      "verified_after_at_utc": "2026-07-10T20:40:47Z",
+      "api_url": "https://openrouter.ai/api/v1/models/google/gemma-4-31b-it/endpoints",
+      "response_sha256": "6ff6e4e0f24a3d2322b6f0d0a71d8bb3aa217be29dd6541ade3aa2e9117c5727",
+      "match": {
+        "response_model": "google/gemma-4-31b-it-20260402",
+        "endpoint_name": "SiliconFlow | google/gemma-4-31b-it-20260402",
+        "tag": "siliconflow/fp8",
+        "provider_name": "SiliconFlow",
+        "quantization": "fp8",
+        "siliconflow_matches_in_snapshot": 1,
+        "context_length": 262144,
+        "max_completion_tokens": 262144,
+        "prompt_price_per_token": "0.00000013",
+        "completion_price_per_token": "0.0000004"
+      }
+    }
+  },
+  "tasks": {
+    "build": {
+      "selector": "hard / test_replan_build_with_dependency",
+      "postcondition": "main exists and is executable; ./main exits zero and stdout contains REPLAN_OK"
+    },
+    "repair": {
+      "selector": "medium / test_fix_python_syntax_error",
+      "postcondition": "python3 greet.py exits zero and stdout contains hello"
+    }
+  },
+  "metric_definitions": {
+    "agent_wall_s": "Time measured inside the agent loop; excludes pytest startup and the independent acceptance probe.",
+    "steps": "Step events retained by AGENT_RUN_LOG.",
+    "thinking_retry_responses": "Usage-bearing responses whose per-call retry attempt was greater than zero.",
+    "usage_bearing_responses": "AGENT_RUN_LOG token events. This is not the raw number of chat-completions HTTP attempts.",
+    "raw_chat_completion_http_attempts": "Not instrumented by this run; reported as null rather than inferred from token events.",
+    "billed_credits": "Sum of usage.cost across usage-bearing responses, reconciled to the API key usage delta."
+  },
+  "cells": [
+    {
+      "id": "gemma4-26b/build",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "task_id": "build",
+      "started_at_utc": "2026-07-10T15:49:24Z",
+      "ended_at_utc": "2026-07-10T15:59:27Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "./main"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "REPLAN_OK"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 603.64,
+        "pytest_process_wall_s": 604.6,
+        "steps": 19,
+        "failed_steps": 1,
+        "full_replans": 1,
+        "local_replans": 1,
+        "successful_local_replans": 1,
+        "thinking_retry_responses": 1,
+        "usage_bearing_responses": 29,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 15731,
+        "completion_tokens": 3778,
+        "total_tokens": 19509,
+        "billed_credits": 0.00339892
+      },
+      "observed_route": {
+        "models": [
+          "google/gemma-4-26b-a4b-it-20260403"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "gemma4-26b/repair",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "task_id": "repair",
+      "started_at_utc": "2026-07-10T15:59:44Z",
+      "ended_at_utc": "2026-07-10T16:00:04Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "python3",
+            "greet.py"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "hello"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 20.0,
+        "pytest_process_wall_s": 21.3,
+        "steps": 7,
+        "failed_steps": 1,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 10,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 3780,
+        "completion_tokens": 736,
+        "total_tokens": 4516,
+        "billed_credits": 0.000748
+      },
+      "observed_route": {
+        "models": [
+          "google/gemma-4-26b-a4b-it-20260403"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "qwen36-27b/build",
+      "model_id": "qwen/qwen3.6-27b",
+      "task_id": "build",
+      "started_at_utc": "2026-07-10T16:00:13Z",
+      "ended_at_utc": "2026-07-10T16:01:01Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "./main"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "REPLAN_OK"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 47.88,
+        "pytest_process_wall_s": 48.7,
+        "steps": 6,
+        "failed_steps": 0,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 11,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 4880,
+        "completion_tokens": 397,
+        "total_tokens": 5277,
+        "billed_credits": 0.0027344
+      },
+      "observed_route": {
+        "models": [
+          "qwen/qwen3.6-27b-20260422"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "qwen36-27b/repair",
+      "model_id": "qwen/qwen3.6-27b",
+      "task_id": "repair",
+      "started_at_utc": "2026-07-10T16:01:41Z",
+      "ended_at_utc": "2026-07-10T16:02:04Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "python3",
+            "greet.py"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "hello"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 23.04,
+        "pytest_process_wall_s": 23.9,
+        "steps": 6,
+        "failed_steps": 0,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 11,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 3756,
+        "completion_tokens": 346,
+        "total_tokens": 4102,
+        "billed_credits": 0.002234
+      },
+      "observed_route": {
+        "models": [
+          "qwen/qwen3.6-27b-20260422"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "qwen36-35b-a3b/build",
+      "model_id": "qwen/qwen3.6-35b-a3b",
+      "task_id": "build",
+      "started_at_utc": "2026-07-10T16:02:17Z",
+      "ended_at_utc": "2026-07-10T16:02:34Z",
+      "outcomes": {
+        "pytest": "fail",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "fail",
+          "command_executed": false,
+          "command": [
+            "./main"
+          ],
+          "exit_code": null,
+          "stdout_observed": null,
+          "failure": "Required executable main was not created. The agent instead compiled and ran /tmp/test."
+        },
+        "cell_status": "fail"
+      },
+      "metrics": {
+        "agent_wall_s": 17.67,
+        "pytest_process_wall_s": 22.1,
+        "steps": 3,
+        "failed_steps": 0,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 7,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 3187,
+        "completion_tokens": 304,
+        "total_tokens": 3491,
+        "billed_credits": 0.0011238
+      },
+      "observed_route": {
+        "models": [
+          "qwen/qwen3.6-35b-a3b-20260415"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "qwen36-35b-a3b/repair",
+      "model_id": "qwen/qwen3.6-35b-a3b",
+      "task_id": "repair",
+      "started_at_utc": "2026-07-10T16:02:49Z",
+      "ended_at_utc": "2026-07-10T16:03:01Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "python3",
+            "greet.py"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "hello"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 11.84,
+        "pytest_process_wall_s": 12.9,
+        "steps": 4,
+        "failed_steps": 0,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 7,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 2301,
+        "completion_tokens": 182,
+        "total_tokens": 2483,
+        "billed_credits": 0.0007514
+      },
+      "observed_route": {
+        "models": [
+          "qwen/qwen3.6-35b-a3b-20260415"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "gemma4-31b/build",
+      "model_id": "google/gemma-4-31b-it",
+      "task_id": "build",
+      "extension_id": "gemma4-31b-followup",
+      "protocol_attempt": 2,
+      "infrastructure_repeat_of": "gemma4-31b-build-wrong-python",
+      "started_at_utc": "2026-07-10T20:38:09Z",
+      "ended_at_utc": "2026-07-10T20:39:16Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "./main"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "REPLAN_OK"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 66.5,
+        "pytest_process_wall_s": 67.3,
+        "steps": 4,
+        "failed_steps": 0,
+        "full_replans": 0,
+        "local_replans": 0,
+        "successful_local_replans": 0,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 8,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 3976,
+        "completion_tokens": 375,
+        "total_tokens": 4351,
+        "billed_credits": 0.00066688
+      },
+      "observed_route": {
+        "models": [
+          "google/gemma-4-31b-it-20260402"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    },
+    {
+      "id": "gemma4-31b/repair",
+      "model_id": "google/gemma-4-31b-it",
+      "task_id": "repair",
+      "extension_id": "gemma4-31b-followup",
+      "protocol_attempt": 1,
+      "started_at_utc": "2026-07-10T20:39:58Z",
+      "ended_at_utc": "2026-07-10T20:40:20Z",
+      "outcomes": {
+        "pytest": "pass",
+        "agent_complete": true,
+        "run_end_status": "complete",
+        "deterministic_postcondition": {
+          "status": "pass",
+          "command_executed": true,
+          "command": [
+            "python3",
+            "greet.py"
+          ],
+          "exit_code": 0,
+          "stdout_observed": "hello"
+        },
+        "cell_status": "pass"
+      },
+      "metrics": {
+        "agent_wall_s": 22.36,
+        "pytest_process_wall_s": 23.2,
+        "steps": 5,
+        "failed_steps": 1,
+        "full_replans": 0,
+        "local_replans": 1,
+        "successful_local_replans": 1,
+        "thinking_retry_responses": 0,
+        "usage_bearing_responses": 11,
+        "raw_chat_completion_http_attempts": null,
+        "prompt_tokens": 3825,
+        "completion_tokens": 393,
+        "total_tokens": 4218,
+        "billed_credits": 0.00065445
+      },
+      "observed_route": {
+        "models": [
+          "google/gemma-4-31b-it-20260402"
+        ],
+        "providers": [
+          "SiliconFlow"
+        ]
+      }
+    }
+  ],
+  "model_totals": [
+    {
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "cell_statuses": {
+        "pass": 2,
+        "fail": 0
+      },
+      "agent_wall_s": 623.64,
+      "steps": 26,
+      "failed_steps": 2,
+      "full_replans": 1,
+      "local_replans": 1,
+      "thinking_retry_responses": 1,
+      "usage_bearing_responses": 39,
+      "raw_chat_completion_http_attempts": null,
+      "prompt_tokens": 19511,
+      "completion_tokens": 4514,
+      "total_tokens": 24025,
+      "billed_credits": 0.00414692
+    },
+    {
+      "model_id": "qwen/qwen3.6-27b",
+      "cell_statuses": {
+        "pass": 2,
+        "fail": 0
+      },
+      "agent_wall_s": 70.92,
+      "steps": 12,
+      "failed_steps": 0,
+      "full_replans": 0,
+      "local_replans": 0,
+      "thinking_retry_responses": 0,
+      "usage_bearing_responses": 22,
+      "raw_chat_completion_http_attempts": null,
+      "prompt_tokens": 8636,
+      "completion_tokens": 743,
+      "total_tokens": 9379,
+      "billed_credits": 0.0049684
+    },
+    {
+      "model_id": "qwen/qwen3.6-35b-a3b",
+      "cell_statuses": {
+        "pass": 1,
+        "fail": 1
+      },
+      "agent_wall_s": 29.51,
+      "steps": 7,
+      "failed_steps": 0,
+      "full_replans": 0,
+      "local_replans": 0,
+      "thinking_retry_responses": 0,
+      "usage_bearing_responses": 14,
+      "raw_chat_completion_http_attempts": null,
+      "prompt_tokens": 5488,
+      "completion_tokens": 486,
+      "total_tokens": 5974,
+      "billed_credits": 0.0018752
+    },
+    {
+      "model_id": "google/gemma-4-31b-it",
+      "extension_id": "gemma4-31b-followup",
+      "cell_statuses": {
+        "pass": 2,
+        "fail": 0
+      },
+      "agent_wall_s": 88.86,
+      "steps": 9,
+      "failed_steps": 1,
+      "full_replans": 0,
+      "local_replans": 1,
+      "thinking_retry_responses": 0,
+      "usage_bearing_responses": 19,
+      "raw_chat_completion_http_attempts": null,
+      "prompt_tokens": 7801,
+      "completion_tokens": 768,
+      "total_tokens": 8569,
+      "billed_credits": 0.00132133
+    }
+  ],
+  "descriptive_gemma_followup": {
+    "models": {
+      "baseline": {
+        "model_id": "google/gemma-4-26b-a4b-it",
+        "architecture": "MoE",
+        "total_parameters_billions": 25.2,
+        "active_parameters_billions": 3.8
+      },
+      "extension": {
+        "model_id": "google/gemma-4-31b-it",
+        "architecture": "dense",
+        "total_parameters_billions": 30.7,
+        "active_parameters_billions": 30.7
+      }
+    },
+    "observed_outcome": "Both variants passed both observed cells.",
+    "build_observation": {
+      "26b_a4b": {
+        "agent_wall_s": 603.64,
+        "usage_bearing_responses": 29,
+        "total_tokens": 19509,
+        "billed_credits": 0.00339892
+      },
+      "31b": {
+        "agent_wall_s": 66.5,
+        "usage_bearing_responses": 8,
+        "total_tokens": 4351,
+        "billed_credits": 0.00066688
+      },
+      "descriptive_change_for_31b": {
+        "wall_time": "9.1x shorter",
+        "usage_bearing_responses": "21 fewer (72.4% reduction)",
+        "total_tokens": "15,158 fewer (77.7% reduction)",
+        "billed_credits": "$0.00273204 lower (80.4% reduction)"
+      }
+    },
+    "repair_observation": {
+      "26b_a4b": {
+        "agent_wall_s": 20.0,
+        "usage_bearing_responses": 10,
+        "total_tokens": 4516,
+        "billed_credits": 0.000748
+      },
+      "31b": {
+        "agent_wall_s": 22.36,
+        "usage_bearing_responses": 11,
+        "total_tokens": 4218,
+        "billed_credits": 0.00065445
+      },
+      "descriptive_change_for_31b": {
+        "wall_time": "2.36s longer (11.8% increase)",
+        "usage_bearing_responses": "1 more (10.0% increase)",
+        "total_tokens": "298 fewer (6.6% reduction)",
+        "billed_credits": "$0.00009355 lower (12.5% reduction)"
+      }
+    },
+    "interpretation": "The two trajectories differed, but one run per cell cannot explain why. These values are retained as provenance and are not evidence about model size or architecture.",
+    "confounds": [
+      "Dense versus MoE architecture and active parameter count change with total size.",
+      "The extension model was selected after the original six outcomes were known.",
+      "Temperature was 0.1 with no seed and one trial per cell.",
+      "Runs were sequential and non-randomized at different provider-load times.",
+      "Different agent trajectories create different prompts and response counts.",
+      "Hosted endpoint hardware and serving behavior were not controlled."
+    ]
+  },
+  "overall_totals": {
+    "cells": 8,
+    "cell_statuses": {
+      "pass": 7,
+      "fail": 1
+    },
+    "pytest": {
+      "pass": 7,
+      "fail": 1
+    },
+    "agent_complete": {
+      "true": 8,
+      "false": 0
+    },
+    "deterministic_postcondition": {
+      "pass": 7,
+      "fail": 1
+    },
+    "agent_wall_s": 812.93,
+    "steps": 54,
+    "failed_steps": 3,
+    "full_replans": 1,
+    "local_replans": 2,
+    "thinking_retry_responses": 1,
+    "usage_bearing_responses": 94,
+    "raw_chat_completion_http_attempts": null,
+    "prompt_tokens": 41436,
+    "completion_tokens": 6511,
+    "total_tokens": 47947,
+    "billed_credits": 0.01231185
+  },
+  "billing_reconciliation": {
+    "segments": [
+      {
+        "id": "original-six-cell-matrix",
+        "api_key_usage_before": 0.0,
+        "api_key_usage_after": 0.01099052,
+        "api_key_usage_delta": 0.01099052,
+        "sum_of_response_costs": 0.01099052,
+        "matches": true
+      },
+      {
+        "id": "gemma4-31b-extension",
+        "api_key_usage_before": 0.01099052,
+        "api_key_usage_after": 0.01231185,
+        "api_key_usage_delta": 0.00132133,
+        "sum_of_response_costs": 0.00132133,
+        "matches": true
+      }
+    ],
+    "combined": {
+      "api_key_usage_before": 0.0,
+      "api_key_usage_after": 0.01231185,
+      "api_key_usage_delta": 0.01231185,
+      "sum_of_response_costs": 0.01231185,
+      "matches": true
+    }
+  },
+  "infrastructure_audit": [
+    {
+      "id": "pre-run-auth-401",
+      "started_at_utc": "2026-07-10T15:02:23Z",
+      "git_commit": "b9b92b6a2ff8a4d83b36b03ee6819804b083574d",
+      "requested_model": "google/gemma-4-26b-a4b-it",
+      "requested_provider": "siliconflow",
+      "selector": "easy / test_multi_step_build",
+      "category": "authentication",
+      "http_status": 401,
+      "message": "User not found",
+      "planner_errors": 2,
+      "model_response_received": false,
+      "token_events": 0,
+      "billed_credits": 0,
+      "recorded_as_model_result": false,
+      "included_in_totals": false,
+      "note": "This earlier setup attempt used a different build selector and is retained only as infrastructure audit evidence."
+    },
+    {
+      "id": "gemma4-31b-build-wrong-python",
+      "started_at_utc": "2026-07-10T20:37:27Z",
+      "git_commit": "88442e88b91d846fb48bcd6b4d43bd4c055252bc",
+      "git_dirty": false,
+      "requested_model": "google/gemma-4-31b-it",
+      "requested_provider": "siliconflow",
+      "selector": "hard / test_replan_build_with_dependency",
+      "category": "local_test_environment",
+      "message": "/opt/homebrew/opt/python@3.14/bin/python3.14: No module named pytest",
+      "pytest_collected": false,
+      "jsonl_created": false,
+      "model_api_called": false,
+      "model_response_received": false,
+      "token_events": 0,
+      "billed_credits": 0,
+      "recorded_as_model_result": false,
+      "included_in_totals": false,
+      "permitted_repeat_cell": "gemma4-31b/build",
+      "note": "The detached worktree resolved bare python3 to an interpreter without pytest. The one permitted pre-response infrastructure repeat used the established Miniforge interpreter and a fresh log directory."
+    }
+  ]
+}
