@@ -18,13 +18,13 @@ A harness is not one fixed architecture. Current projects choose different syste
 
 | Approach | Boundary it emphasizes |
 |---|---|
-| [Pi](https://pi.dev/docs/latest) | A minimal terminal core extended through skills, prompts, extensions, and packages; stronger isolation is supplied separately. |
-| [Oh My Pi](https://github.com/can1357/oh-my-pi) | A batteries-included Pi fork with hash-anchored edits, IDE tooling, persistent execution workers, memory, and subagents. |
+| [Pi](https://github.com/earendil-works/pi) | A minimal terminal core extended through skills, prompts, extensions, and packages; stronger isolation is supplied separately. |
+| [Oh My Pi](https://github.com/can1357/oh-my-pi) | A batteries-included fork of Pi with hash-anchored edits, IDE tooling, persistent execution workers, memory, and subagents. |
 | [OpenHands](https://github.com/OpenHands/OpenHands) | A composable agent SDK and managed local, cloud, or enterprise runtime. |
-| [Omnigent](https://github.com/omnigent-ai/omnigent) | An open-source alpha meta-harness for swapping or composing agents under shared policies, sandboxes, and sessions. |
+| [Omnigent (Databricks, OSS alpha)](https://github.com/omnigent-ai/omnigent) | Databricks' open-source alpha meta-harness for swapping or composing agents under shared policies, sandboxes, and sessions; distinct from its [managed beta](https://docs.databricks.com/aws/en/omnigent/). |
 | [Databricks' internal benchmark](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase) | An organizational evaluation and selection layer built from recent human pull requests, isolated runs, sealed Git history, and held-out tests. |
 
-These are overlapping layers, not a maturity ladder or a leaderboard. Databricks did not compare every project in this table: its workload-specific study compared Pi with the native Claude Code or Codex harness for the same model and thinking effort. It reported more than a 2× task-cost difference in some cases at similar quality, with Pi sending about 3× less context per turn. That is a private-codebase case study, not a universal ranking.
+These are overlapping layers, not a maturity ladder or a leaderboard. Omnigent and the internal benchmark share Databricks provenance but occupy separate layers: the former composes agent harnesses, while the latter evaluates and selects them. Databricks did not compare every project in this table: its workload-specific study compared Pi with the native Claude Code or Codex harness for the same model and thinking effort. It reported more than a 2× task-cost difference in some cases at similar quality, with Pi sending about 3× less context per turn. That is a private-codebase case study, not a universal ranking.
 
 A second, benchmark-specific signal comes from [Claw-SWE-Bench](https://arxiv.org/abs/2606.12344). Across five harnesses with Qwen 3.6-flash fixed, its reported Pass@1 spread was 27.4 percentage points, from 38.6% to 66.0%; the fixed-GLM 5.1 spread was 12.5 points. Those numbers support treating the harness as an experimental variable, not treating either spread as a general causal effect.
 

@@ -186,6 +186,13 @@ style: |
     text-transform: uppercase;
   }
   .harness-card strong { display: block; font-size: 19px; margin: 8px 0 10px; }
+  .harness-card .qualifier {
+    color: var(--muted);
+    display: block;
+    font-size: 12px;
+    line-height: 1.2;
+    margin-top: 2px;
+  }
   .harness-card p { color: var(--muted); font-size: 15px; line-height: 1.3; margin: 0; }
   .harness-seam {
     background: #e9f7f3;
@@ -352,23 +359,23 @@ move.
 
 <div class="harness-grid">
   <div class="harness-card"><div class="kind">Minimal · extensible</div><strong>Pi</strong><p>Small terminal core. Add skills, prompts, extensions, and packages.</p></div>
-  <div class="harness-card"><div class="kind">Tool-rich terminal</div><strong>Oh My Pi</strong><p>Hash-anchored edits, IDE tools, workers, memory, and subagents.</p></div>
+  <div class="harness-card"><div class="kind">Tool-rich terminal</div><strong>Oh My Pi</strong><p>Batteries-included Pi fork: IDE tools, workers, memory, and subagents.</p></div>
   <div class="harness-card"><div class="kind">Agent platform</div><strong>OpenHands</strong><p>Composable SDK plus local, cloud, and enterprise runtimes.</p></div>
-  <div class="harness-card"><div class="kind">Meta-harness · alpha</div><strong>Omnigent</strong><p>Swap or compose agents under policies, sandboxes, and shared sessions.</p></div>
+  <div class="harness-card"><div class="kind">Meta-harness</div><strong>Omnigent <span class="qualifier">(Databricks, OSS alpha)</span></strong><p>Swap or compose agents under policies, sandboxes, and shared sessions.</p></div>
   <div class="harness-card"><div class="kind">Evaluation · selection</div><strong>Databricks</strong><p>Real PR tasks, isolated runs, sealed history, and held-out tests.</p></div>
 </div>
 
 <div class="harness-seam"><strong>AskMe isolates one seam:</strong> execution evidence → bounded plan update → independent acceptance.</div>
 
-<div class="source">Sources: Pi · Oh My Pi · OpenHands · Omnigent (open-source alpha) · Databricks internal coding benchmark, July 8, 2026</div>
+<div class="source">Sources: Pi → Oh My Pi · OpenHands · Omnigent (Databricks, OSS alpha) · Databricks internal coding benchmark, July 8, 2026</div>
 
 <!--
 Speaker notes (~45s):
 These are not interchangeable competitors; they choose harness boundaries. Pi keeps a
-minimal loop and invites extensions. Oh My Pi ships a richer terminal and IDE tool
-surface. OpenHands provides an agent SDK and managed runtime. Omnigent, alpha,
-coordinates harnesses under shared policies and sessions. Databricks adds the
-organizational evaluation layer: real pull requests, isolated runs, and held-out tests.
+minimal loop and invites extensions. Oh My Pi is its batteries-included, tool-rich
+fork. OpenHands provides an agent SDK and managed runtime. Omnigent is Databricks'
+open-source alpha meta-harness; its separate managed counterpart is beta. Databricks'
+benchmark adds an evaluation layer: real pull requests, isolated runs, and held-out tests.
 AskMe is narrower; it studies how execution evidence becomes a bounded plan update and
 an accepted result.
 -->
