@@ -133,7 +133,7 @@ class TestRunLoop:
         ]
         result = run("check")
         out = capsys.readouterr().out
-        assert "nanagent_" in out
+        assert "askme_" in out
         assert result is True
 
 

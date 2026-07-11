@@ -5,7 +5,7 @@ This is a limited integration smoke for the Berkeley talk, not a leaderboard or 
 ## Protocol
 
 **Date:** 2026-07-10
-**NanAgent implementation commit:** `04033b4750b4b4f0d2f31697dd2f65841307f870`
+**AskMe implementation commit:** `04033b4750b4b4f0d2f31697dd2f65841307f870`
 **Run HEAD:** `88442e88b91d846fb48bcd6b4d43bd4c055252bc`, clean before every cell
 **Provider:** `siliconflow`, strict routing (`allow_fallbacks=false`, `require_parameters=true`)
 **Endpoint precision evidence:** authenticated catalog match; details below
@@ -17,20 +17,20 @@ Original matrix models:
 - `qwen/qwen3.6-27b`
 - `qwen/qwen3.6-35b-a3b`
 
-### Predeclared Gemma 4 31B Addendum
+### Predeclared Gemma 4 31B Follow-up
 
-Declared at `2026-07-10T20:36:49Z`, after the original six outcomes were frozen and before any 31B model response. The follow-up adds `google/gemma-4-31b-it` to the same build and repair tasks with one trial per cell, the same NanAgent implementation, and the same strict SiliconFlow routing policy. The original six cells will not be rerun or replaced.
+Declared at `2026-07-10T20:36:49Z`, after the original six outcomes were frozen and before any 31B model response. The follow-up adds `google/gemma-4-31b-it` to the same build and repair tasks with one trial per cell, the same AskMe implementation, and the same strict SiliconFlow routing policy. The original six cells will not be rerun or replaced.
 
-This is a descriptive model-size and architecture contrast within Gemma 4, not a causal size-only estimate: 31B is a dense 30.7B model, while 26B A4B is a 25.2B-total MoE with 3.8B active parameters per token.
+The follow-up was originally motivated as a descriptive size-and-architecture contrast. The design cannot support that inference: model selection was post-hoc, architecture and active compute also changed, and every cell has one unseeded run. The current talk treats these cells only as additional trajectory receipts.
 
 Tasks:
 
-| Task | Harness selector | Independent postcondition |
+| Task | Harness selector | Independent acceptance check |
 |---|---|---|
 | Multi-file C build | `hard / test_replan_build_with_dependency` | Generated `main` exists, exits zero, and prints `REPLAN_OK` |
 | Repair Python syntax | `medium / test_fix_python_syntax_error` | `python3 greet.py` exits zero and prints `hello` |
 
-Pytest disables NanAgent's LLM final-validator fixture during these integration tests. A reported pass requires pytest success, `agent_complete`, and a separately repeated deterministic postcondition.
+Pytest disables AskMe's LLM final-validator fixture during these integration tests. A reported pass requires pytest success, `agent_complete`, and a separately repeated deterministic acceptance check.
 
 The no-think path explicitly sends `reasoning.enabled=false`, which prevents Qwen's default reasoning mode from changing the policy. The existing retry ladder may enable medium/high reasoning after malformed JSON or semantic failure.
 
@@ -72,7 +72,7 @@ Then repeat with:
 For every cell, publish:
 
 - pytest pass and `agent_complete` separately
-- deterministic postcondition result
+- independent acceptance result
 - wall time, steps, replans, thinking retry responses, and usage-bearing responses
 - prompt/completion tokens and OpenRouter billed credits
 - requested model/provider plus observed served model/provider and catalog endpoint metadata
@@ -82,7 +82,7 @@ For every cell, publish:
 
 ## Measured Outcomes
 
-`P/A/X` means pytest, agent completion, and the independently repeated external check.
+`P/A/X` means pytest, agent completion, and the independently repeated acceptance check.
 
 | Model | Build (P/A/X) | Repair (P/A/X) | Usage responses | Billed credits |
 |---|---:|---:|---:|---:|
@@ -109,7 +109,7 @@ Seven of eight cells passed all three criteria. All eight agent runs reported `c
 
 The original six-cell response cost exactly matched its API key usage delta: $0.01099052. The 31B extension added $0.00132133 across 19 usage-bearing responses and also reconciled exactly; the combined key-usage delta was $0.01231185. Raw chat-completions HTTP attempts remain `null`; they are not inferred from the 94 token events.
 
-## Gemma Size and Architecture Contrast
+## Descriptive Gemma Follow-up — No Size Inference
 
 Both Gemma variants passed both observed tasks. Their trajectories differed:
 
@@ -118,7 +118,7 @@ Both Gemma variants passed both observed tasks. Their trajectories differed:
 | Build | 603.64s · 29 responses · 19,509 tokens · $0.00339892 | 66.50s · 8 responses · 4,351 tokens · $0.00066688 | 31B was 9.1x shorter, with 21 fewer responses and 77.7% fewer tokens. |
 | Repair | 20.00s · 10 responses · 4,516 tokens · $0.00074800 | 22.36s · 11 responses · 4,218 tokens · $0.00065445 | 31B was 2.36s slower and used one more response, but 298 fewer tokens. |
 
-This is an exploratory size-and-architecture contrast, not an estimate of the causal impact of model size. Gemma 4 31B is dense with 30.7B parameters; 26B A4B is MoE with 25.2B total and 3.8B active per token. The added model was chosen after the first six outcomes, each cell has one unseeded trial, the runs occurred at different provider-load times, and the models took different trajectories. The build observation is large, but the repair direction is not consistent with a universal “larger is faster” claim.
+These numbers are retained as descriptive provenance, not as a talk result or an estimate of model-size impact. Gemma 4 31B is dense with 30.7B parameters; 26B A4B is MoE with 25.2B total and 3.8B active per token. The added model was chosen after the first six outcomes, each cell has one unseeded trial, the runs occurred at different provider-load times, and the models took different trajectories. The build difference and the slightly reversed repair timing demonstrate why this design cannot support a size or architecture conclusion.
 
 ## Endpoint and Git Provenance
 
@@ -134,9 +134,9 @@ The request did not include a quantization filter. At `2026-07-10T16:04:30Z`, an
 
 A separate snapshot at `2026-07-10T20:37:08Z`, verified unchanged after the extension, contained one SiliconFlow match for `google/gemma-4-31b-it`: `google/gemma-4-31b-it-20260402`, also tagged `siliconflow/fp8` with `quantization=fp8`.
 
-FP8 is therefore a time-stamped catalog attribution matched by model and provider, not a direct runtime precision measurement. Full endpoint names, response hashes, per-cell routes, metrics, and postcondition observations are in [`draft-results.json`](draft-results.json).
+FP8 is therefore a time-stamped catalog attribution matched by model and provider, not a direct runtime precision measurement. Full endpoint names, response hashes, per-cell routes, metrics, and acceptance observations are in [`draft-results.json`](draft-results.json).
 
-The harness recorded HEAD `88442e88b91d846fb48bcd6b4d43bd4c055252bc` and `git_dirty=false` before every cell. The NanAgent implementation at that HEAD is commit `04033b4750b4b4f0d2f31697dd2f65841307f870`; the later commit only pinned this protocol.
+The harness recorded HEAD `88442e88b91d846fb48bcd6b4d43bd4c055252bc` and `git_dirty=false` before every cell. The AskMe implementation at that HEAD is commit `04033b4750b4b4f0d2f31697dd2f65841307f870`; the later commit only pinned this protocol.
 
 ## Infrastructure Audit
 

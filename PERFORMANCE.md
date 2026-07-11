@@ -1,6 +1,6 @@
 # Performance
 
-Benchmark history and test-run matrices for NanAgent. Each entry is a point-in-time measurement against a specific build + model + config. Kept for comparison across changes, not as a current-truth reference.
+Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time measurement against a specific build + model + config. Kept for comparison across changes, not as a current-truth reference.
 
 **Staleness policy.** Each section is dated. If an entry is more than ~6 months old and the code that produced it has changed materially, treat it as historical only — re-run before citing numbers. Sections marked `[stale]` have known divergence from current code.
 

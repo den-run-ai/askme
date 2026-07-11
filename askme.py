@@ -1538,7 +1538,7 @@ def run(user_prompt, working_dir=None):
     """Public API: run agent and return True (success) or False (failure)."""
     # Create isolated temp directory per run unless caller provides one
     if working_dir is None:
-        working_dir = tempfile.mkdtemp(prefix="nanagent_")
+        working_dir = tempfile.mkdtemp(prefix="askme_")
     result = _run_loop(user_prompt, working_dir)
     return result["status"] == "complete"
 

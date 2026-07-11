@@ -11,312 +11,39 @@ style: |
     --line: #d8dee8;
     --blue: #276ef1;
     --teal: #008f7a;
-    --amber: #e58a00;
-    --coral: #e45649;
+    --amber: #d97706;
+    --coral: #d94c42;
     --terminal: #171a21;
   }
   section {
     background: var(--paper);
     color: var(--ink);
     font-family: Inter, Aptos, "Helvetica Neue", Arial, sans-serif;
-    font-size: 25px;
+    font-size: 24px;
     letter-spacing: 0;
-    padding: 42px 54px 46px;
+    padding: 40px 54px 46px;
   }
-  section::after {
-    color: #8792a2;
-    font-size: 15px;
-  }
-  section.title {
-    background: #eef2f7;
-  }
+  section::after { color: #8792a2; font-size: 15px; }
+  section.title { background: #eef2f7; }
   h1, h2, h3, p { letter-spacing: 0; }
   h1 {
     color: var(--ink);
-    font-size: 48px;
-    line-height: 1.05;
-    margin: 0 0 20px;
+    font-size: 46px;
+    line-height: 1.06;
+    margin: 0 0 18px;
   }
-  h2 {
-    color: var(--ink);
-    font-size: 30px;
-    line-height: 1.15;
-    margin: 0 0 16px;
-  }
+  h2 { font-size: 25px; line-height: 1.15; margin: 0 0 12px; }
   p { line-height: 1.32; }
   code { font-family: "SFMono-Regular", Consolas, monospace; }
   .eyebrow {
     color: var(--blue);
-    font-size: 16px;
-    font-weight: 800;
-    margin-bottom: 14px;
+    font-size: 15px;
+    font-weight: 850;
+    margin-bottom: 12px;
     text-transform: uppercase;
   }
-  .hero {
-    display: grid;
-    grid-template-columns: 1.03fr 0.97fr;
-    gap: 34px;
-    align-items: center;
-    height: 88%;
-  }
-  .hero h1 { font-size: 66px; }
-  .subtitle {
-    color: var(--muted);
-    font-size: 25px;
-    margin: 0 0 22px;
-  }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 9px;
-  }
-  .chip {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    color: var(--ink);
-    font-size: 16px;
-    font-weight: 700;
-    padding: 7px 10px;
-  }
-  .terminal {
-    background: var(--terminal);
-    border-radius: 8px;
-    box-shadow: 0 18px 45px rgba(17, 24, 39, 0.16);
-    color: #f7f9fc;
-    font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 18px;
-    line-height: 1.55;
-    min-height: 315px;
-    padding: 22px 24px;
-  }
-  .terminal .bar { color: #8f9bad; margin-bottom: 18px; }
-  .terminal .prompt { color: #63d8c2; }
-  .terminal .ok { color: #ffd166; font-weight: 800; }
-  .terminal .dim { color: #aeb7c5; }
-  .two-col {
-    display: grid;
-    grid-template-columns: 0.94fr 1.06fr;
-    gap: 28px;
-    align-items: stretch;
-  }
-  .code-pane {
-    background: var(--terminal);
-    border-radius: 8px;
-    color: #f7f9fc;
-    font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 19px;
-    line-height: 1.45;
-    padding: 22px;
-  }
-  .code-pane .bad { color: #ff8a80; }
-  .code-pane .good { color: #63d8c2; }
-  .timeline { padding: 2px 0; }
-  .event {
-    display: grid;
-    grid-template-columns: 112px 1fr;
-    gap: 12px;
-    margin: 0 0 13px;
-  }
-  .event .time {
-    color: var(--muted);
-    font-size: 17px;
-    font-weight: 800;
-    padding-top: 7px;
-    text-align: right;
-  }
-  .event .bar {
-    border-left: 8px solid var(--blue);
-    border-radius: 4px;
-    background: #fff;
-    padding: 7px 12px;
-  }
-  .event.warn .bar { border-left-color: var(--coral); }
-  .event.slow .bar { border-left-color: var(--amber); }
-  .event strong { display: block; font-size: 19px; }
-  .event span { color: var(--muted); font-size: 16px; }
-  .callout {
-    background: #fff4dc;
-    border-left: 6px solid var(--amber);
-    border-radius: 4px;
-    font-size: 20px;
-    margin-top: 18px;
-    padding: 12px 15px;
-  }
-  .callout.compact {
-    font-size: 18px;
-    margin-top: 9px;
-    padding: 9px 13px;
-  }
-  .flow {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    margin-top: 24px;
-  }
-  .node {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    min-height: 145px;
-    padding: 15px;
-    position: relative;
-  }
-  .node:not(:last-child)::after {
-    color: var(--blue);
-    content: "→";
-    font-size: 30px;
-    font-weight: 800;
-    position: absolute;
-    right: -22px;
-    top: 50px;
-    z-index: 2;
-  }
-  .node .num {
-    color: var(--blue);
-    font-size: 15px;
-    font-weight: 900;
-  }
-  .node strong { display: block; font-size: 20px; margin: 6px 0; }
-  .node p { color: var(--muted); font-size: 16px; margin: 0; }
-  .example-strip {
-    background: var(--terminal);
-    border-radius: 8px;
-    color: #f7f9fc;
-    font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 18px;
-    margin-top: 24px;
-    padding: 16px 20px;
-  }
-  .example-strip .typed { color: #ffb74d; }
-  .example-strip .pass { color: #63d8c2; }
-  .task-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-    margin: 20px 0;
-  }
-  .task {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    min-height: 148px;
-    padding: 17px 19px;
-  }
-  .task .label { color: var(--teal); font-size: 16px; font-weight: 900; }
-  .task strong { display: block; font-size: 23px; margin: 6px 0 8px; }
-  .task code { color: var(--muted); font-size: 16px; }
-  .model-lane {
-    align-items: center;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-bottom: 14px;
-  }
-  .model {
-    background: #edf4ff;
-    border-bottom: 5px solid var(--blue);
-    border-radius: 6px;
-    font-size: 16px;
-    padding: 10px 8px;
-    text-align: center;
-  }
-  .model:nth-child(2) { background: #e9f7f3; border-color: var(--teal); }
-  .model:nth-child(3) { background: #fff3e5; border-color: var(--amber); }
-  .model:nth-child(4) { background: #fff0ed; border-color: var(--coral); }
-  .model strong { display: block; }
-  .model span { color: var(--muted); font-size: 14px; }
-  table.results {
-    border-collapse: separate;
-    border-spacing: 8px;
-    font-size: 18px;
-    margin-top: 15px;
-    table-layout: fixed;
-    width: calc(100% - 16px) !important;
-  }
-  table.results th {
-    color: var(--muted);
-    font-size: 15px;
-    padding: 8px;
-    text-align: left;
-  }
-  table.results td {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 13px 12px;
-  }
-  table.results td:first-child { font-weight: 800; }
-  .result-grid {
-    display: grid;
-    gap: 6px;
-    grid-template-columns: 1.55fr 1fr 1fr 0.78fr 0.9fr;
-    margin: 10px 8px 0;
-  }
-  .result-cell {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    font-size: 16px;
-    min-height: 30px;
-    padding: 8px 10px;
-  }
-  .result-cell.head {
-    background: transparent;
-    border-color: transparent;
-    color: var(--muted);
-    font-size: 14px;
-    font-weight: 800;
-    min-height: 21px;
-    padding-bottom: 3px;
-  }
-  .result-cell.model-name { font-weight: 800; }
-  .pending { color: var(--amber); font-weight: 900; }
-  .pass { color: var(--teal); font-weight: 900; }
-  .fail { color: var(--coral); font-weight: 900; }
+  .subtitle { color: var(--muted); font-size: 24px; margin: -8px 0 20px; }
   .tiny { color: var(--muted); font-size: 15px; }
-  .proof-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-top: 22px;
-  }
-  .proof {
-    border-radius: 7px;
-    min-height: 265px;
-    padding: 20px 22px;
-  }
-  .proof.yes { background: #e9f7f3; border-top: 7px solid var(--teal); }
-  .proof.no { background: #fff0ed; border-top: 7px solid var(--coral); }
-  .proof h2 { font-size: 25px; }
-  .proof ul { font-size: 19px; line-height: 1.45; margin: 12px 0 0; padding-left: 24px; }
-  .loop {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 10px;
-    margin: 34px 0 30px;
-  }
-  .loop .box {
-    border-radius: 7px;
-    color: #fff;
-    font-size: 20px;
-    font-weight: 800;
-    min-height: 86px;
-    padding: 19px 12px;
-    text-align: center;
-  }
-  .loop .box:nth-child(1) { background: var(--blue); }
-  .loop .box:nth-child(2) { background: #405670; }
-  .loop .box:nth-child(3) { background: var(--amber); }
-  .loop .box:nth-child(4) { background: var(--teal); }
-  .loop .box:nth-child(5) { background: var(--coral); }
-  .tagline {
-    font-size: 37px;
-    font-weight: 850;
-    line-height: 1.15;
-    margin: 0;
-    text-align: center;
-  }
   .source {
     bottom: 18px;
     color: #8792a2;
@@ -324,228 +51,451 @@ style: |
     left: 54px;
     position: absolute;
   }
+  .trace-table {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(17, 24, 39, 0.08);
+    overflow: hidden;
+  }
+  .trace-row {
+    align-items: center;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: 72px 1.15fr 1.35fr 1.15fr;
+    min-height: 61px;
+  }
+  .trace-row.head {
+    background: var(--terminal);
+    border-top: 0;
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 850;
+    min-height: 38px;
+    text-transform: uppercase;
+  }
+  .trace-cell { padding: 10px 14px; }
+  .trace-cell + .trace-cell { border-left: 1px solid var(--line); }
+  .trace-row.head .trace-cell + .trace-cell { border-left-color: #394150; }
+  .step { color: var(--blue); font-size: 17px; font-weight: 900; }
+  .action { font-family: "SFMono-Regular", Consolas, monospace; font-size: 17px; }
+  .evidence { color: var(--teal); font-size: 17px; font-weight: 750; }
+  .intro-foot { display: flex; justify-content: space-between; margin-top: 15px; }
+  .two-col {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: 0.88fr 1.12fr;
+  }
+  .contract {
+    background: var(--terminal);
+    border-radius: 8px;
+    color: #f8fafc;
+    min-height: 320px;
+    padding: 22px 24px;
+  }
+  .contract .label { color: #8fa2ba; font-size: 14px; font-weight: 850; text-transform: uppercase; }
+  .contract .pipeline { font-family: "SFMono-Regular", Consolas, monospace; font-size: 20px; line-height: 1.7; margin-top: 16px; }
+  .contract .required { color: #63d8c2; }
+  .events { padding-top: 2px; }
+  .event {
+    background: #fff;
+    border-left: 7px solid var(--blue);
+    border-radius: 5px;
+    margin-bottom: 10px;
+    padding: 10px 14px;
+  }
+  .event strong { display: block; font-size: 18px; }
+  .event span { color: var(--muted); font-size: 15px; }
+  .event.ok { border-left-color: var(--teal); }
+  .event.fail { border-left-color: var(--coral); }
+  .callout {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    font-size: 19px;
+    margin-top: 12px;
+    padding: 10px 14px;
+  }
+  .flow {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(5, 1fr);
+    margin: 22px 0;
+  }
+  .node {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    min-height: 119px;
+    padding: 14px;
+    position: relative;
+  }
+  .node:not(:last-child)::after {
+    color: var(--blue);
+    content: "→";
+    font-size: 28px;
+    font-weight: 850;
+    position: absolute;
+    right: -22px;
+    top: 40px;
+    z-index: 2;
+  }
+  .node .num { color: var(--blue); font-size: 13px; font-weight: 900; }
+  .node strong { display: block; font-size: 18px; margin: 5px 0; }
+  .node p { color: var(--muted); font-size: 14px; margin: 0; }
+  .decision-grid, .probe-grid, .experiment-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .decision, .probe, .experiment {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    min-height: 112px;
+    padding: 15px 17px;
+  }
+  .decision strong, .probe strong, .experiment strong { display: block; font-size: 19px; margin-bottom: 6px; }
+  .decision p, .probe p, .experiment p { color: var(--muted); font-size: 15px; margin: 0; }
+  .decision.local { border-top: 6px solid var(--teal); }
+  .decision.replan { border-top: 6px solid var(--coral); }
+  .decision.continue { border-top: 6px solid var(--blue); }
+  .trend-grid {
+    align-items: stretch;
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr 0.72fr 1fr;
+    margin-top: 20px;
+  }
+  .trend, .bridge {
+    border-radius: 8px;
+    min-height: 290px;
+    padding: 18px 20px;
+  }
+  .trend { background: #fff; border: 1px solid var(--line); }
+  .trend.model-side { border-top: 7px solid var(--blue); }
+  .trend.workflow-side { border-top: 7px solid var(--teal); }
+  .trend .label, .bridge .label { font-size: 13px; font-weight: 900; text-transform: uppercase; }
+  .trend .label { color: var(--blue); }
+  .trend.workflow-side .label { color: var(--teal); }
+  .trend h2 { font-size: 23px; margin-top: 6px; }
+  .trend ul { font-size: 17px; line-height: 1.45; margin: 13px 0 0; padding-left: 21px; }
+  .bridge {
+    align-items: center;
+    background: var(--terminal);
+    color: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+  .bridge .label { color: #63d8c2; }
+  .bridge h2 { color: #fff; font-size: 27px; margin: 12px 0; }
+  .bridge p { color: #bcc6d3; font-size: 15px; margin: 0; }
+  .formula {
+    align-items: center;
+    background: var(--terminal);
+    border-radius: 8px;
+    color: #f8fafc;
+    display: flex;
+    font-size: 24px;
+    font-weight: 800;
+    justify-content: center;
+    margin: 17px 0;
+    padding: 13px;
+  }
+  .formula span { color: #63d8c2; margin: 0 10px; }
+  .probe-grid { grid-template-columns: 1fr 1fr; }
+  .probe { min-height: 118px; }
+  .probe .label { color: var(--blue); font-size: 13px; font-weight: 900; text-transform: uppercase; }
+  .model-lane {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(4, 1fr);
+    margin-top: 14px;
+  }
+  .model {
+    background: #edf4ff;
+    border-bottom: 4px solid var(--blue);
+    border-radius: 5px;
+    font-size: 14px;
+    font-weight: 800;
+    padding: 8px;
+    text-align: center;
+  }
+  .stats { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin: 20px 0; }
+  .stat {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-height: 108px;
+    padding: 14px 18px;
+  }
+  .stat .big { color: var(--blue); font-size: 39px; font-weight: 900; line-height: 1; }
+  .stat.fail .big { color: var(--coral); }
+  .stat p { color: var(--muted); font-size: 15px; margin: 8px 0 0; }
+  .claim-table { background: #fff; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .claim-row { display: grid; grid-template-columns: 0.82fr 1.18fr; }
+  .claim-row + .claim-row { border-top: 1px solid var(--line); }
+  .claim-row div { font-size: 16px; padding: 10px 14px; }
+  .claim-row div + div { border-left: 1px solid var(--line); color: var(--muted); }
+  .claim-row strong { color: var(--ink); }
+  .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
+  .experiment { min-height: 164px; }
+  .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
+  .metrics {
+    background: #e9f7f3;
+    border-left: 6px solid var(--teal);
+    border-radius: 4px;
+    color: #285d53;
+    font-size: 17px;
+    margin-top: 18px;
+    padding: 12px 15px;
+  }
+  .loop {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(5, 1fr);
+    margin: 38px 0 30px;
+  }
+  .loop .box {
+    border-radius: 7px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 850;
+    min-height: 82px;
+    padding: 18px 10px;
+    text-align: center;
+  }
+  .loop .box:nth-child(1) { background: var(--blue); }
+  .loop .box:nth-child(2) { background: #405670; }
+  .loop .box:nth-child(3) { background: var(--amber); }
+  .loop .box:nth-child(4) { background: var(--teal); }
+  .loop .box:nth-child(5) { background: var(--coral); }
+  .tagline { font-size: 36px; font-weight: 850; line-height: 1.2; margin: 0; text-align: center; }
+  .closing { color: var(--muted); font-size: 19px; margin-top: 18px; text-align: center; }
 ---
 
 <!-- _class: title -->
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Agentic AI Summit 2026 · UC Berkeley</div>
-    <h1>Small models.<br>Tight loops.</h1>
-    <p class="subtitle">What a coding-agent harness is actually doing for you</p>
-    <div class="chips">
-      <span class="chip">one Python file</span>
-      <span class="chip">real compiler</span>
-      <span class="chip">external postconditions</span>
-    </div>
-    <p class="tiny"><strong>Denis Akhiyarov</strong> · Aug 1, 2026</p>
-  </div>
-  <div class="terminal">
-    <div class="bar">nanagent / run 01</div>
-    <span class="prompt">$</span> askme "build a two-file C program"<br><br>
-    <span class="dim">plan</span> &nbsp; write .h → write .c → compile → run<br>
-    <span class="dim">tool</span> &nbsp; cc -o main main.c<br>
-    <span class="dim">check</span> &nbsp; ./main<br><br>
-    <span class="ok">AGENT_OK</span>
-  </div>
+<div class="eyebrow">AskMe · Agentic AI Summit 2026 · UC Berkeley</div>
+
+# Smaller open models.<br>Full workflows. Tight harnesses.
+
+<p class="subtitle">The system layer connecting model control to agent execution</p>
+
+<p class="tiny" style="font-weight:850; margin:0 0 6px; text-transform:uppercase;">Illustrative workflow</p>
+
+<div class="trace-table">
+  <div class="trace-row head"><div class="trace-cell">Step</div><div class="trace-cell">Plan</div><div class="trace-cell">AskMe action</div><div class="trace-cell">Evidence</div></div>
+  <div class="trace-row"><div class="trace-cell step">01</div><div class="trace-cell">Establish behavior</div><div class="trace-cell action">run focused integration test</div><div class="trace-cell evidence">failure is located</div></div>
+  <div class="trace-row"><div class="trace-cell step">02</div><div class="trace-cell">Patch the boundary</div><div class="trace-cell action">edit the smallest surface</div><div class="trace-cell evidence">focused test passes</div></div>
+  <div class="trace-row"><div class="trace-cell step">03</div><div class="trace-cell">Check integration</div><div class="trace-cell action">run related + full suite</div><div class="trace-cell evidence">no regression observed</div></div>
+  <div class="trace-row"><div class="trace-cell step">04</div><div class="trace-cell">Accept the result</div><div class="trace-cell action">verify required behavior</div><div class="trace-cell evidence">contract satisfied</div></div>
 </div>
+
+<div class="intro-foot"><span class="tiny"><strong>Denis Akhiyarov</strong> · Aug 1, 2026</span><span class="tiny">github.com/den-run-ai/askme</span></div>
 
 <!--
 Speaker notes (~45s):
-I wanted to know whether small models are useful inside coding agents, not whether they
-win a one-shot benchmark. So I built the smallest harness I could: one Python file, real
-shell tools, and a plan-execute-recover loop. The surprise was not that a tiny model is
-secretly frontier. Most of the useful reliability came from the loop. One ordinary bug
-made that obvious.
+Smaller open models give teams more control over latency, hardware, deployment, and
+post-training, and may help attract and grow talent. Meanwhile coding agents are
+expanding from code edits toward full workflows. The harness connects those trends. An
+agent is not one answer; it is this sequence of plans, actions, and fresh evidence. AskMe
+makes the sequence visible so we can ask how reasoning turns each result into the next
+move.
 -->
 
 ---
 
-<div class="eyebrow">A real failure trace</div>
+<div class="eyebrow">Why this matters now</div>
 
-# The bug that ate minutes
+# Two trends meet at the harness
+
+<div class="trend-grid">
+  <div class="trend model-side">
+    <div class="label">Smaller, open models</div>
+    <h2>More of the model stack is yours</h2>
+    <ul><li>Execution speed and cost</li><li>Hardware and deployment choice</li><li>Private, edge, or enterprise runtime</li><li>Direct post-training access</li><li>Potential builder and talent flywheel</li></ul>
+  </div>
+  <div class="bridge">
+    <div class="label">The bridge</div>
+    <h2>Tight<br>harnesses</h2>
+    <p>Context · tools · memory · permissions · workflow · evaluation</p>
+  </div>
+  <div class="trend workflow-side">
+    <div class="label">Full-workflow agents</div>
+    <h2>More of the lifecycle is agentic</h2>
+    <ul><li>Plan and coordinate</li><li>Search, edit, and execute</li><li>Test and verify</li><li>Preserve state across handoffs</li><li>Improve workflows—and agents</li></ul>
+  </div>
+</div>
+
+<div class="callout"><strong>Model control expands what you can deploy.</strong> Harness design shapes how the system executes and verifies completion.</div>
+
+<div class="source">Framing: Lilian Weng and HyperAgents · deployment/tuning examples: Google Gemma docs · talent flywheel: practitioner hypothesis</div>
+
+<!--
+Speaker notes (~45s):
+Smaller open models make execution, placement, weights, and post-training more
+controllable. Coding agents are becoming a substrate for broader user
+and enterprise workflows: they plan, use tools, preserve artifacts, verify results, and
+hand work across agents. Hyperagents go further by making agent systems themselves
+editable. Lilian Weng describes the harness as the deployment layer that controls how a
+model plans, acts, remembers, and evaluates. Tight, general harnesses make model control
+useful at workflow scale in practice.
+-->
+
+---
+
+<div class="eyebrow">A retained integration miss</div>
+
+# The code ran. The workflow still failed.
 
 <div class="two-col">
-  <div class="code-pane">
-    <span class="bad">// missing: #include &lt;stdio.h&gt;</span><br>
-    int main() {<br>
-    &nbsp;&nbsp;printf("FIXED\n");<br>
-    &nbsp;&nbsp;return 0;<br>
-    }<br><br>
-    <span class="bad">error: implicit declaration of printf</span>
+  <div class="contract">
+    <div class="label">Required contract</div>
+    <div class="pipeline">write <span class="required">msg.h + main.c</span><br>build <span class="required">./main</span><br>run <span class="required">./main</span><br>observe <span class="required">REPLAN_OK</span></div>
   </div>
-  <div class="timeline">
-    <div class="event"><div class="time">step 1</div><div class="bar"><strong>Compile</strong><span>Useful failure: the compiler names the bug.</span></div></div>
-    <div class="event warn"><div class="time">next</div><div class="bar"><strong>Bad edit</strong><span>Malformed JSON or the wrong exact-match string.</span></div></div>
-    <div class="event slow"><div class="time">140–253s</div><div class="bar"><strong>Think, retry, re-read</strong><span>The model spends tokens rediscovering known state.</span></div></div>
-    <div class="callout"><strong>Wrong move:</strong> buy more thinking. <strong>Better move:</strong> turn the compiler error into control flow.</div>
+  <div class="events">
+    <div class="event ok"><strong>Source and header written</strong><span>The requested program was correct.</span></div>
+    <div class="event ok"><strong><code>/tmp/test</code> compiled</strong><span>A different output path was chosen.</span></div>
+    <div class="event ok"><strong><code>/tmp/test</code> ran successfully</strong><span>It printed <code>REPLAN_OK</code>.</span></div>
+    <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
+    <div class="callout"><strong>Every recorded action succeeded.</strong> The deliverable contract still drifted.</div>
   </div>
 </div>
 
-<div class="source">Three traces of the slowest local microtask, Apr 26, 2026 · PERFORMANCE.md. The 140–253s range is not a suite-wide result.</div>
+<div class="source">One hosted build cell · retained under the predeclared failure rule · evals/draft-results.json</div>
 
 <!--
 Speaker notes (~45s):
-This is the most boring C bug possible: call printf without stdio. The compiler already
-tells us what happened. But the early agent treated every failure as "think harder." On
-our slowest local microtask, a bad edit could trigger a thinking retry and a huge re-read.
-In three traces that recovery call took 140 to 253 seconds. It is narrow evidence from one
-task, but the design error was clear: we paid the model to rediscover a compiler fact.
+This retained run exposes the agent problem more clearly: correct local execution can
+still miss the requested workflow contract across multiple otherwise successful steps
+and tools. The agent wrote correct files, compiled slash tmp slash test, ran
+it successfully, and declared completion. The acceptance check expected dot slash main.
+Every tool action looked green, but the workflow contract was missed. Working code is not
+automatically an accepted change.
 -->
 
 ---
 
-<div class="eyebrow">Harness design</div>
+<div class="eyebrow">Design hypothesis</div>
 
-# Move reliability out of the model
+# Reason over fresh evidence. Preserve progress.
 
 <div class="flow">
-  <div class="node"><div class="num">01</div><strong>Typed error</strong><p><code>compile_error</code>, not an undifferentiated failure string.</p></div>
-  <div class="node"><div class="num">02</div><strong>Exact context</strong><p>Read the file before retrying an edit.</p></div>
-  <div class="node"><div class="num">03</div><strong>Cheap repair</strong><p>Use a narrow deterministic fix when the diagnostic is unambiguous.</p></div>
-  <div class="node"><div class="num">04</div><strong>Small replan</strong><p>Replace one failed task, not the whole plan.</p></div>
-  <div class="node"><div class="num">05</div><strong>Real check</strong><p>Run the artifact outside the LLM's own judgment.</p></div>
+  <div class="node"><div class="num">01</div><strong>Keep the contract</strong><p>Carry the required behavior and artifact forward.</p></div>
+  <div class="node"><div class="num">02</div><strong>Choose one action</strong><p>Advance the current plan with bounded scope.</p></div>
+  <div class="node"><div class="num">03</div><strong>Execute</strong><p>Run the tool, focused test, or integration check.</p></div>
+  <div class="node"><div class="num">04</div><strong>Interpret</strong><p>Use the new evidence, not reconstructed state.</p></div>
+  <div class="node"><div class="num">05</div><strong>Update locally</strong><p>Change only what the evidence invalidated.</p></div>
 </div>
 
-<div class="example-strip">
-compiler stderr → <span class="typed">[compile_error]</span> → repair / retry → <span class="pass">./main == "AGENT_OK"</span>
+<div class="decision-grid">
+  <div class="decision continue"><strong>Expected result</strong><p>Continue to the next planned action.</p></div>
+  <div class="decision local"><strong>Local mismatch</strong><p>Repair the affected step and rerun its check.</p></div>
+  <div class="decision replan"><strong>Broken assumption</strong><p>Replan broadly only when the plan is no longer valid.</p></div>
 </div>
 
-<div class="source">Implementation: askme.py · architecture and historical timings: ARCHITECTURE.md, PERFORMANCE.md</div>
+<div class="callout"><strong>Trajectory goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn—not longer monologues.</div>
 
 <!--
 Speaker notes (~45s):
-The fix is a sequence of explicit contracts. Classify the failure. Give the model exact
-file content instead of asking it to guess. Apply deterministic repairs only when the
-diagnostic is unambiguous. If a task still fails, replace that task instead of the whole
-plan. Finally, run the program. None of this makes the model smarter. It makes the system
-less dependent on intelligence for mechanical work, and it survives model upgrades.
+Reasoning matters between calls. It keeps the current contract in view, interprets
+execution or test feedback, and decides how much of the plan changed. A local
+failure should produce a local correction while completed work stays completed.
+Broad replanning belongs to broken assumptions, not every red command. This is not an
+argument for longer monologues. It is a hypothesis about trajectory quality: fewer
+repeated errors, fewer stuck steps, and less needless plan churn.
 -->
 
 ---
 
-<div class="eyebrow">Measured OpenRouter smoke · July 10, 2026</div>
+<div class="eyebrow">Measured harness smoke · July 10, 2026</div>
 
-# Four models, two concrete jobs
+# A smoke test—not a model verdict
 
-<div class="task-grid">
-  <div class="task"><div class="label">MULTI-FILE BUILD</div><strong>Header + source → compile → run</strong><code>msg.h + main.c · ./main == REPLAN_OK</code></div>
-  <div class="task"><div class="label">REPAIR</div><strong>Fix a Python syntax error</strong><code>python3 greet.py exits 0 · stdout contains hello</code></div>
+<div class="formula">4 hosted models <span>×</span> 2 simple checks <span>×</span> 1 run / cell</div>
+
+<div class="stats">
+  <div class="stat"><div class="big">8 / 8</div><p>agents reported completion</p></div>
+  <div class="stat"><div class="big">7 / 8</div><p>artifacts passed exact acceptance</p></div>
+  <div class="stat fail"><div class="big">1</div><p>integration-path miss was retained</p></div>
 </div>
 
-<div class="model-lane">
-  <div class="model"><strong>Gemma 4 26B A4B</strong><span>MoE · 3.8B active</span></div>
-  <div class="model"><strong>Gemma 4 31B</strong><span>dense · 30.7B</span></div>
-  <div class="model"><strong>Qwen3.6-27B</strong><span>dense · 27B</span></div>
-  <div class="model"><strong>Qwen3.6-35B-A3B</strong><span>MoE · 3B active</span></div>
+<div class="claim-table">
+  <div class="claim-row"><div><strong>What it exercises</strong></div><div>Action protocol, trace visibility, completion state, and separate acceptance.</div></div>
+  <div class="claim-row"><div><strong>What it does not test</strong></div><div>Modern coding ability, model family or size, reasoning impact, or reliability.</div></div>
 </div>
 
-<p class="tiny"><strong>Held fixed:</strong> NanAgent implementation, task prompt, SiliconFlow-only routing, one retry policy, strict external checks. Unique catalog matches were FP8. <strong>n=1/cell.</strong> 31B was a post-hoc extension.</p>
+<div class="callout"><strong>The useful receipt:</strong> self-reported completion and accepted workflow behavior are different measurements.</div>
 
-<div class="source">Exact protocol and commands: evals/README.md · Model architecture: official Google and Qwen model cards</div>
+<div class="source">Both checks were deliberately simple. Full prompts, protocol, and outcomes: evals/README.md</div>
 
 <!--
 Speaker notes (~40s):
-For this talk I ran four hosted models on two jobs, one run per cell. Job one creates a
-header and source, compiles, and runs them. Job two repairs Python, which we execute
-independently. Provider, prompts, commit, and policy are pinned. Gemma thirty-one B was
-added after the original six outcomes were frozen. Eight cells are not a leaderboard.
-The Gemma pair changes size and architecture together.
+The hosted study is an interface smoke, not a modern coding benchmark. Four hosted models
+ran two scripted checks once. All eight agents reported completion; seven artifacts met
+the exact acceptance contract. The traces validate logging and expose the path miss, but
+they are receipts. One unseeded run per cell, non-randomized sequential runs, different
+architectures, and a post hoc fourth model support no family, size, reasoning,
+reliability, or local-hardware conclusion.
 -->
 
 ---
 
-<div class="eyebrow">Eight measured cells · July 10, 2026</div>
+<div class="eyebrow">The next experiment</div>
 
-# What happened?
+# Test the reasoning claim directly
 
-<div class="result-grid">
-  <div class="result-cell head">Model</div><div class="result-cell head">2-file build</div><div class="result-cell head">Repair</div><div class="result-cell head">Responses</div><div class="result-cell head">Billed credits</div>
-  <div class="result-cell model-name">Gemma 4 26B A4B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">603.6s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">20.0s</span></div><div class="result-cell">39</div><div class="result-cell">$0.004147</div>
-  <div class="result-cell model-name">Gemma 4 31B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">66.5s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">22.4s</span></div><div class="result-cell">19</div><div class="result-cell">$0.001321</div>
-  <div class="result-cell model-name">Qwen3.6-27B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">47.9s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">23.0s</span></div><div class="result-cell">22</div><div class="result-cell">$0.004968</div>
-  <div class="result-cell model-name">Qwen3.6-35B-A3B</div><div class="result-cell"><span class="fail">FAIL</span> <span class="tiny">17.7s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">11.8s</span></div><div class="result-cell">14</div><div class="result-cell">$0.001875</div>
+<div class="experiment-grid">
+  <div class="experiment"><div class="num">01</div><strong>Realistic failure</strong><p>Start with syntactically valid multi-file code and a semantic integration bug.</p></div>
+  <div class="experiment"><div class="num">02</div><strong>Feedback inside the loop</strong><p>Return focused execution and test results for a bounded repair.</p></div>
+  <div class="experiment"><div class="num">03</div><strong>Held-out acceptance</strong><p>Keep final scoring separate from feedback the agent sees.</p></div>
+  <div class="experiment"><div class="num">04</div><strong>Matched variants</strong><p>Repeat and randomize reasoning off, gated, and always-on policies.</p></div>
 </div>
 
-<p class="tiny">Pass requires pytest, <strong>agent complete</strong>, and the external check. “Responses” means usage-bearing model replies; raw HTTP attempts were not instrumented.</p>
+<div class="metrics"><strong>Measure:</strong> accepted behavior · recovery effort · plan stability</div>
 
-<div class="callout compact"><strong>7/8 passed.</strong> Gemma: both 2/2 · 31B build used 8 vs 29 responses · repair used 11 vs 10. Size + architecture changed.</div>
-
-<div class="source">Raw summary: evals/draft-results.json · route: response metadata · FP8: catalog match · infrastructure failures excluded</div>
+<div class="source">The published smoke validates the measurement path; it does not perform this causal experiment.</div>
 
 <!--
-Speaker notes (~40s):
-Seven of eight passed. Qwen thirty-five B reported complete but left slash tmp slash test
-instead of main. Both Gemmas passed both jobs. On build, thirty-one B used eight responses
-and sixty-six seconds versus twenty-nine and six hundred four. On repair, it used one more
-response and was slightly slower. Size and architecture changed, so this is not causal in
-this single observed run.
--->
-
----
-
-<div class="eyebrow">Scope check</div>
-
-# Useful evidence, small claim
-
-<div class="proof-grid">
-  <div class="proof yes">
-    <h2>What we actually verify</h2>
-    <ul>
-      <li>Structured actions survive the model/provider path</li>
-      <li>The loop can build or repair these exact programs</li>
-      <li>The resulting artifact executes correctly</li>
-      <li>Responses, tokens, route, and cost are auditable</li>
-    </ul>
-  </div>
-  <div class="proof no">
-    <h2>What we do not claim</h2>
-    <ul>
-      <li>Full-app or long-horizon reliability</li>
-      <li>Local-laptop speed from hosted runs</li>
-      <li>UX, architecture, or maintainability quality</li>
-      <li>Model size alone caused the Gemma gap</li>
-      <li>Contest-code scores predict agent performance</li>
-    </ul>
-  </div>
-</div>
-
-<div class="source">No LiveCodeBench claim: short contest problems answer a different question from multi-step, multi-file agent work.</div>
-
-<!--
-Speaker notes (~40s):
-The claim stays the size of the evidence. We verify that structured actions survive the
-provider path, these jobs complete, and the programs run. We do not verify full-app
-reliability, long refactors, code quality, or local speed. Nor did size alone cause the
-Gemma gap. I am not using LiveCodeBench. Contest problems measure raw coding, but not
-stateful tool use across files and steps. For agents, executable postconditions are closer
-to the question.
+Speaker notes (~45s):
+To test the reasoning claim, start with syntactically valid code and a semantic integration
+failure. Give the agent focused execution and test feedback inside its loop, then retain a
+held-out acceptance check. Compare reasoning off, gated on uncertainty, and
+always on with repeated randomized runs. Measure accepted outcomes, regressions, repeated
+actions, recovery turns, completed work redone, local corrections, full replans, latency,
+and tokens. Test whether reasoning consistently shortens recovery without
+destabilizing a plan.
 -->
 
 ---
 
 <div class="eyebrow">Takeaway</div>
 
-# The loop is the product
+# Control the model. Ground the workflow.
 
 <div class="loop">
-  <div class="box">Model</div>
-  <div class="box">Typed action</div>
-  <div class="box">Guardrail</div>
-  <div class="box">Real tool</div>
-  <div class="box">Postcondition</div>
+  <div class="box">Model choice</div>
+  <div class="box">Simple contract</div>
+  <div class="box">Execution / test</div>
+  <div class="box">Local reasoning</div>
+  <div class="box">Accepted workflow</div>
 </div>
 
-<p class="tagline">Small models do not need easier standards.<br>They need tighter feedback loops.</p>
+<p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>
 
-<p class="tiny" style="text-align:center; margin-top:22px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
+<p class="closing">Tight harnesses connect controllable models to increasingly capable, full-lifecycle agents.</p>
+
+<p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes (~35s):
-My conclusion is not that small models are ready for every coding job. The agent loop is
-the durable product: typed actions, narrow guardrails, real tools, and external checks.
-Small models make weak loops painfully visible; frontier models can hide the same debt.
-Keep the standards high and shorten the feedback path. Then choose the smallest model
-that closes your real loop at the latency, privacy, and cost you need. The repo has the
-deck, blog, protocol, and data. Thank you.
+The claim that survives is a design direction, not a model verdict. Smaller models offer
+control; broader agents offer leverage; the harness makes the combination operational.
+Prefer a simple, general action protocol. Return execution and test evidence.
+Let reasoning update the smallest part of the plan, with acceptance tied to the
+real workflow. Easier standards and interfaces can be good. Specialized skills should
+earn their complexity from repeated traces.
 -->

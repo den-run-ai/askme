@@ -1,4 +1,4 @@
-# NanAgent
+# AskMe
 
 Minimal agent that runs on local LLMs. Takes a prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. Single file, no frameworks, no dependencies beyond `requests`.
 

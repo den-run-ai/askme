@@ -1,17 +1,37 @@
-# Agentic AI Summit 2026 - Lightning Talk
+# Agentic AI Summit 2026 — Lightning Talk
 
-**Title:** Small Models, Tight Loops: What a Coding-Agent Harness Is Actually Doing for You
+**Title:** Smaller Open Models, Full Workflows, Tight Harnesses
 
 **Slot:** Compass (Saturday), Session 2: Frameworks & Dev Platforms, Aug 1, 2026, 1:00 PM PT
 **Format:** 5 minutes, 7 slides
 
 ## Contents
 
-- [`slides.md`](slides.md) - Marp source with 499-word speaker notes (about 4:00-4:10 read straight, leaving pause and transition buffer).
-- `slides.pdf` - rendered deck.
-- [`blog.md`](blog.md) - short companion post.
-- [`evals/README.md`](evals/README.md) - exact eval protocol, commands, and measured outcomes.
-- [`evals/draft-results.json`](evals/draft-results.json) - compact per-cell results, provenance, and infrastructure audit.
+- [`slides.md`](slides.md) — Marp source with 499-word speaker notes.
+- `slides.pdf` — rendered deck.
+- [`blog.md`](blog.md) — companion argument and citations.
+- [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
+- [`evals/draft-results.json`](evals/draft-results.json) — per-run provenance and raw summary.
+
+## Talk Arc
+
+1. Smaller open models offer more control over execution, hardware, deployment, post-training, and the builder ecosystem.
+2. Coding agents are expanding toward full-lifecycle user and enterprise workflows; self-improving hyperagents extend that direction.
+3. A tight harness connects controllable models to those workflows through simple actions, real execution feedback, persistent state, permissions, and acceptance.
+4. The retained failure—working code at the wrong artifact path—shows why successful actions and self-reported completion are not the same as a completed workflow.
+5. Reasoning should preserve progress and turn fresh evidence into the smallest useful plan update.
+6. The published smoke validates the measurement path, not a model hierarchy.
+7. The next experiment should test reasoning policies on realistic semantic integration failures with repeated, matched runs.
+
+## Evidence Boundary
+
+The talk keeps three kinds of statements separate:
+
+- **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
+- **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. The retained miss produced working behavior at the wrong path.
+- **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck proposes the experiment needed to test that claim.
+
+Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 
 ## Render
 
@@ -29,22 +49,12 @@ npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
   --html --preview
 ```
 
-## Evidence Policy
-
-The deck distinguishes three kinds of evidence:
-
-1. **Historical local traces.** The missing-header timeline comes from three traces of one slow Gemma 4 E4B microtask in [`PERFORMANCE.md`](../../PERFORMANCE.md). It is not presented as a suite-wide percentage or an ablation.
-2. **Current hosted smoke.** Four models ran two tasks once each through the same NanAgent implementation with SiliconFlow-only routing and fallbacks disabled. Gemma 4 31B was added as an exploratory extension after the original six outcomes were frozen. A pass requires pytest, agent completion, and an independently repeated postcondition. OpenRouter response metadata supplies the served model/provider; FP8 comes separately from time-stamped catalog matches. This is an integration smoke (`n=1`), not a reliability estimate. The dense-31B versus MoE-26B comparison changes size and architecture together, so it is not a causal size ablation.
-3. **Architecture.** Typed errors, JSON repair, task-local replanning, deterministic repair, and completion checks are implementation features documented in [`ARCHITECTURE.md`](../../ARCHITECTURE.md). The talk does not claim each feature has a matched causal ablation.
-
-These tasks are small C/Python build-and-repair jobs. They are not full-app generation. No LiveCodeBench result is used: contest-style single-problem coding does not test the stateful, multi-step tool loop discussed here.
-
 ## Primary Sources
 
+- [Lilian Weng, “Harness Engineering for Self-Improvement”](https://lilianweng.github.io/posts/2026-07-04-harness/)
+- [HyperAgents](https://arxiv.org/abs/2603.19461)
+- [Google Gemma run and deployment guidance](https://ai.google.dev/gemma/docs/run)
+- [Google Gemma tuning guidance](https://ai.google.dev/gemma/docs/tune)
 - [Agentic AI Summit 2026 program](https://rdi.berkeley.edu/events/agentic-ai-summit-2026)
-- [Google Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) - E4B is dense (4.5B effective / 8B including embeddings); 26B A4B is MoE (25.2B total / 3.8B active).
-- [Qwen3.6-27B release](https://qwen.ai/blog?id=qwen3.6-27b) and [model card](https://huggingface.co/Qwen/Qwen3.6-27B)
-- [Qwen3.6-35B-A3B release](https://qwen.ai/blog?id=qwen3.6-35b-a3b) and [model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
-- [OpenRouter models API](https://openrouter.ai/api/v1/models) - exact model IDs and current endpoint metadata
 
 The public program confirms the session and start time. The five-minute duration comes from speaker communications rather than the public agenda.

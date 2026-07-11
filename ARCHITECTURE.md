@@ -1,4 +1,4 @@
-# NanAgent — Minimal Local Agent for Constrained LLMs
+# AskMe — Minimal Local Agent for Constrained LLMs
 
 Designed for: Gemma 4 E4B (dense PLE, 4.5B effective / 8B including embeddings), 16K context, 16GB M1 Mac.
 

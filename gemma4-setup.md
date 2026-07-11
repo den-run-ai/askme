@@ -50,7 +50,7 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
 ## Server Configuration
 
-### Agentic use (NanAgent)
+### Agentic use (AskMe)
 
 ```bash
 cd /Users/macmone/code/llama.cpp
@@ -187,7 +187,7 @@ Pulled in the 98-commit delta between `85dde8dc4` (local) and fetched master sna
 
 | PR | Title | Impact | Commit |
 |----|-------|--------|--------|
-| [#21793](https://github.com/ggml-org/llama.cpp/pull/21793) | server: Anthropic API prefix-caching fix | Cache-adjacent but **not used by NanAgent's OpenAI-compatible local path**. Relevant if testing Claude Code or other Anthropic-compatible clients against this server | `c807c6e3b` |
+| [#21793](https://github.com/ggml-org/llama.cpp/pull/21793) | server: Anthropic API prefix-caching fix | Cache-adjacent but **not used by AskMe's OpenAI-compatible local path**. Relevant if testing Claude Code or other Anthropic-compatible clients against this server | `c807c6e3b` |
 | [#22267](https://github.com/ggml-org/llama.cpp/pull/22267) | server: fix heap-buffer-overflow from negative `n_discard` | Server security/stability fix in the same rebuild delta. Not Gemma-specific, but worth picking up when rebuilding | `c78fb909b` |
 
 ### Not yet merged (watch list)

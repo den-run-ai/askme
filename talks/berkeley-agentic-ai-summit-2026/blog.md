@@ -1,91 +1,97 @@
-# Small Models, Tight Loops
+# Smaller Open Models, Full Workflows, Tight Harnesses
 
-I started with a broad question: **are small LLMs ready for coding agents?**
+Two trends are converging.
 
-That question is too vague to benchmark honestly. "Coding" can mean filling in one function, resolving an issue in a mature repository, or spending twenty minutes creating files, calling tools, recovering from errors, and checking whether the result actually runs. A coding agent is the last one. Its model matters, but so does everything wrapped around the model.
+First, smaller open models are becoming strategically useful. They give a team more control over execution speed, cost, hardware, data location, deployment, and post-training. Google's current Gemma guidance explicitly spans local, edge, and enterprise deployment, recommends starting with the smallest model that can meet the need, and supports modifying open weights through full or parameter-efficient tuning ([run and deployment guide](https://ai.google.dev/gemma/docs/run), [tuning guide](https://ai.google.dev/gemma/docs/tune)).
 
-NanAgent is my deliberately small way to study that wrapper: one Python file, no agent framework, and a loop that plans tasks, emits structured actions, runs real tools, and replans when something fails.
+That access can create an organizational advantage too. Engineers can inspect, serve, tune, and evaluate the actual model stack instead of only integrating a remote API. I see that as a learning and talent flywheel, although the small experiment in this repository does not measure it.
 
-## One Boring Bug
+Second, coding agents are becoming a practical substrate for broader agents. A coding agent already has to plan, navigate state, call tools, preserve artifacts, run long jobs, test behavior, recover, and hand work across boundaries. Those are the same primitives needed for full-lifecycle enterprise and user workflows. More ambitious hyperagents go one step further by making the agent and its harness editable objects ([HyperAgents](https://arxiv.org/abs/2603.19461)).
 
-The most useful trace came from an unglamorous C program:
+The harness ties these trends together.
 
-```c
-int main() {
-    printf("FIXED\n");
-    return 0;
-}
-```
+## The Harness Is the Bridge
 
-The missing `#include <stdio.h>` is not a reasoning puzzle. The compiler names the problem. Yet an early version of the agent handled every failed action the same way: ask the model to think harder and try again.
+[Lilian Weng defines a harness](https://lilianweng.github.io/posts/2026-07-04-harness/) as the deployment system around a model: it controls planning, tool use, context, memory, permissions, workflow, and evaluation. Her central design direction is deliberately simple and generic machinery, with a goal-oriented loop that plans, executes, observes or tests, improves, and executes again.
 
-On three traces of this one slow local microtask, a failed edit could lead to a thinking retry and then a long re-read. That recovery call took 140-253 seconds. This is narrow evidence, not a suite-wide statistic, but it exposed a systems bug: the harness was paying the model to rediscover state that a deterministic tool had already supplied.
+That is the right level of abstraction for AskMe. A useful agent trace looks like this:
 
-The better loop looks like this:
+| Step | Plan | Agent action | Evidence | Next move |
+|---|---|---|---|---|
+| 1 | Establish behavior | Run a focused integration test | Failing behavior is located | Keep the plan |
+| 2 | Patch the boundary | Edit the smallest affected surface | Focused test passes | Preserve completed work |
+| 3 | Check integration | Run related and full checks | No regression is observed | Advance |
+| 4 | Accept the result | Verify the required behavior and artifact | Workflow contract is satisfied | Finish |
 
-```text
-compiler stderr
-    -> [compile_error]
-    -> exact file context or a narrowly matched repair
-    -> rerun the command
-    -> execute an external postcondition
-```
+The interesting work is not syntax repair. It is whether reasoning keeps the workflow contract in view, interprets fresh execution evidence, and changes only the part of the plan that the evidence invalidated.
 
-Five changes matter in practice:
+## A Working Program Can Still Miss the Workflow
 
-1. **Typed failures.** A missing file, failed exact-match edit, timeout, and compiler error should not share one generic retry path.
-2. **Exact context before edits.** Read the file, then ask for a small replacement. Do not make the model reconstruct old text from memory.
-3. **Deterministic work for deterministic facts.** If a compiler diagnostic and source file uniquely identify a safe repair, code can do it more cheaply and predictably.
-4. **Task-local replanning.** Replace the failed task instead of regenerating a whole plan that mostly worked.
-5. **External validation.** "The model said done" is not a postcondition. Run the binary or script outside the model's own judgment.
+The most useful result in the hosted smoke was not a compiler error. Qwen3.6-35B-A3B wrote the requested `msg.h` and `main.c`, compiled a working program to `/tmp/test`, ran it successfully, saw `REPLAN_OK`, and reported completion.
 
-These are engineering responses to observed failure modes. They are not five independent ablations, and I do not claim each one beats a model upgrade.
+The required deliverable was `./main`.
 
-## An Eight-Cell Hosted Smoke
+The independent acceptance test therefore failed. Every recorded tool action was successful, yet the workflow contract drifted. This is a more realistic agent failure than a missing include: locally plausible progress did not add up to the requested integration result.
 
-For the Berkeley talk, I added a deliberately small OpenRouter comparison. The original six-cell matrix ran three hosted models; after those outcomes were frozen, I added dense Gemma 4 31B as a two-cell exploratory extension. Every model used the same NanAgent implementation with SiliconFlow-only routing and fallbacks disabled. In authenticated endpoint-catalog snapshots, each model had one SiliconFlow match and each match was FP8:
+It also clarifies two different roles for feedback:
 
-- Google Gemma 4 26B A4B
-- Google Gemma 4 31B
-- Qwen3.6-27B
-- Qwen3.6-35B-A3B
+1. **In-loop feedback** is execution or test output returned to the agent so it can choose the next action.
+2. **Independent acceptance** is a separate evaluator check used to decide whether the delivered workflow actually meets its contract.
 
-Each model gets one task run for each of two jobs:
+The published smoke used the independent check for scoring after the run; it did not feed that final failure back into AskMe for recovery. A stronger harness would treat a tentative `done` as the trigger for one focused acceptance pass, return any failure for a bounded local correction, and still retain a held-out evaluator check.
 
-- **Multi-file build:** write `msg.h` and `main.c`, compile them, and leave an executable whose output contains `REPLAN_OK`.
-- **Repair:** fix a syntax error in `greet.py`, then leave a script that exits zero and prints `hello`.
+## Reasoning Should Shorten the Trajectory
 
-The first/no-retry call explicitly disables reasoning for every model; retries use the same harness policy. A pass requires pytest, `agent_complete`, and an independently repeated deterministic postcondition. Requested and served model, provider, usage-bearing responses, tokens, billed credits, commit, and dirty state are recorded.
+Reasoning matters between tool calls. It should:
 
-<!-- EVAL_RESULTS_START -->
-| Model | Build (P/A/X) | Repair (P/A/X) | Usage responses | Billed credits |
-|---|---:|---:|---:|---:|
-| Gemma 4 26B A4B | **PASS** (✓/✓/✓; 603.6s) | **PASS** (✓/✓/✓; 20.0s) | 39 | $0.00414692 |
-| Gemma 4 31B | **PASS** (✓/✓/✓; 66.5s) | **PASS** (✓/✓/✓; 22.4s) | 19 | $0.00132133 |
-| Qwen3.6-27B | **PASS** (✓/✓/✓; 47.9s) | **PASS** (✓/✓/✓; 23.0s) | 22 | $0.00496840 |
-| Qwen3.6-35B-A3B | **FAIL** (✗/✓/✗; 17.7s) | **PASS** (✓/✓/✓; 11.8s) | 14 | $0.00187520 |
-<!-- EVAL_RESULTS_END -->
+- preserve the current goal and completed work;
+- interpret execution, test, and integration evidence;
+- choose the smallest useful correction;
+- continue when the evidence matches the plan;
+- replan broadly only when an assumption has actually broken.
 
-`P/A/X` means pytest, agent completion, and the external check. “Usage responses” counts responses with token-usage events; raw chat-completions HTTP attempts were not instrumented. The per-model counts and credits sum both tasks. Across all eight cells, seven passed all three criteria and all eight agents reported completion. The 94 usage responses reported $0.01231185 in cost; the original matrix, 31B extension, and combined total each reconciled exactly to the API key usage delta.
+This is not an argument for making every call think longer. The useful hypothesis is behavioral: good reasoning should lead to fewer repeated errors, fewer stuck steps, less completed work redone, and less unnecessary plan churn.
 
-The failure is the interesting receipt. Qwen3.6-35B-A3B created correct source and header files, compiled and ran `/tmp/test`, then reported completion. It did not leave the required `main` executable, so pytest and the independent probe failed it. The result was retained rather than replaced.
+The current data does not isolate that effect: the eight cells were not a controlled reasoning experiment. Across the observed traces there was one full replan and two local replans, but the tasks did not reliably require replanning. Those counts are trajectory receipts, not proof that a reasoning policy caused the outcome.
 
-The added Gemma pair gives an exploratory size-and-architecture contrast. Both variants passed both cells. On the build, dense 31B finished in 66.5 seconds and 8 responses versus 603.6 seconds and 29 responses for 26B A4B. On repair, however, 31B was slightly slower and used one more response: 22.4 seconds and 11 responses versus 20.0 seconds and 10. It still used fewer tokens and cost slightly less.
+## Read the Smoke at the Right Level
 
-That is not a clean estimate of the impact of size. Gemma 4 31B is a dense 30.7B model; 26B A4B is a 25.2B-total MoE with 3.8B active per token. Architecture, active compute, stochastic trajectory, and provider load all change or remain uncontrolled. The build difference is a useful observation, while the repair result warns against turning it into “larger is always faster.”
+The hosted study ran four hosted models through two scripted checks once each:
 
-This is `n=1` per cell. It can reveal that a model/provider path missed one action contract. It cannot estimate a success rate, rank the models, isolate model size, or prove that any of them can build a full application reliably.
+- an artifact probe whose prompt supplied the header, source, build command, and run command;
+- an obvious script repair used as a low-ceiling harness sanity check.
 
-The exact commands, per-cell metrics, routing provenance, and repeat policy live in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json). Before the recorded matrix, an earlier setup attempt with the old key returned `401 User not found`. It produced no model response, token event, or billed usage and is retained only in the infrastructure audit.
+These checks test action transport, artifact handling, logging, completion state, and acceptance. They are not representative modern software-engineering tasks.
 
-## Why Not LiveCodeBench?
+The result is simple:
 
-LiveCodeBench asks a useful raw-coding question: can a model solve date-stamped contest problems? It does not exercise the question in this project: can a model hold state across multiple tool calls, modify several artifacts, react to real command output, and satisfy an executable end condition?
+- all eight agents reported completion;
+- seven of eight artifacts met the exact acceptance contract;
+- the retained failure was working behavior at the wrong artifact path;
+- every trajectory and its provenance are auditable.
 
-For agent work, I would rather have a tiny task with a real compiler and a strict postcondition than a large score from a benchmark aimed at a different unit of work.
+That is one harness result, not a model ranking. One unseeded run per cell, non-randomized sequential runs, different dense and MoE architectures, and a post-hoc fourth model cannot establish anything about Gemma versus Qwen, parameter count, active compute, reasoning quality, reliability, or local-Mac performance.
+
+The full eight-cell table, billing reconciliation, routes, prompts, and commands remain in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json) for provenance rather than as a leaderboard.
+
+## Test the Real Hypothesis Next
+
+A useful follow-up should start with syntactically valid multi-file code and a semantic integration failure: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules.
+
+The experiment should:
+
+1. expose focused unit, execution, and integration feedback inside the loop;
+2. retain a separate held-out acceptance check;
+3. compare reasoning off, gated on semantic uncertainty, and always on;
+4. repeat and randomize runs under matched conditions;
+5. measure accepted outcomes, regressions, repeated actions, recovery turns, completed work redone, local corrections, full replans, latency, and tokens.
+
+Only then would a comparison of reasoning policies, model sizes, or model families support a conclusion.
 
 ## The Claim That Survives
 
-The evidence here is promising but small. It covers a few scripted build-and-repair loops, not application architecture, UX, maintainability, or long-horizon refactoring. The older local runs and the new hosted smoke also answer different questions and should not be collapsed into a controlled model-size comparison.
+Smaller models make more of the model stack controllable. General-purpose and lifecycle-spanning agents make more of the workflow executable. A tight harness makes the combination operational.
 
-The useful conclusion is narrower: **the harness is a durable part of the capability.** Typed actions, error-aware recovery, real tools, and external checks help a small model today and a larger model tomorrow. Small models do not need easier standards. They need tighter feedback loops.
+The action protocol should be simple and general. Easier interfaces and more general standards can be good; specialized skills should earn their complexity from repeated failure traces. Execution and test results should ground the next decision, reasoning should update the smallest necessary part of the plan, and acceptance should remain tied to real behavior.
+
+**Make the interface easier to use. Keep success grounded in the workflow.**

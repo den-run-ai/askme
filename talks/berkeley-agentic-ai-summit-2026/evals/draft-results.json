@@ -5,11 +5,11 @@
     "kind": "integration_smoke",
     "run_date": "2026-07-10",
     "trials_per_model_task": 1,
-    "pass_rule": "pytest pass AND agent_complete true AND deterministic postcondition pass",
+    "pass_rule": "pytest pass AND agent_complete true AND deterministic acceptance pass",
     "interpretation": "Eight observations, not a reliability estimate, ranking, or controlled scaling study.",
     "extensions": [
       {
-        "id": "gemma4-31b-size-architecture-contrast",
+        "id": "gemma4-31b-followup",
         "declared_at_utc": "2026-07-10T20:36:49Z",
         "selection_timing": "Requested after the original six outcomes were frozen and before any 31B model response.",
         "added_model": "google/gemma-4-31b-it",
@@ -17,12 +17,12 @@
           "gemma4-31b/build",
           "gemma4-31b/repair"
         ],
-        "interpretation": "Exploratory size-and-architecture contrast: 31B is dense, while 26B A4B is MoE. It does not isolate a causal effect of parameter count."
+        "interpretation": "Post-hoc trajectory follow-up. The design does not support an inference about model size, architecture, or family."
       }
     ]
   },
   "provenance": {
-    "nanagent_implementation_commit": "04033b4750b4b4f0d2f31697dd2f65841307f870",
+    "askme_implementation_commit": "04033b4750b4b4f0d2f31697dd2f65841307f870",
     "run_head": "88442e88b91d846fb48bcd6b4d43bd4c055252bc",
     "run_worktree_dirty": false,
     "run_root": "/tmp/berkeley-eval-20260710",
@@ -104,7 +104,7 @@
     }
   },
   "metric_definitions": {
-    "agent_wall_s": "Time measured inside the agent loop; excludes pytest startup and the independent postcondition probe.",
+    "agent_wall_s": "Time measured inside the agent loop; excludes pytest startup and the independent acceptance probe.",
     "steps": "Step events retained by AGENT_RUN_LOG.",
     "thinking_retry_responses": "Usage-bearing responses whose per-call retry attempt was greater than zero.",
     "usage_bearing_responses": "AGENT_RUN_LOG token events. This is not the raw number of chat-completions HTTP attempts.",
@@ -396,7 +396,7 @@
       "id": "gemma4-31b/build",
       "model_id": "google/gemma-4-31b-it",
       "task_id": "build",
-      "extension_id": "gemma4-31b-size-architecture-contrast",
+      "extension_id": "gemma4-31b-followup",
       "protocol_attempt": 2,
       "infrastructure_repeat_of": "gemma4-31b-build-wrong-python",
       "started_at_utc": "2026-07-10T20:38:09Z",
@@ -445,7 +445,7 @@
       "id": "gemma4-31b/repair",
       "model_id": "google/gemma-4-31b-it",
       "task_id": "repair",
-      "extension_id": "gemma4-31b-size-architecture-contrast",
+      "extension_id": "gemma4-31b-followup",
       "protocol_attempt": 1,
       "started_at_utc": "2026-07-10T20:39:58Z",
       "ended_at_utc": "2026-07-10T20:40:20Z",
@@ -551,7 +551,7 @@
     },
     {
       "model_id": "google/gemma-4-31b-it",
-      "extension_id": "gemma4-31b-size-architecture-contrast",
+      "extension_id": "gemma4-31b-followup",
       "cell_statuses": {
         "pass": 2,
         "fail": 0
@@ -570,7 +570,7 @@
       "billed_credits": 0.00132133
     }
   ],
-  "gemma_size_architecture_contrast": {
+  "descriptive_gemma_followup": {
     "models": {
       "baseline": {
         "model_id": "google/gemma-4-26b-a4b-it",
@@ -626,7 +626,7 @@
         "billed_credits": "$0.00009355 lower (12.5% reduction)"
       }
     },
-    "interpretation": "The 31B trajectory was much shorter on the build but not on the repair. With one run per cell, this does not establish that the larger model caused the difference.",
+    "interpretation": "The two trajectories differed, but one run per cell cannot explain why. These values are retained as provenance and are not evidence about model size or architecture.",
     "confounds": [
       "Dense versus MoE architecture and active parameter count change with total size.",
       "The extension model was selected after the original six outcomes were known.",
