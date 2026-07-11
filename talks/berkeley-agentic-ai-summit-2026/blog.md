@@ -14,6 +14,20 @@ The harness ties these trends together.
 
 [Lilian Weng defines a harness](https://lilianweng.github.io/posts/2026-07-04-harness/) as the deployment system around a model: it controls planning, tool use, context, memory, permissions, workflow, and evaluation. Her central design direction is deliberately simple and generic machinery, with a goal-oriented loop that plans, executes, observes or tests, improves, and executes again.
 
+A harness is not one fixed architecture. Current projects choose different system boundaries:
+
+| Approach | Boundary it emphasizes |
+|---|---|
+| [Pi](https://pi.dev/docs/latest) | A minimal terminal core extended through skills, prompts, extensions, and packages; stronger isolation is supplied separately. |
+| [Oh My Pi](https://github.com/can1357/oh-my-pi) | A batteries-included Pi fork with hash-anchored edits, IDE tooling, persistent execution workers, memory, and subagents. |
+| [OpenHands](https://github.com/OpenHands/OpenHands) | A composable agent SDK and managed local, cloud, or enterprise runtime. |
+| [Omnigent](https://github.com/omnigent-ai/omnigent) | An open-source alpha meta-harness for swapping or composing agents under shared policies, sandboxes, and sessions. |
+| [Databricks' internal benchmark](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase) | An organizational evaluation and selection layer built from recent human pull requests, isolated runs, sealed Git history, and held-out tests. |
+
+These are overlapping layers, not a maturity ladder or a leaderboard. Databricks did not compare every project in this table: its workload-specific study compared Pi with the native Claude Code or Codex harness for the same model and thinking effort. It reported more than a 2× task-cost difference in some cases at similar quality, with Pi sending about 3× less context per turn. That is a private-codebase case study, not a universal ranking.
+
+A second, benchmark-specific signal comes from [Claw-SWE-Bench](https://arxiv.org/abs/2606.12344). Across five harnesses with Qwen 3.6-flash fixed, its reported Pass@1 spread was 27.4 percentage points, from 38.6% to 66.0%; the fixed-GLM 5.1 spread was 12.5 points. Those numbers support treating the harness as an experimental variable, not treating either spread as a general causal effect.
+
 That is the right level of abstraction for AskMe. A useful agent trace looks like this:
 
 | Step | Plan | Agent action | Evidence | Next move |
@@ -40,7 +54,7 @@ It also clarifies two different roles for feedback:
 
 The published smoke used the independent check for scoring after the run; it did not feed that final failure back into AskMe for recovery. A stronger harness would treat a tentative `done` as the trigger for one focused acceptance pass, return any failure for a bounded local correction, and still retain a held-out evaluator check.
 
-## Reasoning Should Shorten the Trajectory
+## The Reasoning Hypothesis Is About Trajectory Quality
 
 Reasoning matters between tool calls. It should:
 
@@ -76,17 +90,21 @@ The full eight-cell table, billing reconciliation, routes, prompts, and commands
 
 ## Test the Real Hypothesis Next
 
-A useful follow-up should start with syntactically valid multi-file code and a semantic integration failure: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules.
+A useful follow-up should start with four native, syntactically valid workflow tasks and semantic integration failures: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules. Starting natively keeps a new external-benchmark adapter from dominating the first policy comparison.
 
-The experiment should:
+Before any outcome-bearing call, the pilot should be predeclared and then registered at an immutable public commit or archive. It should:
 
-1. expose focused unit, execution, and integration feedback inside the loop;
-2. retain a separate held-out acceptance check;
-3. compare reasoning off, gated on semantic uncertainty, and always on;
-4. repeat and randomize runs under matched conditions;
-5. measure accepted outcomes, regressions, repeated actions, recovery turns, completed work redone, local corrections, full replans, latency, and tokens.
+1. freeze the four tasks, prompts, feedback, held-out checks, budgets, gate predicate, and exclusions before any measured run;
+2. compare a system-wide reasoning-off policy with the current composite gated policy under matched conditions;
+3. repeat each task three times in randomized policy order: 24 runs per model;
+4. use held-out acceptance and false completion—reported `complete` plus failed acceptance—over all valid scheduled runs as the two primary outcomes;
+5. report regressions, repeated actions, recovery turns, work redone, local corrections, full replans, latency, and tokens descriptively.
 
-Only then would a comparison of reasoning policies, model sizes, or model families support a conclusion.
+Here, `off` must disable the explicit reasoning channel on planner, executor and retry, local and full replan, and validator calls. `Gated` must freeze the current composite decision table across all of those sites, not only one error classifier. These are explicit-reasoning request policies, not direct measurements of internal cognition.
+
+At this scale, the pilot can reveal only large effects. A null result would still be informative if the deterministic harness guards, rather than extra reasoning, carried the outcome. External suites should follow as generalization checks after the policy path is stable: [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench) first, then [Datacurve's deep-swe benchmark](https://github.com/datacurve-ai/deep-swe), with [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1) later because it adds the largest harness-inside-harness boundary.
+
+This pilot can support a conclusion only about the tested policy on the frozen tasks. Model-size or model-family claims require a separate, appropriately powered design.
 
 ## The Claim That Survives
 

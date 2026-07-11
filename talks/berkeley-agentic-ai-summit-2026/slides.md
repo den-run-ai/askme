@@ -160,6 +160,42 @@ style: |
   .decision.local { border-top: 6px solid var(--teal); }
   .decision.replan { border-top: 6px solid var(--coral); }
   .decision.continue { border-top: 6px solid var(--blue); }
+  .harness-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(5, 1fr);
+    margin-top: 14px;
+  }
+  .harness-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-height: 205px;
+    padding: 15px 14px;
+  }
+  .harness-card:nth-child(1) { border-top: 7px solid var(--blue); }
+  .harness-card:nth-child(2) { border-top: 7px solid #6b5bd2; }
+  .harness-card:nth-child(3) { border-top: 7px solid var(--teal); }
+  .harness-card:nth-child(4) { border-top: 7px solid var(--amber); }
+  .harness-card:nth-child(5) { border-top: 7px solid var(--coral); }
+  .harness-card .kind {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 900;
+    min-height: 30px;
+    text-transform: uppercase;
+  }
+  .harness-card strong { display: block; font-size: 19px; margin: 8px 0 10px; }
+  .harness-card p { color: var(--muted); font-size: 15px; line-height: 1.3; margin: 0; }
+  .harness-seam {
+    background: #e9f7f3;
+    border-left: 6px solid var(--teal);
+    border-radius: 4px;
+    color: #285d53;
+    font-size: 18px;
+    margin-top: 16px;
+    padding: 12px 15px;
+  }
   .trend-grid {
     align-items: stretch;
     display: grid;
@@ -310,39 +346,31 @@ move.
 
 <div class="eyebrow">Why this matters now</div>
 
-# Two trends meet at the harness
+# Five approaches, five harness boundaries
 
-<div class="trend-grid">
-  <div class="trend model-side">
-    <div class="label">Smaller, open models</div>
-    <h2>More of the model stack is yours</h2>
-    <ul><li>Execution speed and cost</li><li>Hardware and deployment choice</li><li>Private, edge, or enterprise runtime</li><li>Direct post-training access</li><li>Potential builder and talent flywheel</li></ul>
-  </div>
-  <div class="bridge">
-    <div class="label">The bridge</div>
-    <h2>Tight<br>harnesses</h2>
-    <p>Context · tools · memory · permissions · workflow · evaluation</p>
-  </div>
-  <div class="trend workflow-side">
-    <div class="label">Full-workflow agents</div>
-    <h2>More of the lifecycle is agentic</h2>
-    <ul><li>Plan and coordinate</li><li>Search, edit, and execute</li><li>Test and verify</li><li>Preserve state across handoffs</li><li>Improve workflows—and agents</li></ul>
-  </div>
+<p class="subtitle">Same model; different context, tools, runtime, governance, and evaluation.</p>
+
+<div class="harness-grid">
+  <div class="harness-card"><div class="kind">Minimal · extensible</div><strong>Pi</strong><p>Small terminal core. Add skills, prompts, extensions, and packages.</p></div>
+  <div class="harness-card"><div class="kind">Tool-rich terminal</div><strong>Oh My Pi</strong><p>Hash-anchored edits, IDE tools, workers, memory, and subagents.</p></div>
+  <div class="harness-card"><div class="kind">Agent platform</div><strong>OpenHands</strong><p>Composable SDK plus local, cloud, and enterprise runtimes.</p></div>
+  <div class="harness-card"><div class="kind">Meta-harness · alpha</div><strong>Omnigent</strong><p>Swap or compose agents under policies, sandboxes, and shared sessions.</p></div>
+  <div class="harness-card"><div class="kind">Evaluation · selection</div><strong>Databricks</strong><p>Real PR tasks, isolated runs, sealed history, and held-out tests.</p></div>
 </div>
 
-<div class="callout"><strong>Model control expands what you can deploy.</strong> Harness design shapes how the system executes and verifies completion.</div>
+<div class="harness-seam"><strong>AskMe isolates one seam:</strong> execution evidence → bounded plan update → independent acceptance.</div>
 
-<div class="source">Framing: Lilian Weng and HyperAgents · deployment/tuning examples: Google Gemma docs · talent flywheel: practitioner hypothesis</div>
+<div class="source">Sources: Pi · Oh My Pi · OpenHands · Omnigent (open-source alpha) · Databricks internal coding benchmark, July 8, 2026</div>
 
 <!--
 Speaker notes (~45s):
-Smaller open models make execution, placement, weights, and post-training more
-controllable. Coding agents are becoming a substrate for broader user
-and enterprise workflows: they plan, use tools, preserve artifacts, verify results, and
-hand work across agents. Hyperagents go further by making agent systems themselves
-editable. Lilian Weng describes the harness as the deployment layer that controls how a
-model plans, acts, remembers, and evaluates. Tight, general harnesses make model control
-useful at workflow scale in practice.
+These are not interchangeable competitors; they choose harness boundaries. Pi keeps a
+minimal loop and invites extensions. Oh My Pi ships a richer terminal and IDE tool
+surface. OpenHands provides an agent SDK and managed runtime. Omnigent, alpha,
+coordinates harnesses under shared policies and sessions. Databricks adds the
+organizational evaluation layer: real pull requests, isolated runs, and held-out tests.
+AskMe is narrower; it studies how execution evidence becomes a bounded plan update and
+an accepted result.
 -->
 
 ---
@@ -444,30 +472,29 @@ reliability, or local-hardware conclusion.
 
 ---
 
-<div class="eyebrow">The next experiment</div>
+<div class="eyebrow">Pre-August native pilot</div>
 
-# Test the reasoning claim directly
+# Freeze the smallest clean test
 
 <div class="experiment-grid">
-  <div class="experiment"><div class="num">01</div><strong>Realistic failure</strong><p>Start with syntactically valid multi-file code and a semantic integration bug.</p></div>
-  <div class="experiment"><div class="num">02</div><strong>Feedback inside the loop</strong><p>Return focused execution and test results for a bounded repair.</p></div>
-  <div class="experiment"><div class="num">03</div><strong>Held-out acceptance</strong><p>Keep final scoring separate from feedback the agent sees.</p></div>
-  <div class="experiment"><div class="num">04</div><strong>Matched variants</strong><p>Repeat and randomize reasoning off, gated, and always-on policies.</p></div>
+  <div class="experiment"><div class="num">01</div><strong>4 frozen workflows</strong><p>Valid multi-file code, semantic failures, visible feedback, held-out scoring.</p></div>
+  <div class="experiment"><div class="num">02</div><strong>2 frozen policies</strong><p>Explicit-reasoning off versus the current composite gated policy.</p></div>
+  <div class="experiment"><div class="num">03</div><strong>3 randomized repeats</strong><p>4 × 2 × 3 = 24 scheduled runs per model.</p></div>
+  <div class="experiment"><div class="num">04</div><strong>2 primary outcomes</strong><p>Held-out acceptance and false completion across all valid runs.</p></div>
 </div>
 
-<div class="metrics"><strong>Measure:</strong> accepted behavior · recovery effort · plan stability</div>
+<div class="metrics"><strong>Secondary:</strong> repeated actions · work redone · local/full replans · latency · tokens</div>
 
-<div class="source">The published smoke validates the measurement path; it does not perform this causal experiment.</div>
+<div class="source">Publish tasks, policies, budgets, gate table, randomization, and exclusions before the first outcome-bearing call.</div>
 
 <!--
 Speaker notes (~45s):
-To test the reasoning claim, start with syntactically valid code and a semantic integration
-failure. Give the agent focused execution and test feedback inside its loop, then retain a
-held-out acceptance check. Compare reasoning off, gated on uncertainty, and
-always on with repeated randomized runs. Measure accepted outcomes, regressions, repeated
-actions, recovery turns, completed work redone, local corrections, full replans, latency,
-and tokens. Test whether reasoning consistently shortens recovery without
-destabilizing a plan.
+Before the summit, freeze the smallest clean pilot rather than rush external adapters.
+Use four native semantic workflows, explicit-reasoning off and current-gated policies,
+and three randomized repeats: twenty-four scheduled runs per model. Score every valid
+run with held-out acceptance and false completion as the two primary outcomes. Treat
+recovery and plan stability as descriptive. This is a feasibility study that can reveal
+only large effects. FeatureBench and other external suites test generalization later.
 -->
 
 ---

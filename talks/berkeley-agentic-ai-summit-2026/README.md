@@ -16,12 +16,12 @@
 ## Talk Arc
 
 1. Smaller open models offer more control over execution, hardware, deployment, post-training, and the builder ecosystem.
-2. Coding agents are expanding toward full-lifecycle user and enterprise workflows; self-improving hyperagents extend that direction.
-3. A tight harness connects controllable models to those workflows through simple actions, real execution feedback, persistent state, permissions, and acceptance.
+2. Harnesses choose different boundaries: minimal extensible loops, tool-rich terminals, managed runtimes, meta-orchestration, and enterprise evaluation.
+3. AskMe isolates one seam connecting controllable models to broader workflows: execution evidence, bounded plan updates, and independent acceptance.
 4. The retained failure—working code at the wrong artifact path—shows why successful actions and self-reported completion are not the same as a completed workflow.
 5. Reasoning should preserve progress and turn fresh evidence into the smallest useful plan update.
 6. The published smoke validates the measurement path, not a model hierarchy.
-7. The next experiment should test reasoning policies on realistic semantic integration failures with repeated, matched runs.
+7. The next experiment should freeze four native semantic workflows, compare explicit-reasoning off with the current gated policy, and use repeated held-out acceptance and false completion as primary outcomes.
 
 ## Evidence Boundary
 
@@ -53,6 +53,15 @@ npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
 
 - [Lilian Weng, “Harness Engineering for Self-Improvement”](https://lilianweng.github.io/posts/2026-07-04-harness/)
 - [HyperAgents](https://arxiv.org/abs/2603.19461)
+- [Pi documentation](https://pi.dev/docs/latest)
+- [Oh My Pi](https://github.com/can1357/oh-my-pi)
+- [OpenHands](https://github.com/OpenHands/OpenHands)
+- [Omnigent](https://github.com/omnigent-ai/omnigent)
+- [Databricks, “Benchmarking Coding Agents on Databricks’ Multi-Million Line Codebase”](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
+- [Claw-SWE-Bench](https://arxiv.org/abs/2606.12344)
+- [FeatureBench](https://github.com/LiberCoders/FeatureBench)
+- [Datacurve's deep-swe benchmark](https://github.com/datacurve-ai/deep-swe)
+- [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1)
 - [Google Gemma run and deployment guidance](https://ai.google.dev/gemma/docs/run)
 - [Google Gemma tuning guidance](https://ai.google.dev/gemma/docs/tune)
 - [Agentic AI Summit 2026 program](https://rdi.berkeley.edu/events/agentic-ai-summit-2026)
