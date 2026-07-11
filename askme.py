@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex
+import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex
 from pathlib import Path
 
 
@@ -143,6 +143,12 @@ MAX_STEPS = 10
 MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
+REASONING_POLICIES = ("gated", "off")
+DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
+if DEFAULT_REASONING_POLICY not in REASONING_POLICIES:
+    raise ValueError(
+        f"AGENT_REASONING_POLICY must be one of {', '.join(REASONING_POLICIES)}"
+    )
 
 SYSTEM_PLAN = f"""Planner. Propose tasks for the user request.
 Rules:
@@ -270,23 +276,52 @@ _STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation
 
 
 def ask_llm(messages, max_tokens=256, think=False, think_level=None,
-            max_retries=MAX_LLM_RETRIES, raw=False, timeout=None):
+            max_retries=MAX_LLM_RETRIES, raw=False, timeout=None,
+            reasoning_policy=DEFAULT_REASONING_POLICY,
+            reasoning_trigger="unspecified"):
+    if reasoning_policy not in REASONING_POLICIES:
+        raise ValueError(
+            f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}"
+        )
     for attempt in range(max_retries + 1):
         # Determine thinking level: explicit think_level overrides auto-escalation.
         # E03: on final auto-retry (attempt 2), disable thinking and use strict
         # contract instead — more thinking doesn't fix truncation/format errors.
-        # Explicit think_level from callers (e.g. validation) is always respected.
+        # Explicit think_level from callers (e.g. validation) is respected by
+        # gated policy; off suppresses every explicit and retry-time request.
         if think_level:
-            effective_think_level = think_level
+            gated_think_level = think_level
+            requested_level = think_level
         elif think:
+            requested_level = "adaptive"
             if attempt >= 2:
-                effective_think_level = None
+                gated_think_level = None
             else:
-                effective_think_level = "high" if attempt >= 1 else "medium"
-        elif attempt >= 1 and attempt < 2:
-            effective_think_level = "medium"
+                gated_think_level = "high" if attempt >= 1 else "medium"
+        elif attempt == 1:
+            # Existing JSON-contract recovery: one reasoning-assisted retry.
+            gated_think_level = "medium"
+            requested_level = "medium"
         else:
-            effective_think_level = None
+            gated_think_level = None
+            requested_level = None
+
+        effective_trigger = (
+            "json_retry"
+            if attempt == 1 and not think and not think_level
+            else reasoning_trigger
+        )
+        effective_think_level = (
+            gated_think_level if reasoning_policy == "gated" else None
+        )
+        _run_log({
+            "event": "reasoning_decision",
+            "requested_policy": reasoning_policy,
+            "requested_trigger": effective_trigger,
+            "requested_level": requested_level,
+            "effective_level": effective_think_level,
+            "attempt": attempt,
+        })
 
         body = {
             "model": MODEL,
@@ -506,7 +541,12 @@ def summarize_errors(errors):
 
 def get_plan(user_prompt, state):
     # Include environment and policy in planner state
-    plan_state = dict(state)
+    # Run-control metadata is logged/returned but is not task evidence for the
+    # model. Keeping it out also preserves the default planner prompt contract.
+    plan_state = {
+        key: value for key, value in state.items()
+        if key not in ("reasoning_policy", "goal_context_chars")
+    }
     if "environment" not in plan_state:
         plan_state["environment"] = {}
     if "policy" not in plan_state:
@@ -523,12 +563,21 @@ def get_plan(user_prompt, state):
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
     ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan,
-       timeout=LLM_TIMEOUT_REPLAN if is_replan else None)
+       timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
+       reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+       reasoning_trigger="planner_replan" if is_replan else "initial_plan")
 
 
-MAX_INPUT = 300  # max chars per field sent to executor
+MAX_INPUT = 300  # max chars per non-goal field sent to executor
+GOAL_CONTEXT_CHARS = int(os.environ.get("AGENT_GOAL_CONTEXT_CHARS", "300"))
+if GOAL_CONTEXT_CHARS < 1:
+    raise ValueError("AGENT_GOAL_CONTEXT_CHARS must be a positive integer")
 
-def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False):
+
+def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
+             reasoning_policy=DEFAULT_REASONING_POLICY,
+             reasoning_trigger="executor",
+             goal_context_chars=GOAL_CONTEXT_CHARS):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -558,14 +607,16 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False)
     if env.get("missing_tools"):
         slim["missing_tools"] = env["missing_tools"]
     slim["policy"] = state.get("policy", get_policy())
-    goal_line = f"GOAL:\n{goal[:MAX_INPUT]}\n\n" if goal else ""
+    goal_line = f"GOAL:\n{goal[:goal_context_chars]}\n\n" if goal else ""
     user_msg = f"{goal_line}TASK:\n{task[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(slim)}"
     # Use higher token budget for OpenRouter (faster model, needs room for write content + reasoning)
     step_tokens = 512 if LLM_BACKEND == "openrouter" else 256
     return ask_llm([
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
-    ], max_tokens=step_tokens, think=think)
+    ], max_tokens=step_tokens, think=think,
+       reasoning_policy=reasoning_policy,
+       reasoning_trigger=reasoning_trigger)
 
 
 SYSTEM_TASK_REPLAN = """You are a task replanner. A single task failed. Given the failed task, errors, and completed tasks, propose a replacement task description.
@@ -643,7 +694,8 @@ def _is_passive_replacement(original, replacement):
     )
 
 
-def replan_task(failed_task, errors, completed_tasks, state, user_prompt):
+def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
+                goal_context_chars=GOAL_CONTEXT_CHARS):
     """Mini-planner: generate a replacement for one failed task.
     Returns replacement task string, or None if replan fails."""
     global _last_task_replan_reject_reason
@@ -660,8 +712,10 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt):
     try:
         result = ask_llm([
             {"role": "system", "content": SYSTEM_TASK_REPLAN},
-            {"role": "user", "content": f"GOAL:\n{user_prompt[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(replan_state)}"}
-        ], max_tokens=TASK_REPLAN_MAX_TOKENS, think=False, max_retries=0)
+            {"role": "user", "content": f"GOAL:\n{user_prompt[:goal_context_chars]}\n\nSTATE:\n{json.dumps(replan_state)}"}
+        ], max_tokens=TASK_REPLAN_MAX_TOKENS, think=False, max_retries=0,
+           reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+           reasoning_trigger="task_local_replan")
         task = result.get("task", "")
         if not task or not isinstance(task, str):
             _last_task_replan_reject_reason = "empty"
@@ -794,7 +848,9 @@ def _validate_completion(user_prompt, state, working_dir):
         result = ask_llm([
             {"role": "system", "content": SYSTEM_VALIDATE},
             {"role": "user", "content": user_msg}
-        ], max_tokens=768, think=True, think_level="high", max_retries=0)
+        ], max_tokens=768, think=True, think_level="high", max_retries=0,
+           reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+           reasoning_trigger="final_validator")
         if isinstance(result, dict) and "valid" in result:
             return result
         log(f"  Validation returned unexpected format: {result}")
@@ -1105,13 +1161,24 @@ def execute(action, working_dir="."):
 
 
 def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
-              max_tasks=MAX_TASKS, max_steps=MAX_STEPS):
+              max_tasks=MAX_TASKS, max_steps=MAX_STEPS,
+              reasoning_policy=DEFAULT_REASONING_POLICY,
+              goal_context_chars=GOAL_CONTEXT_CHARS):
     """Core agent loop. Returns structured result dict.
 
     Used by run() (public API, returns bool) and by integration test harness
     (needs rich dict with state + log). All production behavior lives here:
     preflight, policy, null normalization, error reset, timeout retry, etc.
     """
+    if reasoning_policy not in REASONING_POLICIES:
+        raise ValueError(
+            f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}"
+        )
+    if goal_context_chars < 1:
+        raise ValueError("goal_context_chars must be a positive integer")
+    # Freeze the executor/replanner view once so all policy arms receive the same
+    # task context even if module configuration changes while a run is active.
+    goal_context = user_prompt[:goal_context_chars]
     state = {
         "completed_tasks": [],
         "errors": [],
@@ -1121,6 +1188,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         "validated_step_count": 0,
         "completed_step_groups": [],
         "all_steps": [],
+        "reasoning_policy": reasoning_policy,
+        "goal_context_chars": goal_context_chars,
     }
     history = []
     t_run = time.time()
@@ -1131,7 +1200,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
               "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
               "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
               "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
-              "limits": {"max_replans": max_replans, "max_tasks": max_tasks, "max_steps": max_steps}})
+              "reasoning_policy": reasoning_policy,
+              "limits": {"max_replans": max_replans, "max_tasks": max_tasks,
+                         "max_steps": max_steps,
+                         "goal_context_chars": goal_context_chars}})
     # Preflight: probe environment and set policy
     env = preflight_probe(working_dir)
     state["environment"] = env
@@ -1184,6 +1256,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 task_done = False
                 task_steps = []
                 use_think = False
+                reasoning_trigger = "executor"
                 dup_skip_count = 0
                 last_successful_edit = None
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
@@ -1195,8 +1268,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 for step in range(max_steps):
                     t_step = time.time()
                     try:
-                        action = get_step(task, state, goal=user_prompt, step_num=step,
-                                          max_steps=max_steps, think=use_think)
+                        action = get_step(
+                            task, state, goal=goal_context, step_num=step,
+                            max_steps=max_steps, think=use_think,
+                            reasoning_policy=reasoning_policy,
+                            reasoning_trigger=reasoning_trigger,
+                            goal_context_chars=goal_context_chars,
+                        )
                     except LLMTransportError as e:
                         log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
                         state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
@@ -1267,6 +1345,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 # Saves ~10s of thinking time on harmless first-time duplicates.
                                 if dup_skip_count >= 2:
                                     use_think = True
+                                    reasoning_trigger = "duplicate_action"
                                 continue
                         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                             if prev.get("ok"):
@@ -1404,6 +1483,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     log(f"  -> OK deterministic retry: {retry_result['output'][:80]}")
                                     task_steps.append(retry_step)
                                     use_think = False
+                                    reasoning_trigger = "executor"
                                     continue
                                 log(f"  -> FAIL deterministic retry: {retry_result['output'][:80]}")
                                 result = retry_result
@@ -1418,8 +1498,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             state["all_steps"][-1]["output"] = state["all_steps"][-1]["output"][:100] + f" → {hint}"
                         state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
                         use_think = etype not in _NO_THINK_ERRORS
+                        reasoning_trigger = f"execution_error:{etype}"
                     else:
                         use_think = False
+                        reasoning_trigger = "executor"
                         task_steps.append(step_entry)
                         if act == "edit":
                             last_successful_edit = (
@@ -1436,7 +1518,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     saved_errors = list(state["errors"])
                     t_lr = time.time()
                     replacement = replan_task(task, state["errors"],
-                                             state["completed_tasks"], state, user_prompt)
+                                             state["completed_tasks"], state,
+                                             goal_context,
+                                             goal_context_chars=goal_context_chars)
                     lr_wall = time.time() - t_lr
                     if replacement:
                         log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
@@ -1543,9 +1627,87 @@ def run(user_prompt, working_dir=None):
     return result["status"] == "complete"
 
 
+def _positive_int(value):
+    """argparse type for enforced, non-zero run budgets."""
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("must be an integer") from e
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Run AskMe against an isolated or existing working directory."
+    )
+    parser.add_argument("prompt", nargs="?", help="Task request")
+    parser.add_argument("--prompt-file", help="Read the task request from this file")
+    parser.add_argument("--working-dir", help="Existing workspace for the agent")
+    parser.add_argument("--result-json", help="Write the structured run result here")
+    parser.add_argument(
+        "--reasoning-policy", choices=REASONING_POLICIES,
+        default=DEFAULT_REASONING_POLICY,
+        help="Explicit-reasoning policy (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max-replans", type=_positive_int, default=MAX_REPLANS,
+        help="Maximum planning attempts, including the initial plan",
+    )
+    parser.add_argument(
+        "--max-tasks", type=_positive_int, default=MAX_TASKS,
+        help="Maximum tasks accepted from each plan",
+    )
+    parser.add_argument(
+        "--max-steps", type=_positive_int, default=MAX_STEPS,
+        help="Maximum executor steps per task attempt",
+    )
+    parser.add_argument(
+        "--goal-context-chars", type=_positive_int, default=GOAL_CONTEXT_CHARS,
+        help="Frozen goal characters available to executor and task replanner",
+    )
+    args = parser.parse_args(argv)
+
+    if (args.prompt is None) == (args.prompt_file is None):
+        parser.error("provide exactly one of prompt or --prompt-file")
+
+    if args.prompt_file is not None:
+        try:
+            user_prompt = Path(args.prompt_file).read_text()
+        except OSError as e:
+            parser.error(f"cannot read --prompt-file: {e}")
+    else:
+        user_prompt = args.prompt
+    if not user_prompt or not user_prompt.strip():
+        parser.error("prompt must not be empty")
+
+    if args.working_dir is None:
+        working_dir = tempfile.mkdtemp(prefix="askme_")
+    else:
+        workspace = Path(args.working_dir)
+        if not workspace.is_dir():
+            parser.error("--working-dir must name an existing directory")
+        working_dir = str(workspace)
+
+    result = _run_loop(
+        user_prompt,
+        working_dir,
+        max_replans=args.max_replans,
+        max_tasks=args.max_tasks,
+        max_steps=args.max_steps,
+        reasoning_policy=args.reasoning_policy,
+        goal_context_chars=args.goal_context_chars,
+    )
+    if args.result_json:
+        try:
+            Path(args.result_json).write_text(
+                json.dumps(result, indent=2, default=str) + "\n"
+            )
+        except OSError as e:
+            parser.error(f"cannot write --result-json: {e}")
+    return 0 if result["status"] == "complete" else 1
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 askme.py 'your request here'")
-        sys.exit(1)
-    success = run(sys.argv[1])
-    sys.exit(0 if success else 1)
+    sys.exit(_main())
