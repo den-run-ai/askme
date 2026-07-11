@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import askme
 import pytest
 
 from workflow_eval import (
@@ -198,6 +197,7 @@ def test_result_schema_is_json_serializable(tmp_path):
         "agent_status",
         "agent_complete",
         "agent_error",
+        "agent_run",
         "integrity_passed",
         "integrity_error",
         "run_valid",
@@ -233,6 +233,7 @@ def test_prompt_over_frozen_goal_cap_is_rejected(tmp_path):
     ("key", "value", "message"),
     [
         ("max_replans", 0, "must be a positive integer"),
+        ("agent_timeout_seconds", 0, "must be a positive integer"),
         ("final_validate", "sometimes", "must be one of"),
     ],
 )
@@ -246,13 +247,45 @@ def test_invalid_agent_limits_are_rejected(tmp_path, key, value, message):
         load_manifest(invalid)
 
 
-def test_askme_adapter_forwards_frozen_run_configuration(tmp_path):
+def test_askme_adapter_runs_cold_child_with_frozen_configuration(tmp_path):
     limits = load_manifest(MANIFEST)["agent_limits"]
     expected = {"status": "complete", "state": {}, "log": []}
 
+    def child_process(command, **kwargs):
+        def option(name):
+            return command[command.index(name) + 1]
+
+        assert Path(option("--working-dir")) == tmp_path
+        assert tmp_path.is_dir()
+        assert Path(option("--prompt-file")).read_text(encoding="utf-8") == (
+            "fix configuration"
+        )
+        assert option("--reasoning-policy") == "off"
+        assert option("--max-replans") == str(limits["max_replans"])
+        assert option("--max-tasks") == str(limits["max_tasks"])
+        assert option("--max-steps") == str(limits["max_steps"])
+        assert option("--goal-context-chars") == str(limits["goal_context_chars"])
+        assert kwargs["timeout"] == limits["agent_timeout_seconds"]
+        assert kwargs["env"]["AGENT_FINAL_VALIDATE"] == limits["final_validate"]
+        run_log = Path(kwargs["env"]["AGENT_RUN_LOG"])
+        assert str(run_log) != "/tmp/parent-agent-run.jsonl"
+        assert run_log.parent != tmp_path
+        run_log.write_text(
+            '{"event":"run_start","model":"test-model"}\n'
+            '{"event":"reasoning_decision","effective_level":null}\n',
+            encoding="utf-8",
+        )
+        Path(option("--result-json")).write_text(json.dumps(expected), encoding="utf-8")
+        return __import__("subprocess").CompletedProcess(
+            command, 0, stdout="child stdout", stderr="child stderr"
+        )
+
     with (
-        patch.object(askme, "FINAL_VALIDATE", "always"),
-        patch.object(askme, "_run_loop", return_value=expected) as run_loop,
+        patch.dict(
+            "workflow_eval.os.environ",
+            {"AGENT_RUN_LOG": "/tmp/parent-agent-run.jsonl"},
+        ),
+        patch("workflow_eval.subprocess.run", side_effect=child_process) as child,
     ):
         result = _askme_agent(
             "fix configuration",
@@ -260,15 +293,206 @@ def test_askme_adapter_forwards_frozen_run_configuration(tmp_path):
             reasoning_policy="off",
             agent_limits=limits,
         )
-        assert askme.FINAL_VALIDATE == "always"
 
-    assert result == expected
-    run_loop.assert_called_once_with(
-        "fix configuration",
-        str(tmp_path),
-        max_replans=limits["max_replans"],
-        max_tasks=limits["max_tasks"],
-        max_steps=limits["max_steps"],
-        reasoning_policy="off",
-        goal_context_chars=limits["goal_context_chars"],
+    assert result["status"] == "complete"
+    metadata = result["_workflow_adapter"]
+    assert metadata["status"] == "completed"
+    assert metadata["exit_code"] == 0
+    assert metadata["stdout"] == "child stdout"
+    assert metadata["stderr"] == "child stderr"
+    assert metadata["result"] == expected
+    assert metadata["run_log"]["status"] == "parsed"
+    assert metadata["run_log"]["event_count"] == 2
+    assert metadata["run_log"]["events"][0]["model"] == "test-model"
+    assert child.call_count == 1
+
+
+def test_askme_adapter_reports_missing_structured_result(tmp_path):
+    def missing_result_child(command, **kwargs):
+        Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
+            '{"event":"run_start","reasoning_policy":"gated"}\n',
+            encoding="utf-8",
+        )
+        return __import__("subprocess").CompletedProcess(
+            command, 2, stdout="", stderr="child crashed"
+        )
+
+    with patch("workflow_eval.subprocess.run", side_effect=missing_result_child):
+        adapter_result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="gated",
+            agent_limits=load_manifest(MANIFEST)["agent_limits"],
+        )
+
+    assert adapter_result["status"] == "error"
+    assert "did not write" in adapter_result["_workflow_adapter_error"]
+    assert "_workflow_adapter_infrastructure_error" not in adapter_result
+    metadata = adapter_result["_workflow_adapter"]
+    assert metadata["status"] == "missing_result"
+    assert metadata["exit_code"] == 2
+    assert metadata["stderr"] == "child crashed"
+    assert metadata["run_log"]["status"] == "parsed"
+
+    evaluated = evaluate_workflow(
+        MANIFEST,
+        lambda _prompt, _workspace: adapter_result,
+        workspace=tmp_path / "missing-result-workspace",
     )
+    assert evaluated["agent_status"] == "error"
+    assert evaluated["infrastructure_valid"] is True
+    assert evaluated["run_valid"] is True
+    assert evaluated["outcome"] == "incomplete_failure"
+
+
+def test_askme_adapter_reports_malformed_structured_result(tmp_path):
+    def malformed_child(command, **_kwargs):
+        result_path = Path(command[command.index("--result-json") + 1])
+        result_path.write_text("{not json", encoding="utf-8")
+        Path(_kwargs["env"]["AGENT_RUN_LOG"]).write_text(
+            '{"event":"run_start"}\n', encoding="utf-8"
+        )
+        return __import__("subprocess").CompletedProcess(
+            command, 0, stdout="partial", stderr=""
+        )
+
+    with patch("workflow_eval.subprocess.run", side_effect=malformed_child):
+        result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="gated",
+            agent_limits=load_manifest(MANIFEST)["agent_limits"],
+        )
+
+    assert result["status"] == "error"
+    assert "malformed" in result["_workflow_adapter_error"]
+    assert "_workflow_adapter_infrastructure_error" not in result
+    assert result["_workflow_adapter"]["status"] == "malformed_result"
+    assert result["_workflow_adapter"]["result_text"] == "{not json"
+
+
+def test_askme_adapter_launch_failure_is_explicit(tmp_path):
+    with patch("workflow_eval.subprocess.run", side_effect=OSError("no python")):
+        result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="gated",
+            agent_limits=load_manifest(MANIFEST)["agent_limits"],
+        )
+
+    assert result["status"] == "error"
+    assert "could not launch" in result["_workflow_adapter_error"]
+    assert "_workflow_adapter_infrastructure_error" in result
+    metadata = result["_workflow_adapter"]
+    assert metadata["status"] == "launch_error"
+    assert metadata["exit_code"] is None
+
+
+def test_askme_adapter_retains_malformed_run_log_evidence(tmp_path):
+    expected = {"status": "complete", "state": {}, "log": []}
+
+    def malformed_log_child(command, **kwargs):
+        result_path = Path(command[command.index("--result-json") + 1])
+        result_path.write_text(json.dumps(expected), encoding="utf-8")
+        Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
+            '{"event":"run_start"}\nnot-json\n', encoding="utf-8"
+        )
+        return __import__("subprocess").CompletedProcess(
+            command, 0, stdout="", stderr=""
+        )
+
+    with patch("workflow_eval.subprocess.run", side_effect=malformed_log_child):
+        result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="gated",
+            agent_limits=load_manifest(MANIFEST)["agent_limits"],
+        )
+
+    assert result["status"] == "error"
+    assert "malformed" in result["_workflow_adapter_error"]
+    metadata = result["_workflow_adapter"]
+    assert metadata["status"] == "malformed_run_log"
+    assert metadata["result"] == expected
+    assert metadata["run_log"]["events"] == [{"event": "run_start"}]
+    assert metadata["run_log"]["errors"][0]["line"] == 2
+
+
+def test_askme_timeout_is_a_valid_system_outcome_with_partial_evidence(tmp_path):
+    limits = load_manifest(MANIFEST)["agent_limits"]
+
+    def timed_out_child(command, **kwargs):
+        assert kwargs["timeout"] == limits["agent_timeout_seconds"]
+        Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
+            '{"event":"run_start","reasoning_policy":"off"}\n'
+            '{"event":"reasoning_decision","effective_level":null}\n',
+            encoding="utf-8",
+        )
+        raise __import__("subprocess").TimeoutExpired(
+            command,
+            limits["agent_timeout_seconds"],
+            output=b"partial stdout",
+            stderr=b"partial stderr",
+        )
+
+    with patch("workflow_eval.subprocess.run", side_effect=timed_out_child):
+        adapter_result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="off",
+            agent_limits=limits,
+        )
+
+    assert adapter_result["status"] == "error"
+    assert "timed out" in adapter_result["_workflow_adapter_error"]
+    assert "_workflow_adapter_infrastructure_error" not in adapter_result
+    metadata = adapter_result["_workflow_adapter"]
+    assert metadata["status"] == "timeout"
+    assert metadata["timeout_seconds"] == limits["agent_timeout_seconds"]
+    assert metadata["stdout"] == "partial stdout"
+    assert metadata["stderr"] == "partial stderr"
+    assert metadata["run_log"]["event_count"] == 2
+
+    evaluated = evaluate_workflow(
+        MANIFEST,
+        lambda _prompt, _workspace: adapter_result,
+        workspace=tmp_path / "timeout-workspace",
+    )
+    assert evaluated["agent_status"] == "error"
+    assert evaluated["infrastructure_valid"] is True
+    assert evaluated["run_valid"] is True
+    assert evaluated["outcome"] == "incomplete_failure"
+
+
+def test_unusable_provenance_is_retained_and_invalidates_protocol_run(tmp_path):
+    evidence = {
+        "status": "malformed_run_log",
+        "command": ["python", "askme.py"],
+        "exit_code": 2,
+        "stdout": "",
+        "stderr": "bad arguments",
+        "result": None,
+        "run_log": {"status": "malformed", "events": [], "errors": ["bad line"]},
+    }
+
+    def protocol_failure(_prompt, workspace):
+        assert workspace.is_dir()
+        assert (workspace / "config_cli.py").is_file()
+        return {
+            "status": "error",
+            "_workflow_adapter_error": "malformed run log",
+            "_workflow_adapter_infrastructure_error": "malformed run log",
+            "_workflow_adapter": evidence,
+        }
+
+    workspace = tmp_path / "copied-before-callback"
+    assert not workspace.exists()
+    result = evaluate_workflow(MANIFEST, protocol_failure, workspace=workspace)
+
+    assert result["agent_status"] == "error"
+    assert result["agent_error"] == "malformed run log"
+    assert result["agent_run"] == evidence
+    assert result["infrastructure_valid"] is False
+    assert result["run_valid"] is False
+    assert result["outcome"] == "invalid_run"
+    assert json.loads(json.dumps(result))["agent_run"]["exit_code"] == 2

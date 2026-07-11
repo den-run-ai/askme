@@ -30,8 +30,15 @@ AGENT_LIMIT_KEYS = (
     "max_tasks",
     "max_steps",
     "goal_context_chars",
+    "agent_timeout_seconds",
 )
 AgentCallback = Callable[[str, Path], Any]
+_ADAPTER_METADATA = "_workflow_adapter"
+_ADAPTER_ERROR = "_workflow_adapter_error"
+_ADAPTER_INFRASTRUCTURE_ERROR = "_workflow_adapter_infrastructure_error"
+MAX_CHILD_STREAM_CHARS = 20_000
+MAX_RUN_LOG_EVENTS = 2_000
+MAX_RUN_LOG_ERROR_CHARS = 1_000
 
 
 class ManifestError(ValueError):
@@ -220,6 +227,63 @@ def _agent_status(agent_result: Any) -> str:
     return "unknown"
 
 
+def _bounded_child_stream(value: Any) -> tuple[str, bool, int]:
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = value if isinstance(value, str) else "" if value is None else str(value)
+    length = len(text)
+    return text[:MAX_CHILD_STREAM_CHARS], length > MAX_CHILD_STREAM_CHARS, length
+
+
+def _read_agent_run_log(path: Path) -> tuple[dict[str, Any], Optional[str]]:
+    evidence: dict[str, Any] = {
+        "status": "parsed",
+        "events": [],
+        "event_count": 0,
+        "events_truncated": False,
+        "errors": [],
+    }
+    if not path.is_file():
+        error = "AskMe child did not write its isolated JSONL run log"
+        evidence["status"] = "missing"
+        evidence["errors"].append(error)
+        return evidence, error
+
+    try:
+        with path.open("r", encoding="utf-8") as source:
+            for line_number, line in enumerate(source, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                    if not isinstance(event, dict):
+                        raise ValueError("event must be a JSON object")
+                except (json.JSONDecodeError, ValueError) as exc:
+                    evidence["errors"].append({
+                        "line": line_number,
+                        "error": str(exc),
+                        "text": line[:MAX_RUN_LOG_ERROR_CHARS],
+                        "text_truncated": len(line) > MAX_RUN_LOG_ERROR_CHARS,
+                    })
+                    continue
+                evidence["event_count"] += 1
+                if len(evidence["events"]) < MAX_RUN_LOG_EVENTS:
+                    evidence["events"].append(event)
+                else:
+                    evidence["events_truncated"] = True
+    except (OSError, UnicodeError) as exc:
+        error = f"could not read AskMe JSONL run log: {exc}"
+        evidence["status"] = "unreadable"
+        evidence["errors"].append(error)
+        return evidence, error
+
+    if evidence["errors"]:
+        evidence["status"] = "malformed"
+        return evidence, "AskMe child JSONL run log contains malformed events"
+    return evidence, None
+
+
 def evaluate_workflow(
     manifest_path: Path | str,
     agent_callback: AgentCallback,
@@ -252,12 +316,26 @@ def evaluate_workflow(
     initial_hashes = _protected_hashes(workspace_path, manifest["protected_files"])
     infrastructure_errors: list[str] = []
     agent_error: Optional[str] = None
+    agent_run: Optional[dict[str, Any]] = None
     agent_result: Any = None
     try:
         try:
             agent_result = agent_callback(manifest["prompt"], workspace_path)
         except Exception as exc:  # The checks still run to preserve artifact evidence.
             agent_error = f"{type(exc).__name__}: {exc}"
+        if isinstance(agent_result, Mapping):
+            adapter_metadata = agent_result.get(_ADAPTER_METADATA)
+            if isinstance(adapter_metadata, Mapping):
+                agent_run = dict(adapter_metadata)
+            adapter_error = agent_result.get(_ADAPTER_ERROR)
+            if isinstance(adapter_error, str) and adapter_error:
+                agent_error = adapter_error
+            adapter_infrastructure_error = agent_result.get(
+                _ADAPTER_INFRASTRUCTURE_ERROR
+            )
+            if (isinstance(adapter_infrastructure_error, str) and
+                    adapter_infrastructure_error):
+                infrastructure_errors.append(adapter_infrastructure_error)
 
         final_hashes = _protected_hashes(workspace_path, manifest["protected_files"])
         changed = sorted(
@@ -330,6 +408,7 @@ def evaluate_workflow(
             "agent_status": status,
             "agent_complete": agent_complete,
             "agent_error": agent_error,
+            "agent_run": agent_run,
             "integrity_passed": integrity_passed,
             "integrity_error": integrity_error,
             "run_valid": run_valid,
@@ -364,25 +443,203 @@ def _askme_agent(
     reasoning_policy: str,
     agent_limits: Mapping[str, Any],
 ) -> Mapping[str, Any]:
+    """Run AskMe in a cold child process and return its structured result."""
     repository_root = Path(__file__).resolve().parent.parent
-    if str(repository_root) not in sys.path:
-        sys.path.insert(0, str(repository_root))
-    import askme
+    askme_script = repository_root / "askme.py"
+    workspace = workspace.resolve()
 
-    previous_final_validate = askme.FINAL_VALIDATE
-    askme.FINAL_VALIDATE = agent_limits["final_validate"]
-    try:
-        return askme._run_loop(
-            prompt,
-            str(workspace),
-            max_replans=agent_limits["max_replans"],
-            max_tasks=agent_limits["max_tasks"],
-            max_steps=agent_limits["max_steps"],
-            reasoning_policy=reasoning_policy,
-            goal_context_chars=agent_limits["goal_context_chars"],
+    def process_metadata(
+        status: str,
+        *,
+        command: Sequence[str] = (),
+        exit_code: Optional[int] = None,
+        stdout: Any = "",
+        stderr: Any = "",
+        result: Any = None,
+    ) -> dict[str, Any]:
+        bounded_stdout, stdout_truncated, stdout_chars = _bounded_child_stream(stdout)
+        bounded_stderr, stderr_truncated, stderr_chars = _bounded_child_stream(stderr)
+        return {
+            "status": status,
+            "command": list(command),
+            "exit_code": exit_code,
+            "stdout": bounded_stdout,
+            "stdout_chars": stdout_chars,
+            "stdout_truncated": stdout_truncated,
+            "stderr": bounded_stderr,
+            "stderr_chars": stderr_chars,
+            "stderr_truncated": stderr_truncated,
+            "result": result,
+            "run_log": {
+                "status": "not_started",
+                "events": [],
+                "event_count": 0,
+                "events_truncated": False,
+                "errors": [],
+            },
+        }
+
+    def failure(
+        error: str,
+        metadata: Mapping[str, Any],
+        *,
+        infrastructure_error: Optional[str] = None,
+    ) -> Mapping[str, Any]:
+        result = {
+            "status": "error",
+            _ADAPTER_ERROR: error,
+            _ADAPTER_METADATA: dict(metadata),
+        }
+        if infrastructure_error is not None:
+            result[_ADAPTER_INFRASTRUCTURE_ERROR] = infrastructure_error
+        return result
+
+    if not workspace.is_dir():
+        error = f"AskMe workspace does not exist: {workspace}"
+        return failure(
+            error,
+            process_metadata("workspace_error"),
+            infrastructure_error=error,
         )
-    finally:
-        askme.FINAL_VALIDATE = previous_final_validate
+
+    with tempfile.TemporaryDirectory(prefix="askme-workflow-adapter-") as directory:
+        exchange = Path(directory)
+        prompt_file = exchange / "prompt.txt"
+        result_file = exchange / "result.json"
+        run_log_file = exchange / "run.jsonl"
+        try:
+            prompt_file.write_text(prompt, encoding="utf-8")
+        except OSError as exc:
+            error = f"could not write AskMe prompt file: {exc}"
+            return failure(
+                error,
+                process_metadata("exchange_error", stderr=str(exc)),
+                infrastructure_error=error,
+            )
+
+        command = [
+            sys.executable,
+            str(askme_script),
+            "--prompt-file", str(prompt_file),
+            "--working-dir", str(workspace),
+            "--result-json", str(result_file),
+            "--reasoning-policy", reasoning_policy,
+            "--max-replans", str(agent_limits["max_replans"]),
+            "--max-tasks", str(agent_limits["max_tasks"]),
+            "--max-steps", str(agent_limits["max_steps"]),
+            "--goal-context-chars", str(agent_limits["goal_context_chars"]),
+        ]
+        environment = os.environ.copy()
+        environment["AGENT_FINAL_VALIDATE"] = str(agent_limits["final_validate"])
+        environment["AGENT_RUN_LOG"] = str(run_log_file)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=repository_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=agent_limits["agent_timeout_seconds"],
+            )
+        except subprocess.TimeoutExpired as exc:
+            timeout_seconds = agent_limits["agent_timeout_seconds"]
+            error = f"AskMe child timed out after {timeout_seconds} seconds"
+            metadata = process_metadata(
+                "timeout",
+                command=command,
+                stdout=exc.stdout,
+                stderr=exc.stderr,
+            )
+            metadata["timeout_seconds"] = timeout_seconds
+            metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
+            return failure(
+                error,
+                metadata,
+                infrastructure_error=run_log_error,
+            )
+        except OSError as exc:
+            error = f"could not launch AskMe child process: {exc}"
+            metadata = process_metadata(
+                "launch_error", command=command, stderr=str(exc)
+            )
+            metadata["run_log"], _ = _read_agent_run_log(run_log_file)
+            return failure(error, metadata, infrastructure_error=error)
+
+        metadata = process_metadata(
+            "completed",
+            command=command,
+            exit_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+        metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
+        if not result_file.is_file():
+            metadata["status"] = "missing_result"
+            error = (
+                "AskMe child did not write its structured result "
+                f"(exit code {completed.returncode})"
+            )
+            return failure(error, metadata, infrastructure_error=run_log_error)
+
+        try:
+            result_text = result_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            metadata["status"] = "unreadable_result"
+            metadata["result_error"] = str(exc)
+            return failure(
+                f"could not read AskMe structured result: {exc}",
+                metadata,
+                infrastructure_error=run_log_error,
+            )
+        try:
+            child_result = json.loads(result_text)
+        except json.JSONDecodeError as exc:
+            metadata["status"] = "malformed_result"
+            metadata["result_error"] = str(exc)
+            bounded_result, result_truncated, result_chars = _bounded_child_stream(
+                result_text
+            )
+            metadata["result_text"] = bounded_result
+            metadata["result_text_chars"] = result_chars
+            metadata["result_text_truncated"] = result_truncated
+            return failure(
+                f"AskMe structured result is malformed: {exc}",
+                metadata,
+                infrastructure_error=run_log_error,
+            )
+
+        if (not isinstance(child_result, dict) or
+                not isinstance(child_result.get("status"), str) or
+                not child_result["status"]):
+            metadata["status"] = "malformed_result"
+            metadata["result"] = child_result
+            error = "AskMe structured result must contain a non-empty string status"
+            return failure(error, metadata, infrastructure_error=run_log_error)
+
+        metadata["result"] = child_result
+        expected_exit = 0 if child_result["status"] == "complete" else 1
+        if completed.returncode != expected_exit:
+            metadata["status"] = "exit_result_mismatch"
+            error = (
+                f"AskMe exit code {completed.returncode} conflicts with "
+                f"structured status {child_result['status']!r}"
+            )
+            return failure(error, metadata, infrastructure_error=run_log_error)
+
+        if run_log_error is not None:
+            metadata["status"] = metadata["run_log"]["status"] + "_run_log"
+            return failure(
+                run_log_error,
+                metadata,
+                infrastructure_error=run_log_error,
+            )
+
+        return {
+            "status": child_result["status"],
+            _ADAPTER_METADATA: metadata,
+        }
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
