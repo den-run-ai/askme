@@ -10,8 +10,8 @@
 - [`slides.md`](slides.md) - Marp source with 499-word speaker notes (about 4:00-4:10 read straight, leaving pause and transition buffer).
 - `slides.pdf` - rendered deck.
 - [`blog.md`](blog.md) - short companion post.
-- [`evals/README.md`](evals/README.md) - exact draft eval protocol and commands.
-- `evals/draft-results.json` - compact result data once the authenticated run completes.
+- [`evals/README.md`](evals/README.md) - exact eval protocol, commands, and measured outcomes.
+- [`evals/draft-results.json`](evals/draft-results.json) - compact per-cell results, provenance, and infrastructure audit.
 
 ## Render
 
@@ -34,7 +34,7 @@ npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
 The deck distinguishes three kinds of evidence:
 
 1. **Historical local traces.** The missing-header timeline comes from three traces of one slow Gemma 4 E4B microtask in [`PERFORMANCE.md`](../../PERFORMANCE.md). It is not presented as a suite-wide percentage or an ablation.
-2. **Current hosted smoke.** Three models run two tasks once each through the same NanAgent commit and strictly pinned SiliconFlow routing with FP8 endpoints. A pass requires agent completion and an independently executed postcondition. This is an integration smoke (`n=1`), not a reliability estimate.
+2. **Current hosted smoke.** Four models ran two tasks once each through the same NanAgent implementation with SiliconFlow-only routing and fallbacks disabled. Gemma 4 31B was added as an exploratory extension after the original six outcomes were frozen. A pass requires pytest, agent completion, and an independently repeated postcondition. OpenRouter response metadata supplies the served model/provider; FP8 comes separately from time-stamped catalog matches. This is an integration smoke (`n=1`), not a reliability estimate. The dense-31B versus MoE-26B comparison changes size and architecture together, so it is not a causal size ablation.
 3. **Architecture.** Typed errors, JSON repair, task-local replanning, deterministic repair, and completion checks are implementation features documented in [`ARCHITECTURE.md`](../../ARCHITECTURE.md). The talk does not claim each feature has a matched causal ablation.
 
 These tasks are small C/Python build-and-repair jobs. They are not full-app generation. No LiveCodeBench result is used: contest-style single-problem coding does not test the stateful, multi-step tool loop discussed here.

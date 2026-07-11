@@ -143,6 +143,11 @@ style: |
     margin-top: 18px;
     padding: 12px 15px;
   }
+  .callout.compact {
+    font-size: 18px;
+    margin-top: 9px;
+    padding: 9px 13px;
+  }
   .flow {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -204,20 +209,21 @@ style: |
   .model-lane {
     align-items: center;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
     margin-bottom: 14px;
   }
   .model {
     background: #edf4ff;
     border-bottom: 5px solid var(--blue);
     border-radius: 6px;
-    font-size: 18px;
-    padding: 12px;
+    font-size: 16px;
+    padding: 10px 8px;
     text-align: center;
   }
   .model:nth-child(2) { background: #e9f7f3; border-color: var(--teal); }
   .model:nth-child(3) { background: #fff3e5; border-color: var(--amber); }
+  .model:nth-child(4) { background: #fff0ed; border-color: var(--coral); }
   .model strong { display: block; }
   .model span { color: var(--muted); font-size: 14px; }
   table.results {
@@ -243,26 +249,26 @@ style: |
   table.results td:first-child { font-weight: 800; }
   .result-grid {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     grid-template-columns: 1.55fr 1fr 1fr 0.78fr 0.9fr;
-    margin: 15px 8px 0;
+    margin: 10px 8px 0;
   }
   .result-cell {
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 6px;
-    font-size: 18px;
-    min-height: 37px;
-    padding: 11px 12px;
+    font-size: 16px;
+    min-height: 30px;
+    padding: 8px 10px;
   }
   .result-cell.head {
     background: transparent;
     border-color: transparent;
     color: var(--muted);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 800;
-    min-height: 24px;
-    padding-bottom: 4px;
+    min-height: 21px;
+    padding-bottom: 3px;
   }
   .result-cell.model-name { font-weight: 800; }
   .pending { color: var(--amber); font-weight: 900; }
@@ -418,9 +424,9 @@ less dependent on intelligence for mechanical work, and it survives model upgrad
 
 ---
 
-<div class="eyebrow">Draft OpenRouter smoke · July 10, 2026</div>
+<div class="eyebrow">Measured OpenRouter smoke · July 10, 2026</div>
 
-# Six runs, two concrete jobs
+# Four models, two concrete jobs
 
 <div class="task-grid">
   <div class="task"><div class="label">MULTI-FILE BUILD</div><strong>Header + source → compile → run</strong><code>msg.h + main.c · ./main == REPLAN_OK</code></div>
@@ -429,49 +435,51 @@ less dependent on intelligence for mechanical work, and it survives model upgrad
 
 <div class="model-lane">
   <div class="model"><strong>Gemma 4 26B A4B</strong><span>MoE · 3.8B active</span></div>
+  <div class="model"><strong>Gemma 4 31B</strong><span>dense · 30.7B</span></div>
   <div class="model"><strong>Qwen3.6-27B</strong><span>dense · 27B</span></div>
   <div class="model"><strong>Qwen3.6-35B-A3B</strong><span>MoE · 3B active</span></div>
 </div>
 
-<p class="tiny"><strong>Held fixed:</strong> NanAgent commit, prompts, SiliconFlow routing with FP8 endpoints, reasoning off initially with one retry policy, strict external checks. <strong>n=1 per cell.</strong></p>
+<p class="tiny"><strong>Held fixed:</strong> NanAgent implementation, task prompt, SiliconFlow-only routing, one retry policy, strict external checks. Unique catalog matches were FP8. <strong>n=1/cell.</strong> 31B was a post-hoc extension.</p>
 
 <div class="source">Exact protocol and commands: evals/README.md · Model architecture: official Google and Qwen model cards</div>
 
 <!--
 Speaker notes (~40s):
-For this talk I added a tiny hosted smoke: three models, two jobs, one run per cell. Job
-one creates a header and source file, then compiles and runs them. Job two repairs a broken
-Python file, which we execute independently. Provider, prompts, commit, and reasoning
-policy are pinned. Six runs are not a leaderboard or reliability estimate. They are a
-receipt: can each model drive this loop and leave an artifact that runs?
+For this talk I ran four hosted models on two jobs, one run per cell. Job one creates a
+header and source, compiles, and runs them. Job two repairs Python, which we execute
+independently. Provider, prompts, commit, and policy are pinned. Gemma thirty-one B was
+added after the original six outcomes were frozen. Eight cells are not a leaderboard.
+The Gemma pair changes size and architecture together.
 -->
 
 ---
 
-<div class="eyebrow">Draft result · replace after authenticated run</div>
+<div class="eyebrow">Eight measured cells · July 10, 2026</div>
 
 # What happened?
 
 <div class="result-grid">
-  <div class="result-cell head">Model</div><div class="result-cell head">2-file build</div><div class="result-cell head">Repair</div><div class="result-cell head">LLM calls</div><div class="result-cell head">Billed credits</div>
-  <div class="result-cell model-name">Gemma 4 26B A4B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
-  <div class="result-cell model-name">Qwen3.6-27B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
-  <div class="result-cell model-name">Qwen3.6-35B-A3B</div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell"><span class="pending">PENDING</span></div><div class="result-cell">—</div><div class="result-cell">—</div>
+  <div class="result-cell head">Model</div><div class="result-cell head">2-file build</div><div class="result-cell head">Repair</div><div class="result-cell head">Responses</div><div class="result-cell head">Billed credits</div>
+  <div class="result-cell model-name">Gemma 4 26B A4B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">603.6s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">20.0s</span></div><div class="result-cell">39</div><div class="result-cell">$0.004147</div>
+  <div class="result-cell model-name">Gemma 4 31B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">66.5s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">22.4s</span></div><div class="result-cell">19</div><div class="result-cell">$0.001321</div>
+  <div class="result-cell model-name">Qwen3.6-27B</div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">47.9s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">23.0s</span></div><div class="result-cell">22</div><div class="result-cell">$0.004968</div>
+  <div class="result-cell model-name">Qwen3.6-35B-A3B</div><div class="result-cell"><span class="fail">FAIL</span> <span class="tiny">17.7s</span></div><div class="result-cell"><span class="pass">PASS</span> <span class="tiny">11.8s</span></div><div class="result-cell">14</div><div class="result-cell">$0.001875</div>
 </div>
 
-<p class="tiny">Pass means both <strong>agent complete</strong> and the deterministic postcondition passed. Latency is shown per task because it is provider- and network-dependent.</p>
+<p class="tiny">Pass requires pytest, <strong>agent complete</strong>, and the external check. “Responses” means usage-bearing model replies; raw HTTP attempts were not instrumented.</p>
 
-<div class="callout"><strong>Read this as a smoke test.</strong> One run can find an integration failure; it cannot estimate a success rate.</div>
+<div class="callout compact"><strong>7/8 passed.</strong> Gemma: both 2/2 · 31B build used 8 vs 29 responses · repair used 11 vs 10. Size + architecture changed.</div>
 
-<div class="source">Result data will be committed as evals/draft-results.json. Current .env key returned 401 before billing.</div>
+<div class="source">Raw summary: evals/draft-results.json · route: response metadata · FP8: catalog match · infrastructure failures excluded</div>
 
 <!--
-Speaker notes (~35s):
-The definition of pass is strict: the agent must report completion and the program must
-run under a deterministic postcondition. Calls and billed credits capture loop efficiency
-better than a response score. One run can expose a parser, routing, or recovery problem.
-It cannot tell us a model is reliable. Treat these cells as a draft integration smoke,
-nothing more.
+Speaker notes (~40s):
+Seven of eight passed. Qwen thirty-five B reported complete but left slash tmp slash test
+instead of main. Both Gemmas passed both jobs. On build, thirty-one B used eight responses
+and sixty-six seconds versus twenty-nine and six hundred four. On repair, it used one more
+response and was slightly slower. Size and architecture changed, so this is not causal in
+this single observed run.
 -->
 
 ---
@@ -487,7 +495,7 @@ nothing more.
       <li>Structured actions survive the model/provider path</li>
       <li>The loop can build or repair these exact programs</li>
       <li>The resulting artifact executes correctly</li>
-      <li>Calls, tokens, route, and cost are auditable</li>
+      <li>Responses, tokens, route, and cost are auditable</li>
     </ul>
   </div>
   <div class="proof no">
@@ -496,6 +504,7 @@ nothing more.
       <li>Full-app or long-horizon reliability</li>
       <li>Local-laptop speed from hosted runs</li>
       <li>UX, architecture, or maintainability quality</li>
+      <li>Model size alone caused the Gemma gap</li>
       <li>Contest-code scores predict agent performance</li>
     </ul>
   </div>
@@ -505,11 +514,12 @@ nothing more.
 
 <!--
 Speaker notes (~40s):
-The claim has to stay the size of the evidence. We verify that structured actions survive
-the provider path, these two jobs complete, and the programs run. We do not verify full-app
-reliability, long refactors, code quality, or local speed. I am intentionally not using
-LiveCodeBench. Contest problems measure raw coding, but not stateful tool use across files
-and steps. For agent work, executable postconditions are closer to the question.
+The claim stays the size of the evidence. We verify that structured actions survive the
+provider path, these jobs complete, and the programs run. We do not verify full-app
+reliability, long refactors, code quality, or local speed. Nor did size alone cause the
+Gemma gap. I am not using LiveCodeBench. Contest problems measure raw coding, but not
+stateful tool use across files and steps. For agents, executable postconditions are closer
+to the question.
 -->
 
 ---

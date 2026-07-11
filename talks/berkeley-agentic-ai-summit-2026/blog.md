@@ -41,11 +41,12 @@ Five changes matter in practice:
 
 These are engineering responses to observed failure modes. They are not five independent ablations, and I do not claim each one beats a model upgrade.
 
-## A Six-Run Draft Smoke
+## An Eight-Cell Hosted Smoke
 
-For the Berkeley talk, I added a deliberately small OpenRouter comparison. It runs three hosted models through the same NanAgent commit and strictly pinned SiliconFlow routing with FP8 endpoints:
+For the Berkeley talk, I added a deliberately small OpenRouter comparison. The original six-cell matrix ran three hosted models; after those outcomes were frozen, I added dense Gemma 4 31B as a two-cell exploratory extension. Every model used the same NanAgent implementation with SiliconFlow-only routing and fallbacks disabled. In authenticated endpoint-catalog snapshots, each model had one SiliconFlow match and each match was FP8:
 
 - Google Gemma 4 26B A4B
+- Google Gemma 4 31B
 - Qwen3.6-27B
 - Qwen3.6-35B-A3B
 
@@ -54,19 +55,28 @@ Each model gets one task run for each of two jobs:
 - **Multi-file build:** write `msg.h` and `main.c`, compile them, and leave an executable whose output contains `REPLAN_OK`.
 - **Repair:** fix a syntax error in `greet.py`, then leave a script that exits zero and prints `hello`.
 
-The first/no-retry call explicitly disables reasoning for every model; retries enable the same harness reasoning policy. A pass requires both `agent_complete` and the deterministic postcondition. Model ID, selected endpoint, calls, tokens, billed credits, commit, and dirty state are recorded.
+The first/no-retry call explicitly disables reasoning for every model; retries use the same harness policy. A pass requires pytest, `agent_complete`, and an independently repeated deterministic postcondition. Requested and served model, provider, usage-bearing responses, tokens, billed credits, commit, and dirty state are recorded.
 
 <!-- EVAL_RESULTS_START -->
-| Model | Build + run | Repair + run | LLM calls | Billed credits |
+| Model | Build (P/A/X) | Repair (P/A/X) | Usage responses | Billed credits |
 |---|---:|---:|---:|---:|
-| Gemma 4 26B A4B | Pending authenticated run | Pending authenticated run | - | - |
-| Qwen3.6-27B | Pending authenticated run | Pending authenticated run | - | - |
-| Qwen3.6-35B-A3B | Pending authenticated run | Pending authenticated run | - | - |
+| Gemma 4 26B A4B | **PASS** (✓/✓/✓; 603.6s) | **PASS** (✓/✓/✓; 20.0s) | 39 | $0.00414692 |
+| Gemma 4 31B | **PASS** (✓/✓/✓; 66.5s) | **PASS** (✓/✓/✓; 22.4s) | 19 | $0.00132133 |
+| Qwen3.6-27B | **PASS** (✓/✓/✓; 47.9s) | **PASS** (✓/✓/✓; 23.0s) | 22 | $0.00496840 |
+| Qwen3.6-35B-A3B | **FAIL** (✗/✓/✗; 17.7s) | **PASS** (✓/✓/✓; 11.8s) | 14 | $0.00187520 |
 <!-- EVAL_RESULTS_END -->
 
-This is `n=1` per cell. It can reveal that a model/provider path cannot follow the action contract or recover on one task. It cannot estimate a success rate, rank the models, or prove that any of them can build a full application reliably.
+`P/A/X` means pytest, agent completion, and the external check. “Usage responses” counts responses with token-usage events; raw chat-completions HTTP attempts were not instrumented. The per-model counts and credits sum both tasks. Across all eight cells, seven passed all three criteria and all eight agents reported completion. The 94 usage responses reported $0.01231185 in cost; the original matrix, 31B extension, and combined total each reconciled exactly to the API key usage delta.
 
-The exact commands and repeat policy live in [`evals/README.md`](evals/README.md). The initial run was not billed because the repository's `.env` key returned `401 User not found`; the table will be filled only from a successful authenticated run.
+The failure is the interesting receipt. Qwen3.6-35B-A3B created correct source and header files, compiled and ran `/tmp/test`, then reported completion. It did not leave the required `main` executable, so pytest and the independent probe failed it. The result was retained rather than replaced.
+
+The added Gemma pair gives an exploratory size-and-architecture contrast. Both variants passed both cells. On the build, dense 31B finished in 66.5 seconds and 8 responses versus 603.6 seconds and 29 responses for 26B A4B. On repair, however, 31B was slightly slower and used one more response: 22.4 seconds and 11 responses versus 20.0 seconds and 10. It still used fewer tokens and cost slightly less.
+
+That is not a clean estimate of the impact of size. Gemma 4 31B is a dense 30.7B model; 26B A4B is a 25.2B-total MoE with 3.8B active per token. Architecture, active compute, stochastic trajectory, and provider load all change or remain uncontrolled. The build difference is a useful observation, while the repair result warns against turning it into “larger is always faster.”
+
+This is `n=1` per cell. It can reveal that a model/provider path missed one action contract. It cannot estimate a success rate, rank the models, isolate model size, or prove that any of them can build a full application reliably.
+
+The exact commands, per-cell metrics, routing provenance, and repeat policy live in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json). Before the recorded matrix, an earlier setup attempt with the old key returned `401 User not found`. It produced no model response, token event, or billed usage and is retained only in the infrastructure audit.
 
 ## Why Not LiveCodeBench?
 
