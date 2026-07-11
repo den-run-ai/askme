@@ -5,14 +5,17 @@ The frozen policy and outcome definitions are in [PROTOCOL.md](PROTOCOL.md).
 Phase 1 contains one deterministic configuration-precedence workflow. The
 manifest points to a syntactically valid seed repository, protected public
 tests, a regression command that passes on the seed, a visible feedback command
-that fails on the seed, and a behavioral acceptance evaluator. A reference-like
-fix passes all three checks.
+that fails on the seed, and a behavioral acceptance evaluator. Both the
+same-author reference and a separately authored alternative must pass all three
+checks before an outcome-bearing run; the alternative's source and provenance
+live under `tests/workflow_alternatives/`.
 
 Each manifest freezes the agent budgets (`max_replans`, `max_tasks`,
-`max_steps`, and `goal_context_chars`) and final-validator policy. A prompt over
-its declared goal-context cap is rejected before the callback runs; the harness
-does not silently truncate task requirements. The selected `off` or `gated`
-reasoning policy and all limits are copied into every structured result.
+`max_steps`, `goal_context_chars`, and the outer `agent_timeout_seconds`) and
+final-validator policy. A prompt over its declared goal-context cap is rejected
+before the callback runs; the harness does not silently truncate task
+requirements. The selected `off` or `gated` reasoning policy and all limits are
+copied into every structured result.
 
 The runner copies only the seed into a fresh working directory. The held-out
 evaluator remains outside that copied workspace and is invoked after the agent
@@ -34,7 +37,9 @@ The no-op is expected to preserve public regressions while failing visible
 feedback and held-out acceptance. The result records infrastructure validity,
 protected-test integrity, and their conjunction (`run_valid`) independently
 from agent completion and artifact checks. To execute AskMe against a configured
-backend, opt in explicitly with `--agent askme`.
+backend, opt in explicitly with `--agent askme`; this path starts `askme.py` as
+a fresh CLI subprocess and passes the manifest's workspace, policy, and budgets
+explicitly.
 
 `outcome` is one of:
 

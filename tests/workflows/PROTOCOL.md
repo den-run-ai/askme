@@ -65,8 +65,20 @@ incomplete artifacts remain visible.
 ## Qualification and exclusions
 
 Before model runs, the no-op seed must preserve regressions while failing
-visible feedback and held-out acceptance. A reference-like implementation must
-pass every artifact check. Each trial starts from a fresh copied fixture.
+visible feedback and held-out acceptance. A same-author reference
+implementation and an independently authored alternative must each pass every
+artifact check. The alternative author may use the task prompt and protected
+public checks, but not the reference implementation or held-out evaluator; its
+provenance is retained with the fixture. Each trial starts from a fresh copied
+fixture.
+
+Outcome-bearing AskMe runs use a cold-start CLI subprocess with a prompt file,
+the copied working directory, a structured result path, and every frozen policy
+and inner budget passed explicitly; the parent enforces the manifest's frozen
+wall-clock timeout. In-process callbacks remain available only for offline
+runner qualification. This prevents Python module state from leaking between
+scheduled cells and exercises the same process boundary used by an external
+adapter.
 
 Only failures before any model response may be repeated as infrastructure
 invalidity. Timeouts, malformed responses, crashes, wrong artifacts, tool/test

@@ -85,7 +85,8 @@ python3 tests/bench_harness.py --test test_shell_and_write        # single test
 python3 tests/bench_harness.py --list                             # show available tests
 
 # Native semantic-workflow qualification (offline; no model call)
-python3 -m pytest tests/test_workflow_eval.py -q
+python3 -m pytest \
+  tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
 python3 tests/workflow_eval.py \
   tests/workflows/config_precedence/manifest.json --agent noop
 ```
