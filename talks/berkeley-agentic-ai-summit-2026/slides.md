@@ -225,6 +225,12 @@ style: |
     margin-top: 18px;
     padding: 11px 15px;
   }
+  .bridge-caption span { display: block; font-size: 14px; margin-top: 3px; }
+  .result-limit {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 8px 0 0;
+  }
   .matrix-summary {
     display: grid;
     gap: 12px;
@@ -286,8 +292,23 @@ style: |
     line-height: 1.3;
     margin: 10px 0 0;
   }
+  .matrix-interpretation {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 0.9fr 1.4fr;
+    margin-top: 10px;
+  }
+  .matrix-interpretation > div {
+    border-radius: 5px;
+    font-size: 13px;
+    line-height: 1.3;
+    padding: 8px 11px;
+  }
+  .matrix-interpretation strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .matrix-interpretation .supported { background: #e9f7f3; color: #285d53; }
+  .matrix-interpretation .unsupported { background: #fff2df; color: #7a5008; }
   .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
-  .experiment { min-height: 164px; }
+  .experiment { min-height: 145px; }
   .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
   .metrics {
     background: #e9f7f3;
@@ -298,6 +319,34 @@ style: |
     margin-top: 18px;
     padding: 12px 15px;
   }
+  .pilot-status {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    color: #7a5008;
+    font-size: 17px;
+    font-weight: 850;
+    margin-top: 13px;
+    padding: 10px 15px;
+  }
+  .conclusion-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 30px 0 26px;
+  }
+  .conclusion-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    min-height: 190px;
+    padding: 18px 19px;
+  }
+  .conclusion-card.observed { border-top: 7px solid var(--blue); }
+  .conclusion-card.supported { border-top: 7px solid var(--teal); }
+  .conclusion-card.open { border-top: 7px solid var(--amber); }
+  .conclusion-card strong { display: block; font-size: 20px; margin-bottom: 10px; }
+  .conclusion-card p { color: var(--muted); font-size: 16px; margin: 0; }
   .loop {
     display: grid;
     gap: 10px;
@@ -330,7 +379,7 @@ style: |
 
 # Are Small LLMs Ready for Coding Agents?
 
-<p class="title-message">A tight harness connects controllable models to accepted full workflows.</p>
+<p class="title-message">Can tight execution feedback turn bounded small-model actions into accepted workflows?</p>
 
 </div>
 
@@ -341,12 +390,12 @@ style: |
 
 <!--
 Speaker notes (~40s):
-The title is a question, not a verdict. Smaller open models are attractive because they
-offer control over execution speed, hardware, deployment, post-training, and the builder
-ecosystem. Coding agents are also moving beyond code edits toward full-lifecycle
-workflows. My question is whether a tight harness can connect those trends: keep each
-action small, return real execution evidence, preserve progress, and judge the delivered
-workflow.
+The title is a question, not a verdict. Here, small is a deployment class, not one
+parameter cutoff. The hosted receipts span roughly three-to-four-billion-active mixtures
+and twenty-seven-to-thirty-one-billion dense models; they do not measure local
+performance. Teams want control over speed, hardware, deployment, and post-training on
+their chosen hardware and stack. The question is whether tight execution feedback can
+turn bounded actions into accepted workflows.
 -->
 
 ---
@@ -363,21 +412,21 @@ workflow.
   <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">Accepted full workflow</div><h2>Keep and check the contract</h2><ul><li>Preserve completed work</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
 </div>
 
-<div class="bridge-caption"><strong>The bridge:</strong> small action surface + fresh execution feedback + independent workflow acceptance.</div>
+<div class="bridge-caption"><strong>The bridge:</strong> small action surface + fresh execution feedback + independent workflow acceptance.<span>Assumes bounded actions, informative feedback, and independently testable success.</span></div>
 
 <!--
 Speaker notes (~45s):
-The technical bridge: start with a controllable small model. AskMe narrows each turn to
-one small action, executes it, and returns fresh test or runtime evidence. The surrounding
-harness keeps the full contract and completed work in view. The model can continue,
-repair locally, or replan only when an assumption breaks. Independent acceptance then
-checks the required behavior and artifact. The point is not a smaller standard; it is a
-simpler interface that makes feedback useful.
+AskMe narrows each turn to one small action, executes it, and returns fresh test or
+runtime evidence. The harness keeps the full contract and completed work in view, so the
+model can continue, repair locally, or replan when an assumption breaks. This approach
+assumes the work decomposes into bounded actions, feedback is informative, and success is
+independently testable. The point is a simpler interface, not a lower standard.
+Independent acceptance checks the required behavior and artifact.
 -->
 
 ---
 
-<div class="eyebrow">A retained integration miss</div>
+<div class="eyebrow">Observed result · Qwen3.6-35B-A3B build cell</div>
 
 # The code ran. The workflow still failed.
 
@@ -391,7 +440,8 @@ simpler interface that makes feedback useful.
     <div class="event ok"><strong><code>/tmp/test</code> compiled</strong><span>A different output path was chosen.</span></div>
     <div class="event ok"><strong><code>/tmp/test</code> ran successfully</strong><span>It printed <code>REPLAN_OK</code>.</span></div>
     <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
-    <div class="callout"><strong>Every recorded action succeeded.</strong> The deliverable contract still drifted.</div>
+    <div class="callout"><strong>Successful actions + reported completion ≠ accepted artifact.</strong></div>
+    <p class="result-limit"><strong>Current limit:</strong> acceptance scored this run after completion; the failure was not returned for recovery.</p>
   </div>
 </div>
 
@@ -399,19 +449,19 @@ simpler interface that makes feedback useful.
 
 <!--
 Speaker notes (~45s):
-This retained run exposes the agent problem more clearly: correct local execution can
-still miss the requested workflow contract across multiple otherwise successful steps
-and tools. The agent wrote correct files, compiled slash tmp slash test, ran
-it successfully, and declared completion. The acceptance check expected dot slash main.
-Every tool action looked green, but the workflow contract was missed. Working code is not
-automatically an accepted change.
+This Qwen build run shows the agent problem: correct local execution can still miss the
+workflow contract. It wrote correct files, compiled slash tmp slash test, ran it
+successfully, and declared completion. Acceptance expected dot slash main. Every recorded
+action succeeded, but the artifact failed. That check scored the finished run; AskMe did
+not receive the failure for recovery. Successful steps and completion are insufficient
+without artifact acceptance.
 -->
 
 ---
 
 <div class="eyebrow">Design hypothesis</div>
 
-# Reason over fresh evidence. Preserve progress.
+# Hypothesis: update only what fresh evidence invalidates
 
 <div class="flow">
   <div class="node"><div class="num">01</div><strong>Keep the contract</strong><p>Carry the required behavior and artifact forward.</p></div>
@@ -427,107 +477,111 @@ automatically an accepted change.
   <div class="decision replan"><strong>Broken assumption</strong><p>Replan broadly only when the plan is no longer valid.</p></div>
 </div>
 
-<div class="callout"><strong>Trajectory goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn—not longer monologues.</div>
+<div class="callout"><strong>Trajectory goal—not yet isolated:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
 
 <!--
 Speaker notes (~45s):
-Reasoning matters between calls. It keeps the current contract in view, interprets
-execution or test feedback, and decides how much of the plan changed. A local
-failure should produce a local correction while completed work stays completed.
-Broad replanning belongs to broken assumptions, not every red command. This is not an
-argument for longer monologues. It is a hypothesis about trajectory quality: fewer
-repeated errors, fewer stuck steps, and less needless plan churn.
+This is a design hypothesis, not a result from the smoke. Reasoning should keep the
+contract in view, interpret execution feedback, and decide how much of the plan changed.
+A local mismatch should produce a local correction while completed work stays completed.
+Broad replanning belongs to broken assumptions, not every red command. The target is
+trajectory quality across these fast execution-feedback loops: fewer repeated failures,
+stuck steps, and unnecessary plan churn—not longer monologues.
 -->
 
 ---
 
-<div class="eyebrow">Measured harness smoke · July 10, 2026</div>
+<div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
 
-# Four models, eight descriptive receipts
+# Current result: 7 of 8 simple artifacts accepted
 
-<p class="subtitle">Two variants per family; architecture and active parameters changed.</p>
+<p class="subtitle">4 hosted model variants × 2 simple checks × 1 unseeded run/cell</p>
 
 <div class="matrix-summary">
   <div><strong>8 / 8</strong><span>agent complete</span></div>
   <div><strong>7 / 8</strong><span>artifact accepted</span></div>
-  <div class="boundary">Hosted · simple checks · n=1/cell · descriptive only</div>
+  <div class="boundary">Compatibility smoke · n=1/cell · descriptive only</div>
 </div>
 
 <div class="matrix-grid">
-  <div class="matrix-cell head">Model</div><div class="matrix-cell head">Shape</div><div class="matrix-cell head">Build observation</div><div class="matrix-cell head">Repair observation</div>
-  <div class="matrix-cell model-name">Gemma 4 26B A4B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>25.2B total · 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>603.6s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>20.0s</small></div>
-  <div class="matrix-cell model-name">Gemma 4 31B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>66.5s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>22.4s</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-27B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>47.9s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>23.0s</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-35B-A3B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>wrong artifact path · 17.7s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>11.8s</small></div>
+  <div class="matrix-cell head">Model</div><div class="matrix-cell head">Shape</div><div class="matrix-cell head">Artifact build</div><div class="matrix-cell head">Script repair</div>
+  <div class="matrix-cell model-name">Gemma 4 26B A4B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>25.2B total · 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Gemma 4 31B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Qwen3.6-27B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Qwen3.6-35B-A3B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>35B total · 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
 </div>
 
-<p class="matrix-caveat"><strong>Boundary:</strong> architecture, active parameters, run order, and trajectories changed; the 31B follow-up was post-hoc. No size, family, reasoning, or reliability inference.</p>
+<div class="matrix-interpretation">
+  <div class="supported"><strong>Supported</strong>AskMe ran all four variants; acceptance caught one false completion.</div>
+  <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
+</div>
 
 <div class="source">Four hosted models × two deliberately simple checks × one unseeded run/cell · evals/README.md</div>
 
 <!--
 Speaker notes (~45s):
-This is the hosted matrix: two Gemma 4 variants and two Qwen3.6 variants, including dense
-and mixture-of-experts shapes. Every agent reported completion. Seven artifacts were
-accepted. The Qwen thirty-five B A3B build is the retained wrong-path miss; every repair
-cell passed. Timings describe these observed trajectories only. Each cell is one unseeded
-run on simple checks, and the Gemma thirty-one B addition was post-hoc. Nothing here
-supports a size, architecture, family, reasoning, or reliability conclusion.
+Four hosted variants each ran two simple checks once. Both dense models and the Gemma
+mixture accepted both cells; the Qwen mixture accepted one. All eight reported complete.
+Descriptively, Gemma thirty-one's build trace was nine times shorter than Gemma
+twenty-six's, but its repair was slower; the fastest build trace was rejected. No pair
+isolates size, architecture, active compute, family, provider timing, or reliability.
+These are trajectory observations, not rankings. The thirty-one model was added
+post-hoc.
 -->
 
 ---
 
-<div class="eyebrow">Pre-August native pilot</div>
+<div class="eyebrow">Experiment 1 · planned, not registered or run</div>
 
-# Freeze the smallest clean test
+# Test the reasoning policy—not model size
 
 <div class="experiment-grid">
-  <div class="experiment"><div class="num">01</div><strong>4 frozen workflows</strong><p>Valid multi-file code, semantic failures, visible feedback, held-out scoring.</p></div>
-  <div class="experiment"><div class="num">02</div><strong>2 frozen policies</strong><p>Explicit-reasoning off versus the current composite gated policy.</p></div>
-  <div class="experiment"><div class="num">03</div><strong>3 randomized repeats</strong><p>4 × 2 × 3 = 24 scheduled runs per model.</p></div>
+  <div class="experiment"><div class="num">01</div><strong>4 planned workflows</strong><p>Semantic failures, visible feedback, held-out scoring; all must qualify.</p></div>
+  <div class="experiment"><div class="num">02</div><strong>1 frozen model route</strong><p>Hold the model and harness conditions fixed.</p></div>
+  <div class="experiment"><div class="num">03</div><strong>Off vs gated × 3</strong><p>Randomized repeats: 4 × 2 × 3 = 24 total runs.</p></div>
   <div class="experiment"><div class="num">04</div><strong>2 primary outcomes</strong><p>Held-out acceptance and false completion across all valid runs.</p></div>
 </div>
 
-<div class="metrics"><strong>Secondary:</strong> repeated actions · work redone · local/full replans · latency · tokens</div>
+<div class="pilot-status">Today: 1 / 4 workflows qualified · route and schedule pending · 0 measured runs</div>
+
+<div class="metrics"><strong>Scope:</strong> a large policy effect on these tasks—not Qwen vs Gemma, model size, architecture, or internal cognition.</div>
 
 <div class="source">Publish tasks, policies, budgets, gate table, randomization, and exclusions before the first outcome-bearing call.</div>
 
 <!--
 Speaker notes (~45s):
-Before the summit, freeze the pilot rather than rush external adapters.
-Use four native semantic workflows, explicit-reasoning off and current-gated policies,
-and three randomized repeats: twenty-four scheduled runs per model. Score every valid
-run with held-out acceptance and false completion as the two primary outcomes. Treat
-recovery and plan stability as descriptive. This is a feasibility study that can reveal
-only large effects. FeatureBench tests features; Vals Vibe Code Bench tests full apps.
+The next experiment asks whether gated explicit-reasoning requests improve held-out
+acceptance or reduce false completion versus off. Today, only one of four workflows is
+qualified; the route and schedule are pending; zero measured runs exist. After
+qualification, one frozen model route gets twenty-four randomized runs. Recovery and
+replans are secondary. This can reveal only large policy effects, not internal cognition,
+family, or size. FeatureBench tests features; Vals Vibe Code Bench tests full apps.
 -->
 
 ---
 
-<div class="eyebrow">Answer to the title</div>
+<div class="eyebrow">Conclusion + limits</div>
 
 # Promising—with a tight harness.
 
-<div class="loop">
-  <div class="box">Model choice</div>
-  <div class="box">Simple contract</div>
-  <div class="box">Execution / test</div>
-  <div class="box">Local reasoning</div>
-  <div class="box">Accepted workflow</div>
+<div class="conclusion-grid">
+  <div class="conclusion-card observed"><strong>Observed</strong><p>8 / 8 reported completion. 7 / 8 simple artifacts were accepted. One completed run missed its deliverable.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness compatibility across four hosted variants; execution evidence plus independent acceptance is a credible direction.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, model-size effects, reliability, and local performance.</p></div>
 </div>
 
 <p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>
 
-<p class="closing">The smoke validates this interface; readiness needs repeated held-out workflows.</p>
+<p class="closing">The smoke exercises the measurement path; readiness needs repeated held-out workflows.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes (~35s):
-The claim that survives today is a design direction, not a model verdict. Smaller models offer
-control; broader agents offer leverage; the harness makes the combination operational.
-Prefer a simple, general action protocol. Return execution and test evidence.
-Let reasoning update the smallest part of the plan, with acceptance tied to the
-real workflow. Easier standards and interfaces can be good. Specialized skills should
-earn their complexity from repeated traces.
+Today we observed harness compatibility and one caught false completion. That supports
+execution feedback plus independent acceptance as a credible design direction, not a
+readiness verdict. We have not established realistic feature or application performance,
+a reasoning-policy benefit, Qwen versus Gemma, scaling, reliability, or local performance.
+Keep the action protocol simple and general, update only invalidated work, and tie success
+to behavior. Repeated held-out workflows must earn the stronger claim.
 -->

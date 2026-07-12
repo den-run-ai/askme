@@ -22,6 +22,9 @@ recorded here before the slides are edited.
 
 The title is a question. The deck presents a design direction and bounded
 evidence; it does not claim that the current smoke test settles the question.
+Here, "small" is an engineering and deployment class rather than a fixed
+parameter threshold. The hosted receipts span roughly 3–4B-active MoE models
+and 27–31B dense models; they are not evidence of local-device performance.
 
 ## Central message
 
@@ -153,12 +156,13 @@ trajectory time, not model speed.
 
 ### 6. Next valid experiment
 
-Show the planned direction: four qualified semantic workflows, one frozen model
-route, explicit-reasoning `off` versus frozen `gated`, three randomized repeats,
-held-out acceptance and false completion as co-primary outcomes. This is 24
-scheduled runs total for the first fixed-model pilot, not 24 per model. Do not
-imply that the protocol is registered or that the pilot has run: only one of
-four workflows is currently qualified and the model route is not yet frozen.
+Show the planned direction: four semantic workflows that must all qualify, one
+frozen model route, explicit-reasoning `off` versus frozen `gated`, three
+randomized repeats, held-out acceptance and false completion as co-primary
+outcomes. This is 24 scheduled runs total for the first fixed-model pilot, not
+24 per model. Do not imply that the protocol is registered or that the pilot
+has run: only one of four workflows is currently qualified and the model route
+is not yet frozen.
 This experiment can test an explicit-reasoning request policy on the frozen
 tasks; it cannot compare Qwen with Gemma or larger with smaller models.
 

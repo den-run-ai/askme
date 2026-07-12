@@ -53,10 +53,29 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "7 / 8" in comparison
     assert "n=1/cell" in comparison
     assert "descriptive only" in comparison
+    assert "4 hosted model variants × 2 simple checks × 1 unseeded run/cell" in comparison
+    assert "35B total · 3B active" in comparison
+    assert "Supported" in comparison
+    assert "Not a clean model comparison" in comparison
+    assert "No Qwen-vs-Gemma, larger-vs-smaller" in comparison
+    for misleading_timing in ("603.6s", "66.5s", "47.9s", "17.7s"):
+        assert misleading_timing not in comparison
+
+    pilot = slides[5]
+    assert "planned, not registered or run" in pilot
+    assert "1 frozen model route" in pilot
+    assert "24 total runs" in pilot
+    assert "1 / 4 workflows qualified" in pilot
+    assert "0 measured runs" in pilot
+    assert "not Qwen vs Gemma, model size" in pilot
 
     conclusion = slides[6]
-    assert "Answer to the title" in conclusion
+    assert "Conclusion + limits" in conclusion
     assert "Promising—with a tight harness." in conclusion
+    for label in ("Observed", "Supported", "Still open"):
+        assert label in conclusion
+    assert "The smoke exercises the measurement path" in conclusion
+    assert "validates this interface" not in conclusion
 
     assert "NanAgent" not in text
 
@@ -92,6 +111,9 @@ def test_deck_contract_guards_notes_and_review_spec():
         "Slide 2 contains no product/vendor taxonomy",
         "FeatureBench for feature development and Vals Vibe Code Bench",
         "A one-task `gron` run may qualify the adapter",
+        '"small" is an engineering and deployment class',
+        "24 scheduled runs total for the first fixed-model pilot",
+        "does not validate a causal harness benefit",
     ):
         assert requirement in spec
 
