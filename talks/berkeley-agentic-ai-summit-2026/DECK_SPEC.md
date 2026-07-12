@@ -43,6 +43,20 @@ visible monologues are not themselves the goal.
 
 ## Evidence and claim boundaries
 
+Keep one explicit evidence chain visible across the last three slides:
+
+1. **Current experiment:** four hosted models × two deliberately simple harness
+   checks × one unseeded, sequential run per cell.
+2. **Observed result:** all eight agents reported completion; seven artifacts
+   passed independent acceptance; the retained Qwen3.6-35B-A3B build produced
+   working behavior at the wrong path.
+3. **Supported conclusion:** AskMe transported actions for all four variants and
+   the independent evaluator exposed one false completion.
+4. **Unresolved:** readiness, reasoning-policy benefit, model speed or
+   reliability, Qwen versus Gemma, dense versus MoE, and larger versus smaller.
+
+Do not collapse these four levels into a single "the smoke validates" claim.
+
 - Keep the four-model comparison visible: Gemma 4 26B A4B, Gemma 4 31B,
   Qwen3.6-27B, and Qwen3.6-35B-A3B. The paired dense/MoE shapes are useful
   descriptive context and must not disappear in aggregate statistics.
@@ -55,6 +69,12 @@ visible monologues are not themselves the goal.
 - Do not imply that model size caused trajectory differences. Architecture,
   active parameters, provider conditions, run order, and task trajectories also
   changed; the Gemma 31B follow-up was post-hoc.
+- Show total and active parameters consistently for MoE rows. In particular,
+  Qwen3.6-35B-A3B is 35B total and 3B active; showing only the active count makes
+  the within-family size/architecture confound harder to see.
+- Timings are observed hosted trajectory wall times, not model-speed estimates.
+  If shown, label them that way and use the inconsistent within-family patterns
+  to explain why the smoke cannot support a scaling story.
 - Do not use compiler or syntax repair as headline evidence of contemporary
   coding ability. The useful failure is workflow-level: working behavior at the
   wrong required artifact path.
@@ -65,6 +85,10 @@ visible monologues are not themselves the goal.
   complexity from repeated evidence.
 - Provider names, pytest mechanics, routing flags, and similar audit details
   belong in the appendix/eval documentation, not the five-minute narrative.
+- The current acceptance check scored the artifact after the run; its failure was
+  not returned to AskMe for another correction. Feeding a focused acceptance
+  failure back into the loop while retaining a held-out scorer is future harness
+  work, not a feature of the published smoke.
 - Keep external-benchmark scope narrow. The stage narrative may name
   FeatureBench for feature development and Vals Vibe Code Bench for complete
   web applications. Vals is proprietary and access-dependent, so it is external
@@ -123,13 +147,20 @@ Restore the visible two-variant-per-family comparison. Show model shape plus the
 build and repair outcomes for all four hosted models. Keep `8/8 complete` and
 `7/8 accepted` visible, but do not let aggregate totals replace the model rows.
 Label the matrix `n=1/cell`, simple, hosted, and descriptive only.
+State the experiment, observed result, supported harness conclusion, and
+unsupported model inferences separately. Any displayed timing is an observed
+trajectory time, not model speed.
 
 ### 6. Next valid experiment
 
-Show the preregistered direction: four qualified semantic workflows, explicit
-reasoning `off` versus frozen `gated`, three randomized repeats, held-out
-acceptance and false completion as co-primary outcomes. Do not imply this pilot
-has already run.
+Show the planned direction: four qualified semantic workflows, one frozen model
+route, explicit-reasoning `off` versus frozen `gated`, three randomized repeats,
+held-out acceptance and false completion as co-primary outcomes. This is 24
+scheduled runs total for the first fixed-model pilot, not 24 per model. Do not
+imply that the protocol is registered or that the pilot has run: only one of
+four workflows is currently qualified and the model route is not yet frozen.
+This experiment can test an explicit-reasoning request policy on the frozen
+tasks; it cannot compare Qwen with Gemma or larger with smaller models.
 
 ### 7. Answer posture and takeaway
 
@@ -137,7 +168,9 @@ Return to the title question. The bounded answer is that small LLMs are
 promising when the harness keeps actions small, feeds back real execution, uses
 reasoning to update the smallest invalidated part of the plan, and ties success
 to the delivered workflow. This is a direction to test, not a general readiness
-verdict.
+verdict. The current smoke exercises the interface and shows the evaluator
+catching one false completion; it does not validate a causal harness benefit or
+settle model readiness.
 
 ## Visual and editorial constraints
 
@@ -182,9 +215,13 @@ verdict.
 - [ ] The retained wrong-path workflow miss remains visible.
 - [ ] Reasoning is framed as trajectory quality and bounded replanning.
 - [ ] All four model rows and their dense/MoE shapes are visible.
+- [ ] Both MoE rows show total and active parameter counts.
 - [ ] The model matrix is labeled descriptive, hosted, simple, and `n=1/cell`.
-- [ ] No size, family, reliability, or local-speed conclusion is implied.
-- [ ] The next pilot is presented as planned, not completed.
+- [ ] Timings, if retained, are labeled observed trajectory time—not model speed.
+- [ ] The supported harness conclusion is distinct from unsupported size,
+      family, architecture, reasoning, reliability, and local-speed claims.
+- [ ] The next pilot is presented as 24 total fixed-model runs, planned and not
+      completed or registered.
 - [ ] The stage narrative names only FeatureBench and Vals Vibe Code Bench;
       ProgramBench remains an optional later roadmap stress test.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
