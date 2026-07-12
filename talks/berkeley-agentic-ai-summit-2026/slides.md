@@ -494,12 +494,12 @@ supports a size, architecture, family, reasoning, or reliability conclusion.
 
 <!--
 Speaker notes (~45s):
-Before the summit, freeze the smallest clean pilot rather than rush external adapters.
+Before the summit, freeze the pilot rather than rush external adapters.
 Use four native semantic workflows, explicit-reasoning off and current-gated policies,
 and three randomized repeats: twenty-four scheduled runs per model. Score every valid
 run with held-out acceptance and false completion as the two primary outcomes. Treat
 recovery and plan stability as descriptive. This is a feasibility study that can reveal
-only large effects. FeatureBench tests app-feature generalization after the native pilot.
+only large effects. FeatureBench tests features; Vals Vibe Code Bench tests full apps.
 -->
 
 ---

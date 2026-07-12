@@ -54,11 +54,11 @@ npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
 
 ## Primary Sources
 
-### App-feature benchmark shortlist
+### Coding-agent benchmark shortlist
 
 - [FeatureBench](https://github.com/LiberCoders/FeatureBench) — primary target
-- [ViBench Vibe-on-Ref](https://vibench.ai/) — optional app-extension follow-up
-- [RACE-bench](https://arxiv.org/abs/2603.26337) — optional repository-feature follow-up
+- [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) — access-dependent full-app reference
+- [ProgramBench](https://github.com/facebookresearch/programbench) — later clean-room stress test; `gron` canary only
 
 ### Other sources
 
