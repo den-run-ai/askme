@@ -24,7 +24,11 @@ style: |
     padding: 40px 54px 46px;
   }
   section::after { color: #8792a2; font-size: 15px; }
-  section.title { background: #eef2f7; }
+  section.title {
+    background: #eef2f7;
+    padding: 62px 76px 54px;
+  }
+  section.title::after { display: none; }
   h1, h2, h3, p { letter-spacing: 0; }
   h1 {
     color: var(--ink);
@@ -51,36 +55,38 @@ style: |
     left: 54px;
     position: absolute;
   }
-  .trace-table {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 16px 40px rgba(17, 24, 39, 0.08);
-    overflow: hidden;
-  }
-  .trace-row {
-    align-items: center;
-    border-top: 1px solid var(--line);
-    display: grid;
-    grid-template-columns: 72px 1.15fr 1.35fr 1.15fr;
-    min-height: 61px;
-  }
-  .trace-row.head {
-    background: var(--terminal);
-    border-top: 0;
-    color: #f8fafc;
-    font-size: 14px;
+  .title-kicker {
+    color: var(--blue);
+    font-size: 16px;
     font-weight: 850;
-    min-height: 38px;
     text-transform: uppercase;
   }
-  .trace-cell { padding: 10px 14px; }
-  .trace-cell + .trace-cell { border-left: 1px solid var(--line); }
-  .trace-row.head .trace-cell + .trace-cell { border-left-color: #394150; }
-  .step { color: var(--blue); font-size: 17px; font-weight: 900; }
-  .action { font-family: "SFMono-Regular", Consolas, monospace; font-size: 17px; }
-  .evidence { color: var(--teal); font-size: 17px; font-weight: 750; }
-  .intro-foot { display: flex; justify-content: space-between; margin-top: 15px; }
+  .title-question { margin-top: 68px; max-width: 980px; }
+  .title-question h1 {
+    font-size: 64px;
+    line-height: 1.04;
+    margin-bottom: 24px;
+  }
+  .title-message {
+    color: var(--muted);
+    font-size: 27px;
+    line-height: 1.3;
+    margin: 0;
+    max-width: 850px;
+  }
+  .title-speaker {
+    align-items: end;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    margin-top: 92px;
+    padding-top: 19px;
+  }
+  .title-speaker .name { display: block; font-size: 22px; }
+  .title-speaker .role { color: var(--muted); display: block; font-size: 16px; margin-top: 4px; }
+  .title-links { font-size: 15px; text-align: right; }
+  .title-links a { color: var(--blue); text-decoration: none; }
+  .title-links span { color: #9aa4b2; margin: 0 8px; }
   .two-col {
     display: grid;
     gap: 24px;
@@ -160,129 +166,126 @@ style: |
   .decision.local { border-top: 6px solid var(--teal); }
   .decision.replan { border-top: 6px solid var(--coral); }
   .decision.continue { border-top: 6px solid var(--blue); }
-  .harness-grid {
+  .bridge-grid {
     display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(5, 1fr);
-    margin-top: 14px;
+    gap: 24px;
+    grid-template-columns: 0.9fr 1.2fr 0.9fr;
+    margin-top: 26px;
   }
-  .harness-card {
+  .bridge-stage {
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 8px;
-    min-height: 205px;
-    padding: 15px 14px;
+    min-height: 265px;
+    padding: 19px 20px;
+    position: relative;
   }
-  .harness-card:nth-child(1) { border-top: 7px solid var(--blue); }
-  .harness-card:nth-child(2) { border-top: 7px solid #6b5bd2; }
-  .harness-card:nth-child(3) { border-top: 7px solid var(--teal); }
-  .harness-card:nth-child(4) { border-top: 7px solid var(--amber); }
-  .harness-card:nth-child(5) { border-top: 7px solid var(--coral); }
-  .harness-card .kind {
-    color: var(--muted);
-    font-size: 12px;
+  .bridge-stage:not(:last-child)::after {
+    color: var(--blue);
+    content: "→";
+    font-size: 30px;
     font-weight: 900;
-    min-height: 30px;
-    text-transform: uppercase;
+    position: absolute;
+    right: -23px;
+    top: 108px;
+    z-index: 2;
   }
-  .harness-card strong { display: block; font-size: 19px; margin: 8px 0 10px; }
-  .harness-card .qualifier {
-    color: var(--muted);
-    display: block;
-    font-size: 12px;
-    line-height: 1.2;
-    margin-top: 2px;
+  .bridge-stage.model-stage { border-top: 7px solid var(--blue); }
+  .bridge-stage.askme-stage {
+    background: var(--terminal);
+    border-color: var(--terminal);
+    color: #f8fafc;
   }
-  .harness-card p { color: var(--muted); font-size: 15px; line-height: 1.3; margin: 0; }
-  .harness-seam {
+  .bridge-stage.workflow-stage { border-top: 7px solid var(--teal); }
+  .bridge-stage .num { color: var(--blue); font-size: 13px; font-weight: 900; }
+  .bridge-stage.askme-stage .num { color: #63d8c2; }
+  .bridge-stage .label { color: var(--muted); font-size: 13px; font-weight: 900; text-transform: uppercase; }
+  .bridge-stage.askme-stage .label { color: #9fb0c5; }
+  .bridge-stage h2 { font-size: 22px; margin: 10px 0 14px; }
+  .bridge-stage.askme-stage h2 { color: #fff; }
+  .bridge-stage ul { font-size: 16px; line-height: 1.5; margin: 0; padding-left: 20px; }
+  .bridge-stage p { color: var(--muted); font-size: 15px; line-height: 1.35; margin: 14px 0 0; }
+  .bridge-stage.askme-stage p { color: #bcc6d3; }
+  .micro-loop {
+    background: #242a35;
+    border-left: 5px solid #63d8c2;
+    border-radius: 4px;
+    color: #f8fafc;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.55;
+    padding: 13px 14px;
+  }
+  .bridge-caption {
     background: #e9f7f3;
     border-left: 6px solid var(--teal);
     border-radius: 4px;
     color: #285d53;
     font-size: 18px;
-    margin-top: 16px;
-    padding: 12px 15px;
+    margin-top: 18px;
+    padding: 11px 15px;
   }
-  .trend-grid {
-    align-items: stretch;
+  .matrix-summary {
     display: grid;
-    gap: 16px;
-    grid-template-columns: 1fr 0.72fr 1fr;
-    margin-top: 20px;
+    gap: 12px;
+    grid-template-columns: 0.72fr 0.72fr 1.56fr;
+    margin: 13px 0 12px;
   }
-  .trend, .bridge {
-    border-radius: 8px;
-    min-height: 290px;
-    padding: 18px 20px;
-  }
-  .trend { background: #fff; border: 1px solid var(--line); }
-  .trend.model-side { border-top: 7px solid var(--blue); }
-  .trend.workflow-side { border-top: 7px solid var(--teal); }
-  .trend .label, .bridge .label { font-size: 13px; font-weight: 900; text-transform: uppercase; }
-  .trend .label { color: var(--blue); }
-  .trend.workflow-side .label { color: var(--teal); }
-  .trend h2 { font-size: 23px; margin-top: 6px; }
-  .trend ul { font-size: 17px; line-height: 1.45; margin: 13px 0 0; padding-left: 21px; }
-  .bridge {
-    align-items: center;
-    background: var(--terminal);
-    color: #f8fafc;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
-  }
-  .bridge .label { color: #63d8c2; }
-  .bridge h2 { color: #fff; font-size: 27px; margin: 12px 0; }
-  .bridge p { color: #bcc6d3; font-size: 15px; margin: 0; }
-  .formula {
-    align-items: center;
-    background: var(--terminal);
-    border-radius: 8px;
-    color: #f8fafc;
-    display: flex;
-    font-size: 24px;
-    font-weight: 800;
-    justify-content: center;
-    margin: 17px 0;
-    padding: 13px;
-  }
-  .formula span { color: #63d8c2; margin: 0 10px; }
-  .probe-grid { grid-template-columns: 1fr 1fr; }
-  .probe { min-height: 118px; }
-  .probe .label { color: var(--blue); font-size: 13px; font-weight: 900; text-transform: uppercase; }
-  .model-lane {
-    display: grid;
-    gap: 8px;
-    grid-template-columns: repeat(4, 1fr);
-    margin-top: 14px;
-  }
-  .model {
-    background: #edf4ff;
-    border-bottom: 4px solid var(--blue);
-    border-radius: 5px;
-    font-size: 14px;
-    font-weight: 800;
-    padding: 8px;
-    text-align: center;
-  }
-  .stats { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin: 20px 0; }
-  .stat {
+  .matrix-summary > div {
     background: #fff;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    min-height: 108px;
-    padding: 14px 18px;
+    border-radius: 6px;
+    min-height: 50px;
+    padding: 8px 13px;
   }
-  .stat .big { color: var(--blue); font-size: 39px; font-weight: 900; line-height: 1; }
-  .stat.fail .big { color: var(--coral); }
-  .stat p { color: var(--muted); font-size: 15px; margin: 8px 0 0; }
-  .claim-table { background: #fff; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-  .claim-row { display: grid; grid-template-columns: 0.82fr 1.18fr; }
-  .claim-row + .claim-row { border-top: 1px solid var(--line); }
-  .claim-row div { font-size: 16px; padding: 10px 14px; }
-  .claim-row div + div { border-left: 1px solid var(--line); color: var(--muted); }
-  .claim-row strong { color: var(--ink); }
+  .matrix-summary strong { color: var(--blue); font-size: 24px; margin-right: 7px; }
+  .matrix-summary span { color: var(--muted); font-size: 14px; }
+  .matrix-summary .boundary {
+    align-items: center;
+    background: #fff7e9;
+    border-color: #f0d5a6;
+    color: #8a5700;
+    display: flex;
+    font-size: 14px;
+    font-weight: 800;
+  }
+  .matrix-grid {
+    display: grid;
+    gap: 5px;
+    grid-template-columns: 1.32fr 1.13fr 1fr 1fr;
+  }
+  .matrix-cell {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 15px;
+    min-height: 39px;
+    padding: 8px 10px;
+  }
+  .matrix-cell.head {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 850;
+    min-height: 20px;
+    padding-bottom: 3px;
+    text-transform: uppercase;
+  }
+  .matrix-cell.model-name { font-weight: 850; }
+  .matrix-cell small { color: var(--muted); display: block; font-size: 12px; margin-top: 2px; }
+  .shape { font-weight: 850; }
+  .shape.dense { color: var(--blue); }
+  .shape.moe { color: #7256c9; }
+  .matrix-status { font-size: 13px; font-weight: 900; }
+  .matrix-status.pass { color: var(--teal); }
+  .matrix-status.fail { color: var(--coral); }
+  .matrix-caveat {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.3;
+    margin: 10px 0 0;
+  }
   .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
   .experiment { min-height: 164px; }
   .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
@@ -321,63 +324,55 @@ style: |
 
 <!-- _class: title -->
 
-<div class="eyebrow">AskMe · Agentic AI Summit 2026 · UC Berkeley</div>
+<div class="title-kicker">Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026</div>
 
-# Smaller open models.<br>Full workflows. Tight harnesses.
+<div class="title-question">
 
-<p class="subtitle">The system layer connecting model control to agent execution</p>
+# Are Small LLMs Ready for Coding Agents?
 
-<p class="tiny" style="font-weight:850; margin:0 0 6px; text-transform:uppercase;">Illustrative workflow</p>
+<p class="title-message">A tight harness connects controllable models to accepted full workflows.</p>
 
-<div class="trace-table">
-  <div class="trace-row head"><div class="trace-cell">Step</div><div class="trace-cell">Plan</div><div class="trace-cell">AskMe action</div><div class="trace-cell">Evidence</div></div>
-  <div class="trace-row"><div class="trace-cell step">01</div><div class="trace-cell">Establish behavior</div><div class="trace-cell action">run focused integration test</div><div class="trace-cell evidence">failure is located</div></div>
-  <div class="trace-row"><div class="trace-cell step">02</div><div class="trace-cell">Patch the boundary</div><div class="trace-cell action">edit the smallest surface</div><div class="trace-cell evidence">focused test passes</div></div>
-  <div class="trace-row"><div class="trace-cell step">03</div><div class="trace-cell">Check integration</div><div class="trace-cell action">run related + full suite</div><div class="trace-cell evidence">no regression observed</div></div>
-  <div class="trace-row"><div class="trace-cell step">04</div><div class="trace-cell">Accept the result</div><div class="trace-cell action">verify required behavior</div><div class="trace-cell evidence">contract satisfied</div></div>
 </div>
 
-<div class="intro-foot"><span class="tiny"><strong>Denis Akhiyarov</strong> · Aug 1, 2026</span><span class="tiny">github.com/den-run-ai/askme</span></div>
+<div class="title-speaker">
+  <div><span class="name"><strong>Denis Akhiyarov</strong></span><span class="role">Sr Staff Research Scientist at ServiceNow</span></div>
+  <div class="title-links"><a href="https://x.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
+</div>
 
 <!--
-Speaker notes (~45s):
-Smaller open models give teams more control over latency, hardware, deployment, and
-post-training, and may help attract and grow talent. Meanwhile coding agents are
-expanding from code edits toward full workflows. The harness connects those trends. An
-agent is not one answer; it is this sequence of plans, actions, and fresh evidence. AskMe
-makes the sequence visible so we can ask how reasoning turns each result into the next
-move.
+Speaker notes (~40s):
+The title is a question, not a verdict. Smaller open models are attractive because they
+offer control over execution speed, hardware, deployment, post-training, and the builder
+ecosystem. Coding agents are also moving beyond code edits toward full-lifecycle
+workflows. My question is whether a tight harness can connect those trends: keep each
+action small, return real execution evidence, preserve progress, and judge the delivered
+workflow.
 -->
 
 ---
 
 <div class="eyebrow">Why this matters now</div>
 
-# Five approaches, five harness boundaries
+# A tight loop connects model control to full workflows
 
-<p class="subtitle">Same model; different context, tools, runtime, governance, and evaluation.</p>
+<p class="subtitle">The model gets one bounded move; the harness keeps the end-to-end contract.</p>
 
-<div class="harness-grid">
-  <div class="harness-card"><div class="kind">Minimal · extensible</div><strong>Pi</strong><p>Small terminal core. Add skills, prompts, extensions, and packages.</p></div>
-  <div class="harness-card"><div class="kind">Tool-rich terminal</div><strong>Oh My Pi</strong><p>Batteries-included Pi fork: IDE tools, workers, memory, and subagents.</p></div>
-  <div class="harness-card"><div class="kind">Agent platform</div><strong>OpenHands</strong><p>Composable SDK plus local, cloud, and enterprise runtimes.</p></div>
-  <div class="harness-card"><div class="kind">Meta-harness</div><strong>Omnigent <span class="qualifier">(Databricks, OSS alpha)</span></strong><p>Swap or compose agents under policies, sandboxes, and shared sessions.</p></div>
-  <div class="harness-card"><div class="kind">Evaluation · selection</div><strong>Databricks</strong><p>Real PR tasks, isolated runs, sealed history, and held-out tests.</p></div>
+<div class="bridge-grid">
+  <div class="bridge-stage model-stage"><div class="num">01</div><div class="label">Controllable small LLMs</div><h2>Choose the model boundary</h2><ul><li>Execution speed</li><li>Hardware and deployment</li><li>Post-training access</li></ul></div>
+  <div class="bridge-stage askme-stage"><div class="num">02</div><div class="label">AskMe loop</div><h2>One small action at a time</h2><div class="micro-loop">plan → act → execute / test<br>→ fresh evidence ↺</div><p>Interpret the result. Update locally when possible.</p></div>
+  <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">Accepted full workflow</div><h2>Keep and check the contract</h2><ul><li>Preserve completed work</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
 </div>
 
-<div class="harness-seam"><strong>AskMe isolates one seam:</strong> execution evidence → bounded plan update → independent acceptance.</div>
-
-<div class="source">Sources: Pi → Oh My Pi · OpenHands · Omnigent (Databricks, OSS alpha) · Databricks internal coding benchmark, July 8, 2026</div>
+<div class="bridge-caption"><strong>The bridge:</strong> small action surface + fresh execution feedback + independent workflow acceptance.</div>
 
 <!--
 Speaker notes (~45s):
-These are not interchangeable competitors; they choose harness boundaries. Pi keeps a
-minimal loop and invites extensions. Oh My Pi is its batteries-included, tool-rich
-fork. OpenHands provides an agent SDK and managed runtime. Omnigent is Databricks'
-open-source alpha meta-harness; its separate managed counterpart is beta. Databricks'
-benchmark adds an evaluation layer: real pull requests, isolated runs, and held-out tests.
-AskMe is narrower; it studies how execution evidence becomes a bounded plan update and
-an accepted result.
+The technical bridge: start with a controllable small model. AskMe narrows each turn to
+one small action, executes it, and returns fresh test or runtime evidence. The surrounding
+harness keeps the full contract and completed work in view. The model can continue,
+repair locally, or replan only when an assumption breaks. Independent acceptance then
+checks the required behavior and artifact. The point is not a smaller standard; it is a
+simpler interface that makes feedback useful.
 -->
 
 ---
@@ -448,33 +443,36 @@ repeated errors, fewer stuck steps, and less needless plan churn.
 
 <div class="eyebrow">Measured harness smoke · July 10, 2026</div>
 
-# A smoke test—not a model verdict
+# Four models, eight descriptive receipts
 
-<div class="formula">4 hosted models <span>×</span> 2 simple checks <span>×</span> 1 run / cell</div>
+<p class="subtitle">Two variants per family; architecture and active parameters changed.</p>
 
-<div class="stats">
-  <div class="stat"><div class="big">8 / 8</div><p>agents reported completion</p></div>
-  <div class="stat"><div class="big">7 / 8</div><p>artifacts passed exact acceptance</p></div>
-  <div class="stat fail"><div class="big">1</div><p>integration-path miss was retained</p></div>
+<div class="matrix-summary">
+  <div><strong>8 / 8</strong><span>agent complete</span></div>
+  <div><strong>7 / 8</strong><span>artifact accepted</span></div>
+  <div class="boundary">Hosted · simple checks · n=1/cell · descriptive only</div>
 </div>
 
-<div class="claim-table">
-  <div class="claim-row"><div><strong>What it exercises</strong></div><div>Action protocol, trace visibility, completion state, and separate acceptance.</div></div>
-  <div class="claim-row"><div><strong>What it does not test</strong></div><div>Modern coding ability, model family or size, reasoning impact, or reliability.</div></div>
+<div class="matrix-grid">
+  <div class="matrix-cell head">Model</div><div class="matrix-cell head">Shape</div><div class="matrix-cell head">Build observation</div><div class="matrix-cell head">Repair observation</div>
+  <div class="matrix-cell model-name">Gemma 4 26B A4B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>25.2B total · 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>603.6s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>20.0s</small></div>
+  <div class="matrix-cell model-name">Gemma 4 31B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>66.5s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>22.4s</small></div>
+  <div class="matrix-cell model-name">Qwen3.6-27B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>47.9s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>23.0s</small></div>
+  <div class="matrix-cell model-name">Qwen3.6-35B-A3B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>wrong artifact path · 17.7s</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>11.8s</small></div>
 </div>
 
-<div class="callout"><strong>The useful receipt:</strong> self-reported completion and accepted workflow behavior are different measurements.</div>
+<p class="matrix-caveat"><strong>Boundary:</strong> architecture, active parameters, run order, and trajectories changed; the 31B follow-up was post-hoc. No size, family, reasoning, or reliability inference.</p>
 
-<div class="source">Both checks were deliberately simple. Full prompts, protocol, and outcomes: evals/README.md</div>
+<div class="source">Four hosted models × two deliberately simple checks × one unseeded run/cell · evals/README.md</div>
 
 <!--
-Speaker notes (~40s):
-The hosted study is an interface smoke, not a modern coding benchmark. Four hosted models
-ran two scripted checks once. All eight agents reported completion; seven artifacts met
-the exact acceptance contract. The traces validate logging and expose the path miss, but
-they are receipts. One unseeded run per cell, non-randomized sequential runs, different
-architectures, and a post hoc fourth model support no family, size, reasoning,
-reliability, or local-hardware conclusion.
+Speaker notes (~45s):
+This is the hosted matrix: two Gemma 4 variants and two Qwen3.6 variants, including dense
+and mixture-of-experts shapes. Every agent reported completion. Seven artifacts were
+accepted. The Qwen thirty-five B A3B build is the retained wrong-path miss; every repair
+cell passed. Timings describe these observed trajectories only. Each cell is one unseeded
+run on simple checks, and the Gemma thirty-one B addition was post-hoc. Nothing here
+supports a size, architecture, family, reasoning, or reliability conclusion.
 -->
 
 ---
@@ -506,9 +504,9 @@ only large effects. FeatureBench and other external suites test generalization l
 
 ---
 
-<div class="eyebrow">Takeaway</div>
+<div class="eyebrow">Answer to the title</div>
 
-# Control the model. Ground the workflow.
+# Promising—with a tight harness.
 
 <div class="loop">
   <div class="box">Model choice</div>
@@ -520,13 +518,13 @@ only large effects. FeatureBench and other external suites test generalization l
 
 <p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>
 
-<p class="closing">Tight harnesses connect controllable models to increasingly capable, full-lifecycle agents.</p>
+<p class="closing">The smoke validates this interface; readiness needs repeated held-out workflows.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes (~35s):
-The claim that survives is a design direction, not a model verdict. Smaller models offer
+The claim that survives today is a design direction, not a model verdict. Smaller models offer
 control; broader agents offer leverage; the harness makes the combination operational.
 Prefer a simple, general action protocol. Return execution and test evidence.
 Let reasoning update the smallest part of the plan, with acceptance tied to the

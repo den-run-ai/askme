@@ -1,4 +1,6 @@
-# Smaller Open Models, Full Workflows, Tight Harnesses
+# Are Small LLMs Ready for Coding Agents?
+
+*Small actions, fresh execution feedback, and full-workflow acceptance.*
 
 Two trends are converging.
 
@@ -76,6 +78,20 @@ The hosted study ran four hosted models through two scripted checks once each:
 - an obvious script repair used as a low-ceiling harness sanity check.
 
 These checks test action transport, artifact handling, logging, completion state, and acceptance. They are not representative modern software-engineering tasks.
+
+The model rows are still important descriptive context; aggregate totals should
+not make the two variants in each family disappear:
+
+| Family | Requested model | Shape | Build | Repair |
+|---|---|---|---:|---:|
+| Gemma 4 | [26B A4B](https://huggingface.co/google/gemma-4-26B-A4B) | MoE · 3.8B active | Pass · 603.64s | Pass · 20.00s |
+| Gemma 4 | [31B](https://huggingface.co/google/gemma-4-31B) | Dense · 30.7B | Pass · 66.50s | Pass · 22.36s |
+| Qwen3.6 | [27B](https://qwen.ai/blog?id=qwen3.6-27b) | Dense · 27B | Pass · 47.88s | Pass · 23.04s |
+| Qwen3.6 | [35B-A3B](https://qwen.ai/blog?id=qwen3.6-35b-a3b) | MoE · 35B total / 3B active | **Fail** · 17.67s | Pass · 11.84s |
+
+These are observed hosted agent-wall times, not controlled speed measurements.
+The shapes, sizes, and active compute differ, the runs were sequential, and the
+Gemma 31B row was a post-hoc follow-up.
 
 The result is simple:
 
