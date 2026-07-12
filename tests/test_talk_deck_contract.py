@@ -126,6 +126,12 @@ def test_companion_benchmark_shortlist_stays_bounded():
     )
     for benchmark in ("FeatureBench", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in companion
+    assert "small is a deployment class, not a strict parameter threshold" in blog
+    assert "one of four workflows is qualified" in blog
+    assert "24 runs total" in blog
+    assert "24 runs per model" not in blog
+    assert "The smoke exercises the measurement path" in readme
+    assert "model-size claim requires a separate predeclared, repeated design" in readme
     for out_of_scope in (
         "Claw-SWE-Bench",
         "deep-swe",

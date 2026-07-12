@@ -6,6 +6,8 @@ Two trends are converging.
 
 First, smaller open models are becoming strategically useful. They give a team more control over execution speed, cost, hardware, data location, deployment, and post-training. Google's current Gemma guidance explicitly spans local, edge, and enterprise deployment, recommends starting with the smallest model that can meet the need, and supports modifying open weights through full or parameter-efficient tuning ([run and deployment guide](https://ai.google.dev/gemma/docs/run), [tuning guide](https://ai.google.dev/gemma/docs/tune)).
 
+In this talk, **small is a deployment class, not a strict parameter threshold**. The hosted receipts include roughly 3–4B-active mixtures and 27–31B dense open-weight models. That range is useful for studying controllability and harness compatibility, but the hosted runs do not establish that every model fits or runs well on a local Mac.
+
 That access can create an organizational advantage too. Engineers can inspect, serve, tune, and evaluate the actual model stack instead of only integrating a remote API. I see that as a learning and talent flywheel, although the small experiment in this repository does not measure it.
 
 Second, coding agents are becoming a practical substrate for broader agents. A coding agent already has to plan, navigate state, call tools, preserve artifacts, run long jobs, test behavior, recover, and hand work across boundaries. Those are the same primitives needed for full-lifecycle enterprise and user workflows. More ambitious hyperagents go one step further by making the agent and its harness editable objects ([HyperAgents](https://arxiv.org/abs/2603.19461)).
@@ -38,6 +40,12 @@ That is the right level of abstraction for AskMe. A useful agent trace looks lik
 | 4 | Accept the result | Verify the required behavior and artifact | Workflow contract is satisfied | Finish |
 
 The interesting work is not syntax repair. It is whether reasoning keeps the workflow contract in view, interprets fresh execution evidence, and changes only the part of the plan that the evidence invalidated.
+
+### Assumptions and current limits
+
+The AskMe loop is most plausible when a workflow decomposes into bounded actions without losing its contract, tool or test feedback arrives quickly enough to guide the next move, and success can be checked independently. It does not by itself solve ambiguous product intent, missing behavioral oracles, adversarial evaluator leakage, or long-horizon context loss.
+
+The published smoke has one additional limit: independent acceptance scored the artifact after the agent stopped. Its failure was not fed back to AskMe for recovery. A stronger operational loop would run a focused acceptance check at tentative completion, return a failure for one bounded correction, and still reserve a separate held-out evaluator for scoring.
 
 ## A Working Program Can Still Miss the Workflow
 
@@ -82,14 +90,17 @@ not make the two variants in each family disappear:
 
 | Family | Requested model | Shape | Build | Repair |
 |---|---|---|---:|---:|
-| Gemma 4 | [26B A4B](https://huggingface.co/google/gemma-4-26B-A4B) | MoE · 3.8B active | Pass · 603.64s | Pass · 20.00s |
+| Gemma 4 | [26B A4B](https://huggingface.co/google/gemma-4-26B-A4B) | MoE · 25.2B total / 3.8B active | Pass · 603.64s | Pass · 20.00s |
 | Gemma 4 | [31B](https://huggingface.co/google/gemma-4-31B) | Dense · 30.7B | Pass · 66.50s | Pass · 22.36s |
 | Qwen3.6 | [27B](https://qwen.ai/blog?id=qwen3.6-27b) | Dense · 27B | Pass · 47.88s | Pass · 23.04s |
 | Qwen3.6 | [35B-A3B](https://qwen.ai/blog?id=qwen3.6-35b-a3b) | MoE · 35B total / 3B active | **Fail** · 17.67s | Pass · 11.84s |
 
 These are observed hosted agent-wall times, not controlled speed measurements.
 The shapes, sizes, and active compute differ, the runs were sequential, and the
-Gemma 31B row was a post-hoc follow-up.
+Gemma 31B row was selected after the original six outcomes and declared before
+its own model calls.
+
+The descriptive contrasts are still worth preserving. Both dense models—Gemma 31B and Qwen3.6-27B—accepted both cells. Gemma 26B A4B also accepted both; Qwen3.6-35B-A3B accepted one of two. Gemma 31B's build trajectory was 9.1× shorter and used 77.7% fewer tokens than Gemma 26B A4B's, but its repair was slightly slower. The fastest observed build trajectory, Qwen3.6-35B-A3B, was the only rejected artifact. These patterns generate questions about trajectory efficiency; they do not answer them.
 
 The result is simple:
 
@@ -98,7 +109,7 @@ The result is simple:
 - the retained failure was working behavior at the wrong artifact path;
 - every trajectory and its provenance are auditable.
 
-That is one harness result, not a model ranking. One unseeded run per cell, non-randomized sequential runs, different dense and MoE architectures, and a post-hoc fourth model cannot establish anything about Gemma versus Qwen, parameter count, active compute, reasoning quality, reliability, or local-Mac performance.
+That is one harness result, not a model ranking. One unseeded run per cell, non-randomized sequential runs, different dense and MoE architectures, and a fourth model selected after the original matrix cannot establish anything about Gemma versus Qwen, parameter count, active compute, reasoning quality, reliability, or local-Mac performance.
 
 The full eight-cell table, billing reconciliation, routes, prompts, and commands remain in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json) for provenance rather than as a leaderboard.
 
@@ -106,11 +117,13 @@ The full eight-cell table, billing reconciliation, routes, prompts, and commands
 
 A useful follow-up should start with four native, syntactically valid workflow tasks and semantic integration failures: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules. Starting natively keeps a new external-benchmark adapter from dominating the first policy comparison.
 
+The pilot is not registered and has not run. Today, one of four workflows is qualified; the model route and randomized schedule remain pending; zero outcome-bearing model calls have been made.
+
 Before any outcome-bearing call, the pilot should be predeclared and then registered at an immutable public commit or archive. It should:
 
 1. freeze the four tasks, prompts, feedback, held-out checks, budgets, gate predicate, and exclusions before any measured run;
 2. compare a system-wide reasoning-off policy with the current composite gated policy under matched conditions;
-3. repeat each task three times in randomized policy order: 24 runs per model;
+3. freeze one model route and repeat each task three times in randomized policy order: 24 runs total;
 4. use held-out acceptance and false completion—reported `complete` plus failed acceptance—over all valid scheduled runs as the two primary outcomes;
 5. report regressions, repeated actions, recovery turns, work redone, local corrections, full replans, latency, and tokens descriptively.
 

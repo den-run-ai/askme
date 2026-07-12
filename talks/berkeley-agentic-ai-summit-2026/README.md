@@ -22,8 +22,8 @@
 2. Connect controllable small LLMs to coding workflows through AskMe's small actions, fresh execution feedback, bounded updates, and independent acceptance.
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
-5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, including 8/8 reported completions and 7/8 accepted artifacts.
-6. Show the repeated native pilot needed to test reasoning policy and false completion properly.
+5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
+6. Show the next fixed-model reasoning-policy pilot with its real status: 1/4 workflows qualified, route and schedule pending, and zero measured runs.
 7. Answer cautiously: small LLM coding agents are promising with tight execution-grounded harnesses, but the current n=1 smoke does not establish general readiness.
 
 ## Evidence Boundary
@@ -32,7 +32,12 @@ The talk keeps three kinds of statements separate:
 
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
 - **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. The retained miss produced working behavior at the wrong path.
+- **Supported conclusion.** AskMe transported actions across all four hosted variants, and independent acceptance exposed one false completion. The smoke exercises the measurement path; it does not validate a causal harness benefit.
 - **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck proposes the experiment needed to test that claim.
+
+For this talk, “small” is an engineering/deployment class rather than a fixed parameter cutoff. The hosted matrix spans 3–4B-active MoE and 27–31B dense models and does not measure local-Mac performance. Its timings are observed trajectory wall times, not model-speed estimates.
+
+The planned native pilot is four workflows × two explicit-reasoning policies × three randomized repeats on one frozen model route: 24 scheduled runs total. It can test only a large policy effect on those tasks. A Qwen-versus-Gemma or model-size claim requires a separate predeclared, repeated design.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 
