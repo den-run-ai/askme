@@ -1,12 +1,15 @@
 # Agentic AI Summit 2026 — Lightning Talk
 
-**Title:** Smaller Open Models, Full Workflows, Tight Harnesses
+**Title:** Are Small LLMs Ready for Coding Agents?
+
+**Speaker:** Denis Akhiyarov, Sr Staff Research Scientist at ServiceNow · [@den-run-ai](https://x.com/den-run-ai)
 
 **Slot:** Compass (Saturday), Session 2: Frameworks & Dev Platforms, Aug 1, 2026, 1:00 PM PT
 **Format:** 5 minutes, 7 slides
 
 ## Contents
 
+- [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
 - [`slides.md`](slides.md) — Marp source with 499-word speaker notes.
 - `slides.pdf` — rendered deck.
 - [`blog.md`](blog.md) — companion argument and citations.
@@ -15,13 +18,13 @@
 
 ## Talk Arc
 
-1. Smaller open models offer more control over execution, hardware, deployment, post-training, and the builder ecosystem.
-2. Harnesses choose different boundaries: minimal extensible loops, tool-rich terminals, managed runtimes, meta-orchestration, and enterprise evaluation.
-3. AskMe isolates one seam connecting controllable models to broader workflows: execution evidence, bounded plan updates, and independent acceptance.
-4. The retained failure—working code at the wrong artifact path—shows why successful actions and self-reported completion are not the same as a completed workflow.
-5. Reasoning should preserve progress and turn fresh evidence into the smallest useful plan update.
-6. The published smoke validates the measurement path, not a model hierarchy.
-7. The next experiment should freeze four native semantic workflows, compare explicit-reasoning off with the current gated policy, and use repeated held-out acceptance and false completion as primary outcomes.
+1. Open with the readiness question and the speaker, not a dense system diagram.
+2. Connect controllable small LLMs to coding workflows through AskMe's small actions, fresh execution feedback, bounded updates, and independent acceptance.
+3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
+4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
+5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, including 8/8 reported completions and 7/8 accepted artifacts.
+6. Show the repeated native pilot needed to test reasoning policy and false completion properly.
+7. Answer cautiously: small LLM coding agents are promising with tight execution-grounded harnesses, but the current n=1 smoke does not establish general readiness.
 
 ## Evidence Boundary
 
@@ -35,17 +38,17 @@ Provider routing, endpoint metadata, test-runner mechanics, token accounting, co
 
 ## Render
 
-From the repository root:
+The checked-in PDF uses Marp CLI 4.4.1 with Node 23. From the repository root:
 
 ```bash
-npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
   --html --pdf --allow-local-files
 ```
 
 For presenter mode:
 
 ```bash
-npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
   --html --preview
 ```
 
@@ -63,6 +66,9 @@ npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
 - [FeatureBench](https://github.com/LiberCoders/FeatureBench)
 - [Datacurve's deep-swe benchmark](https://github.com/datacurve-ai/deep-swe)
 - [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1)
+- [Google, Gemma 4 model overview](https://ai.google.dev/gemma/docs/core)
+- [Qwen, Qwen3.6-27B announcement](https://qwen.ai/blog?id=qwen3.6-27b)
+- [Qwen, Qwen3.6-35B-A3B announcement](https://qwen.ai/blog?id=qwen3.6-35b-a3b)
 - [Google Gemma run and deployment guidance](https://ai.google.dev/gemma/docs/run)
 - [Google Gemma tuning guidance](https://ai.google.dev/gemma/docs/tune)
 - [Agentic AI Summit 2026 program](https://rdi.berkeley.edu/events/agentic-ai-summit-2026)
