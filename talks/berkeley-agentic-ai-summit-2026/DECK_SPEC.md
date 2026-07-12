@@ -65,6 +65,11 @@ visible monologues are not themselves the goal.
   complexity from repeated evidence.
 - Provider names, pytest mechanics, routing flags, and similar audit details
   belong in the appendix/eval documentation, not the five-minute narrative.
+- Keep external-benchmark scope narrow and relevant to app-feature development.
+  The stage deck may foreground FeatureBench only. The companion roadmap may
+  retain at most three candidates: FeatureBench first, with ViBench Vibe-on-Ref
+  and RACE-bench as optional follow-ups for distinct questions. This shortlist
+  is not a commitment to run all three.
 - Project and vendor landscapes may remain cited in the companion blog. The
   stage deck should explain technical boundaries rather than promote or compare
   companies.
@@ -156,6 +161,9 @@ verdict.
   must preserve it unless the reviewer explicitly removes it.
 - Claims about model size, family, easier standards, compiler repair, and
   reasoning remain bounded by the rules above.
+- Four external benchmark references were too broad for this talk. FeatureBench
+  is the primary generalization target; any companion shortlist is capped at
+  three app-feature benchmarks and keeps the other two explicitly optional.
 
 ## Pre-render drift check
 
@@ -170,4 +178,6 @@ verdict.
 - [ ] The model matrix is labeled descriptive, hosted, simple, and `n=1/cell`.
 - [ ] No size, family, reliability, or local-speed conclusion is implied.
 - [ ] The next pilot is presented as planned, not completed.
+- [ ] The stage deck names FeatureBench only; companion benchmark scope is
+      capped at FeatureBench plus two optional app-feature candidates.
 - [ ] Seven slides render without clipping and speaker notes total 499 words.

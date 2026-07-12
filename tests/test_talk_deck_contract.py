@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TALK = ROOT / "talks" / "berkeley-agentic-ai-summit-2026"
 SLIDES = TALK / "slides.md"
 SPEC = TALK / "DECK_SPEC.md"
+BLOG = TALK / "blog.md"
+README = TALK / "README.md"
 
 
 def _rendered_slide_sources(text):
@@ -68,6 +70,20 @@ def test_deck_contract_guards_notes_and_review_spec():
     )
     assert len(note_blocks) == 7
     assert sum(len(block.split()) for block in note_blocks) == 499
+    assert "FeatureBench tests app-feature generalization" in text
+    named_benchmarks = {
+        token
+        for token in re.findall(r"\b[\w.-]*[Bb]ench[\w.-]*\b", text)
+        if token.lower() not in {"benchmark", "benchmarks"}
+    }
+    assert named_benchmarks == {"FeatureBench"}
+    for out_of_scope in (
+        "Claw-SWE-Bench",
+        "deep-swe",
+        "SWE-bench-Live",
+        "Terminal-Bench",
+    ):
+        assert out_of_scope not in text
 
     spec = SPEC.read_text(encoding="utf-8")
     for requirement in (
@@ -76,5 +92,50 @@ def test_deck_contract_guards_notes_and_review_spec():
         "https://x.com/den-run-ai",
         "Removing the Gemma/Qwen two-variant comparison was a regression",
         "Slide 2 contains no product/vendor taxonomy",
+        "at most three candidates: FeatureBench first",
     ):
         assert requirement in spec
+
+
+def test_companion_benchmark_shortlist_stays_feature_focused():
+    blog = BLOG.read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
+    companion = "\n".join(
+        path.read_text(encoding="utf-8") for path in (BLOG, README, SPEC)
+    )
+    for benchmark in ("FeatureBench", "ViBench", "RACE-bench"):
+        assert benchmark in companion
+    for out_of_scope in (
+        "Claw-SWE-Bench",
+        "deep-swe",
+        "SWE-bench-Live",
+        "Terminal-Bench",
+    ):
+        assert out_of_scope not in companion
+
+    shortlist = re.search(
+        r"(?ms)^### App-feature benchmark shortlist\s+(.*?)^### Other sources",
+        readme,
+    )
+    assert shortlist is not None
+    assert re.findall(r"(?m)^- \[([^]]+)\]", shortlist.group(1)) == [
+        "FeatureBench",
+        "ViBench Vibe-on-Ref",
+        "RACE-bench",
+    ]
+    assert shortlist.group(1).count("optional") == 2
+
+    roadmap = re.search(
+        r"External generalization should stay focused on app-feature "
+        r"development:(.*?)\n\nThis pilot",
+        blog,
+        flags=re.DOTALL,
+    )
+    assert roadmap is not None
+    assert re.findall(r"\[([^]]+)\]\(https?://[^)]+\)", roadmap.group(1)) == [
+        "FeatureBench-fast",
+        "ViBench Vibe-on-Ref",
+        "RACE-bench",
+    ]
+    assert "optional secondary candidates" in roadmap.group(1)
+    assert "not a commitment to run all three" in roadmap.group(1)

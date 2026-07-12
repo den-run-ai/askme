@@ -54,6 +54,14 @@ npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
 
 ## Primary Sources
 
+### App-feature benchmark shortlist
+
+- [FeatureBench](https://github.com/LiberCoders/FeatureBench) — primary target
+- [ViBench Vibe-on-Ref](https://vibench.ai/) — optional app-extension follow-up
+- [RACE-bench](https://arxiv.org/abs/2603.26337) — optional repository-feature follow-up
+
+### Other sources
+
 - [Lilian Weng, “Harness Engineering for Self-Improvement”](https://lilianweng.github.io/posts/2026-07-04-harness/)
 - [HyperAgents](https://arxiv.org/abs/2603.19461)
 - [Pi](https://github.com/earendil-works/pi)
@@ -62,10 +70,6 @@ npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
 - [Omnigent (Databricks, OSS alpha)](https://github.com/omnigent-ai/omnigent)
 - [Omnigent on Databricks (managed beta)](https://docs.databricks.com/aws/en/omnigent/)
 - [Databricks’ separate evaluation layer, “Benchmarking Coding Agents on Databricks’ Multi-Million Line Codebase”](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
-- [Claw-SWE-Bench](https://arxiv.org/abs/2606.12344)
-- [FeatureBench](https://github.com/LiberCoders/FeatureBench)
-- [Datacurve's deep-swe benchmark](https://github.com/datacurve-ai/deep-swe)
-- [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1)
 - [Google, Gemma 4 model overview](https://ai.google.dev/gemma/docs/core)
 - [Qwen, Qwen3.6-27B announcement](https://qwen.ai/blog?id=qwen3.6-27b)
 - [Qwen, Qwen3.6-35B-A3B announcement](https://qwen.ai/blog?id=qwen3.6-35b-a3b)

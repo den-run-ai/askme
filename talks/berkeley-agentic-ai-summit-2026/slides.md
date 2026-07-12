@@ -499,7 +499,7 @@ Use four native semantic workflows, explicit-reasoning off and current-gated pol
 and three randomized repeats: twenty-four scheduled runs per model. Score every valid
 run with held-out acceptance and false completion as the two primary outcomes. Treat
 recovery and plan stability as descriptive. This is a feasibility study that can reveal
-only large effects. FeatureBench and other external suites test generalization later.
+only large effects. FeatureBench tests app-feature generalization after the native pilot.
 -->
 
 ---
