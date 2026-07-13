@@ -24,7 +24,11 @@ style: |
     padding: 40px 54px 46px;
   }
   section::after { color: #8792a2; font-size: 15px; }
-  section.title { background: #eef2f7; }
+  section.title {
+    background: #eef2f7;
+    padding: 62px 76px 54px;
+  }
+  section.title::after { display: none; }
   h1, h2, h3, p { letter-spacing: 0; }
   h1 {
     color: var(--ink);
@@ -51,36 +55,38 @@ style: |
     left: 54px;
     position: absolute;
   }
-  .trace-table {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 16px 40px rgba(17, 24, 39, 0.08);
-    overflow: hidden;
-  }
-  .trace-row {
-    align-items: center;
-    border-top: 1px solid var(--line);
-    display: grid;
-    grid-template-columns: 72px 1.15fr 1.35fr 1.15fr;
-    min-height: 61px;
-  }
-  .trace-row.head {
-    background: var(--terminal);
-    border-top: 0;
-    color: #f8fafc;
-    font-size: 14px;
+  .title-kicker {
+    color: var(--blue);
+    font-size: 16px;
     font-weight: 850;
-    min-height: 38px;
     text-transform: uppercase;
   }
-  .trace-cell { padding: 10px 14px; }
-  .trace-cell + .trace-cell { border-left: 1px solid var(--line); }
-  .trace-row.head .trace-cell + .trace-cell { border-left-color: #394150; }
-  .step { color: var(--blue); font-size: 17px; font-weight: 900; }
-  .action { font-family: "SFMono-Regular", Consolas, monospace; font-size: 17px; }
-  .evidence { color: var(--teal); font-size: 17px; font-weight: 750; }
-  .intro-foot { display: flex; justify-content: space-between; margin-top: 15px; }
+  .title-question { margin-top: 68px; max-width: 980px; }
+  .title-question h1 {
+    font-size: 64px;
+    line-height: 1.04;
+    margin-bottom: 24px;
+  }
+  .title-message {
+    color: var(--muted);
+    font-size: 27px;
+    line-height: 1.3;
+    margin: 0;
+    max-width: 850px;
+  }
+  .title-speaker {
+    align-items: end;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    margin-top: 92px;
+    padding-top: 19px;
+  }
+  .title-speaker .name { display: block; font-size: 22px; }
+  .title-speaker .role { color: var(--muted); display: block; font-size: 16px; margin-top: 4px; }
+  .title-links { font-size: 15px; text-align: right; }
+  .title-links a { color: var(--blue); text-decoration: none; }
+  .title-links span { color: #9aa4b2; margin: 0 8px; }
   .two-col {
     display: grid;
     gap: 24px;
@@ -160,124 +166,149 @@ style: |
   .decision.local { border-top: 6px solid var(--teal); }
   .decision.replan { border-top: 6px solid var(--coral); }
   .decision.continue { border-top: 6px solid var(--blue); }
-  .harness-grid {
+  .bridge-grid {
     display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(5, 1fr);
-    margin-top: 14px;
+    gap: 24px;
+    grid-template-columns: 0.9fr 1.2fr 0.9fr;
+    margin-top: 26px;
   }
-  .harness-card {
+  .bridge-stage {
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 8px;
-    min-height: 205px;
-    padding: 15px 14px;
+    min-height: 265px;
+    padding: 19px 20px;
+    position: relative;
   }
-  .harness-card:nth-child(1) { border-top: 7px solid var(--blue); }
-  .harness-card:nth-child(2) { border-top: 7px solid #6b5bd2; }
-  .harness-card:nth-child(3) { border-top: 7px solid var(--teal); }
-  .harness-card:nth-child(4) { border-top: 7px solid var(--amber); }
-  .harness-card:nth-child(5) { border-top: 7px solid var(--coral); }
-  .harness-card .kind {
-    color: var(--muted);
-    font-size: 12px;
+  .bridge-stage:not(:last-child)::after {
+    color: var(--blue);
+    content: "→";
+    font-size: 30px;
     font-weight: 900;
-    min-height: 30px;
-    text-transform: uppercase;
+    position: absolute;
+    right: -23px;
+    top: 108px;
+    z-index: 2;
   }
-  .harness-card strong { display: block; font-size: 19px; margin: 8px 0 10px; }
-  .harness-card p { color: var(--muted); font-size: 15px; line-height: 1.3; margin: 0; }
-  .harness-seam {
+  .bridge-stage.model-stage { border-top: 7px solid var(--blue); }
+  .bridge-stage.askme-stage {
+    background: var(--terminal);
+    border-color: var(--terminal);
+    color: #f8fafc;
+  }
+  .bridge-stage.workflow-stage { border-top: 7px solid var(--teal); }
+  .bridge-stage .num { color: var(--blue); font-size: 13px; font-weight: 900; }
+  .bridge-stage.askme-stage .num { color: #63d8c2; }
+  .bridge-stage .label { color: var(--muted); font-size: 13px; font-weight: 900; text-transform: uppercase; }
+  .bridge-stage.askme-stage .label { color: #9fb0c5; }
+  .bridge-stage h2 { font-size: 22px; margin: 10px 0 14px; }
+  .bridge-stage.askme-stage h2 { color: #fff; }
+  .bridge-stage ul { font-size: 16px; line-height: 1.5; margin: 0; padding-left: 20px; }
+  .bridge-stage p { color: var(--muted); font-size: 15px; line-height: 1.35; margin: 14px 0 0; }
+  .bridge-stage.askme-stage p { color: #bcc6d3; }
+  .micro-loop {
+    background: #242a35;
+    border-left: 5px solid #63d8c2;
+    border-radius: 4px;
+    color: #f8fafc;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.55;
+    padding: 13px 14px;
+  }
+  .bridge-caption {
     background: #e9f7f3;
     border-left: 6px solid var(--teal);
     border-radius: 4px;
     color: #285d53;
     font-size: 18px;
-    margin-top: 16px;
-    padding: 12px 15px;
+    margin-top: 18px;
+    padding: 11px 15px;
   }
-  .trend-grid {
-    align-items: stretch;
-    display: grid;
-    gap: 16px;
-    grid-template-columns: 1fr 0.72fr 1fr;
-    margin-top: 20px;
-  }
-  .trend, .bridge {
-    border-radius: 8px;
-    min-height: 290px;
-    padding: 18px 20px;
-  }
-  .trend { background: #fff; border: 1px solid var(--line); }
-  .trend.model-side { border-top: 7px solid var(--blue); }
-  .trend.workflow-side { border-top: 7px solid var(--teal); }
-  .trend .label, .bridge .label { font-size: 13px; font-weight: 900; text-transform: uppercase; }
-  .trend .label { color: var(--blue); }
-  .trend.workflow-side .label { color: var(--teal); }
-  .trend h2 { font-size: 23px; margin-top: 6px; }
-  .trend ul { font-size: 17px; line-height: 1.45; margin: 13px 0 0; padding-left: 21px; }
-  .bridge {
-    align-items: center;
-    background: var(--terminal);
-    color: #f8fafc;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
-  }
-  .bridge .label { color: #63d8c2; }
-  .bridge h2 { color: #fff; font-size: 27px; margin: 12px 0; }
-  .bridge p { color: #bcc6d3; font-size: 15px; margin: 0; }
-  .formula {
-    align-items: center;
-    background: var(--terminal);
-    border-radius: 8px;
-    color: #f8fafc;
-    display: flex;
-    font-size: 24px;
-    font-weight: 800;
-    justify-content: center;
-    margin: 17px 0;
-    padding: 13px;
-  }
-  .formula span { color: #63d8c2; margin: 0 10px; }
-  .probe-grid { grid-template-columns: 1fr 1fr; }
-  .probe { min-height: 118px; }
-  .probe .label { color: var(--blue); font-size: 13px; font-weight: 900; text-transform: uppercase; }
-  .model-lane {
-    display: grid;
-    gap: 8px;
-    grid-template-columns: repeat(4, 1fr);
-    margin-top: 14px;
-  }
-  .model {
-    background: #edf4ff;
-    border-bottom: 4px solid var(--blue);
-    border-radius: 5px;
+  .bridge-caption span { display: block; font-size: 14px; margin-top: 3px; }
+  .result-limit {
+    color: var(--muted);
     font-size: 14px;
-    font-weight: 800;
-    padding: 8px;
-    text-align: center;
+    margin: 8px 0 0;
   }
-  .stats { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin: 20px 0; }
-  .stat {
+  .matrix-summary {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 0.72fr 0.72fr 1.56fr;
+    margin: 13px 0 12px;
+  }
+  .matrix-summary > div {
     background: #fff;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    min-height: 108px;
-    padding: 14px 18px;
+    border-radius: 6px;
+    min-height: 50px;
+    padding: 8px 13px;
   }
-  .stat .big { color: var(--blue); font-size: 39px; font-weight: 900; line-height: 1; }
-  .stat.fail .big { color: var(--coral); }
-  .stat p { color: var(--muted); font-size: 15px; margin: 8px 0 0; }
-  .claim-table { background: #fff; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-  .claim-row { display: grid; grid-template-columns: 0.82fr 1.18fr; }
-  .claim-row + .claim-row { border-top: 1px solid var(--line); }
-  .claim-row div { font-size: 16px; padding: 10px 14px; }
-  .claim-row div + div { border-left: 1px solid var(--line); color: var(--muted); }
-  .claim-row strong { color: var(--ink); }
+  .matrix-summary strong { color: var(--blue); font-size: 24px; margin-right: 7px; }
+  .matrix-summary span { color: var(--muted); font-size: 14px; }
+  .matrix-summary .boundary {
+    align-items: center;
+    background: #fff7e9;
+    border-color: #f0d5a6;
+    color: #8a5700;
+    display: flex;
+    font-size: 14px;
+    font-weight: 800;
+  }
+  .matrix-grid {
+    display: grid;
+    gap: 5px;
+    grid-template-columns: 1.32fr 1.13fr 1fr 1fr;
+  }
+  .matrix-cell {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 15px;
+    min-height: 39px;
+    padding: 8px 10px;
+  }
+  .matrix-cell.head {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 850;
+    min-height: 20px;
+    padding-bottom: 3px;
+    text-transform: uppercase;
+  }
+  .matrix-cell.model-name { font-weight: 850; }
+  .matrix-cell small { color: var(--muted); display: block; font-size: 12px; margin-top: 2px; }
+  .shape { font-weight: 850; }
+  .shape.dense { color: var(--blue); }
+  .shape.moe { color: #7256c9; }
+  .matrix-status { font-size: 13px; font-weight: 900; }
+  .matrix-status.pass { color: var(--teal); }
+  .matrix-status.fail { color: var(--coral); }
+  .matrix-caveat {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.3;
+    margin: 10px 0 0;
+  }
+  .matrix-interpretation {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 0.9fr 1.4fr;
+    margin-top: 10px;
+  }
+  .matrix-interpretation > div {
+    border-radius: 5px;
+    font-size: 13px;
+    line-height: 1.3;
+    padding: 8px 11px;
+  }
+  .matrix-interpretation strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .matrix-interpretation .supported { background: #e9f7f3; color: #285d53; }
+  .matrix-interpretation .unsupported { background: #fff2df; color: #7a5008; }
   .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
-  .experiment { min-height: 164px; }
+  .experiment { min-height: 145px; }
   .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
   .metrics {
     background: #e9f7f3;
@@ -288,6 +319,43 @@ style: |
     margin-top: 18px;
     padding: 12px 15px;
   }
+  .pilot-status {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    color: #7a5008;
+    font-size: 17px;
+    font-weight: 850;
+    margin-top: 13px;
+    padding: 10px 15px;
+  }
+  .external-status {
+    background: #edf4ff;
+    border-left: 6px solid var(--blue);
+    border-radius: 4px;
+    color: #27476f;
+    font-size: 15px;
+    margin-top: 12px;
+    padding: 9px 15px;
+  }
+  .conclusion-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 30px 0 26px;
+  }
+  .conclusion-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    min-height: 190px;
+    padding: 18px 19px;
+  }
+  .conclusion-card.observed { border-top: 7px solid var(--blue); }
+  .conclusion-card.supported { border-top: 7px solid var(--teal); }
+  .conclusion-card.open { border-top: 7px solid var(--amber); }
+  .conclusion-card strong { display: block; font-size: 20px; margin-bottom: 10px; }
+  .conclusion-card p { color: var(--muted); font-size: 16px; margin: 0; }
   .loop {
     display: grid;
     gap: 10px;
@@ -314,68 +382,60 @@ style: |
 
 <!-- _class: title -->
 
-<div class="eyebrow">AskMe · Agentic AI Summit 2026 · UC Berkeley</div>
+<div class="title-kicker">Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026</div>
 
-# Smaller open models.<br>Full workflows. Tight harnesses.
+<div class="title-question">
 
-<p class="subtitle">The system layer connecting model control to agent execution</p>
+# Are Small LLMs Ready for Coding Agents?
 
-<p class="tiny" style="font-weight:850; margin:0 0 6px; text-transform:uppercase;">Illustrative workflow</p>
+<p class="title-message">Can tight execution feedback turn bounded small-model actions into accepted workflows?</p>
 
-<div class="trace-table">
-  <div class="trace-row head"><div class="trace-cell">Step</div><div class="trace-cell">Plan</div><div class="trace-cell">AskMe action</div><div class="trace-cell">Evidence</div></div>
-  <div class="trace-row"><div class="trace-cell step">01</div><div class="trace-cell">Establish behavior</div><div class="trace-cell action">run focused integration test</div><div class="trace-cell evidence">failure is located</div></div>
-  <div class="trace-row"><div class="trace-cell step">02</div><div class="trace-cell">Patch the boundary</div><div class="trace-cell action">edit the smallest surface</div><div class="trace-cell evidence">focused test passes</div></div>
-  <div class="trace-row"><div class="trace-cell step">03</div><div class="trace-cell">Check integration</div><div class="trace-cell action">run related + full suite</div><div class="trace-cell evidence">no regression observed</div></div>
-  <div class="trace-row"><div class="trace-cell step">04</div><div class="trace-cell">Accept the result</div><div class="trace-cell action">verify required behavior</div><div class="trace-cell evidence">contract satisfied</div></div>
 </div>
 
-<div class="intro-foot"><span class="tiny"><strong>Denis Akhiyarov</strong> · Aug 1, 2026</span><span class="tiny">github.com/den-run-ai/askme</span></div>
+<div class="title-speaker">
+  <div><span class="name"><strong>Denis Akhiyarov</strong></span><span class="role">Sr Staff Research Scientist at ServiceNow</span></div>
+  <div class="title-links"><a href="https://x.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
+</div>
 
 <!--
-Speaker notes (~45s):
-Smaller open models give teams more control over latency, hardware, deployment, and
-post-training, and may help attract and grow talent. Meanwhile coding agents are
-expanding from code edits toward full workflows. The harness connects those trends. An
-agent is not one answer; it is this sequence of plans, actions, and fresh evidence. AskMe
-makes the sequence visible so we can ask how reasoning turns each result into the next
-move.
+Speaker notes (~40s):
+The title is a question, not a verdict. Here, small is a deployment class, not one
+parameter cutoff. The hosted receipts span roughly three-to-four-billion-active mixtures
+and twenty-seven-to-thirty-one-billion dense models; they do not measure local
+performance. Teams want control over speed, hardware, deployment, and post-training on
+their chosen hardware and stack. The question is whether tight execution feedback can
+turn bounded actions into accepted workflows.
 -->
 
 ---
 
 <div class="eyebrow">Why this matters now</div>
 
-# Five approaches, five harness boundaries
+# A tight loop connects model control to full workflows
 
-<p class="subtitle">Same model; different context, tools, runtime, governance, and evaluation.</p>
+<p class="subtitle">The model gets one bounded move; the harness keeps the end-to-end contract.</p>
 
-<div class="harness-grid">
-  <div class="harness-card"><div class="kind">Minimal · extensible</div><strong>Pi</strong><p>Small terminal core. Add skills, prompts, extensions, and packages.</p></div>
-  <div class="harness-card"><div class="kind">Tool-rich terminal</div><strong>Oh My Pi</strong><p>Hash-anchored edits, IDE tools, workers, memory, and subagents.</p></div>
-  <div class="harness-card"><div class="kind">Agent platform</div><strong>OpenHands</strong><p>Composable SDK plus local, cloud, and enterprise runtimes.</p></div>
-  <div class="harness-card"><div class="kind">Meta-harness · alpha</div><strong>Omnigent</strong><p>Swap or compose agents under policies, sandboxes, and shared sessions.</p></div>
-  <div class="harness-card"><div class="kind">Evaluation · selection</div><strong>Databricks</strong><p>Real PR tasks, isolated runs, sealed history, and held-out tests.</p></div>
+<div class="bridge-grid">
+  <div class="bridge-stage model-stage"><div class="num">01</div><div class="label">Controllable small LLMs</div><h2>Choose the model boundary</h2><ul><li>Execution speed</li><li>Hardware and deployment</li><li>Post-training access</li></ul></div>
+  <div class="bridge-stage askme-stage"><div class="num">02</div><div class="label">AskMe loop</div><h2>One small action at a time</h2><div class="micro-loop">plan → act → execute / test<br>→ fresh evidence ↺</div><p>Interpret the result. Update locally when possible.</p></div>
+  <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">Accepted full workflow</div><h2>Keep and check the contract</h2><ul><li>Preserve completed work</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
 </div>
 
-<div class="harness-seam"><strong>AskMe isolates one seam:</strong> execution evidence → bounded plan update → independent acceptance.</div>
-
-<div class="source">Sources: Pi · Oh My Pi · OpenHands · Omnigent (open-source alpha) · Databricks internal coding benchmark, July 8, 2026</div>
+<div class="bridge-caption"><strong>The bridge:</strong> small action surface + fresh execution feedback + independent workflow acceptance.<span>Assumes bounded actions, informative feedback, and independently testable success.</span></div>
 
 <!--
 Speaker notes (~45s):
-These are not interchangeable competitors; they choose harness boundaries. Pi keeps a
-minimal loop and invites extensions. Oh My Pi ships a richer terminal and IDE tool
-surface. OpenHands provides an agent SDK and managed runtime. Omnigent, alpha,
-coordinates harnesses under shared policies and sessions. Databricks adds the
-organizational evaluation layer: real pull requests, isolated runs, and held-out tests.
-AskMe is narrower; it studies how execution evidence becomes a bounded plan update and
-an accepted result.
+AskMe narrows each turn to one small action, executes it, and returns fresh test or
+runtime evidence. The harness keeps the full contract and completed work in view, so the
+model can continue, repair locally, or replan when an assumption breaks. This approach
+assumes the work decomposes into bounded actions, feedback is informative, and success is
+independently testable. The point is a simpler interface, not a lower standard.
+Independent acceptance checks the required behavior and artifact.
 -->
 
 ---
 
-<div class="eyebrow">A retained integration miss</div>
+<div class="eyebrow">Observed result · Qwen3.6-35B-A3B build cell</div>
 
 # The code ran. The workflow still failed.
 
@@ -389,7 +449,8 @@ an accepted result.
     <div class="event ok"><strong><code>/tmp/test</code> compiled</strong><span>A different output path was chosen.</span></div>
     <div class="event ok"><strong><code>/tmp/test</code> ran successfully</strong><span>It printed <code>REPLAN_OK</code>.</span></div>
     <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
-    <div class="callout"><strong>Every recorded action succeeded.</strong> The deliverable contract still drifted.</div>
+    <div class="callout"><strong>Successful actions + reported completion ≠ accepted artifact.</strong></div>
+    <p class="result-limit"><strong>Current limit:</strong> acceptance scored this run after completion; the failure was not returned for recovery.</p>
   </div>
 </div>
 
@@ -397,19 +458,19 @@ an accepted result.
 
 <!--
 Speaker notes (~45s):
-This retained run exposes the agent problem more clearly: correct local execution can
-still miss the requested workflow contract across multiple otherwise successful steps
-and tools. The agent wrote correct files, compiled slash tmp slash test, ran
-it successfully, and declared completion. The acceptance check expected dot slash main.
-Every tool action looked green, but the workflow contract was missed. Working code is not
-automatically an accepted change.
+This Qwen build run shows the agent problem: correct local execution can still miss the
+workflow contract. It wrote correct files, compiled slash tmp slash test, ran it
+successfully, and declared completion. Acceptance expected dot slash main. Every recorded
+action succeeded, but the artifact failed. That check scored the finished run; AskMe did
+not receive the failure for recovery. Successful steps and completion are insufficient
+without artifact acceptance.
 -->
 
 ---
 
 <div class="eyebrow">Design hypothesis</div>
 
-# Reason over fresh evidence. Preserve progress.
+# Hypothesis: update only what fresh evidence invalidates
 
 <div class="flow">
   <div class="node"><div class="num">01</div><strong>Keep the contract</strong><p>Carry the required behavior and artifact forward.</p></div>
@@ -425,104 +486,113 @@ automatically an accepted change.
   <div class="decision replan"><strong>Broken assumption</strong><p>Replan broadly only when the plan is no longer valid.</p></div>
 </div>
 
-<div class="callout"><strong>Trajectory goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn—not longer monologues.</div>
+<div class="callout"><strong>Trajectory goal—not yet isolated:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
 
 <!--
 Speaker notes (~45s):
-Reasoning matters between calls. It keeps the current contract in view, interprets
-execution or test feedback, and decides how much of the plan changed. A local
-failure should produce a local correction while completed work stays completed.
-Broad replanning belongs to broken assumptions, not every red command. This is not an
-argument for longer monologues. It is a hypothesis about trajectory quality: fewer
-repeated errors, fewer stuck steps, and less needless plan churn.
+This is a design hypothesis, not a result from the smoke. Reasoning should keep the
+contract in view, interpret execution feedback, and decide how much of the plan changed.
+A local mismatch should produce a local correction while completed work stays completed.
+Broad replanning belongs to broken assumptions, not every red command. The target is
+trajectory quality across these fast execution-feedback loops: fewer repeated failures,
+stuck steps, and unnecessary plan churn—not longer monologues.
 -->
 
 ---
 
-<div class="eyebrow">Measured harness smoke · July 10, 2026</div>
+<div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
 
-# A smoke test—not a model verdict
+# Current result: 7 of 8 simple artifacts accepted
 
-<div class="formula">4 hosted models <span>×</span> 2 simple checks <span>×</span> 1 run / cell</div>
+<p class="subtitle">4 hosted model variants × 2 simple checks × 1 unseeded run/cell</p>
 
-<div class="stats">
-  <div class="stat"><div class="big">8 / 8</div><p>agents reported completion</p></div>
-  <div class="stat"><div class="big">7 / 8</div><p>artifacts passed exact acceptance</p></div>
-  <div class="stat fail"><div class="big">1</div><p>integration-path miss was retained</p></div>
+<div class="matrix-summary">
+  <div><strong>8 / 8</strong><span>agent complete</span></div>
+  <div><strong>7 / 8</strong><span>artifact accepted</span></div>
+  <div class="boundary">Compatibility smoke · n=1/cell · descriptive only</div>
 </div>
 
-<div class="claim-table">
-  <div class="claim-row"><div><strong>What it exercises</strong></div><div>Action protocol, trace visibility, completion state, and separate acceptance.</div></div>
-  <div class="claim-row"><div><strong>What it does not test</strong></div><div>Modern coding ability, model family or size, reasoning impact, or reliability.</div></div>
+<div class="matrix-grid">
+  <div class="matrix-cell head">Model</div><div class="matrix-cell head">Shape</div><div class="matrix-cell head">Artifact build</div><div class="matrix-cell head">Script repair</div>
+  <div class="matrix-cell model-name">Gemma 4 26B A4B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>25.2B total · 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Gemma 4 31B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Qwen3.6-27B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell model-name">Qwen3.6-35B-A3B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>35B total · 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
 </div>
 
-<div class="callout"><strong>The useful receipt:</strong> self-reported completion and accepted workflow behavior are different measurements.</div>
+<div class="matrix-interpretation">
+  <div class="supported"><strong>Supported</strong>AskMe ran all four variants; acceptance caught one false completion.</div>
+  <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
+</div>
 
-<div class="source">Both checks were deliberately simple. Full prompts, protocol, and outcomes: evals/README.md</div>
+<div class="source">Four hosted models × two deliberately simple checks × one unseeded run/cell · evals/README.md</div>
 
 <!--
-Speaker notes (~40s):
-The hosted study is an interface smoke, not a modern coding benchmark. Four hosted models
-ran two scripted checks once. All eight agents reported completion; seven artifacts met
-the exact acceptance contract. The traces validate logging and expose the path miss, but
-they are receipts. One unseeded run per cell, non-randomized sequential runs, different
-architectures, and a post hoc fourth model support no family, size, reasoning,
-reliability, or local-hardware conclusion.
+Speaker notes (~45s):
+Four hosted variants each ran two simple checks once. Both dense models and the Gemma
+mixture accepted both cells; the Qwen mixture accepted one. All eight reported complete.
+Descriptively, Gemma thirty-one's build trace was nine times shorter than Gemma
+twenty-six's, but its repair was slower; the fastest build trace was rejected. No pair
+isolates size, architecture, active compute, family, provider timing, or reliability.
+These are trajectory observations, not rankings. The thirty-one model was added
+post-hoc.
 -->
 
 ---
 
-<div class="eyebrow">Pre-August native pilot</div>
+<div class="eyebrow">Next evidence · two separate steps</div>
 
-# Freeze the smallest clean test
+# Does selective extra reasoning improve delivery?
+
+<p class="subtitle">An AskMe setting A/B test—not an external benchmark or model comparison.</p>
 
 <div class="experiment-grid">
-  <div class="experiment"><div class="num">01</div><strong>4 frozen workflows</strong><p>Valid multi-file code, semantic failures, visible feedback, held-out scoring.</p></div>
-  <div class="experiment"><div class="num">02</div><strong>2 frozen policies</strong><p>Explicit-reasoning off versus the current composite gated policy.</p></div>
-  <div class="experiment"><div class="num">03</div><strong>3 randomized repeats</strong><p>4 × 2 × 3 = 24 scheduled runs per model.</p></div>
-  <div class="experiment"><div class="num">04</div><strong>2 primary outcomes</strong><p>Held-out acceptance and false completion across all valid runs.</p></div>
+  <div class="experiment"><div class="num">01</div><strong>Build the AskMe test</strong><p>Four semantic workflows; one is qualified today.</p></div>
+  <div class="experiment"><div class="num">02</div><strong>Hold the system fixed</strong><p>One model route; identical tasks, tools, feedback, and budgets.</p></div>
+  <div class="experiment"><div class="num">03</div><strong>Change one switch</strong><p><strong>Off:</strong> never request extra reasoning. <strong>Gated:</strong> request it only at predefined recovery points.</p></div>
+  <div class="experiment"><div class="num">04</div><strong>Judge the delivery</strong><p>Three repeats per task and setting; held-out acceptance and false completion.</p></div>
 </div>
 
-<div class="metrics"><strong>Secondary:</strong> repeated actions · work redone · local/full replans · latency · tokens</div>
+<div class="pilot-status">Native A/B not ready: 3 workflows, model route, and schedule still pending · 0 measured runs</div>
 
-<div class="source">Publish tasks, policies, budgets, gate table, randomization, and exclusions before the first outcome-bearing call.</div>
+<div class="metrics"><strong>24-run scope:</strong> only an obvious difference on these four tasks—not reliability, model size, or Qwen vs Gemma.</div>
+
+<div class="external-status"><strong>External evaluation is also not ready:</strong> no adapter or result yet. FeatureBench first; Vals only if access permits.</div>
 
 <!--
 Speaker notes (~45s):
-Before the summit, freeze the smallest clean pilot rather than rush external adapters.
-Use four native semantic workflows, explicit-reasoning off and current-gated policies,
-and three randomized repeats: twenty-four scheduled runs per model. Score every valid
-run with held-out acceptance and false completion as the two primary outcomes. Treat
-recovery and plan stability as descriptive. This is a feasibility study that can reveal
-only large effects. FeatureBench and other external suites test generalization later.
+This is an AskMe-owned A/B test, not an external benchmark. Both arms use one model,
+workflows, tools, feedback, and budgets; both may reason internally. Off never requests
+the API's explicit-reasoning mode. Gated requests it only at retry, recovery, replan, and
+final-check points. Today one of four workflows is qualified, and zero runs exist.
+FeatureBench adaptation comes later; Vals requires access. Twenty-four runs could reveal
+a task-local difference, not a family or size effect.
 -->
 
 ---
 
-<div class="eyebrow">Takeaway</div>
+<div class="eyebrow">Conclusion + limits</div>
 
-# Control the model. Ground the workflow.
+# Promising—with a tight harness.
 
-<div class="loop">
-  <div class="box">Model choice</div>
-  <div class="box">Simple contract</div>
-  <div class="box">Execution / test</div>
-  <div class="box">Local reasoning</div>
-  <div class="box">Accepted workflow</div>
+<div class="conclusion-grid">
+  <div class="conclusion-card observed"><strong>Observed</strong><p>8 / 8 reported completion. 7 / 8 simple artifacts were accepted. One completed run missed its deliverable.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness compatibility across four hosted variants; execution evidence plus independent acceptance is a credible direction.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, model-size effects, reliability, and local performance.</p></div>
 </div>
 
 <p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>
 
-<p class="closing">Tight harnesses connect controllable models to increasingly capable, full-lifecycle agents.</p>
+<p class="closing">The smoke exercises the measurement path; readiness needs repeated held-out workflows.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes (~35s):
-The claim that survives is a design direction, not a model verdict. Smaller models offer
-control; broader agents offer leverage; the harness makes the combination operational.
-Prefer a simple, general action protocol. Return execution and test evidence.
-Let reasoning update the smallest part of the plan, with acceptance tied to the
-real workflow. Easier standards and interfaces can be good. Specialized skills should
-earn their complexity from repeated traces.
+Today we observed harness compatibility and one caught false completion. That supports
+execution feedback plus independent acceptance as a credible design direction, not a
+readiness verdict. We have not established realistic feature or application performance,
+a reasoning-policy benefit, Qwen versus Gemma, scaling, reliability, or local performance.
+Keep the action protocol simple and general, update only invalidated work, and tie success
+to behavior. Repeated held-out workflows must earn the stronger claim.
 -->

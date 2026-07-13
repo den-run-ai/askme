@@ -1,12 +1,15 @@
 # Agentic AI Summit 2026 — Lightning Talk
 
-**Title:** Smaller Open Models, Full Workflows, Tight Harnesses
+**Title:** Are Small LLMs Ready for Coding Agents?
+
+**Speaker:** Denis Akhiyarov, Sr Staff Research Scientist at ServiceNow · [@den-run-ai](https://x.com/den-run-ai)
 
 **Slot:** Compass (Saturday), Session 2: Frameworks & Dev Platforms, Aug 1, 2026, 1:00 PM PT
 **Format:** 5 minutes, 7 slides
 
 ## Contents
 
+- [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
 - [`slides.md`](slides.md) — Marp source with 499-word speaker notes.
 - `slides.pdf` — rendered deck.
 - [`blog.md`](blog.md) — companion argument and citations.
@@ -15,13 +18,13 @@
 
 ## Talk Arc
 
-1. Smaller open models offer more control over execution, hardware, deployment, post-training, and the builder ecosystem.
-2. Harnesses choose different boundaries: minimal extensible loops, tool-rich terminals, managed runtimes, meta-orchestration, and enterprise evaluation.
-3. AskMe isolates one seam connecting controllable models to broader workflows: execution evidence, bounded plan updates, and independent acceptance.
-4. The retained failure—working code at the wrong artifact path—shows why successful actions and self-reported completion are not the same as a completed workflow.
-5. Reasoning should preserve progress and turn fresh evidence into the smallest useful plan update.
-6. The published smoke validates the measurement path, not a model hierarchy.
-7. The next experiment should freeze four native semantic workflows, compare explicit-reasoning off with the current gated policy, and use repeated held-out acceptance and false completion as primary outcomes.
+1. Open with the readiness question and the speaker, not a dense system diagram.
+2. Connect controllable small LLMs to coding workflows through AskMe's small actions, fresh execution feedback, bounded updates, and independent acceptance.
+3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
+4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
+5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
+6. Separate the unfinished AskMe setting A/B test from external evaluation: 1/4 native workflows qualified, zero measured runs, and no external adapter yet.
+7. Answer cautiously: small LLM coding agents are promising with tight execution-grounded harnesses, but the current n=1 smoke does not establish general readiness.
 
 ## Evidence Boundary
 
@@ -29,39 +32,56 @@ The talk keeps three kinds of statements separate:
 
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
 - **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. The retained miss produced working behavior at the wrong path.
+- **Supported conclusion.** AskMe transported actions across all four hosted variants, and independent acceptance exposed one false completion. The smoke exercises the measurement path; it does not validate a causal harness benefit.
 - **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck proposes the experiment needed to test that claim.
+
+For this talk, “small” is an engineering/deployment class rather than a fixed parameter cutoff. The hosted matrix spans 3–4B-active MoE and 27–31B dense models and does not measure local-Mac performance. Its timings are observed trajectory wall times, not model-speed estimates.
+
+The planned native pilot is four workflows × two explicit-reasoning settings × three randomized repeats on one frozen model route: 24 scheduled runs total. It could reveal only an obvious difference on those tasks. A Qwen-versus-Gemma or model-size claim requires a separate predeclared, repeated design.
+
+In plain language, `off` never asks the API for explicit reasoning. `Gated` asks only at predefined retry, recovery, replan, and final-check points. Both settings may still reason internally. With only 24 runs, the pilot could reveal an obvious difference on its four tasks; it cannot estimate reliability.
+
+External evaluation is **not ready to run**. FeatureBench, Vals Vibe Code Bench, and ProgramBench currently appear only in the talk roadmap—there is no executable AskMe adapter or external result. FeatureBench is the first planned adapter; Vals depends on evaluator access; a ProgramBench `gron` run would qualify infrastructure only.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 
 ## Render
 
-From the repository root:
+The checked-in PDF uses Marp CLI 4.4.1 with Node 23. From the repository root:
 
 ```bash
-npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
   --html --pdf --allow-local-files
 ```
 
 For presenter mode:
 
 ```bash
-npx @marp-team/marp-cli talks/berkeley-agentic-ai-summit-2026/slides.md \
+npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md \
   --html --preview
 ```
 
 ## Primary Sources
 
+### Coding-agent benchmark shortlist
+
+- [FeatureBench](https://github.com/LiberCoders/FeatureBench) — primary target
+- [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) — access-dependent full-app reference
+- [ProgramBench](https://github.com/facebookresearch/programbench) — later clean-room stress test; `gron` canary only
+
+### Other sources
+
 - [Lilian Weng, “Harness Engineering for Self-Improvement”](https://lilianweng.github.io/posts/2026-07-04-harness/)
 - [HyperAgents](https://arxiv.org/abs/2603.19461)
-- [Pi documentation](https://pi.dev/docs/latest)
-- [Oh My Pi](https://github.com/can1357/oh-my-pi)
+- [Pi](https://github.com/earendil-works/pi)
+- [Oh My Pi, a batteries-included Pi fork](https://github.com/can1357/oh-my-pi)
 - [OpenHands](https://github.com/OpenHands/OpenHands)
-- [Omnigent](https://github.com/omnigent-ai/omnigent)
-- [Databricks, “Benchmarking Coding Agents on Databricks’ Multi-Million Line Codebase”](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
-- [Claw-SWE-Bench](https://arxiv.org/abs/2606.12344)
-- [FeatureBench](https://github.com/LiberCoders/FeatureBench)
-- [Datacurve's deep-swe benchmark](https://github.com/datacurve-ai/deep-swe)
-- [Terminal-Bench 2.1](https://www.tbench.ai/news/terminal-bench-2-1)
+- [Omnigent (Databricks, OSS alpha)](https://github.com/omnigent-ai/omnigent)
+- [Omnigent on Databricks (managed beta)](https://docs.databricks.com/aws/en/omnigent/)
+- [Databricks’ separate evaluation layer, “Benchmarking Coding Agents on Databricks’ Multi-Million Line Codebase”](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
+- [Google, Gemma 4 model overview](https://ai.google.dev/gemma/docs/core)
+- [Qwen, Qwen3.6-27B announcement](https://qwen.ai/blog?id=qwen3.6-27b)
+- [Qwen, Qwen3.6-35B-A3B announcement](https://qwen.ai/blog?id=qwen3.6-35b-a3b)
 - [Google Gemma run and deployment guidance](https://ai.google.dev/gemma/docs/run)
 - [Google Gemma tuning guidance](https://ai.google.dev/gemma/docs/tune)
 - [Agentic AI Summit 2026 program](https://rdi.berkeley.edu/events/agentic-ai-summit-2026)
