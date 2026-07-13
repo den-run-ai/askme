@@ -492,7 +492,8 @@ class TestLLMTransport:
         """LLMTransportError in get_step() should trigger replan, not crash."""
         step_calls = {"n": 0}
 
-        def mock_get_step(task, state, goal="", step_num=0, max_steps=10, think=False):
+        def mock_get_step(task, state, goal="", step_num=0, max_steps=10,
+                          think=False, **kwargs):
             step_calls["n"] += 1
             if step_calls["n"] == 1:
                 raise LLMTransportError("timeout")

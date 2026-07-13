@@ -38,15 +38,16 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 - `preflight_probe(working_dir)` — environment probe (platform, arch, tools, package managers, dir listing)
 - `get_policy()` — execution policy (`allow_system_installs`, `allow_network`)
 - `_repair_json(text)` — mechanical JSON repair for truncation artifacts (trailing commas, unclosed braces, truncated keys); returns dict or None
-- `ask_llm(messages, max_tokens, think)` — calls backend, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, attempts repair then retries on parse failure (up to 2). E03: final auto-retry uses strict contract with no thinking
-- `get_plan(user_prompt, state)` — task list. Thinking conditional: `think=bool(errors or completed_tasks)` — off for first plan, on for replans
-- `get_step(task, state, goal)` — next action within a task. Goal-aware completion — executor must satisfy the full task, not just one step
+- `ask_llm(messages, max_tokens, think, reasoning_policy, reasoning_trigger)` — calls a backend, logs the requested/effective explicit-reasoning decision for every attempt, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, attempts repair, then retries on parse failure (up to 2). E03: the final auto-retry uses a strict contract with no thinking
+- `get_plan(user_prompt, state)` — task list. Under the default `gated` policy, explicit reasoning is off for the first plan and enabled for replans
+- `get_step(task, state, goal, reasoning_policy, goal_context_chars)` — next action within a task. Goal-aware completion uses the per-run frozen goal-context view rather than the generic field cap
 - `replan_task(failed_task, errors, completed_tasks, state, user_prompt)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (`max_tokens=96`, no retries). Returns string or None. Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
 - `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
 - `execute(action, working_dir)` — runs shell/write/edit/read/done/fail with command-aware timeouts
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`
-- `run(user_prompt)` — outer loop: preflight → plan → execute → replan → validate
+- `_run_loop(...)` — structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls
+- `run(user_prompt, working_dir=None)` — backward-compatible public wrapper returning a boolean
 
 **State** is an in-memory dict (no files). Planner and executor see different views.
 
@@ -81,10 +82,45 @@ State design:
 - Last step from previous task carries over so executor knows what just happened
 - Write/read `arg` fields use basename to save tokens
 - Write output is `"Wrote main.c"` (basename) not full path — critical for the LLM to recognize the file was created
+- `reasoning_policy` and `goal_context_chars` are frozen in run state for logging and downstream calls, but are deliberately removed from planner state so the experiment label cannot become model-visible task evidence
+- The initial planner receives the full request. Executor and task-local replan receive the same frozen `goal_context_chars` prefix in both policy arms; other executor fields remain capped independently
 
 **Two system prompts:**
 - `SYSTEM_PLAN` — planner, outputs `{"tasks": [...]}`. Gets full user prompt + full state.
 - `SYSTEM_STEP` — executor, outputs `{"action": "...", "arg": "...", "content": "...", "reasoning": "..."}`. Gets original goal + current task + slim state.
+
+## Explicit-Reasoning Policy
+
+`AGENT_REASONING_POLICY` controls requests made through the backend's explicit
+reasoning channel; it does not claim that a model performs no internal
+reasoning. Normal runtime defaults to `gated`. Evaluation runs freeze either
+`gated` or `off` for the entire process.
+
+| Request event | `gated` | `off` |
+|---|---|---|
+| Initial plan or ordinary executor step | Disabled | Disabled |
+| First automatic JSON-contract retry | Medium | Disabled |
+| Full planner replan | Medium; high on its first retry | Disabled |
+| Executor after semantic/unknown execution errors | Medium; high on its first retry | Disabled |
+| Executor after structural errors in `_NO_THINK_ERRORS` | Disabled | Disabled |
+| Executor after two duplicate-action skips | Medium; high on its first retry | Disabled |
+| Task-local replan | Disabled | Disabled |
+| LLM final validator, when enabled | High | Disabled |
+
+Every HTTP attempt emits a `reasoning_decision` JSONL event with the policy,
+named trigger, requested level, effective level, and attempt number. The `off`
+policy nulls the effective level even when a caller requests an explicit level.
+The frozen evaluation contract lives in
+[`tests/workflows/PROTOCOL.md`](tests/workflows/PROTOCOL.md).
+
+Outcome-bearing native evaluations do not import `askme` into the evaluator.
+The runner first copies a seed into a fresh workspace, then launches `askme.py`
+through its CLI in a cold subprocess with frozen policy and budgets. A separate
+outer wall timeout bounds the whole child. The runner retains the structured
+agent result, bounded process streams, and isolated JSONL events before running
+visible regressions and the held-out sidecar evaluator. Offline no-op,
+reference, and independent-alternative qualification may use in-process
+callbacks because those paths make no model call.
 
 ## Action Model
 
@@ -103,7 +139,7 @@ State design:
 
 On task failure:
 1. Error is classified into a typed category — deterministic tags for edit scaffold failures (`edit_failed`) and missing edit targets (`missing_file`), heuristic `classify_error()` for shell output and exception paths
-2. Error-class-specific retry policy (E05): structural failures (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`) skip thinking escalation; semantic failures (`compile_error`, `unknown`) escalate thinking
+2. Error-class-specific retry policy (E05): under `gated`, structural failures (`edit_failed`, `missing_file`, `timeout`, `missing_tool`, `permission_denied`) skip explicit-reasoning escalation while semantic failures (`compile_error`, `unknown`) request it; `off` suppresses both paths
 3. Recovery hints (E06): typed failures inject a short hint into step output (e.g., "Read the file first" for `edit_failed`) so the model knows what to do next without thinking tokens
 4. Repeated identical failed edits and repeated duplicate reads are treated as stuck and force replan instead of burning `MAX_STEPS`
 5. **Task-local replan (E11):** before a full replan, `replan_task()` calls a cheap mini-planner that generates a replacement task description for just the failed task. Capped at `MAX_TASK_LOCAL_REPLANS=1` — if the replacement also fails, fall through to full replan. Original errors are saved and merged back so the full planner sees both failure contexts. Exact duplicates, near duplicates, and passive downgrades are rejected; rejection reason is logged for JSONL analysis
@@ -120,7 +156,7 @@ After all tasks complete, `_validate_completion()` runs an LLM check to verify t
 
 - **Gating** (`_should_validate()`): runs when complexity/risk signals are present — replan occurred, failed steps in history, ≥3 tasks, ≥5 total steps, or prompt matches action keywords (compile, build, test, run, fix). Trivial runs skip validation.
 - **Evidence collected**: goal + per-task step summaries (action + basename + output snippet, ≤5 per task) + `sorted(os.listdir(working_dir))[:50]`.
-- **LLM call**: `ask_llm(..., max_tokens=768, think=True, think_level="high", max_retries=0)` — one high-thinking attempt, no retries. Returns `{"valid": true}` or `{"valid": false, "reason": "...", "missing": [...]}`.
+- **LLM call**: `ask_llm(..., max_tokens=768, think=True, think_level="high", max_retries=0)` — requests one high explicit-reasoning attempt under `gated`; `off` suppresses the reasoning request. There are no retries. Returns `{"valid": true}` or `{"valid": false, "reason": "...", "missing": [...]}`.
 - **Fail-open**: transport errors, parse errors, or unexpected formats → treated as valid. Agent never fails due to validation infrastructure issues.
 - **Single-shot**: `validated_once` flag prevents re-validation after a recovery replan. If validation fails, it triggers one replan with `[validation_failed]` error; the recovery plan succeeds or fails on its own merits.
 
@@ -137,7 +173,8 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `MAX_RESULT` | 300 | Chars kept from command output |
 | `MAX_STEP_HISTORY` | 3 | Sliding window of recent steps sent to executor |
 | `MAX_LLM_RETRIES` | 2 | Retries per LLM call on JSON parse failure |
-| `MAX_INPUT` | 300 | Max chars per field sent to executor |
+| `MAX_INPUT` | 300 | Max chars per non-goal field sent to executor |
+| `GOAL_CONTEXT_CHARS` | 300 | Default executor/task-replan goal view; independently configurable and frozen per run |
 | `SHELL_TIMEOUT` | 30s | Default per-command timeout |
 | `SHELL_TIMEOUT_LONG` | 120s | Timeout for install/build commands |
 | `SHELL_TIMEOUT_MAX` | 300s | Hard cap for model-specified timeout hint |
@@ -163,20 +200,20 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Failure recovery | Replan loop carries completed tasks forward; errors reset per replan |
 | Observability | `log()` helper adds `[HH:MM:SS]` timestamps + `(Xs)` durations |
 | Error truncation | `r.stdout[:300] + r.stderr[-300:]` — tail-truncates to keep actual error messages |
-| Input caps | `MAX_INPUT=300` chars per field sent to executor — prevents path bloat eating context |
+| Input caps | `MAX_INPUT=300` caps non-goal executor fields; `GOAL_CONTEXT_CHARS` independently caps and freezes the goal view across a run |
 | Parse-error-as-failure | If `get_step()` raises after exhausting retries, task always fails and replans — no false auto-completion |
 | Cross-task state | Last step from previous task carries over; `completed_tasks` included in slim state |
 | Basename outputs | Write output says `"Wrote main.c"` not full path — LLM needs a clear signal |
 | Basename args | Slim step history uses basename for write/read `arg` fields |
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models sometimes output objects instead of escaped strings |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
-| Thinking-on-retry | Zero cost on happy path; escalation gated by error class (E05). Structural failures (edit mismatch, missing file) skip thinking; semantic failures (compile error, unknown) escalate none → medium → strict-no-thinking (E03). Explicit `think_level` from callers overrides |
+| Thinking-on-retry | Zero explicit-reasoning cost on the happy path under `gated`; escalation is keyed by error class (E05). Structural failures skip it while semantic/unknown failures request medium. The `off` policy suppresses every explicit request, including caller-specified levels |
 | JSON repair (E03) | `_repair_json` attempts mechanical fixes (close braces, strip trailing commas/truncated fields) before burning a retry. Guarantees valid JSON structure but not complete action fields — downstream KeyError/validation paths still handle missing fields |
-| Strict final retry (E03) | Final auto-retry (attempt 2) disables thinking and appends a strict JSON-only instruction. Explicit `think_level` from callers (e.g. `_validate_completion`) is always respected. Upstream has no grammar+reasoning coexistence solution |
+| Strict final retry (E03) | Final auto-retry (attempt 2) disables explicit reasoning and appends a strict JSON-only instruction. Caller-specified levels (for example `_validate_completion`) are respected under `gated` and suppressed under `off`. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. Only `edit_failed` and `missing_file` have hints; adding more requires evidence of wasted thinking cycles |
 | Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, `max_tokens=96`, `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
 | Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once, then auto-fail as `stuck_loop`. This preserves cheap first recovery while preventing no-thinking loops |
-| Planner thinking | Off for first plan, on for replans (`think=bool(errors or completed_tasks)`). Benchmarked: `think=True` on first plan caused JSON truncation on local 768-token budget and no quality gain on either backend |
+| Planner thinking | `gated` requests it only for replans (`think=bool(errors or completed_tasks)`); `off` suppresses the effective level. Benchmarked: requesting it on the first plan caused JSON truncation on the local 768-token budget and no quality gain on either backend |
 | Duplicate action guard | Per-action-type loop detection. `write(same content)` → skip+continue. `shell(same+ok)` → auto-done. `shell(same+fail)` → auto-fail (stuck). `read(same+ok)` → skip once with "Already read" observation, then auto-fail if repeated. First skip injects corrective observation only; 2+ consecutive write skips activate thinking |
 | Write content comparison | Duplicate guard on `write` must compare content, not just arg — matching only on `(action, arg)` would kill the write → compile fail → write fix pattern |
 | `_content` in step dict | Stored for duplicate detection; excluded from slim state via underscore-prefix convention |
@@ -195,7 +232,7 @@ Active limitations that still shape the design.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
 - **`--cache-reuse` requires `--swa-full` for Gemma 4 iSWA.** Fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (build `a702f395`+). Current default: `--swa-full --cache-reuse 256`. Not compatible with `--mmproj`. See [gemma4-setup.md](gemma4-setup.md).
 - **Replan thinking latency.** ~73s per replan on local (thinking shares the 768-token planner budget). Justified by better error analysis on recovery plans; not justified on first plans.
-- **Parse-retry thinking latency.** E03 mitigates: `_repair_json` salvages truncated JSON without retrying; final auto-retry (attempt 2) uses strict contract with no thinking instead of escalating to high. Explicit `think_level` callers (validation) are unaffected. Upstream has no grammar+reasoning coexistence solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)) and `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)).
+- **Parse-retry thinking latency.** E03 mitigates: `_repair_json` salvages truncated JSON without retrying; final auto-retry (attempt 2) uses a strict contract with no explicit reasoning instead of escalating to high. Caller-specified levels remain active under `gated` and are suppressed under `off`. Upstream has no grammar+reasoning coexistence solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)) and `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)).
 - **Shell error classification is heuristic.** `classify_error(output, cmd)` uses substring matching for shell output. E16 hardened this: compiler-family commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.) now prefer `compile_error` for ambiguous diagnostics like `No such file or directory`. Edit-origin errors are not affected because they are tagged deterministically in `execute()`.
 
 ## Multi-Backend Support

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "config-precedence",
+  "prompt": "Fix config_cli.py so timeout precedence is CLI --timeout > ASKME_TIMEOUT > JSON config > default 30. Invalid timeout values must print exactly 'error: timeout must be a positive integer' to stderr and exit 2. Preserve JSON output and --name behavior. Run the public tests.",
+  "agent_limits": {
+    "max_replans": 3,
+    "max_tasks": 5,
+    "max_steps": 8,
+    "goal_context_chars": 512,
+    "agent_timeout_seconds": 900,
+    "final_validate": "0"
+  },
+  "fixture": "seed",
+  "protected_files": [
+    "tests/check_regression.py",
+    "tests/check_feedback.py"
+  ],
+  "public_regression": {
+    "command": [
+      "{python}",
+      "tests/check_regression.py",
+      "-v"
+    ],
+    "timeout_seconds": 15
+  },
+  "public_feedback": {
+    "command": [
+      "{python}",
+      "tests/check_feedback.py",
+      "-v"
+    ],
+    "timeout_seconds": 15
+  },
+  "held_out_evaluator": {
+    "path": "../../workflow_evaluators/config_precedence.py",
+    "command": [
+      "{python}",
+      "{evaluator}"
+    ],
+    "timeout_seconds": 15
+  }
+}
