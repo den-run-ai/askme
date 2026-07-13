@@ -14,6 +14,8 @@ The frozen values and outcome contract are also recorded in
 | Field | Frozen value |
 |---|---|
 | AskMe base | `0dd686c42ee0d325195aec3a500eee4c0ec4c8c9` |
+| AskMe adapter code | `9e0937676daf989f14229fa39ef96fd9f88abe26` |
+| AskMe execution revision | Registered externally in PR #6 before inference; the clean checkout must match it exactly |
 | FeatureBench commit | `445dcbaec0b2e136061b0acb54e753c0a9f1888e` |
 | Dataset repository | `LiberCoders/FeatureBench` |
 | Dataset revision | `e99d6efdfe511ea832c1b5735c536129561ec96a` |
@@ -25,7 +27,8 @@ The frozen values and outcome contract are also recorded in
 | Provider route | `siliconflow`, no fallback, required parameters enabled |
 | AskMe policy | `gated` |
 | Attempts | 1 |
-| Inference timeout | 3600 seconds |
+| Inner AskMe timeout | 3540 seconds |
+| Outer FeatureBench timeout | 3600 seconds |
 
 Run the commands from the AskMe repository root in one shell. Docker must be
 running, `git` and `uv` must be available, and `OPENROUTER_API_KEY` must already
@@ -39,11 +42,14 @@ set -eu
 
 ASKME_ROOT="$(pwd -P)"
 ASKME_BASE="0dd686c42ee0d325195aec3a500eee4c0ec4c8c9"
+ASKME_ADAPTER_CODE_COMMIT="9e0937676daf989f14229fa39ef96fd9f88abe26"
+: "${ASKME_RUN_COMMIT:?Export the execution commit registered in PR #6}"
 FEATUREBENCH_ROOT="${FEATUREBENCH_ROOT:-/tmp/FeatureBench}"
 FEATUREBENCH_COMMIT="445dcbaec0b2e136061b0acb54e753c0a9f1888e"
 DATASET_REVISION="e99d6efdfe511ea832c1b5735c536129561ec96a"
 TASK_ID="mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1"
 MODEL="google/gemma-4-31b-it"
+EXPECTED_SERVED_MODEL="google/gemma-4-31b-it-20260402"
 PROVIDER="siliconflow"
 IMAGE_NAME="libercoders/featurebench-specs_seaborn-instance_52738fbb"
 IMAGE="docker.io/$IMAGE_NAME"
@@ -52,12 +58,18 @@ PINNED_IMAGE="$IMAGE@$IMAGE_DIGEST"
 FEATUREBENCH_CACHE="${FEATUREBENCH_CACHE:-$HOME/.cache/featurebench}"
 RUNS_BASE="${ASKME_FEATUREBENCH_RUNS:-/tmp/askme-featurebench-runs}"
 RUN_ROOT="$RUNS_BASE/canary-$(date -u +%Y%m%dT%H%M%SZ)"
+PROTOCOL="$ASKME_ROOT/tests/featurebench/canary-protocol.json"
+INNER_TIMEOUT=3540
+OUTER_TIMEOUT=3600
 
 : "${OPENROUTER_API_KEY:?Export OPENROUTER_API_KEY before running the canary}"
 docker info >/dev/null
 mkdir -p "$FEATUREBENCH_CACHE" "$RUN_ROOT"
 
 test -z "$(git -C "$ASKME_ROOT" status --porcelain)"
+test "$(git -C "$ASKME_ROOT" rev-parse HEAD)" = "$ASKME_RUN_COMMIT"
+git -C "$ASKME_ROOT" merge-base --is-ancestor \
+  "$ASKME_ADAPTER_CODE_COMMIT" "$ASKME_RUN_COMMIT"
 test "$(git -C "$ASKME_ROOT" hash-object askme.py)" = \
   "$(git -C "$ASKME_ROOT" rev-parse "$ASKME_BASE:askme.py")"
 
@@ -85,7 +97,28 @@ The clean AskMe-tree check is deliberate: commit the adapter and protocol before
 the first model response. Run artifacts stay outside the checkout because the
 adapter rechecks cleanliness immediately before inference. The blob check
 permits adapter code on top of the frozen base while requiring the executed
-`askme.py` to match that base exactly.
+`askme.py` to match that base exactly. The protocol pins the adapter/audit file
+hashes at the adapter-code commit. Because a commit cannot contain its own hash,
+the later clean execution revision is registered in PR #6 before inference and
+supplied separately as `ASKME_RUN_COMMIT`.
+
+### Security boundary
+
+The adapter adds an auditable, best-effort command-level guard at AskMe's action
+dispatcher. Direct `read`, `write`, and `edit` actions must resolve inside
+`/testbed`; shell action
+text is rejected for the adapter/log paths, parent traversal, environment
+disclosure, network clients, remote Git operations, and package installation.
+The launcher removes the OpenRouter credential from its process environment
+after loading AskMe, so model-issued child commands do not inherit the key. The
+guard decision log is retained for audit.
+
+This is defense in depth, not a container network sandbox. The container keeps
+default outbound connectivity because AskMe must call OpenRouter; container
+egress is **not isolated**. The command filter is not a general shell parser or
+an adversarial-code sandbox. This canary therefore trusts the pinned
+FeatureBench source, dataset row, repository image, and tests. Do not use this
+adapter unchanged on an untrusted repository or task.
 
 ## 2. Download and verify the pinned dataset snapshot
 
@@ -112,17 +145,25 @@ PY
 )"
 export DATASET_PATH
 
-$FB_PYTHON - "$DATASET_PATH" "$TASK_ID" "$IMAGE_NAME" <<'PY'
+$FB_PYTHON - "$DATASET_PATH" "$TASK_ID" "$IMAGE_NAME" "$PROTOCOL" <<'PY'
+import hashlib
+import json
 import sys
 from datasets import load_dataset
 
-dataset_path, task_id, image_name = sys.argv[1:]
+dataset_path, task_id, image_name, protocol_path = sys.argv[1:]
+protocol = json.load(open(protocol_path, encoding="utf-8"))["sources"]["dataset"]
 dataset = load_dataset(dataset_path, split="fast")
 matches = [row for row in dataset if row["instance_id"] == task_id]
 if len(matches) != 1:
     raise SystemExit(f"expected one pinned task, found {len(matches)}")
 if matches[0]["image_name"] != image_name:
     raise SystemExit("pinned task image does not match the protocol")
+prompt = matches[0]["problem_statement"]
+if len(prompt) != protocol["problem_statement_chars"]:
+    raise SystemExit("pinned task prompt length does not match the protocol")
+if hashlib.sha256(prompt.encode()).hexdigest() != protocol["problem_statement_sha256"]:
+    raise SystemExit("pinned task prompt hash does not match the protocol")
 print(f"Pinned dataset verified: {task_id}")
 PY
 ```
@@ -173,7 +214,12 @@ import json
 import sys
 
 report = json.load(open(sys.argv[1], encoding="utf-8"))["attempt_1"]
-if report["total_instances"] != 1 or report["resolved_instances"] != 1:
+if (
+    report["total_instances"] != 1
+    or report["completed_instances"] != 1
+    or report["resolved_instances"] != 1
+    or report["error_instances"] != 0
+):
     raise SystemExit(f"gold control did not resolve: {report}")
 print("Gold control: resolved")
 PY
@@ -186,7 +232,6 @@ adds `ASKME_FEATUREBENCH_CONTROL.txt`; it must apply but must not resolve the
 feature task.
 
 ```sh
-PROTOCOL="$ASKME_ROOT/tests/featurebench/canary-protocol.json"
 CONTROL_DIR="$RUN_ROOT/control"
 CONTROL_JSONL="$CONTROL_DIR/output.jsonl"
 mkdir -p "$CONTROL_DIR"
@@ -223,6 +268,10 @@ import json
 import sys
 
 result = json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]]
+if "error" in result or "traceback" in result:
+    raise SystemExit(f"harmless control evaluator error: {result}")
+if result.get("featurebench_eval_completed") is not True:
+    raise SystemExit(f"harmless control evaluator did not complete: {result}")
 if not result["patch_successfully_applied"] or result["resolved"]:
     raise SystemExit(f"harmless control violated expectations: {result}")
 print("Harmless nonempty control: applied and unresolved")
@@ -234,11 +283,21 @@ PY
 The adapter passes the full pinned problem statement by file, runs AskMe in
 `/testbed`, requests `gated` reasoning, and sets strict SiliconFlow routing with
 provider fallback disabled. It retains AskMe's structured result, run log,
-stdout, exact prompt, adapter manifest, and FeatureBench prediction.
+policy decisions, stdout, exact prompt, adapter manifest, and FeatureBench
+prediction.
 
-Do not rerun or replace the attempt after the first model response. The command
-may exit nonzero when AskMe reports incomplete; retain that exit and continue to
-official evaluation if `output.jsonl` exists.
+The budgets mean at most three total planning attempts across the run, at most
+ten tasks in each plan, and at most ten steps in each task attempt. AskMe's
+frozen `MAX_TASK_LOCAL_REPLANS=1` permits one replacement after an unsuccessful
+task attempt, so a planned task can have at most two task attempts. These are
+caps, not expected usage.
+
+The adapter derives a 3540-second inner launcher timeout from the frozen
+3600-second FeatureBench timeout. That 60-second margin lets the launcher write
+a terminal result and preserve artifacts before the outer runner timeout. Do
+not rerun or replace the attempt after inference starts, including after a
+timeout or infrastructure failure. Retain the partial artifacts and report the
+failure category.
 
 ```sh
 INFERENCE_ROOT="$RUN_ROOT/inference"
@@ -248,15 +307,18 @@ if "$FB_PYTHON" "$ASKME_ROOT/tests/featurebench/askme_adapter.py" \
   --featurebench-root "$FEATUREBENCH_ROOT" \
   --featurebench-revision "$FEATUREBENCH_COMMIT" \
   --askme-path "$ASKME_ROOT/askme.py" \
+  --askme-revision "$ASKME_RUN_COMMIT" \
+  --protocol-path "$PROTOCOL" \
   --dataset-path "$DATASET_PATH" \
   --dataset-revision "$DATASET_REVISION" \
   --output-dir "$INFERENCE_ROOT" \
   --cache-dir "$FEATUREBENCH_CACHE" \
   --task-id "$TASK_ID" \
   --model "$MODEL" \
+  --expected-served-model "$EXPECTED_SERVED_MODEL" \
   --provider "$PROVIDER" \
   --split fast \
-  --timeout 3600; then
+  --timeout "$OUTER_TIMEOUT"; then
   ADAPTER_EXIT=0
 else
   ADAPTER_EXIT=$?
@@ -270,10 +332,72 @@ test -s "$PREDICTIONS"
 printf 'Adapter exit: %s\nPredictions: %s\n' "$ADAPTER_EXIT" "$PREDICTIONS"
 ```
 
-An infrastructure failure that produces no prediction is not a model result.
-Stop and retain the logs rather than manufacturing an empty prediction.
+FeatureBench's `InferenceRunner.run()` returns zero when its pipeline finishes,
+even when the only inference record has `success=false`. Therefore
+`ADAPTER_EXIT=0` is not evidence that AskMe completed. The structured AskMe
+result and the single `output.jsonl` record determine agent completion. The
+adapter returns `2` for an invalid deterministic audit and `3` for valid
+infrastructure with a recorded policy denial; other nonzero values retain the
+runner/process failure or interruption. None authorizes a replacement attempt.
 
-## 7. Run official acceptance, including failed inference records
+An infrastructure failure that produces no prediction is not a model result.
+Stop and retain the logs rather than manufacturing an empty prediction or
+starting a replacement attempt.
+
+## 7. Run the deterministic post-run audit
+
+The adapter automatically writes its audit to
+`$ADAPTER_RUN_DIR/askme-canary-audit.json`. Inspect that retained result, then
+independently rerun the same audit against the registered execution revision.
+`ASKME_RUN_COMMIT` must be the immutable commit registered outside this run;
+do not derive it from the current checkout or substitute a self-referential
+adapter revision.
+
+```sh
+ATTEMPT_DIR="$ADAPTER_RUN_DIR/run_outputs/$TASK_ID/attempt-1"
+ASKME_RESULT="$ATTEMPT_DIR/askme-result.json"
+AUTO_AUDIT="$ADAPTER_RUN_DIR/askme-canary-audit.json"
+POST_RUN_AUDIT="$RUN_ROOT/deterministic-post-run-audit.json"
+: "${ASKME_RUN_COMMIT:?Export the externally registered execution commit}"
+
+if test -s "$AUTO_AUDIT" && "$FB_PYTHON" -m json.tool "$AUTO_AUDIT"; then
+  AUTO_AUDIT_EXIT=0
+else
+  AUTO_AUDIT_EXIT=$?
+fi
+
+if "$FB_PYTHON" "$ASKME_ROOT/tests/featurebench/canary_audit.py" \
+  "$ADAPTER_RUN_DIR" \
+  --protocol "$PROTOCOL" \
+  --askme-source "$ASKME_ROOT/askme.py" \
+  --code-root "$ASKME_ROOT" \
+  --expected-served-model "$EXPECTED_SERVED_MODEL" \
+  --expected-run-revision "$ASKME_RUN_COMMIT" \
+  --output "$POST_RUN_AUDIT"; then
+  POST_RUN_AUDIT_EXIT=0
+else
+  POST_RUN_AUDIT_EXIT=$?
+fi
+
+if [ "$AUTO_AUDIT_EXIT" -ne 0 ] || [ "$POST_RUN_AUDIT_EXIT" -ne 0 ]; then
+  AUDIT_CLASS="invalid_infrastructure"
+elif "$FB_PYTHON" -c \
+  'import json, sys; raise SystemExit(not json.load(open(sys.argv[1]))["policy_compliant"])' \
+  "$POST_RUN_AUDIT"; then
+  AUDIT_CLASS="valid_infrastructure_policy_compliant"
+else
+  AUDIT_CLASS="valid_infrastructure_policy_denial"
+fi
+printf 'Automatic audit inspection exit: %s\nPost-run audit exit: %s\nClassification: %s\n' \
+  "$AUTO_AUDIT_EXIT" "$POST_RUN_AUDIT_EXIT" "$AUDIT_CLASS"
+```
+
+An invalid-infrastructure result or a policy denial disqualifies the adapter
+run, but neither authorizes another attempt. Preserve the artifacts and
+continue exactly once to the official evaluator in Section 8 so acceptance is
+still recorded for the retained prediction.
+
+## 8. Run official acceptance, including failed inference records
 
 `--include-failed` is mandatory. Without it, FeatureBench skips a prediction
 whose inference record has `success=false`, which would hide an incomplete AskMe
@@ -288,24 +412,33 @@ trajectory instead of evaluating its delivered patch.
   --n-concurrent 1 \
   --include-failed
 
-ASKME_RESULT="$(find "$ADAPTER_RUN_DIR/run_outputs" \
-  -name askme-result.json -type f -print | head -n 1)"
 ACCEPTANCE_REPORT="$ADAPTER_RUN_DIR/eval_outputs/$TASK_ID/attempt-1/report.json"
+JOINT_OUTCOME="$RUN_ROOT/joint-outcome.json"
 test -s "$ASKME_RESULT"
 test -s "$ACCEPTANCE_REPORT"
 
-$FB_PYTHON - "$ASKME_RESULT" "$ACCEPTANCE_REPORT" "$TASK_ID" <<'PY'
+$FB_PYTHON - \
+  "$ASKME_RESULT" "$ACCEPTANCE_REPORT" "$TASK_ID" "$JOINT_OUTCOME" <<'PY'
 import json
 import sys
+from pathlib import Path
 
 agent = json.load(open(sys.argv[1], encoding="utf-8"))
 acceptance = json.load(open(sys.argv[2], encoding="utf-8"))[sys.argv[3]]
+if "error" in acceptance or "traceback" in acceptance:
+    raise SystemExit(f"official evaluator returned an error: {acceptance}")
+if acceptance.get("featurebench_eval_completed") is not True:
+    raise SystemExit(f"official evaluator did not complete: {acceptance}")
 joint = {
-    "agent_completion": agent.get("status") == "complete",
+    "agent_completion": agent.get("status") in {
+        "complete", "complete_deterministic_after_exhausted"
+    },
     "feature_acceptance": bool(acceptance.get("resolved")),
     "patch_applied": bool(acceptance.get("patch_successfully_applied")),
 }
-print(json.dumps(joint, indent=2, sort_keys=True))
+rendered = json.dumps(joint, indent=2, sort_keys=True) + "\n"
+Path(sys.argv[4]).write_text(rendered, encoding="utf-8")
+print(rendered, end="")
 PY
 
 printf 'Retained run directory: %s\n' "$RUN_ROOT"
@@ -322,6 +455,8 @@ a categorical outcome. Qualification does not require the model patch to pass.
 
 Record the clean AskMe run commit, adapter revision, FeatureBench commit, dataset
 revision, image digest, requested and served model/provider, reasoning policy,
-wall time, tokens, billed cost, joint outcome, and retained artifact paths. Do
-not report an aggregate percentage, compare this cell with published systems,
-or call it a benchmark result.
+wall time, tokens, billed cost, runner exit, deterministic-audit result, joint
+outcome, and retained artifact paths. An evaluator report containing `error` or
+`traceback` is an infrastructure/evaluator failure, never an unresolved model
+result. Do not report an aggregate percentage, compare this cell with published
+systems, or call it a benchmark result.
