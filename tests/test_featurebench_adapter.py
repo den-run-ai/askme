@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,20 +59,18 @@ def _source(tmp_path):
 
 def _agent(tmp_path, env=None):
     source = _source(tmp_path)
-    agent_class = adapter.build_askme_agent_class(FakeBaseAgent, source)
-    cm = FakeContainerManager()
-    strict_env = adapter.strict_openrouter_env(
-        "qwen/qwen3.6-27b",
-        "siliconflow",
-        "secret-key",
+    agent_class = adapter.build_askme_agent_class(
+        FakeBaseAgent, source, "secret-key", inner_timeout=3540
     )
+    cm = FakeContainerManager()
+    strict_env = adapter.strict_openrouter_env("qwen/qwen3.6-27b", "siliconflow")
     if env:
         strict_env.update(env)
     return agent_class(cm, strict_env, FakeLogger()), cm, source
 
 
-def test_strict_openrouter_environment_disables_fallbacks_and_agent_network():
-    env = adapter.strict_openrouter_env("model/id", "siliconflow", "secret")
+def test_strict_openrouter_environment_disables_fallbacks_and_omits_credential():
+    env = adapter.strict_openrouter_env("model/id", "siliconflow")
 
     assert env["LLM_BACKEND"] == "openrouter"
     assert env["OPENROUTER_ALLOW_FALLBACKS"] == "0"
@@ -79,21 +78,22 @@ def test_strict_openrouter_environment_disables_fallbacks_and_agent_network():
     assert env["ALLOW_NETWORK"] == "0"
     assert env["ALLOW_SYSTEM_INSTALLS"] == "0"
     assert env["AGENT_RUN_LOG"] == "/agent-logs/askme-run.jsonl"
+    assert "OPENROUTER_API_KEY" not in env
     adapter.validate_strict_env(env)
 
     env["OPENROUTER_ALLOW_FALLBACKS"] = "1"
     with pytest.raises(ValueError, match="OPENROUTER_ALLOW_FALLBACKS"):
         adapter.validate_strict_env(env)
 
-    env = adapter.strict_openrouter_env("model/id", "siliconflow", "secret")
+    env = adapter.strict_openrouter_env("model/id", "siliconflow")
     env["AGENT_REASONING_POLICY"] = "off"
     with pytest.raises(ValueError, match="AGENT_REASONING_POLICY"):
         adapter.validate_strict_env(env)
 
 
-@pytest.mark.parametrize("field", ["model", "provider", "api_key"])
+@pytest.mark.parametrize("field", ["model", "provider"])
 def test_strict_openrouter_environment_requires_route_fields(field):
-    values = {"model": "model/id", "provider": "siliconflow", "api_key": "secret"}
+    values = {"model": "model/id", "provider": "siliconflow"}
     values[field] = ""
     with pytest.raises(ValueError):
         adapter.strict_openrouter_env(**values)
@@ -101,7 +101,84 @@ def test_strict_openrouter_environment_requires_route_fields(field):
 
 def test_strict_openrouter_environment_rejects_automatic_provider_route():
     with pytest.raises(ValueError, match="must be pinned"):
-        adapter.strict_openrouter_env("model/id", "auto", "secret")
+        adapter.strict_openrouter_env("model/id", "auto")
+
+
+def _launcher_namespace(tmp_path):
+    namespace = {"__name__": "askme_launcher_test"}
+    exec(compile(adapter.launcher_source(), "<askme-launcher>", "exec"), namespace)
+    namespace["POLICY_LOG_PATH"] = str(tmp_path / "policy.jsonl")
+    namespace["RESULT_PATH"] = str(tmp_path / "result.json")
+    namespace["WORKSPACE"] = (tmp_path / "workspace").resolve()
+    namespace["WORKSPACE"].mkdir()
+    return namespace
+
+
+def test_launcher_scrubs_transient_credential_before_agent_actions(tmp_path, monkeypatch):
+    namespace = _launcher_namespace(tmp_path)
+    source = tmp_path / "pinned_askme.py"
+    source.write_text(
+        "import os\n"
+        "CAPTURED_KEY = os.environ.get('OPENROUTER_API_KEY')\n"
+        "def execute(action, working_dir='.'):\n"
+        "    return {'ok': True, 'output': 'ok'}\n"
+        "def _main():\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
+    credential = tmp_path / "credential"
+    credential.write_text("transient-secret\n", encoding="utf-8")
+    namespace["ASKME_PATH"] = str(source)
+    namespace["CREDENTIAL_PATH"] = str(credential)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "parent-placeholder")
+
+    module, secret = namespace["_load_askme"]()
+
+    assert module.CAPTURED_KEY == "transient-secret"
+    assert secret == "transient-secret"
+    assert "OPENROUTER_API_KEY" not in os.environ
+    assert not credential.exists()
+
+
+def test_launcher_guards_actions_and_records_outcomes(tmp_path):
+    namespace = _launcher_namespace(tmp_path)
+
+    def execute(action, _working_dir):
+        if action.get("arg") == "timeout-case":
+            return {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}
+        if action.get("arg") == "exception-case":
+            raise RuntimeError("boom")
+        return {"ok": True, "output": "ok"}
+
+    module = SimpleNamespace(execute=execute)
+    namespace["_install_guard"](module, "transient-secret")
+    workspace = str(namespace["WORKSPACE"])
+
+    assert module.execute({"action": "shell", "arg": "pytest -q"}, workspace)["ok"]
+    assert module.execute({"action": "shell", "arg": "git diff --check"}, workspace)["ok"]
+    assert not module.execute(
+        {"action": "shell", "arg": "curl https://example.com"}, workspace
+    )["ok"]
+    assert not module.execute(
+        {"action": "write", "arg": "../escape.py", "content": "pass"}, workspace
+    )["ok"]
+    assert not module.execute(
+        {"action": "write", "arg": "net.py", "content": "import requests"}, workspace
+    )["ok"]
+    timeout = module.execute({"action": "shell", "arg": "timeout-case"}, workspace)
+    assert timeout["error_type"] == "timeout"
+    with pytest.raises(RuntimeError, match="boom"):
+        module.execute({"action": "shell", "arg": "exception-case"}, workspace)
+
+    events = [json.loads(line) for line in Path(namespace["POLICY_LOG_PATH"]).read_text().splitlines()]
+    decisions = [event for event in events if event["event"] == "action_decision"]
+    results = [event for event in events if event["event"] == "action_result"]
+    assert len(decisions) == 7
+    assert len(results) == 7
+    assert any(event["decision"] == "deny" and event["reason"] == "url" for event in decisions)
+    assert any(event["error_type"] == "timeout" for event in results)
+    assert any(event["error_type"] == "exception:RuntimeError" for event in results)
+    assert all("transient-secret" not in json.dumps(event) for event in events)
 
 
 def test_agent_copies_pinned_source_and_passes_full_prompt_by_file(tmp_path):
@@ -113,15 +190,27 @@ def test_agent_copies_pinned_source_and_passes_full_prompt_by_file(tmp_path):
     command = agent.get_run_command("this argument must not be interpolated")
 
     assert cm.files[adapter.ASKME_PATH] == source.read_bytes()
+    assert b"secret-key" == cm.files[adapter.CREDENTIAL_PATH].strip()
+    assert b"OPENROUTER_API_KEY" in cm.files[adapter.LAUNCHER_PATH]
     assert cm.files[adapter.PROMPT_PATH].decode() == prompt
     manifest = json.loads(cm.files[adapter.ADAPTER_MANIFEST_PATH])
     assert manifest["prompt_chars"] == len(prompt)
     assert manifest["goal_context_chars"] == len(prompt)
     assert manifest["askme_sha256"] == adapter.sha256_file(source)
     assert manifest["allow_provider_fallbacks"] is False
-    assert manifest["allow_agent_network_actions"] is False
-    assert manifest["limits"] == {"max_replans": 3, "max_tasks": 10, "max_steps": 10}
+    assert manifest["network_policy_requested"] == "deny"
+    assert manifest["container_egress_isolated"] is False
+    assert manifest["limits"] == {
+        "max_planning_attempts": 3,
+        "max_tasks_per_plan": 10,
+        "max_steps_per_task_attempt": 10,
+        "max_task_local_replans": 1,
+        "max_task_attempts": 2,
+    }
     assert "python3 -c 'import requests'" in agent.install_script
+    assert "command -v timeout" in agent.install_script
+    assert "timeout --signal=TERM --kill-after=15s 3540s" in command
+    assert "python3 /installed-agent/askme-launcher.py" in command
     assert "--prompt-file /installed-agent/task-prompt.txt" in command
     assert "--working-dir /testbed" in command
     assert "--result-json /agent-logs/askme-result.json" in command
@@ -151,6 +240,7 @@ def test_post_run_preserves_logs_and_requires_complete_structured_result(tmp_pat
         {
             adapter.RESULT_PATH: b'{"status":"complete"}\n',
             adapter.RUN_LOG_PATH: b'{"event":"run_end"}\n',
+            adapter.POLICY_LOG_PATH: b'{"event":"launcher_start"}\n',
             adapter.STDOUT_LOG_PATH: b"All tasks complete.\n",
             adapter.ADAPTER_MANIFEST_PATH: b'{"schema_version":1}\n',
             adapter.PROMPT_PATH: b"the exact prompt",
@@ -170,7 +260,9 @@ def test_post_run_preserves_logs_and_requires_complete_structured_result(tmp_pat
 
 def test_registration_is_temporary_and_delegates_other_agents(tmp_path):
     source = _source(tmp_path)
-    agent_class = adapter.build_askme_agent_class(FakeBaseAgent, source)
+    agent_class = adapter.build_askme_agent_class(
+        FakeBaseAgent, source, "secret", inner_timeout=3540
+    )
     calls = []
 
     def original(agent_name, **kwargs):
@@ -179,7 +271,7 @@ def test_registration_is_temporary_and_delegates_other_agents(tmp_path):
 
     run_infer_module = SimpleNamespace(get_agent=original)
     cm = FakeContainerManager()
-    env = adapter.strict_openrouter_env("model/id", "siliconflow", "secret")
+    env = adapter.strict_openrouter_env("model/id", "siliconflow")
 
     with adapter.registered_askme_agent(run_infer_module, agent_class):
         askme_agent = run_infer_module.get_agent(
@@ -198,6 +290,8 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
     featurebench_root.mkdir()
     dataset_path = tmp_path / "FeatureBench-dataset"
     dataset_path.mkdir()
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text("{}\n", encoding="utf-8")
     output_root = tmp_path / "runs"
     records = {}
 
@@ -244,10 +338,33 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
         output_dir=output_root,
         task_id="repo.feature.lv1",
         model="qwen/qwen3.6-27b",
+        askme_revision="featurebench-sha",
+        protocol_path=protocol_path,
+        expected_served_models=("qwen/qwen3.6-27b",),
         cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(adapter, "_git_revision", lambda _path: "featurebench-sha")
     monkeypatch.setattr(adapter, "_git_is_dirty", lambda _path: False)
+    monkeypatch.setattr(
+        adapter,
+        "_validate_protocol_settings",
+        lambda _settings: {
+            "sources": {
+                "askme": {
+                    "adapter_code_revision": "a" * 40,
+                    "code_files": {"askme.py": adapter.sha256_file(source)},
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_audit_retained_run",
+        lambda *_args: {
+            "infrastructure_valid": True,
+            "qualification_valid": True,
+        },
+    )
 
     exit_code, run_dir = adapter.run_canary(settings, "secret-key", api)
 
@@ -280,6 +397,8 @@ def test_run_canary_rejects_wrong_or_dirty_featurebench_checkout(tmp_path, monke
     featurebench_root.mkdir()
     dataset_path = tmp_path / "FeatureBench-dataset"
     dataset_path.mkdir()
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text("{}\n", encoding="utf-8")
     settings = adapter.CanarySettings(
         featurebench_root=featurebench_root,
         featurebench_revision="expected-sha",
@@ -289,6 +408,9 @@ def test_run_canary_rejects_wrong_or_dirty_featurebench_checkout(tmp_path, monke
         output_dir=tmp_path / "runs",
         task_id="repo.feature.lv1",
         model="model/id",
+        askme_revision="expected-sha",
+        protocol_path=protocol_path,
+        expected_served_models=("model/id",),
     )
 
     monkeypatch.setattr(adapter, "_git_revision", lambda _path: "wrong-sha")
