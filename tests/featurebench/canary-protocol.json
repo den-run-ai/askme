@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "protocol_id": "askme-featurebench-fast-adapter-canary-v1",
+  "status": "frozen_before_outcome_bearing_model_call",
+  "purpose": "Qualify the AskMe-to-FeatureBench adapter on one task; do not estimate benchmark performance.",
+  "claim_boundary": {
+    "allowed_label": "one-task FeatureBench fast adapter canary",
+    "is_benchmark_score": false,
+    "is_reliability_estimate": false,
+    "is_model_comparison": false,
+    "aggregate_percentage_allowed": false
+  },
+  "sources": {
+    "askme": {
+      "repository": "https://github.com/den-run-ai/askme",
+      "base_commit": "0dd686c42ee0d325195aec3a500eee4c0ec4c8c9",
+      "adapter_revision": null,
+      "adapter_revision_requirement": "Record the clean adapter commit before the first model response."
+    },
+    "featurebench": {
+      "repository": "https://github.com/LiberCoders/FeatureBench",
+      "commit": "445dcbaec0b2e136061b0acb54e753c0a9f1888e"
+    },
+    "dataset": {
+      "repository": "LiberCoders/FeatureBench",
+      "revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+      "split": "fast",
+      "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+      "moving_default_branch_permitted": false
+    },
+    "container": {
+      "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+      "digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+      "pinned_reference": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb@sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+      "verify_digest_after_pull": true
+    }
+  },
+  "agent_cell": {
+    "attempts": 1,
+    "model": "google/gemma-4-31b-it",
+    "backend": "openrouter",
+    "provider": {
+      "order": [
+        "siliconflow"
+      ],
+      "allow_fallbacks": false,
+      "require_parameters": true,
+      "served_model_and_provider_must_be_recorded": true
+    },
+    "reasoning_policy": "gated",
+    "limits": {
+      "max_replans": 3,
+      "max_tasks": 10,
+      "max_steps_per_task": 10,
+      "goal_context": "full_problem_statement"
+    },
+    "inference_timeout_seconds": 3600,
+    "cold_start": true,
+    "fresh_container": true,
+    "replacement_attempts_after_model_response": 0
+  },
+  "sequence": [
+    {
+      "order": 1,
+      "id": "gold_control",
+      "operation": "official_featurebench_eval",
+      "predictions": "gold",
+      "expected": {
+        "evaluation_completed": true,
+        "resolved": true
+      }
+    },
+    {
+      "order": 2,
+      "id": "harmless_nonempty_control",
+      "operation": "official_featurebench_eval",
+      "prediction": {
+        "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+        "agent": "harmless-control",
+        "model": "none",
+        "n_attempt": 1,
+        "success": true,
+        "model_patch": "diff --git a/ASKME_FEATUREBENCH_CONTROL.txt b/ASKME_FEATUREBENCH_CONTROL.txt\nnew file mode 100644\nindex 0000000..4d6d14c\n--- /dev/null\n+++ b/ASKME_FEATUREBENCH_CONTROL.txt\n@@ -0,0 +1 @@\n+adapter qualification control\n",
+        "model_patch_kind": "add_file_only",
+        "path": "ASKME_FEATUREBENCH_CONTROL.txt",
+        "content": "adapter qualification control\n",
+        "must_be_nonempty": true
+      },
+      "evaluator_arguments": [
+        "--include-failed"
+      ],
+      "expected": {
+        "evaluation_completed": true,
+        "patch_applied": true,
+        "resolved": false
+      }
+    },
+    {
+      "order": 3,
+      "id": "askme_adapter_run",
+      "operation": "cold_start_agent_inference",
+      "emit_prediction_even_if_agent_incomplete": true,
+      "expected_artifacts": [
+        "askme_result_json",
+        "askme_run_log",
+        "featurebench_prediction_jsonl",
+        "git_diff",
+        "route_and_usage_metadata"
+      ]
+    },
+    {
+      "order": 4,
+      "id": "adapter_prediction_acceptance",
+      "operation": "official_featurebench_eval",
+      "evaluator_arguments": [
+        "--predictions-path",
+        "<featurebench_prediction_jsonl>",
+        "--dataset",
+        "<pinned_dataset_snapshot>",
+        "--split",
+        "fast",
+        "--task-id",
+        "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+        "--n-concurrent",
+        "1",
+        "--include-failed"
+      ],
+      "expected": {
+        "evaluation_completed": true,
+        "resolved": "record_observed_boolean"
+      }
+    }
+  ],
+  "outcome_contract": {
+    "agent_completion": {
+      "source": "AskMe structured result status",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "feature_acceptance": {
+      "source": "Official FeatureBench evaluator resolved field",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "must_report_joint_outcome": true,
+    "agent_complete_does_not_imply_acceptance": true,
+    "acceptance_does_not_require_agent_complete": true
+  },
+  "adapter_qualification": {
+    "requires_gold_control_resolved": true,
+    "requires_harmless_control_unresolved": true,
+    "requires_harmless_control_patch_applied": true,
+    "requires_prediction_serialized_for_the_only_attempt": true,
+    "requires_official_eval_categorical_outcome": true,
+    "requires_agent_patch_resolved": false
+  },
+  "audit_fields_required": [
+    "execution_started_at",
+    "execution_finished_at",
+    "host_platform",
+    "askme_run_commit",
+    "askme_git_dirty",
+    "adapter_revision",
+    "featurebench_commit",
+    "dataset_revision",
+    "container_digest",
+    "requested_model",
+    "served_model",
+    "requested_provider",
+    "served_provider",
+    "reasoning_policy",
+    "agent_completion",
+    "feature_acceptance",
+    "wall_seconds",
+    "prompt_tokens",
+    "completion_tokens",
+    "billed_cost",
+    "artifact_paths"
+  ]
+}
