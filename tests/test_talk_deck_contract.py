@@ -18,6 +18,10 @@ def _rendered_slide_sources(text):
     return [part for part in parts[2:] if part.strip()]
 
 
+def _single_line(text):
+    return re.sub(r"\s+", " ", text)
+
+
 def test_deck_contract_guards_identity_arc_and_model_rows():
     text = SLIDES.read_text(encoding="utf-8")
     slides = _rendered_slide_sources(text)
@@ -61,18 +65,16 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     for misleading_timing in ("603.6s", "66.5s", "47.9s", "17.7s"):
         assert misleading_timing not in comparison
 
-    pilot = slides[5]
-    assert "Next evidence · two separate steps" in pilot
-    assert "An AskMe setting A/B test—not an external benchmark" in pilot
-    assert "Off:" in pilot
-    assert "Gated:" in pilot
-    assert "Native A/B not ready" in pilot
-    assert "24-run scope" in pilot
-    assert "0 measured runs" in pilot
-    assert "not reliability, model size, or Qwen vs Gemma" in pilot
-    assert "External evaluation is also not ready" in pilot
-    assert "FeatureBench first" in pilot
-    assert "Vals only if access permits" in pilot
+    boundary = slides[5]
+    assert "Current AskMe boundary" in boundary
+    assert "Execution feedback is inside the loop" in boundary
+    assert "Final acceptance is not—yet" in boundary
+    assert "bounded action → execute / test → evidence ↺" in boundary
+    assert "report complete → deliver artifact → independent acceptance" in boundary
+    assert "not returned to AskMe for one more recovery turn" in boundary
+    assert "the Qwen wrong-path run was caught, not repaired" in boundary
+    for roadmap_detail in ("reasoning-policy", "24-run", "FeatureBench", "Vals"):
+        assert roadmap_detail not in boundary
 
     conclusion = slides[6]
     assert "Conclusion + limits" in conclusion
@@ -94,9 +96,8 @@ def test_deck_contract_guards_notes_and_review_spec():
     )
     assert len(note_blocks) == 7
     assert sum(len(block.split()) for block in note_blocks) == 499
-    assert "FeatureBench adaptation comes later" in text
-    assert "Vals requires access" in text
-    assert "ProgramBench" not in text
+    for benchmark in ("FeatureBench", "Vals", "ProgramBench"):
+        assert benchmark not in text
     for out_of_scope in (
         "Claw-SWE-Bench",
         "deep-swe",
@@ -107,7 +108,7 @@ def test_deck_contract_guards_notes_and_review_spec():
     ):
         assert out_of_scope not in text
 
-    spec = SPEC.read_text(encoding="utf-8")
+    spec = _single_line(SPEC.read_text(encoding="utf-8"))
     for requirement in (
         "Are Small LLMs Ready for Coding Agents?",
         "Sr Staff Research Scientist at ServiceNow",
@@ -117,11 +118,11 @@ def test_deck_contract_guards_notes_and_review_spec():
         "FeatureBench for feature development and Vals Vibe Code Bench",
         "A one-task `gron` run may qualify the adapter",
         '"small" is an engineering and deployment class',
-        "This is 24 scheduled runs total",
         "does not validate a causal harness benefit",
-        "AskMe-owned A/B pilot",
-        "Neither has an AskMe adapter",
-        'Avoid "large policy effect."',
+        "Current AskMe boundary",
+        "the Qwen wrong-path run was caught, not repaired",
+        "presentation-first instruction removes the unfinished 24-run",
+        "a named one-task canary would qualify an adapter",
     ):
         assert requirement in spec
 
@@ -129,20 +130,21 @@ def test_deck_contract_guards_notes_and_review_spec():
 def test_companion_benchmark_shortlist_stays_bounded():
     blog = BLOG.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
+    blog_prose = _single_line(blog)
+    readme_prose = _single_line(readme)
     companion = "\n".join(
         path.read_text(encoding="utf-8") for path in (BLOG, README, SPEC)
     )
     for benchmark in ("FeatureBench", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in companion
     assert "small is a deployment class, not a strict parameter threshold" in blog
-    assert "one of four workflows is qualified" in blog
-    assert "24 runs total" in blog
-    assert "24 runs per model" not in blog
-    assert "The smoke exercises the measurement path" in readme
-    assert "model-size claim requires a separate predeclared, repeated design" in readme
+    assert "The smoke exercises the measurement path" in readme_prose
+    assert "model-size claim would require a separate predeclared, repeated design" in readme_prose
     assert "External evaluation is **not ready to run**" in readme
-    assert "No FeatureBench, Vals, or ProgramBench adapter or result" in blog
-    assert "Both arms may still reason internally" in blog
+    assert "No AskMe adapter or FeatureBench result exists today" in blog_prose
+    assert "That is adapter qualification—not a FeatureBench score" in blog_prose
+    assert "reasoning-policy study is deferred" in blog_prose
+    assert "It is not" in blog_prose and "a prerequisite for this talk" in blog_prose
     for stage_or_companion in (SLIDES.read_text(encoding="utf-8"), readme, blog):
         assert "large policy effect" not in stage_or_companion
     for out_of_scope in (
@@ -169,14 +171,13 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "later clean-room stress test; `gron` canary only" in shortlist.group(1)
 
     roadmap = re.search(
-        r"External generalization should answer three distinct questions at "
-        r"most\.(.*?)\n\nThis pilot",
+        r"(?ms)^## What Changes the Answer Next\s+(.*?)^## The Claim That Survives",
         blog,
-        flags=re.DOTALL,
     )
     assert roadmap is not None
+    roadmap_prose = _single_line(roadmap.group(1))
     for benchmark in ("FeatureBench-fast", "Vals Vibe Code Bench", "ProgramBench"):
-        assert benchmark in roadmap.group(1)
-    assert "one-task `gron` adapter canary" in roadmap.group(1)
-    assert "not a model result" in roadmap.group(1)
-    assert "not a commitment to run all three" in roadmap.group(1)
+        assert benchmark in roadmap_prose
+    assert "one pinned public task" in roadmap_prose
+    assert "adapter qualification—not a FeatureBench score" in roadmap_prose
+    assert "bounded shortlist, not a commitment to run all three" in roadmap_prose

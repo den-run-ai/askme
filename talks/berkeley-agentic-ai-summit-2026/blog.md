@@ -113,29 +113,39 @@ That is one harness result, not a model ranking. One unseeded run per cell, non-
 
 The full eight-cell table, billing reconciliation, routes, prompts, and commands remain in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json) for provenance rather than as a leaderboard.
 
-## Test the Real Hypothesis Next
+## What Changes the Answer Next
 
-A useful follow-up should start with four native, syntactically valid workflow tasks and semantic integration failures: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules. Starting natively keeps a new external-benchmark adapter from dominating the first policy comparison.
+The presentation does not need an unfinished policy study to make its bounded
+claim. The completed smoke already establishes what happened, what the evaluator
+caught, and what remains unsupported. Follow-up work should answer the next
+practical question with the shortest valid path.
 
-The pilot is not registered and has not run. Today, one of four workflows is qualified; the model route and randomized schedule remain pending; zero outcome-bearing model calls have been made.
+First, close the visible AskMe harness gap: treat tentative completion as a
+focused acceptance checkpoint, return a failure for one bounded correction, and
+still reserve an independent held-out evaluator for scoring. The retained
+wrong-path miss is the regression case for that improvement.
 
-Before any outcome-bearing call, the pilot should be predeclared and then registered at an immutable public commit or archive. It should:
+Second, test realistic feature work. [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench)
+is the first external target because it evaluates feature development in
+existing repositories and supports task-level evaluation. No AskMe adapter or
+FeatureBench result exists today. The smallest defensible start is one pinned
+public task on a suitable Linux x86_64 Docker host: verify the official gold
+patch, verify a harmless control remains unresolved, run AskMe once, and always
+score the resulting patch with the official evaluator. That is adapter
+qualification—not a FeatureBench score. A result-bearing subset or full split
+needs its own frozen protocol.
 
-1. freeze the four tasks, prompts, feedback, held-out checks, budgets, gate predicate, and exclusions before any measured run;
-2. compare a system-wide reasoning-off policy with the current composite gated policy under matched conditions;
-3. freeze one model route and repeat each task three times in randomized policy order: 24 runs total;
-4. use held-out acceptance and false completion—reported `complete` plus failed acceptance—over all valid scheduled runs as the two primary outcomes;
-5. report regressions, repeated actions, recovery turns, work redone, local corrections, full replans, latency, and tokens descriptively.
+[Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
+full-web-application reference if task and evaluator access becomes available.
+[ProgramBench](https://github.com/facebookresearch/programbench) remains only a
+later clean-room reconstruction stress test. This is a bounded shortlist, not a
+commitment to run all three.
 
-In plain language, `off` never requests the API's explicit-reasoning mode. `Gated` requests it only at the frozen retry, recovery, replan, and final-check points. The model, workflows, tools, feedback, and budgets stay fixed. Both arms may still reason internally; the experiment changes an AskMe API request, not cognition itself.
-
-At this scale, the pilot could reveal only an obvious difference on these four tasks. A null result would still be informative if the deterministic harness guards, rather than extra reasoning, carried the outcome.
-
-External evaluation is a separate next step and is **not ready to run**. No FeatureBench, Vals, or ProgramBench adapter or result exists in AskMe today. External generalization should answer three distinct questions at most. [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench) is the primary and first adapter target for feature development in existing repositories. [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) is the complementary full-web-application reference: it evaluates running applications through point-and-click user workflows, but its tasks are proprietary and access is still being rolled out, so it is not yet a reproducible AskMe adapter commitment.
-
-The optional third candidate is [ProgramBench](https://github.com/facebookresearch/programbench), which tests the opposite extreme: reconstruct a complete program from an execute-only binary and documentation. Its full 200-task benchmark is far beyond this experiment, and the [current frontier leaderboard](https://programbench.com/) remains near zero on fully resolved tasks. The [public dataset](https://huggingface.co/datasets/programbench/ProgramBench-Tests) currently labels 27 tasks easy, but that tier is a static source-size and dependency proxy rather than evidence that small models can solve them. The first step should therefore be only a pinned [one-task `gron` adapter canary](https://programbench.com/task/tomnomnom__gron.88a6234/), selected for deterministic text I/O—not a model result. Any outcome-bearing subset needs a separate preregistration and the label **AskMe-adapted ProgramBench subset**. Fully resolved tasks remain primary; partial test coverage is diagnostic only. This is a shortlist, not a commitment to run all three.
-
-This pilot can support a conclusion only about the tested policy on the frozen tasks. Model-size or model-family claims require a separate, appropriately powered design.
+The native `off` versus `gated` reasoning-policy study is deferred. It becomes
+useful only if the research question is specifically whether AskMe's explicit
+reasoning request changes recovery under otherwise fixed conditions. It is not
+a prerequisite for this talk, an external-readiness test, or a Qwen-versus-Gemma
+or model-size experiment.
 
 ## The Claim That Survives
 
