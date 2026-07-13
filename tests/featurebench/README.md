@@ -9,6 +9,25 @@ comparison, or evidence about model size.
 The frozen values and outcome contract are also recorded in
 [`canary-protocol.json`](canary-protocol.json).
 
+## Completed canary outcome
+
+The frozen run completed on 2026-07-13. Both qualification controls behaved as
+required: the untouched gold patch resolved the task under Docker Rosetta, and
+the harmless nonempty patch applied without resolving it. The only model
+attempt used the exact dated Gemma 4 31B endpoint on SiliconFlow and passed the
+adapter's infrastructure, route, policy, and credential-leak audits. The agent
+then exhausted three bounded planning attempts after repeated implementation
+writes were truncated or returned malformed JSON. It produced an empty patch,
+and official acceptance recorded the task as unresolved with no evaluator
+error.
+
+The compact, hash-linked record is
+[`results/2026-07-13-gemma-4-31b-canary.json`](results/2026-07-13-gemma-4-31b-canary.json).
+This is a supported negative canary of the frozen action protocol on one task.
+It is not a FeatureBench score, a reliability estimate, a model-family or
+model-size result, or a causal estimate of the reasoning policy. No replacement
+model attempt was made.
+
 ## Frozen sources and cell
 
 | Field | Frozen value |
