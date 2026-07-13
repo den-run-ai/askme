@@ -18,19 +18,29 @@ The harness ties these trends together.
 
 [Lilian Weng defines a harness](https://lilianweng.github.io/posts/2026-07-04-harness/) as the deployment system around a model: it controls planning, tool use, context, memory, permissions, workflow, and evaluation. Her central design direction is deliberately simple and generic machinery, with a goal-oriented loop that plans, executes, observes or tests, improves, and executes again.
 
-A harness is not one fixed architecture. Current projects choose different system boundaries:
+A harness is not one fixed architecture. AskMe is an experimental coding-agent
+harness: it keeps an explicit plan, asks the model for one structured action per
+turn, executes it, and returns focused evidence. Its model-facing boundary is
+deliberately narrower than two prominent alternatives:
 
-| Approach | Boundary it emphasizes |
-|---|---|
-| [Pi](https://github.com/earendil-works/pi) | A minimal terminal core extended through skills, prompts, extensions, and packages; stronger isolation is supplied separately. |
-| [Oh My Pi](https://github.com/can1357/oh-my-pi) | A batteries-included fork of Pi with hash-anchored edits, IDE tooling, persistent execution workers, memory, and subagents. |
-| [OpenHands](https://github.com/OpenHands/OpenHands) | A composable agent SDK and managed local, cloud, or enterprise runtime. |
-| [Omnigent (Databricks, OSS alpha)](https://github.com/omnigent-ai/omnigent) | Databricks' open-source alpha meta-harness for swapping or composing agents under shared policies, sandboxes, and sessions; distinct from its [managed beta](https://docs.databricks.com/aws/en/omnigent/). |
-| [Databricks' internal evaluation study](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase) | An organizational evaluation and selection layer built from recent human pull requests, isolated runs, sealed Git history, and held-out tests. |
+| Boundary | AskMe | [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) | [OpenHands](https://docs.openhands.dev/sdk/arch/tool-system) |
+|---|---|---|---|
+| Action surface | Six fixed JSON actions; one action per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
+| State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode | Persistent conversation state and event log with a configurable condenser |
+| Completion boundary | `done` plus an internal check; held-out acceptance remains separate | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` ends the run; benchmark evaluation remains a separate harness |
 
-These are overlapping layers, not a maturity ladder or a leaderboard. Omnigent and the internal study share Databricks provenance but occupy separate layers: the former composes agent harnesses, while the latter evaluates and selects them. Databricks did not compare every project in this table: its workload-specific study compared Pi with the native Claude Code or Codex harness for the same model and thinking effort. It reported more than a 2× task-cost difference in some cases at similar quality, with Pi sending about 3× less context per turn. That is a private-codebase case study, not a universal ranking.
+This is a trade-off, not a ranking. AskMe spends more harness structure to reduce
+each turn's decision burden. Pi keeps a minimal, extensible, model-led core.
+OpenHands supplies a richer lifecycle runtime. All three still need independent
+behavioral acceptance. Other projects explore adjacent layers: [Oh My
+Pi](https://github.com/can1357/oh-my-pi) packages more capabilities around pi,
+while [Omnigent](https://github.com/omnigent-ai/omnigent) composes agents behind
+shared policies and sessions. A separate [Databricks private-codebase
+study](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
+illustrates why harness choice itself needs evaluation, but it is not a universal
+ranking of these projects.
 
-That is the right level of abstraction for AskMe. A useful agent trace looks like this:
+A useful AskMe trace looks like this:
 
 | Step | Plan | Agent action | Evidence | Next move |
 |---|---|---|---|---|
@@ -132,9 +142,10 @@ now implemented and qualified on one pinned public task: the official gold patch
 resolved, a harmless nonempty patch applied but remained unresolved, the audit
 passed, and the official evaluator returned a categorical outcome. The single
 registered model attempt exhausted without emitting a patch, so the task was
-unresolved. That is a negative one-task canary—not a FeatureBench score,
-reliability estimate, or readiness result. A result-bearing subset or full split
-still needs its own frozen protocol.
+unresolved. That is a successful diagnostic run with a negative task outcome—not
+a FeatureBench score, reliability estimate, or readiness result. Repeating more
+tasks under the same known action bottleneck would add little. A result-bearing
+subset should follow an action-interface fix and its own frozen protocol.
 
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.
@@ -154,4 +165,4 @@ Smaller models make more of the model stack controllable. General-purpose and li
 
 The action protocol should be simple and general. Easier interfaces and more general standards can be good; specialized skills should earn their complexity from repeated failure traces. Execution and test results should ground the next decision, reasoning should update the smallest necessary part of the plan, and acceptance should remain tied to real behavior.
 
-**Make the interface easier to use. Keep success grounded in the workflow.**
+**Evaluate the model, harness, task, and evaluator as one system.**

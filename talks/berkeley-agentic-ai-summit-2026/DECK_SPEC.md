@@ -1,6 +1,6 @@
 # Berkeley talk deck contract
 
-**Status:** reviewer-facing source of truth for the seven-slide talk
+**Status:** reviewer-facing source of truth for seven main slides plus one backup
 
 **Last updated:** 2026-07-13
 
@@ -18,7 +18,7 @@ recorded here before the slides are edited.
 - **Social:** [@den-run-ai](https://x.com/den-run-ai)
 - **Project:** [github.com/den-run-ai/askme](https://github.com/den-run-ai/askme)
 - **Venue/date:** Agentic AI Summit 2026, UC Berkeley, Aug 1, 2026
-- **Format:** five minutes, exactly seven slides
+- **Format:** five minutes, seven main slides plus one backup slide
 
 The title is a question. The deck presents a design direction and bounded
 evidence; it does not claim that the current smoke test settles the question.
@@ -35,6 +35,9 @@ workflow agents. A tight harness connects those trends by giving the model a
 small action surface, returning fresh execution or test evidence, preserving
 completed work, and checking the delivered workflow independently.
 
+Define AskMe on slide 2 before using its name as shorthand: it is an
+experimental coding-agent harness that keeps an explicit plan, asks the model
+for one structured action per turn, executes it, and returns focused evidence.
 AskMe's specific design seam is:
 
 > keep the contract → choose one small action → execute/test → interpret fresh
@@ -53,9 +56,14 @@ Keep one explicit evidence chain visible across the last three slides:
 2. **Observed result:** all eight agents reported completion; seven artifacts
    passed independent acceptance; the retained Qwen3.6-35B-A3B action record
    shows a combined compile-and-run command at the wrong path exiting zero.
-3. **Supported conclusion:** AskMe transported actions for all four variants and
-   the independent evaluator exposed one false completion.
-4. **Unresolved:** readiness, reasoning-policy benefit, model speed or
+3. **External boundary probe:** on one qualified FeatureBench-fast task, the
+   Gemma 4 31B trajectory made four reads but no write, produced an empty patch,
+   and remained unresolved because proposed structured writes exceeded the
+   action budget or were malformed.
+4. **Supported conclusion:** the harness exposed two distinct boundaries: one
+   wrong delivered artifact and one feature-scale action that never reached
+   execution.
+5. **Unresolved:** readiness, reasoning-policy benefit, model speed or
    reliability, Qwen versus Gemma, dense versus MoE, and larger versus smaller.
 
 Do not collapse these four levels into a single "the smoke validates" claim.
@@ -92,20 +100,21 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   not returned to AskMe for another correction. Feeding a focused acceptance
   failure back into the loop while retaining a held-out scorer is future harness
   work, not a feature of the published smoke.
-- Keep external-benchmark scope narrow and companion-only. Benchmark names
-  remain companion-material only: the seven stage slides name none. The
-  companion roadmap may name FeatureBench for feature development, Vals Vibe
+- Keep external-benchmark scope narrow. Slide 6 may name the negative one-task
+  FeatureBench-fast canary only as an external boundary probe, never as a score,
+  reliability estimate, or readiness result. The companion roadmap may name
+  FeatureBench for feature development, Vals Vibe
   Code Bench for complete web applications, and one optional third candidate:
   ProgramBench as a later clean-room reconstruction stress test. Vals is
   proprietary and access-dependent. A one-task `gron` run may qualify an
   adapter but must not become model evidence; any result-bearing subset needs a
   separate preregistration. The full ProgramBench is out of scope. This
   shortlist is not a commitment to run all three.
-- Project and vendor landscapes may remain cited in the companion blog. The
-  stage deck should explain technical boundaries rather than promote or compare
-  companies.
+- Project and vendor landscapes may remain cited in the companion blog. A backup
+  slide may compare the technical model-facing boundaries of AskMe, pi, and
+  OpenHands without ranking products or discussing vendor positioning.
 
-## Seven-slide narrative contract
+## Seven main slides plus one backup
 
 ### 1. Author and question
 
@@ -119,6 +128,9 @@ message.
 jargon, vendor taxonomies, or a dense problem statement.
 
 ### 2. Why a tight loop matters for small models
+
+Define AskMe in one sentence before explaining the loop. The audience should
+not need prior repository knowledge.
 
 Connect three ideas directly:
 
@@ -150,21 +162,25 @@ assumption. Emphasize preserving progress and avoiding repeated/stuck steps.
 Restore the visible two-variant-per-family comparison. Show model shape plus the
 build and repair outcomes for all four hosted models. Keep `8/8 complete` and
 `7/8 accepted` visible, but do not let aggregate totals replace the model rows.
+Per-cell wall time, steps, tokens, and replan counts may be shown only as
+observed trajectory detail; they are not scores or model-speed estimates.
 Label the matrix `n=1/cell`, simple, hosted, and descriptive only.
 State the experiment, observed result, supported harness conclusion, and
 unsupported model inferences separately. Any displayed timing is an observed
 trajectory time, not model speed.
 
-### 6. Current AskMe boundary
+### 6. Two observed AskMe boundaries
 
-Show the system boundary established by the current smoke rather than an
-unfinished research roadmap:
+Show two distinct places where feedback currently cannot help:
 
-1. **During the run:** AskMe takes a bounded action, executes or tests it,
+1. **Before execution:** one qualified FeatureBench-fast canary exhausted after
+   four reads and no writes, leaving an empty patch. The 512-token structured
+   action budget bound this trajectory. Label it one task and not a score.
+2. **During the run:** AskMe takes a bounded action, executes or tests it,
    receives fresh evidence, and can continue, repair locally, or replan.
-2. **At tentative completion:** the agent reports complete and delivers an
+3. **At tentative completion:** the agent reports complete and delivers an
    artifact to an independent acceptance check.
-3. **Current gap:** acceptance scored the finished artifact, but a failing
+4. **After completion:** acceptance scored the finished artifact, but a failing
    result was not returned to AskMe for another recovery turn.
 
 Tie the boundary to the retained observation: the Qwen wrong-path run was
@@ -172,27 +188,29 @@ caught, not repaired. This is a concrete harness limit, not an argument about
 model size or family.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
-unfinished native reasoning-policy A/B. The first external target remains
-FeatureBench. Its AskMe adapter is implemented and qualified, and the registered
-one-task model canary exhausted without a patch and was unresolved. That is a
-negative one-task canary, not a benchmark score, reliability estimate, or
-readiness result. This status and the detailed evaluation roadmap belong in
-issue #2 and the companion material, not on stage.
+unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
+in issue #2 and the companion material.
 
 ### 7. Answer posture and takeaway
 
 Return to the title question. The bounded answer is that small LLMs are
-promising when the harness keeps actions small, feeds back real execution, uses
-reasoning to update the smallest invalidated part of the plan, and ties success
-to the delivered workflow. This is a direction to test, not a general readiness
-verdict. The current smoke exercises the interface and shows the evaluator
-catching one false completion; it does not validate a causal harness benefit or
-settle model readiness.
+promising for bounded coding loops, while realistic feature readiness is not
+demonstrated. Treat readiness as a property of the model, harness, task, and
+evaluator together. The current evidence exposes two interface boundaries; it
+does not validate a causal harness benefit or settle general model readiness.
+
+### 8. Backup: AskMe, pi, and OpenHands
+
+Compare only three technical dimensions: model-facing action surface,
+state/control, and completion/acceptance boundary. The purpose is to show how a
+harness changes the work left to the model. State that this is a trade-off, not
+a ranking. Use current primary project documentation and keep company, cloud,
+and enterprise positioning off the slide.
 
 ## Visual and editorial constraints
 
-- Exactly seven rendered slides and exactly 499 speaker-note words unless the
-  reviewer explicitly changes those constraints.
+- Exactly eight rendered slides: seven main slides with exactly 499 speaker-note
+  words in total, followed by one backup slide without a main-talk note block.
 - Slide 1 must have substantial whitespace.
 - Slide 2 should communicate one relationship, not survey a market.
 - Slide 5 is the one intentionally dense evidence slide; favor a readable table
@@ -210,6 +228,8 @@ settle model readiness.
   blog.
 - The five-harness landscape was too vague and too detailed at the same time.
   Its replacement must explain AskMe's technical bridge to small models.
+- AskMe itself must be defined in plain language on slide 2; do not assume the
+  audience knows the repository.
 - Company-specific positioning is not part of the stage narrative.
 - Removing the Gemma/Qwen two-variant comparison was a regression; future edits
   must preserve it unless the reviewer explicitly removes it.
@@ -219,6 +239,11 @@ settle model readiness.
   began with a bounded FeatureBench adapter qualification. The adapter qualified;
   the single registered model canary exhausted without emitting a patch and was
   unresolved, which is not a benchmark score.
+- The latest instruction permits that negative FeatureBench canary on slide 6
+  as a one-task boundary diagnosis. Broader runs under the same known action-cap
+  bottleneck would not create a valid benchmark score.
+- The latest harness-comparison request adds one backup slide comparing AskMe,
+  pi, and OpenHands at technical boundaries only.
 - Claims about model size, family, easier standards, compiler repair, and
   reasoning remain bounded by the rules above.
 - Four external benchmark references were too broad for this talk. The revised
@@ -234,6 +259,7 @@ settle model readiness.
 - [ ] `@den-run-ai` links to `https://x.com/den-run-ai`.
 - [ ] Slide 1 is visually calm and contains no table.
 - [ ] Slide 2 names the small-model → AskMe loop → accepted-workflow connection.
+- [ ] Slide 2 defines AskMe as an experimental coding-agent harness.
 - [ ] Slide 2 contains no product/vendor taxonomy.
 - [ ] The retained wrong-path workflow miss remains visible.
 - [ ] Reasoning is framed as trajectory quality and bounded replanning.
@@ -243,16 +269,18 @@ settle model readiness.
 - [ ] Timings, if retained, are labeled observed trajectory time—not model speed.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
-- [ ] Slide 6 separates in-loop execution feedback from post-run independent
-      acceptance.
+- [ ] Slide 6 separates the pre-execution action boundary, in-loop execution
+      feedback, and post-run independent acceptance.
+- [ ] Slide 6 labels FeatureBench-fast as one task and not a score.
 - [ ] Slide 6 states that the retained wrong-path result was caught, not
       repaired.
 - [ ] The unfinished reasoning-policy pilot is absent from the stage narrative
       and is not presented as a prerequisite for a shareable talk.
 - [ ] No FeatureBench score, reliability estimate, or external readiness claim
       is implied.
-- [ ] The stage narrative contains no benchmark names; FeatureBench, Vals Vibe
-      Code Bench, and ProgramBench remain companion-material only.
+- [ ] Vals Vibe Code Bench and ProgramBench remain companion-material only.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
 - [ ] Companion benchmark scope is capped at those three distinct candidates.
-- [ ] Seven slides render without clipping and speaker notes total 499 words.
+- [ ] Backup slide 8 compares AskMe, pi, and OpenHands without a product ranking.
+- [ ] Eight slides render without clipping; the seven main speaker-note blocks
+      total 499 words.

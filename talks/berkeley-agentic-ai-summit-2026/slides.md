@@ -258,15 +258,15 @@ style: |
   .matrix-grid {
     display: grid;
     gap: 5px;
-    grid-template-columns: 1.32fr 1.13fr 1fr 1fr;
+    grid-template-columns: 1.05fr 1.32fr 1.32fr;
   }
   .matrix-cell {
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 5px;
-    font-size: 15px;
-    min-height: 39px;
-    padding: 8px 10px;
+    font-size: 14px;
+    min-height: 52px;
+    padding: 7px 10px;
   }
   .matrix-cell.head {
     background: transparent;
@@ -279,7 +279,7 @@ style: |
     text-transform: uppercase;
   }
   .matrix-cell.model-name { font-weight: 850; }
-  .matrix-cell small { color: var(--muted); display: block; font-size: 12px; margin-top: 2px; }
+  .matrix-cell small { color: var(--muted); display: block; font-size: 11px; line-height: 1.28; margin-top: 2px; }
   .shape { font-weight: 850; }
   .shape.dense { color: var(--blue); }
   .shape.moe { color: #7256c9; }
@@ -363,6 +363,7 @@ style: |
     z-index: 2;
   }
   .boundary-step.run { border-top: 7px solid var(--blue); }
+  .boundary-step.entry { border-top: 7px solid var(--coral); }
   .boundary-step.delivery { border-top: 7px solid var(--teal); }
   .boundary-step.gap { border-top: 7px solid var(--coral); }
   .boundary-step .num { color: var(--blue); font-size: 14px; font-weight: 900; }
@@ -377,6 +378,47 @@ style: |
     font-size: 19px;
     margin-top: 18px;
     padding: 12px 15px;
+  }
+  .harness-grid {
+    display: grid;
+    gap: 5px;
+    grid-template-columns: 0.72fr repeat(3, 1fr);
+    margin-top: 18px;
+  }
+  .harness-cell {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 14px;
+    line-height: 1.28;
+    min-height: 83px;
+    padding: 11px 12px;
+  }
+  .harness-cell.head {
+    background: var(--terminal);
+    border-color: var(--terminal);
+    color: #fff;
+    font-size: 17px;
+    font-weight: 850;
+    min-height: 24px;
+  }
+  .harness-cell.row-head {
+    align-items: center;
+    color: var(--blue);
+    display: flex;
+    font-size: 13px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .harness-caption {
+    background: #e9f7f3;
+    border-left: 6px solid var(--teal);
+    border-radius: 4px;
+    color: #285d53;
+    font-size: 16px;
+    line-height: 1.3;
+    margin-top: 14px;
+    padding: 10px 14px;
   }
   .conclusion-grid {
     display: grid;
@@ -451,9 +493,9 @@ turn bounded actions into accepted workflows.
 
 <div class="eyebrow">Why this matters now</div>
 
-# A tight loop connects model control to full workflows
+# AskMe gives a small model one bounded move at a time
 
-<p class="subtitle">The model gets one bounded move; the harness keeps the end-to-end contract.</p>
+<p class="subtitle"><strong>AskMe</strong> is an experimental coding-agent harness: explicit plan → one JSON action → execution evidence ↺</p>
 
 <div class="bridge-grid">
   <div class="bridge-stage model-stage"><div class="num">01</div><div class="label">Controllable small LLMs</div><h2>Choose the model boundary</h2><ul><li>Execution speed</li><li>Hardware and deployment</li><li>Post-training access</li></ul></div>
@@ -465,12 +507,12 @@ turn bounded actions into accepted workflows.
 
 <!--
 Speaker notes (~45s):
-AskMe narrows each turn to one small action, executes it, and returns fresh test or
-runtime evidence. The harness keeps the full contract and completed work in view, so the
-model can continue, repair locally, or replan when an assumption breaks. This approach
-assumes the work decomposes into bounded actions, feedback is informative, and success is
-independently testable. The point is a simpler interface, not a lower standard.
-Independent acceptance checks the required behavior and artifact.
+AskMe is an experimental coding-agent harness. It keeps an explicit plan, asks the model
+for one structured action, executes it, and returns fresh test or runtime evidence. The
+harness keeps the contract and completed work in view, so the model can continue, repair
+locally, or replan when an assumption breaks. This approach assumes work decomposes into
+bounded actions, feedback is informative, and success is independently testable.
+Acceptance checks the required behavior and artifact.
 -->
 
 ---
@@ -541,9 +583,9 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 <div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
 
-# Current result: 7 of 8 simple artifacts accepted
+# All four variants ran; acceptance rejected one deliverable
 
-<p class="subtitle">4 hosted model variants × 2 simple checks × 1 unseeded run/cell</p>
+<p class="subtitle">4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell</p>
 
 <div class="matrix-summary">
   <div><strong>8 / 8</strong><span>agent complete</span></div>
@@ -552,15 +594,15 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 </div>
 
 <div class="matrix-grid">
-  <div class="matrix-cell head">Model</div><div class="matrix-cell head">Shape</div><div class="matrix-cell head">Artifact build</div><div class="matrix-cell head">Script repair</div>
-  <div class="matrix-cell model-name">Gemma 4 26B A4B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>25.2B total · 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
-  <div class="matrix-cell model-name">Gemma 4 31B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
-  <div class="matrix-cell model-name">Qwen3.6-27B</div><div class="matrix-cell"><span class="shape dense">● Dense</span><small>27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
-  <div class="matrix-cell model-name">Qwen3.6-35B-A3B</div><div class="matrix-cell"><span class="shape moe">◆ MoE</span><small>35B total · 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span></div>
+  <div class="matrix-cell head">Model · shape</div><div class="matrix-cell head">Artifact build · observed trajectory</div><div class="matrix-cell head">Sanity repair · observed trajectory</div>
+  <div class="matrix-cell model-name">Gemma 4 26B A4B<small><span class="shape moe">◆ MoE</span> · 25.2B total / 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>603.6s · 19 steps · 19.5k tok<br>1 full / 1 local replan</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>20.0s · 7 steps · 4.5k tok<br>0 full / 0 local replans</small></div>
+  <div class="matrix-cell model-name">Gemma 4 31B<small><span class="shape dense">● Dense</span> · 30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>66.5s · 4 steps · 4.4k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>22.4s · 5 steps · 4.2k tok<br>0 full / 1 local replan</small></div>
+  <div class="matrix-cell model-name">Qwen3.6-27B<small><span class="shape dense">● Dense</span> · 27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>47.9s · 6 steps · 5.3k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>23.0s · 6 steps · 4.1k tok<br>0 full / 0 local replans</small></div>
+  <div class="matrix-cell model-name">Qwen3.6-35B-A3B<small><span class="shape moe">◆ MoE</span> · 35B total / 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>17.7s · 3 steps · 3.5k tok<br>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>11.8s · 4 steps · 2.5k tok<br>0 full / 0 local replans</small></div>
 </div>
 
 <div class="matrix-interpretation">
-  <div class="supported"><strong>Supported</strong>AskMe ran all four variants; acceptance caught one false completion.</div>
+  <div class="supported"><strong>Supported</strong>All four completed both checks; acceptance rejected one wrong deliverable.</div>
   <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
 </div>
 
@@ -568,65 +610,85 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 <!--
 Speaker notes (~45s):
-Four hosted variants each ran two simple checks once. Both dense models and the Gemma
-mixture accepted both cells; the Qwen mixture accepted one. All eight reported complete.
-The rows preserve the Gemma and Qwen size-and-shape comparison as descriptive context.
-But no pair isolates size, architecture, active compute, family, run order, provider
-conditions, or reliability. The matrix cannot establish a size effect. These are trajectory
-receipts, not rankings; the Gemma thirty-one row was added post-hoc.
+Four hosted variants each ran two simple checks once. Every agent reported completion;
+independent checks accepted seven artifacts. The shortest build trajectory was the rejected
+one, which is why completion and speed alone are insufficient. The rows preserve Gemma and
+Qwen size, shape, steps, tokens, and replans as descriptive trajectory context. No pair
+isolates size, architecture, active compute, family, run order, reasoning, or reliability.
+These are one-shot receipts, not rankings.
 -->
 
 ---
 
-<div class="eyebrow">Current AskMe boundary</div>
+<div class="eyebrow">Two observed harness boundaries</div>
 
-# Execution feedback is inside the loop. Independent acceptance is outside.
+# Feedback can repair only what enters—and returns to—the loop
 
-<p class="subtitle">The smoke measured delivery after the agent stopped.</p>
+<p class="subtitle">One limit appeared before execution; another after reported completion.</p>
 
 <div class="boundary-grid">
-  <div class="boundary-step run"><div class="num">01 · DURING THE RUN</div><strong>Execution feedback loops back</strong><p><code>bounded action → execute / test → evidence ↺</code><br><br>AskMe can continue, repair locally, or replan.</p></div>
-  <div class="boundary-step delivery"><div class="num">02 · TENTATIVE COMPLETION</div><strong>The artifact leaves the loop</strong><p><code>report complete → deliver artifact → independent acceptance</code></p></div>
-  <div class="boundary-step gap"><div class="num">03 · CURRENT GAP</div><strong>A failed acceptance cannot re-enter the loop</strong><p>The failure is retained as evidence, but is not returned to AskMe for one more recovery turn.</p></div>
+  <div class="boundary-step entry"><div class="num">01 · ENTER THE LOOP</div><strong>The model must emit a valid action</strong><p><code>model → bounded action</code><br><br><b>FeatureBench-fast · 1 task · Gemma 4 31B:</b><br>3 plans → 4 reads → 0 writes → empty patch → unresolved.</p></div>
+  <div class="boundary-step run"><div class="num">02 · INSIDE THE LOOP</div><strong>Execution feedback can guide repair</strong><p><code>action → execute / test → evidence ↺</code><br><br>AskMe can continue, update locally, or replan.</p></div>
+  <div class="boundary-step delivery"><div class="num">03 · AFTER COMPLETION</div><strong>Acceptance checks the deliverable</strong><p><code>artifact → independent acceptance</code><br><br>The Qwen wrong-path result was rejected, but not returned for recovery.</p></div>
 </div>
 
-<div class="boundary-observation"><strong>Observed here:</strong> the Qwen wrong-path run was caught, not repaired.</div>
+<div class="boundary-observation"><strong>External boundary probe—not a score:</strong> the FeatureBench canary exposed a 512-token structured-action bottleneck before a patch existed. One task cannot separate model capability from this model–harness interface.</div>
+
+<div class="source">FeatureBench-fast canary: 1 pinned task, not a score · simple smoke: 8 cells · published results retained in the repo</div>
 
 <!--
 Speaker notes (~45s):
-Execution and test feedback are already inside AskMe's loop. The model can continue,
-repair one step, or replan after a broken assumption. Independent acceptance is currently
-outside that loop: it scores the delivered artifact after the agent reports completion.
-In the retained Qwen run, acceptance found the missing dot-slash main, but AskMe did not
-receive that failure for another correction. So the current system caught the miss; it
-did not recover from it.
+Feedback helps only after a valid action enters the loop. In one qualified FeatureBench
+fast canary, Gemma thirty-one read four times, but proposed writes exceeded the structured
+action budget or were malformed. AskMe produced no write and an empty patch. This is a
+negative task outcome and a useful interface diagnosis, not a benchmark score. At the
+other boundary, independent acceptance rejected Qwen's wrong-path artifact after completion,
+but that failure did not return for recovery.
 -->
 
 ---
 
 <div class="eyebrow">Conclusion + limits</div>
 
-# Promising—with a tight harness.
+# Promising for bounded loops. Feature readiness is still open.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>8 / 8 reported completion. 7 / 8 simple artifacts were accepted. One completed run missed its deliverable.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>The same AskMe action protocol ran all four variants; independent acceptance distinguished reported completion from delivered behavior.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, size/architecture effects, reliability, and local performance.</p></div>
+  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple smoke: 7 / 8 artifacts accepted. Feature canary: 4 reads, 0 writes, empty patch.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>The harness exposed two distinct limits: a wrong deliverable and an action that never reached execution.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app reliability after fixing the action interface; reasoning impact; Qwen vs Gemma; size, architecture, and local performance.</p></div>
 </div>
 
-<p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>
+<p class="tagline">Evaluate the model, harness, and task as one system.</p>
 
-<p class="closing">The smoke exercises the measurement path; readiness needs repeated held-out workflows.</p>
+<p class="closing">Current evidence supports boundary diagnosis—not a general readiness verdict.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes (~35s):
-Today we observed the same AskMe action protocol running across four hosted variants,
-with independent acceptance separating reported completion from delivered behavior. That
-supports a measurement path, not a readiness verdict. We have not established realistic
-feature or application performance, a reasoning-policy benefit, Qwen versus Gemma,
-scaling, reliability, or local performance. Keep actions bounded, ground updates in
-execution evidence, preserve completed work, and keep success tied to the delivered
-workflow.
+The bounded checks are promising, but feature readiness is not demonstrated. Across the
+two experiments, the harness exposed two different limits: one artifact left the loop at
+the wrong path, while one feature-scale write never entered execution. That makes readiness
+a property of the model, harness, task, and evaluator together. We have not established
+feature reliability on these tasks or elsewhere, a reasoning benefit, Qwen versus Gemma, scaling, or local performance.
+Judge progress by delivered behavior.
 -->
+
+---
+
+<div class="eyebrow">Backup · harness boundaries</div>
+
+# A small model's workload depends on the harness
+
+<p class="subtitle">Three technical boundaries—not a leaderboard.</p>
+
+<div class="harness-grid">
+  <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
+  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">6 fixed JSON actions; exactly one action per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
+  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Persistent conversation state and event log; configurable context condenser.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> plus an internal check; held-out acceptance remains separate.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> ends the run; benchmark evaluation remains a separate harness.</div>
+</div>
+
+<div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>
+
+<div class="source">Sources: AskMe architecture · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi coding-agent docs</a> · <a href="https://docs.openhands.dev/sdk/arch/tool-system">OpenHands tool system</a> and <a href="https://docs.openhands.dev/sdk/arch/conversation">conversation architecture</a></div>
