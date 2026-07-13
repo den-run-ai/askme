@@ -31,7 +31,7 @@
 The talk keeps three kinds of statements separate:
 
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
-- **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. The retained miss produced working behavior at the wrong path.
+- **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. In the retained miss, a combined compile-and-run command exited zero at the wrong artifact path, but the required deliverable was absent.
 - **Supported conclusion.** AskMe transported actions across all four hosted variants, and independent acceptance exposed one false completion. The smoke exercises the measurement path; it does not validate a causal harness benefit.
 - **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck leaves that causal claim open.
 
@@ -42,12 +42,13 @@ workflow runner and one qualified native fixture are merged, but the native
 reasoning-policy A/B is deferred and has zero measured runs. A Qwen-versus-Gemma
 or model-size claim would require a separate predeclared, repeated design.
 
-External evaluation is **not ready to run**. FeatureBench is the first adapter
-target because it evaluates feature work in existing repositories, but AskMe has
-no FeatureBench adapter or result today. A named one-task run can qualify the
-adapter and official evaluator; it cannot be called a FeatureBench score. Vals
-Vibe Code Bench remains an access-dependent full-app reference, and ProgramBench
-is only a later clean-room stress-test candidate. Details are tracked in
+External evaluation now has one qualified FeatureBench adapter path, not a
+benchmark result. The registered one-task canary passed the gold, harmless-control,
+audit, and evaluator qualification checks; its only model attempt exhausted
+without emitting a patch and was unresolved. This is a negative one-task canary,
+not a FeatureBench score, reliability estimate, or readiness result. Vals Vibe
+Code Bench remains an access-dependent full-app reference, and ProgramBench is
+only a later clean-room stress-test candidate. Details are tracked in
 [issue #2](https://github.com/den-run-ai/askme/issues/2), not on the five-minute stage.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.

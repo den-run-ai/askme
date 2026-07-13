@@ -47,13 +47,13 @@ The AskMe loop is most plausible when a workflow decomposes into bounded actions
 
 The published smoke has one additional limit: independent acceptance scored the artifact after the agent stopped. Its failure was not fed back to AskMe for recovery. A stronger operational loop would run a focused acceptance check at tentative completion, return a failure for one bounded correction, and still reserve a separate held-out evaluator for scoring.
 
-## A Working Program Can Still Miss the Workflow
+## An Exit-Zero Command Can Still Miss the Workflow
 
-The most useful result in the hosted smoke was not a compiler error. Qwen3.6-35B-A3B wrote the requested `msg.h` and `main.c`, compiled a working program to `/tmp/test`, ran it successfully, saw `REPLAN_OK`, and reported completion.
+The most useful result in the hosted smoke was not a compiler error. The retained Qwen3.6-35B-A3B action record shows `cc -o /tmp/test main.c && /tmp/test` returning zero, followed by the agent reporting completion. It does not independently preserve that command's stdout or prove the source contents.
 
 The required deliverable was `./main`.
 
-The independent acceptance test therefore failed. Every recorded tool action was successful, yet the workflow contract drifted. This is a more realistic agent failure than a missing include: locally plausible progress did not add up to the requested integration result.
+The independent acceptance test therefore failed. The recorded combined command succeeded, yet the required artifact was absent. This is a more realistic agent failure than a missing include: locally plausible progress did not add up to the requested integration result.
 
 It also clarifies two different roles for feedback:
 
@@ -106,7 +106,7 @@ The result is simple:
 
 - all eight agents reported completion;
 - seven of eight artifacts met the exact acceptance contract;
-- the retained failure was working behavior at the wrong artifact path;
+- the retained failure was an exit-zero compile-and-run command at the wrong artifact path;
 - every trajectory and its provenance are auditable.
 
 That is one harness result, not a model ranking. One unseeded run per cell, non-randomized sequential runs, different dense and MoE architectures, and a fourth model selected after the original matrix cannot establish anything about Gemma versus Qwen, parameter count, active compute, reasoning quality, reliability, or local-Mac performance.
@@ -127,13 +127,14 @@ wrong-path miss is the regression case for that improvement.
 
 Second, test realistic feature work. [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench)
 is the first external target because it evaluates feature development in
-existing repositories and supports task-level evaluation. No AskMe adapter or
-FeatureBench result exists today. The smallest defensible start is one pinned
-public task on a suitable Linux x86_64 Docker host: verify the official gold
-patch, verify a harmless control remains unresolved, run AskMe once, and always
-score the resulting patch with the official evaluator. That is adapter
-qualification—not a FeatureBench score. A result-bearing subset or full split
-needs its own frozen protocol.
+existing repositories and supports task-level evaluation. The AskMe adapter is
+now implemented and qualified on one pinned public task: the official gold patch
+resolved, a harmless nonempty patch applied but remained unresolved, the audit
+passed, and the official evaluator returned a categorical outcome. The single
+registered model attempt exhausted without emitting a patch, so the task was
+unresolved. That is a negative one-task canary—not a FeatureBench score,
+reliability estimate, or readiness result. A result-bearing subset or full split
+still needs its own frozen protocol.
 
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.

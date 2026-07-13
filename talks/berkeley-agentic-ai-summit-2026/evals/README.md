@@ -91,7 +91,7 @@ For every cell, publish:
 | Qwen3.6-27B | **PASS** (✓/✓/✓; 47.88s) | **PASS** (✓/✓/✓; 23.04s) | 22 | $0.00496840 |
 | Qwen3.6-35B-A3B | **FAIL** (✗/✓/✗; 17.67s) | **PASS** (✓/✓/✓; 11.84s) | 14 | $0.00187520 |
 
-Seven of eight cells passed all three criteria. All eight agent runs reported `complete`. In the failed build, Qwen3.6-35B-A3B created correct `main.c` and `msg.h`, compiled and ran `/tmp/test`, and reported completion, but it did not leave the required `main` executable. The semantic failure was retained under the predeclared rule.
+Seven of eight cells passed all three criteria. All eight agent runs reported `complete`. In the failed build, the retained Qwen3.6-35B-A3B action record shows `cc -o /tmp/test main.c && /tmp/test` returning zero before reported completion, but the required `main` executable was absent. The retained artifacts do not independently prove the source contents or `/tmp/test` stdout. The semantic failure was retained under the predeclared rule.
 
 ## Per-Cell Metrics
 

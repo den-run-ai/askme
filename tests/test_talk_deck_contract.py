@@ -116,14 +116,15 @@ def test_deck_contract_guards_notes_and_review_spec():
         "https://x.com/den-run-ai",
         "Removing the Gemma/Qwen two-variant comparison was a regression",
         "Slide 2 contains no product/vendor taxonomy",
-        "FeatureBench for feature development and Vals Vibe Code Bench",
-        "A one-task `gron` run may qualify the adapter",
+        "companion roadmap may name FeatureBench for feature development",
+        "A one-task `gron` run may qualify an adapter",
+        "Benchmark names remain companion-material only",
         '"small" is an engineering and deployment class',
         "does not validate a causal harness benefit",
         "Current AskMe boundary",
         "the Qwen wrong-path run was caught, not repaired",
         "presentation-first instruction removes the unfinished 24-run",
-        "a named one-task canary would qualify an adapter",
+        "registered one-task model canary exhausted without a patch",
     ):
         assert requirement in spec
 
@@ -141,9 +142,10 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "small is a deployment class, not a strict parameter threshold" in blog
     assert "The smoke exercises the measurement path" in readme_prose
     assert "model-size claim would require a separate predeclared, repeated design" in readme_prose
-    assert "External evaluation is **not ready to run**" in readme
-    assert "No AskMe adapter or FeatureBench result exists today" in blog_prose
-    assert "That is adapter qualification—not a FeatureBench score" in blog_prose
+    assert "one qualified FeatureBench adapter path" in readme_prose
+    assert "AskMe adapter is now implemented and qualified" in blog_prose
+    assert "negative one-task canary—not a FeatureBench score" in blog_prose
+    assert "exhausted without emitting a patch" in blog_prose
     assert "reasoning-policy study is deferred" in blog_prose
     assert "It is not" in blog_prose and "a prerequisite for this talk" in blog_prose
     for stage_or_companion in (SLIDES.read_text(encoding="utf-8"), readme, blog):
@@ -180,5 +182,5 @@ def test_companion_benchmark_shortlist_stays_bounded():
     for benchmark in ("FeatureBench-fast", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in roadmap_prose
     assert "one pinned public task" in roadmap_prose
-    assert "adapter qualification—not a FeatureBench score" in roadmap_prose
+    assert "negative one-task canary—not a FeatureBench score" in roadmap_prose
     assert "bounded shortlist, not a commitment to run all three" in roadmap_prose
