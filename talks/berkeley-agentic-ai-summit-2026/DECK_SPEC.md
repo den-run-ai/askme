@@ -156,15 +156,27 @@ trajectory time, not model speed.
 
 ### 6. Next valid experiment
 
-Show the planned direction: four semantic workflows that must all qualify, one
-frozen model route, explicit-reasoning `off` versus frozen `gated`, three
-randomized repeats, held-out acceptance and false completion as co-primary
-outcomes. This is 24 scheduled runs total for the first fixed-model pilot, not
-24 per model. Do not imply that the protocol is registered or that the pilot
-has run: only one of four workflows is currently qualified and the model route
-is not yet frozen.
-This experiment can test an explicit-reasoning request policy on the frozen
-tasks; it cannot compare Qwen with Gemma or larger with smaller models.
+Separate two next steps that are easy to conflate:
+
+1. **AskMe-owned A/B pilot:** keep one model route, workflows, tools, feedback,
+   and budgets fixed; change only AskMe's explicit-reasoning request. `Off`
+   never requests the API's explicit-reasoning mode. `Gated` requests it only
+   at the frozen retry, recovery, replan, and final-check points. Both arms may
+   still reason internally.
+2. **External generalization:** adapt FeatureBench first; use Vals only if its
+   task and evaluator access becomes available. Neither has an AskMe adapter or
+   result today. ProgramBench remains a later infrastructure canary.
+
+For the A/B pilot, show four semantic workflows that must all qualify, one
+frozen model route, three randomized repeats per task and arm, and held-out
+acceptance plus false completion. This is 24 scheduled runs total. State the
+current blockers: only one of four workflows is qualified; the model route and
+randomized schedule are pending; zero measured runs exist.
+
+Avoid "large policy effect." Say plainly that 24 runs could reveal only an
+obvious difference on these four tasks. The fixed-model pilot cannot compare
+Qwen with Gemma or larger with smaller models, and it is not evidence of
+external feature or application readiness.
 
 ### 7. Answer posture and takeaway
 
@@ -224,8 +236,14 @@ settle model readiness.
 - [ ] Timings, if retained, are labeled observed trajectory time—not model speed.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
+- [ ] Slide 6 distinguishes the unfinished AskMe A/B pilot from later external
+      evaluation.
+- [ ] `Off` and `gated` are explained as explicit-reasoning request settings,
+      not as the presence or absence of internal cognition.
 - [ ] The next pilot is presented as 24 total fixed-model runs, planned and not
-      completed or registered.
+      completed, registered, or ready to run.
+- [ ] FeatureBench is labeled the first future adapter; no external AskMe result
+      is implied.
 - [ ] The stage narrative names only FeatureBench and Vals Vibe Code Bench;
       ProgramBench remains an optional later roadmap stress test.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
