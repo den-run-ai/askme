@@ -171,6 +171,14 @@ def _expand_command(command: Sequence[str], workspace: Path,
         raise ManifestError(f"unknown command placeholder: {exc.args[0]}") from exc
 
 
+def _stream_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
 def _run_command(command: Sequence[str], workspace: Path,
                  timeout_seconds: float) -> dict[str, Any]:
     environment = os.environ.copy()
@@ -199,8 +207,8 @@ def _run_command(command: Sequence[str], workspace: Path,
             "status": "timeout",
             "command": list(command),
             "exit_code": None,
-            "stdout": exc.stdout or "",
-            "stderr": exc.stderr or "",
+            "stdout": _stream_text(exc.stdout),
+            "stderr": _stream_text(exc.stderr),
             "passed": False,
         }
     except OSError as exc:
@@ -228,10 +236,7 @@ def _agent_status(agent_result: Any) -> str:
 
 
 def _bounded_child_stream(value: Any) -> tuple[str, bool, int]:
-    if isinstance(value, bytes):
-        text = value.decode("utf-8", errors="replace")
-    else:
-        text = value if isinstance(value, str) else "" if value is None else str(value)
+    text = _stream_text(value)
     length = len(text)
     return text[:MAX_CHILD_STREAM_CHARS], length > MAX_CHILD_STREAM_CHARS, length
 
@@ -282,6 +287,25 @@ def _read_agent_run_log(path: Path) -> tuple[dict[str, Any], Optional[str]]:
         evidence["status"] = "malformed"
         return evidence, "AskMe child JSONL run log contains malformed events"
     return evidence, None
+
+
+def _reasoning_policy_error(
+    run_log: Mapping[str, Any], reasoning_policy: str
+) -> Optional[str]:
+    for index, event in enumerate(run_log.get("events", []), start=1):
+        if event.get("event") != "reasoning_decision":
+            continue
+        if event.get("requested_policy") != reasoning_policy:
+            return (
+                f"reasoning decision {index} requested policy "
+                f"{event.get('requested_policy')!r}; expected {reasoning_policy!r}"
+            )
+        if reasoning_policy == "off" and event.get("effective_level") is not None:
+            return (
+                f"reasoning decision {index} enabled "
+                f"{event.get('effective_level')!r} under off policy"
+            )
+    return None
 
 
 def evaluate_workflow(
@@ -530,6 +554,10 @@ def _askme_agent(
             "--goal-context-chars", str(agent_limits["goal_context_chars"]),
         ]
         environment = os.environ.copy()
+        environment["AGENT_REASONING_POLICY"] = reasoning_policy
+        environment["AGENT_GOAL_CONTEXT_CHARS"] = str(
+            agent_limits["goal_context_chars"]
+        )
         environment["AGENT_FINAL_VALIDATE"] = str(agent_limits["final_validate"])
         environment["AGENT_RUN_LOG"] = str(run_log_file)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -554,10 +582,13 @@ def _askme_agent(
             )
             metadata["timeout_seconds"] = timeout_seconds
             metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
+            policy_error = _reasoning_policy_error(
+                metadata["run_log"], reasoning_policy
+            )
             return failure(
                 error,
                 metadata,
-                infrastructure_error=run_log_error,
+                infrastructure_error=run_log_error or policy_error,
             )
         except OSError as exc:
             error = f"could not launch AskMe child process: {exc}"
@@ -634,6 +665,15 @@ def _askme_agent(
                 run_log_error,
                 metadata,
                 infrastructure_error=run_log_error,
+            )
+
+        policy_error = _reasoning_policy_error(metadata["run_log"], reasoning_policy)
+        if policy_error is not None:
+            metadata["status"] = "reasoning_policy_violation"
+            return failure(
+                policy_error,
+                metadata,
+                infrastructure_error=policy_error,
             )
 
         return {

@@ -7,6 +7,7 @@ import pytest
 from workflow_eval import (
     ManifestError,
     _askme_agent,
+    _run_command,
     evaluate_workflow,
     load_manifest,
 )
@@ -229,6 +230,19 @@ def test_prompt_over_frozen_goal_cap_is_rejected(tmp_path):
         load_manifest(over_cap)
 
 
+def test_timed_out_check_streams_are_json_serializable(tmp_path):
+    timeout = __import__("subprocess").TimeoutExpired(
+        ["check"], 1, output=b"partial stdout", stderr=b"partial stderr"
+    )
+    with patch("workflow_eval.subprocess.run", side_effect=timeout):
+        result = _run_command(["check"], tmp_path, 1)
+
+    assert result["status"] == "timeout"
+    assert result["stdout"] == "partial stdout"
+    assert result["stderr"] == "partial stderr"
+    assert json.loads(json.dumps(result))["passed"] is False
+
+
 @pytest.mark.parametrize(
     ("key", "value", "message"),
     [
@@ -266,13 +280,18 @@ def test_askme_adapter_runs_cold_child_with_frozen_configuration(tmp_path):
         assert option("--max-steps") == str(limits["max_steps"])
         assert option("--goal-context-chars") == str(limits["goal_context_chars"])
         assert kwargs["timeout"] == limits["agent_timeout_seconds"]
+        assert kwargs["env"]["AGENT_REASONING_POLICY"] == "off"
+        assert kwargs["env"]["AGENT_GOAL_CONTEXT_CHARS"] == str(
+            limits["goal_context_chars"]
+        )
         assert kwargs["env"]["AGENT_FINAL_VALIDATE"] == limits["final_validate"]
         run_log = Path(kwargs["env"]["AGENT_RUN_LOG"])
         assert str(run_log) != "/tmp/parent-agent-run.jsonl"
         assert run_log.parent != tmp_path
         run_log.write_text(
             '{"event":"run_start","model":"test-model"}\n'
-            '{"event":"reasoning_decision","effective_level":null}\n',
+            '{"event":"reasoning_decision","requested_policy":"off",'
+            '"effective_level":null}\n',
             encoding="utf-8",
         )
         Path(option("--result-json")).write_text(json.dumps(expected), encoding="utf-8")
@@ -283,7 +302,11 @@ def test_askme_adapter_runs_cold_child_with_frozen_configuration(tmp_path):
     with (
         patch.dict(
             "workflow_eval.os.environ",
-            {"AGENT_RUN_LOG": "/tmp/parent-agent-run.jsonl"},
+            {
+                "AGENT_RUN_LOG": "/tmp/parent-agent-run.jsonl",
+                "AGENT_REASONING_POLICY": "invalid-parent-value",
+                "AGENT_GOAL_CONTEXT_CHARS": "invalid-parent-value",
+            },
         ),
         patch("workflow_eval.subprocess.run", side_effect=child_process) as child,
     ):
@@ -418,6 +441,35 @@ def test_askme_adapter_retains_malformed_run_log_evidence(tmp_path):
     assert metadata["run_log"]["errors"][0]["line"] == 2
 
 
+def test_askme_adapter_rejects_reasoning_policy_violation(tmp_path):
+    expected = {"status": "complete", "state": {}, "log": []}
+
+    def noncompliant_child(command, **kwargs):
+        result_path = Path(command[command.index("--result-json") + 1])
+        result_path.write_text(json.dumps(expected), encoding="utf-8")
+        Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
+            '{"event":"reasoning_decision","requested_policy":"off",'
+            '"effective_level":"medium"}\n',
+            encoding="utf-8",
+        )
+        return __import__("subprocess").CompletedProcess(
+            command, 0, stdout="", stderr=""
+        )
+
+    with patch("workflow_eval.subprocess.run", side_effect=noncompliant_child):
+        result = _askme_agent(
+            "fix configuration",
+            tmp_path,
+            reasoning_policy="off",
+            agent_limits=load_manifest(MANIFEST)["agent_limits"],
+        )
+
+    assert result["status"] == "error"
+    assert "enabled 'medium' under off policy" in result["_workflow_adapter_error"]
+    assert "_workflow_adapter_infrastructure_error" in result
+    assert result["_workflow_adapter"]["status"] == "reasoning_policy_violation"
+
+
 def test_askme_timeout_is_a_valid_system_outcome_with_partial_evidence(tmp_path):
     limits = load_manifest(MANIFEST)["agent_limits"]
 
@@ -425,7 +477,8 @@ def test_askme_timeout_is_a_valid_system_outcome_with_partial_evidence(tmp_path)
         assert kwargs["timeout"] == limits["agent_timeout_seconds"]
         Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
             '{"event":"run_start","reasoning_policy":"off"}\n'
-            '{"event":"reasoning_decision","effective_level":null}\n',
+            '{"event":"reasoning_decision","requested_policy":"off",'
+            '"effective_level":null}\n',
             encoding="utf-8",
         )
         raise __import__("subprocess").TimeoutExpired(
