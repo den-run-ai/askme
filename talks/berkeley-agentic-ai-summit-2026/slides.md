@@ -329,6 +329,15 @@ style: |
     margin-top: 13px;
     padding: 10px 15px;
   }
+  .external-status {
+    background: #edf4ff;
+    border-left: 6px solid var(--blue);
+    border-radius: 4px;
+    color: #27476f;
+    font-size: 15px;
+    margin-top: 12px;
+    padding: 9px 15px;
+  }
   .conclusion-grid {
     display: grid;
     gap: 16px;
@@ -531,31 +540,33 @@ post-hoc.
 
 ---
 
-<div class="eyebrow">Experiment 1 · planned, not registered or run</div>
+<div class="eyebrow">Next evidence · two separate steps</div>
 
-# Test the reasoning policy—not model size
+# Does selective extra reasoning improve delivery?
+
+<p class="subtitle">An AskMe setting A/B test—not an external benchmark or model comparison.</p>
 
 <div class="experiment-grid">
-  <div class="experiment"><div class="num">01</div><strong>4 planned workflows</strong><p>Semantic failures, visible feedback, held-out scoring; all must qualify.</p></div>
-  <div class="experiment"><div class="num">02</div><strong>1 frozen model route</strong><p>Hold the model and harness conditions fixed.</p></div>
-  <div class="experiment"><div class="num">03</div><strong>Off vs gated × 3</strong><p>Randomized repeats: 4 × 2 × 3 = 24 total runs.</p></div>
-  <div class="experiment"><div class="num">04</div><strong>2 primary outcomes</strong><p>Held-out acceptance and false completion across all valid runs.</p></div>
+  <div class="experiment"><div class="num">01</div><strong>Build the AskMe test</strong><p>Four semantic workflows; one is qualified today.</p></div>
+  <div class="experiment"><div class="num">02</div><strong>Hold the system fixed</strong><p>One model route; identical tasks, tools, feedback, and budgets.</p></div>
+  <div class="experiment"><div class="num">03</div><strong>Change one switch</strong><p><strong>Off:</strong> never request extra reasoning. <strong>Gated:</strong> request it only at predefined recovery points.</p></div>
+  <div class="experiment"><div class="num">04</div><strong>Judge the delivery</strong><p>Three repeats per task and setting; held-out acceptance and false completion.</p></div>
 </div>
 
-<div class="pilot-status">Today: 1 / 4 workflows qualified · route and schedule pending · 0 measured runs</div>
+<div class="pilot-status">Native A/B not ready: 3 workflows, model route, and schedule still pending · 0 measured runs</div>
 
-<div class="metrics"><strong>Scope:</strong> a large policy effect on these tasks—not Qwen vs Gemma, model size, architecture, or internal cognition.</div>
+<div class="metrics"><strong>24-run scope:</strong> only an obvious difference on these four tasks—not reliability, model size, or Qwen vs Gemma.</div>
 
-<div class="source">Publish tasks, policies, budgets, gate table, randomization, and exclusions before the first outcome-bearing call.</div>
+<div class="external-status"><strong>External evaluation is also not ready:</strong> no adapter or result yet. FeatureBench first; Vals only if access permits.</div>
 
 <!--
 Speaker notes (~45s):
-The next experiment asks whether gated explicit-reasoning requests improve held-out
-acceptance or reduce false completion versus off. Today, only one of four workflows is
-qualified; the route and schedule are pending; zero measured runs exist. After
-qualification, one frozen model route gets twenty-four randomized runs. Recovery and
-replans are secondary. This can reveal only large policy effects, not internal cognition,
-family, or size. FeatureBench tests features; Vals Vibe Code Bench tests full apps.
+This is an AskMe-owned A/B test, not an external benchmark. Both arms use one model,
+workflows, tools, feedback, and budgets; both may reason internally. Off never requests
+the API's explicit-reasoning mode. Gated requests it only at retry, recovery, replan, and
+final-check points. Today one of four workflows is qualified, and zero runs exist.
+FeatureBench adaptation comes later; Vals requires access. Twenty-four runs could reveal
+a task-local difference, not a family or size effect.
 -->
 
 ---

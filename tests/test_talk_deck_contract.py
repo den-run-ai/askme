@@ -62,12 +62,17 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
         assert misleading_timing not in comparison
 
     pilot = slides[5]
-    assert "planned, not registered or run" in pilot
-    assert "1 frozen model route" in pilot
-    assert "24 total runs" in pilot
-    assert "1 / 4 workflows qualified" in pilot
+    assert "Next evidence · two separate steps" in pilot
+    assert "An AskMe setting A/B test—not an external benchmark" in pilot
+    assert "Off:" in pilot
+    assert "Gated:" in pilot
+    assert "Native A/B not ready" in pilot
+    assert "24-run scope" in pilot
     assert "0 measured runs" in pilot
-    assert "not Qwen vs Gemma, model size" in pilot
+    assert "not reliability, model size, or Qwen vs Gemma" in pilot
+    assert "External evaluation is also not ready" in pilot
+    assert "FeatureBench first" in pilot
+    assert "Vals only if access permits" in pilot
 
     conclusion = slides[6]
     assert "Conclusion + limits" in conclusion
@@ -89,8 +94,8 @@ def test_deck_contract_guards_notes_and_review_spec():
     )
     assert len(note_blocks) == 7
     assert sum(len(block.split()) for block in note_blocks) == 499
-    assert "FeatureBench tests features" in text
-    assert "Vals Vibe Code Bench tests full apps" in text
+    assert "FeatureBench adaptation comes later" in text
+    assert "Vals requires access" in text
     assert "ProgramBench" not in text
     for out_of_scope in (
         "Claw-SWE-Bench",
@@ -112,8 +117,11 @@ def test_deck_contract_guards_notes_and_review_spec():
         "FeatureBench for feature development and Vals Vibe Code Bench",
         "A one-task `gron` run may qualify the adapter",
         '"small" is an engineering and deployment class',
-        "24 scheduled runs total for the first fixed-model pilot",
+        "This is 24 scheduled runs total",
         "does not validate a causal harness benefit",
+        "AskMe-owned A/B pilot",
+        "Neither has an AskMe adapter",
+        'Avoid "large policy effect."',
     ):
         assert requirement in spec
 
