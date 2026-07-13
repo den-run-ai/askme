@@ -67,6 +67,6 @@
 - [x] Add an explicit security boundary and untrusted-input guidance.
 - [x] Remove the private-fork and machine-specific path assumptions from primary setup docs.
 - [x] Record the FeatureBench structured-action failure in `PERFORMANCE.md` and `ARCHITECTURE.md`.
-- [ ] Run a dedicated full-history scanner such as Gitleaks or TruffleHog immediately before changing repository visibility. A basic filename-only regex scan on 2026-07-13 found no common key or private-key patterns, but it is not a substitute for a dedicated scanner.
+- [ ] Run a dedicated full-history scanner such as Gitleaks or TruffleHog immediately before changing repository visibility. A basic full-history content regex scan with filename-only output found no common key or private-key patterns on 2026-07-13, but it is not a substitute for a dedicated scanner.
 - [ ] Decide whether to enforce network isolation in code; changing `ALLOW_NETWORK` today would be a behavior and protocol change, not documentation hygiene.
 - [ ] Confirm every audience-facing repository link resolves after the repository visibility change.

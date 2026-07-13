@@ -20,7 +20,8 @@ mkdir -p /tmp/llama-cache
   -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 
-# 2. Run the agent (from agent/ directory)
+# 2. In another terminal, run the agent from the AskMe checkout
+cd /path/to/askme
 python3 askme.py "create a hello world program in C and compile it"
 
 # Or via OpenRouter (set OPENROUTER_API_KEY in .env)
