@@ -23,7 +23,7 @@
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
-6. Separate the unfinished AskMe setting A/B test from external evaluation: 1/4 native workflows qualified, zero measured runs, and no external adapter yet.
+6. Draw the current system boundary: execution and test feedback return to AskMe during the run, while independent acceptance currently scores the artifact after the agent stops.
 7. Answer cautiously: small LLM coding agents are promising with tight execution-grounded harnesses, but the current n=1 smoke does not establish general readiness.
 
 ## Evidence Boundary
@@ -33,15 +33,22 @@ The talk keeps three kinds of statements separate:
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
 - **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. The retained miss produced working behavior at the wrong path.
 - **Supported conclusion.** AskMe transported actions across all four hosted variants, and independent acceptance exposed one false completion. The smoke exercises the measurement path; it does not validate a causal harness benefit.
-- **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck proposes the experiment needed to test that claim.
+- **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck leaves that causal claim open.
 
 For this talk, “small” is an engineering/deployment class rather than a fixed parameter cutoff. The hosted matrix spans 3–4B-active MoE and 27–31B dense models and does not measure local-Mac performance. Its timings are observed trajectory wall times, not model-speed estimates.
 
-The planned native pilot is four workflows × two explicit-reasoning settings × three randomized repeats on one frozen model route: 24 scheduled runs total. It could reveal only an obvious difference on those tasks. A Qwen-versus-Gemma or model-size claim requires a separate predeclared, repeated design.
+Evaluation extension is separate from the talk's critical path. The reproducible
+workflow runner and one qualified native fixture are merged, but the native
+reasoning-policy A/B is deferred and has zero measured runs. A Qwen-versus-Gemma
+or model-size claim would require a separate predeclared, repeated design.
 
-In plain language, `off` never asks the API for explicit reasoning. `Gated` asks only at predefined retry, recovery, replan, and final-check points. Both settings may still reason internally. With only 24 runs, the pilot could reveal an obvious difference on its four tasks; it cannot estimate reliability.
-
-External evaluation is **not ready to run**. FeatureBench, Vals Vibe Code Bench, and ProgramBench currently appear only in the talk roadmap—there is no executable AskMe adapter or external result. FeatureBench is the first planned adapter; Vals depends on evaluator access; a ProgramBench `gron` run would qualify infrastructure only.
+External evaluation is **not ready to run**. FeatureBench is the first adapter
+target because it evaluates feature work in existing repositories, but AskMe has
+no FeatureBench adapter or result today. A named one-task run can qualify the
+adapter and official evaluator; it cannot be called a FeatureBench score. Vals
+Vibe Code Bench remains an access-dependent full-app reference, and ProgramBench
+is only a later clean-room stress-test candidate. Details are tracked in
+[issue #2](https://github.com/den-run-ai/askme/issues/2), not on the five-minute stage.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 

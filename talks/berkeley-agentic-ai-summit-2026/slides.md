@@ -338,6 +338,46 @@ style: |
     margin-top: 12px;
     padding: 9px 15px;
   }
+  .boundary-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 24px;
+  }
+  .boundary-step {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-height: 205px;
+    padding: 18px 19px;
+    position: relative;
+  }
+  .boundary-step:not(:last-child)::after {
+    color: var(--blue);
+    content: "→";
+    font-size: 30px;
+    font-weight: 900;
+    position: absolute;
+    right: -25px;
+    top: 80px;
+    z-index: 2;
+  }
+  .boundary-step.run { border-top: 7px solid var(--blue); }
+  .boundary-step.delivery { border-top: 7px solid var(--teal); }
+  .boundary-step.gap { border-top: 7px solid var(--coral); }
+  .boundary-step .num { color: var(--blue); font-size: 14px; font-weight: 900; }
+  .boundary-step strong { display: block; font-size: 20px; margin: 8px 0 12px; }
+  .boundary-step p { color: var(--muted); font-size: 16px; margin: 0; }
+  .boundary-step code { color: var(--ink); font-size: 14px; }
+  .boundary-observation {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    color: #7a5008;
+    font-size: 19px;
+    margin-top: 18px;
+    padding: 12px 15px;
+  }
   .conclusion-grid {
     display: grid;
     gap: 16px;
@@ -531,42 +571,36 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 Speaker notes (~45s):
 Four hosted variants each ran two simple checks once. Both dense models and the Gemma
 mixture accepted both cells; the Qwen mixture accepted one. All eight reported complete.
-Descriptively, Gemma thirty-one's build trace was nine times shorter than Gemma
-twenty-six's, but its repair was slower; the fastest build trace was rejected. No pair
-isolates size, architecture, active compute, family, provider timing, or reliability.
-These are trajectory observations, not rankings. The thirty-one model was added
-post-hoc.
+The rows preserve the Gemma and Qwen size-and-shape comparison as descriptive context.
+But no pair isolates size, architecture, active compute, family, run order, provider
+conditions, or reliability. The matrix cannot establish a size effect. These are trajectory
+receipts, not rankings; the Gemma thirty-one row was added post-hoc.
 -->
 
 ---
 
-<div class="eyebrow">Next evidence · two separate steps</div>
+<div class="eyebrow">Current AskMe boundary</div>
 
-# Does selective extra reasoning improve delivery?
+# Execution feedback is inside the loop. Independent acceptance is outside.
 
-<p class="subtitle">An AskMe setting A/B test—not an external benchmark or model comparison.</p>
+<p class="subtitle">The smoke measured delivery after the agent stopped.</p>
 
-<div class="experiment-grid">
-  <div class="experiment"><div class="num">01</div><strong>Build the AskMe test</strong><p>Four semantic workflows; one is qualified today.</p></div>
-  <div class="experiment"><div class="num">02</div><strong>Hold the system fixed</strong><p>One model route; identical tasks, tools, feedback, and budgets.</p></div>
-  <div class="experiment"><div class="num">03</div><strong>Change one switch</strong><p><strong>Off:</strong> never request extra reasoning. <strong>Gated:</strong> request it only at predefined recovery points.</p></div>
-  <div class="experiment"><div class="num">04</div><strong>Judge the delivery</strong><p>Three repeats per task and setting; held-out acceptance and false completion.</p></div>
+<div class="boundary-grid">
+  <div class="boundary-step run"><div class="num">01 · DURING THE RUN</div><strong>Execution feedback loops back</strong><p><code>bounded action → execute / test → evidence ↺</code><br><br>AskMe can continue, repair locally, or replan.</p></div>
+  <div class="boundary-step delivery"><div class="num">02 · TENTATIVE COMPLETION</div><strong>The artifact leaves the loop</strong><p><code>report complete → deliver artifact → independent acceptance</code></p></div>
+  <div class="boundary-step gap"><div class="num">03 · CURRENT GAP</div><strong>A failed acceptance cannot re-enter the loop</strong><p>The failure is retained as evidence, but is not returned to AskMe for one more recovery turn.</p></div>
 </div>
 
-<div class="pilot-status">Native A/B not ready: 3 workflows, model route, and schedule still pending · 0 measured runs</div>
-
-<div class="metrics"><strong>24-run scope:</strong> only an obvious difference on these four tasks—not reliability, model size, or Qwen vs Gemma.</div>
-
-<div class="external-status"><strong>External evaluation is also not ready:</strong> no adapter or result yet. FeatureBench first; Vals only if access permits.</div>
+<div class="boundary-observation"><strong>Observed here:</strong> the Qwen wrong-path run was caught, not repaired.</div>
 
 <!--
 Speaker notes (~45s):
-This is an AskMe-owned A/B test, not an external benchmark. Both arms use one model,
-workflows, tools, feedback, and budgets; both may reason internally. Off never requests
-the API's explicit-reasoning mode. Gated requests it only at retry, recovery, replan, and
-final-check points. Today one of four workflows is qualified, and zero runs exist.
-FeatureBench adaptation comes later; Vals requires access. Twenty-four runs could reveal
-a task-local difference, not a family or size effect.
+Execution and test feedback are already inside AskMe's loop. The model can continue,
+repair one step, or replan after a broken assumption. Independent acceptance is currently
+outside that loop: it scores the delivered artifact after the agent reports completion.
+In the retained Qwen run, acceptance found the missing dot-slash main, but AskMe did not
+receive that failure for another correction. So the current system caught the miss; it
+did not recover from it.
 -->
 
 ---
@@ -577,7 +611,7 @@ a task-local difference, not a family or size effect.
 
 <div class="conclusion-grid">
   <div class="conclusion-card observed"><strong>Observed</strong><p>8 / 8 reported completion. 7 / 8 simple artifacts were accepted. One completed run missed its deliverable.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness compatibility across four hosted variants; execution evidence plus independent acceptance is a credible direction.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>The same AskMe action protocol ran all four variants; independent acceptance distinguished reported completion from delivered behavior.</p></div>
   <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, model-size effects, reliability, and local performance.</p></div>
 </div>
 
@@ -589,10 +623,11 @@ a task-local difference, not a family or size effect.
 
 <!--
 Speaker notes (~35s):
-Today we observed harness compatibility and one caught false completion. That supports
-execution feedback plus independent acceptance as a credible design direction, not a
-readiness verdict. We have not established realistic feature or application performance,
-a reasoning-policy benefit, Qwen versus Gemma, scaling, reliability, or local performance.
-Keep the action protocol simple and general, update only invalidated work, and tie success
-to behavior. Repeated held-out workflows must earn the stronger claim.
+Today we observed the same AskMe action protocol running across four hosted variants,
+with independent acceptance separating reported completion from delivered behavior. That
+supports a measurement path, not a readiness verdict. We have not established realistic
+feature or application performance, a reasoning-policy benefit, Qwen versus Gemma,
+scaling, reliability, or local performance. Keep actions bounded, ground updates in
+execution evidence, preserve completed work, and keep success tied to the delivered
+workflow.
 -->

@@ -2,7 +2,7 @@
 
 **Status:** reviewer-facing source of truth for the seven-slide talk
 
-**Last updated:** 2026-07-12
+**Last updated:** 2026-07-13
 
 **Purpose:** prevent narrative and evidence drift between slide revisions
 
@@ -154,29 +154,27 @@ State the experiment, observed result, supported harness conclusion, and
 unsupported model inferences separately. Any displayed timing is an observed
 trajectory time, not model speed.
 
-### 6. Next valid experiment
+### 6. Current AskMe boundary
 
-Separate two next steps that are easy to conflate:
+Show the system boundary established by the current smoke rather than an
+unfinished research roadmap:
 
-1. **AskMe-owned A/B pilot:** keep one model route, workflows, tools, feedback,
-   and budgets fixed; change only AskMe's explicit-reasoning request. `Off`
-   never requests the API's explicit-reasoning mode. `Gated` requests it only
-   at the frozen retry, recovery, replan, and final-check points. Both arms may
-   still reason internally.
-2. **External generalization:** adapt FeatureBench first; use Vals only if its
-   task and evaluator access becomes available. Neither has an AskMe adapter or
-   result today. ProgramBench remains a later infrastructure canary.
+1. **During the run:** AskMe takes a bounded action, executes or tests it,
+   receives fresh evidence, and can continue, repair locally, or replan.
+2. **At tentative completion:** the agent reports complete and delivers an
+   artifact to an independent acceptance check.
+3. **Current gap:** acceptance scored the finished artifact, but a failing
+   result was not returned to AskMe for another recovery turn.
 
-For the A/B pilot, show four semantic workflows that must all qualify, one
-frozen model route, three randomized repeats per task and arm, and held-out
-acceptance plus false completion. This is 24 scheduled runs total. State the
-current blockers: only one of four workflows is qualified; the model route and
-randomized schedule are pending; zero measured runs exist.
+Tie the boundary to the retained observation: the Qwen wrong-path run was
+caught, not repaired. This is a concrete harness limit, not an argument about
+model size or family.
 
-Avoid "large policy effect." Say plainly that 24 runs could reveal only an
-obvious difference on these four tasks. The fixed-model pilot cannot compare
-Qwen with Gemma or larger with smaller models, and it is not evidence of
-external feature or application readiness.
+Keep research sequencing off the stage. The presentation is not blocked on the
+unfinished native reasoning-policy A/B. The first external target remains
+FeatureBench, but no AskMe adapter or external result exists today; a named
+one-task canary would qualify an adapter, not produce a benchmark score. The
+detailed evaluation roadmap belongs in issue #2 and the companion material.
 
 ### 7. Answer posture and takeaway
 
@@ -212,6 +210,11 @@ settle model readiness.
 - Company-specific positioning is not part of the stage narrative.
 - Removing the Gemma/Qwen two-variant comparison was a regression; future edits
   must preserve it unless the reviewer explicitly removes it.
+- The latest presentation-first instruction removes the unfinished 24-run
+  reasoning-policy study from the stage and from the talk's critical path.
+  Phase 1 evaluation machinery is complete; realistic external feature work
+  begins with a bounded FeatureBench adapter qualification when suitable
+  infrastructure is available.
 - Claims about model size, family, easier standards, compiler repair, and
   reasoning remain bounded by the rules above.
 - Four external benchmark references were too broad for this talk. The revised
@@ -236,14 +239,13 @@ settle model readiness.
 - [ ] Timings, if retained, are labeled observed trajectory time—not model speed.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
-- [ ] Slide 6 distinguishes the unfinished AskMe A/B pilot from later external
-      evaluation.
-- [ ] `Off` and `gated` are explained as explicit-reasoning request settings,
-      not as the presence or absence of internal cognition.
-- [ ] The next pilot is presented as 24 total fixed-model runs, planned and not
-      completed, registered, or ready to run.
-- [ ] FeatureBench is labeled the first future adapter; no external AskMe result
-      is implied.
+- [ ] Slide 6 separates in-loop execution feedback from post-run independent
+      acceptance.
+- [ ] Slide 6 states that the retained wrong-path result was caught, not
+      repaired.
+- [ ] The unfinished reasoning-policy pilot is absent from the stage narrative
+      and is not presented as a prerequisite for a shareable talk.
+- [ ] No FeatureBench result or external readiness claim is implied.
 - [ ] The stage narrative names only FeatureBench and Vals Vibe Code Bench;
       ProgramBench remains an optional later roadmap stress test.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
