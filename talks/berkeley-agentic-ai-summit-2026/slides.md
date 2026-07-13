@@ -477,7 +477,7 @@ Independent acceptance checks the required behavior and artifact.
 
 <div class="eyebrow">Observed result · Qwen3.6-35B-A3B build cell</div>
 
-# The code ran. The workflow still failed.
+# A command passed. The workflow still failed.
 
 <div class="two-col">
   <div class="contract">
@@ -485,11 +485,10 @@ Independent acceptance checks the required behavior and artifact.
     <div class="pipeline">write <span class="required">msg.h + main.c</span><br>build <span class="required">./main</span><br>run <span class="required">./main</span><br>observe <span class="required">REPLAN_OK</span></div>
   </div>
   <div class="events">
-    <div class="event ok"><strong>Source and header written</strong><span>The requested program was correct.</span></div>
-    <div class="event ok"><strong><code>/tmp/test</code> compiled</strong><span>A different output path was chosen.</span></div>
-    <div class="event ok"><strong><code>/tmp/test</code> ran successfully</strong><span>It printed <code>REPLAN_OK</code>.</span></div>
+    <div class="event ok"><strong>A different target was chosen</strong><span><code>cc -o /tmp/test main.c &amp;&amp; /tmp/test</code></span></div>
+    <div class="event ok"><strong>The combined command exited 0</strong><span>The retained record does not independently prove stdout or source contents.</span></div>
     <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
-    <div class="callout"><strong>Successful actions + reported completion ≠ accepted artifact.</strong></div>
+    <div class="callout"><strong>Exit-zero command + reported completion ≠ accepted artifact.</strong></div>
     <p class="result-limit"><strong>Current limit:</strong> acceptance scored this run after completion; the failure was not returned for recovery.</p>
   </div>
 </div>
@@ -498,12 +497,12 @@ Independent acceptance checks the required behavior and artifact.
 
 <!--
 Speaker notes (~45s):
-This Qwen build run shows the agent problem: correct local execution can still miss the
-workflow contract. It wrote correct files, compiled slash tmp slash test, ran it
-successfully, and declared completion. Acceptance expected dot slash main. Every recorded
-action succeeded, but the artifact failed. That check scored the finished run; AskMe did
-not receive the failure for recovery. Successful steps and completion are insufficient
-without artifact acceptance.
+This Qwen build run shows the agent problem: a successful command can still miss the
+workflow contract. The retained evidence shows a combined compile-and-run command
+targeting slash tmp slash test returning zero, followed by reported completion. It does
+not preserve stdout or prove the source contents. Acceptance expected dot slash main and
+found none. AskMe did not receive that failure for recovery. The workflow contract
+remained unmet afterward.
 -->
 
 ---
@@ -612,7 +611,7 @@ did not recover from it.
 <div class="conclusion-grid">
   <div class="conclusion-card observed"><strong>Observed</strong><p>8 / 8 reported completion. 7 / 8 simple artifacts were accepted. One completed run missed its deliverable.</p></div>
   <div class="conclusion-card supported"><strong>Supported</strong><p>The same AskMe action protocol ran all four variants; independent acceptance distinguished reported completion from delivered behavior.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, model-size effects, reliability, and local performance.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app readiness, reasoning impact, Qwen vs Gemma, size/architecture effects, reliability, and local performance.</p></div>
 </div>
 
 <p class="tagline">Make the interface easier to use.<br>Keep success tied to real behavior.</p>

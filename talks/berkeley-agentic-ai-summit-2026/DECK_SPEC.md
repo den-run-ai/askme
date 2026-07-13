@@ -51,8 +51,8 @@ Keep one explicit evidence chain visible across the last three slides:
 1. **Current experiment:** four hosted models × two deliberately simple harness
    checks × one unseeded, sequential run per cell.
 2. **Observed result:** all eight agents reported completion; seven artifacts
-   passed independent acceptance; the retained Qwen3.6-35B-A3B build produced
-   working behavior at the wrong path.
+   passed independent acceptance; the retained Qwen3.6-35B-A3B action record
+   shows a combined compile-and-run command at the wrong path exiting zero.
 3. **Supported conclusion:** AskMe transported actions for all four variants and
    the independent evaluator exposed one false completion.
 4. **Unresolved:** readiness, reasoning-policy benefit, model speed or
@@ -79,8 +79,8 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   If shown, label them that way and use the inconsistent within-family patterns
   to explain why the smoke cannot support a scaling story.
 - Do not use compiler or syntax repair as headline evidence of contemporary
-  coding ability. The useful failure is workflow-level: working behavior at the
-  wrong required artifact path.
+  coding ability. The useful failure is workflow-level: an exit-zero command at
+  the wrong required artifact path.
 - External acceptance remains important, but do not introduce it as abstract
   jargon on the title slide. Demonstrate it through the retained miss.
 - Simpler, more general standards and interfaces can be good. Do not claim that
@@ -92,15 +92,15 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   not returned to AskMe for another correction. Feeding a focused acceptance
   failure back into the loop while retaining a held-out scorer is future harness
   work, not a feature of the published smoke.
-- Keep external-benchmark scope narrow. The stage narrative may name
-  FeatureBench for feature development and Vals Vibe Code Bench for complete
-  web applications. Vals is proprietary and access-dependent, so it is external
-  evidence rather than a promised AskMe adapter. The companion roadmap may
-  retain one optional third candidate: ProgramBench as a later clean-room
-  reconstruction stress test. A one-task `gron` run may qualify the adapter but
-  must not become model evidence; any result-bearing subset needs a separate
-  preregistration. The full ProgramBench is out of scope. This shortlist is not
-  a commitment to run all three.
+- Keep external-benchmark scope narrow and companion-only. Benchmark names
+  remain companion-material only: the seven stage slides name none. The
+  companion roadmap may name FeatureBench for feature development, Vals Vibe
+  Code Bench for complete web applications, and one optional third candidate:
+  ProgramBench as a later clean-room reconstruction stress test. Vals is
+  proprietary and access-dependent. A one-task `gron` run may qualify an
+  adapter but must not become model evidence; any result-bearing subset needs a
+  separate preregistration. The full ProgramBench is out of scope. This
+  shortlist is not a commitment to run all three.
 - Project and vendor landscapes may remain cited in the companion blog. The
   stage deck should explain technical boundaries rather than promote or compare
   companies.
@@ -134,9 +134,10 @@ the point of the slide.
 
 ### 3. Retained workflow miss
 
-Show that correct files, a successful build, and successful execution can still
-miss the required deliverable when the artifact is produced at the wrong path.
-Separate successful actions, agent-reported completion, and artifact acceptance.
+Show that a combined compile-and-run command can exit zero while still missing
+the required deliverable because it targeted the wrong path. Do not claim that
+the retained evidence independently proves source contents or command stdout.
+Separate the exit-zero action, agent-reported completion, and artifact acceptance.
 
 ### 4. Reasoning and bounded plan updates
 
@@ -172,9 +173,11 @@ model size or family.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The first external target remains
-FeatureBench, but no AskMe adapter or external result exists today; a named
-one-task canary would qualify an adapter, not produce a benchmark score. The
-detailed evaluation roadmap belongs in issue #2 and the companion material.
+FeatureBench. Its AskMe adapter is implemented and qualified, and the registered
+one-task model canary exhausted without a patch and was unresolved. That is a
+negative one-task canary, not a benchmark score, reliability estimate, or
+readiness result. This status and the detailed evaluation roadmap belong in
+issue #2 and the companion material, not on stage.
 
 ### 7. Answer posture and takeaway
 
@@ -213,8 +216,9 @@ settle model readiness.
 - The latest presentation-first instruction removes the unfinished 24-run
   reasoning-policy study from the stage and from the talk's critical path.
   Phase 1 evaluation machinery is complete; realistic external feature work
-  begins with a bounded FeatureBench adapter qualification when suitable
-  infrastructure is available.
+  began with a bounded FeatureBench adapter qualification. The adapter qualified;
+  the single registered model canary exhausted without emitting a patch and was
+  unresolved, which is not a benchmark score.
 - Claims about model size, family, easier standards, compiler repair, and
   reasoning remain bounded by the rules above.
 - Four external benchmark references were too broad for this talk. The revised
@@ -245,9 +249,10 @@ settle model readiness.
       repaired.
 - [ ] The unfinished reasoning-policy pilot is absent from the stage narrative
       and is not presented as a prerequisite for a shareable talk.
-- [ ] No FeatureBench result or external readiness claim is implied.
-- [ ] The stage narrative names only FeatureBench and Vals Vibe Code Bench;
-      ProgramBench remains an optional later roadmap stress test.
+- [ ] No FeatureBench score, reliability estimate, or external readiness claim
+      is implied.
+- [ ] The stage narrative contains no benchmark names; FeatureBench, Vals Vibe
+      Code Bench, and ProgramBench remain companion-material only.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
 - [ ] Companion benchmark scope is capped at those three distinct candidates.
 - [ ] Seven slides render without clipping and speaker notes total 499 words.
