@@ -23,7 +23,7 @@
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
-6. Show the next fixed-model reasoning-policy pilot with its real status: 1/4 workflows qualified, route and schedule pending, and zero measured runs.
+6. Separate the unfinished AskMe setting A/B test from external evaluation: 1/4 native workflows qualified, zero measured runs, and no external adapter yet.
 7. Answer cautiously: small LLM coding agents are promising with tight execution-grounded harnesses, but the current n=1 smoke does not establish general readiness.
 
 ## Evidence Boundary
@@ -37,7 +37,11 @@ The talk keeps three kinds of statements separate:
 
 For this talk, “small” is an engineering/deployment class rather than a fixed parameter cutoff. The hosted matrix spans 3–4B-active MoE and 27–31B dense models and does not measure local-Mac performance. Its timings are observed trajectory wall times, not model-speed estimates.
 
-The planned native pilot is four workflows × two explicit-reasoning policies × three randomized repeats on one frozen model route: 24 scheduled runs total. It can test only a large policy effect on those tasks. A Qwen-versus-Gemma or model-size claim requires a separate predeclared, repeated design.
+The planned native pilot is four workflows × two explicit-reasoning settings × three randomized repeats on one frozen model route: 24 scheduled runs total. It could reveal only an obvious difference on those tasks. A Qwen-versus-Gemma or model-size claim requires a separate predeclared, repeated design.
+
+In plain language, `off` never asks the API for explicit reasoning. `Gated` asks only at predefined retry, recovery, replan, and final-check points. Both settings may still reason internally. With only 24 runs, the pilot could reveal an obvious difference on its four tasks; it cannot estimate reliability.
+
+External evaluation is **not ready to run**. FeatureBench, Vals Vibe Code Bench, and ProgramBench currently appear only in the talk roadmap—there is no executable AskMe adapter or external result. FeatureBench is the first planned adapter; Vals depends on evaluator access; a ProgramBench `gron` run would qualify infrastructure only.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 

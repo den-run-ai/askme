@@ -140,6 +140,11 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "24 runs per model" not in blog
     assert "The smoke exercises the measurement path" in readme
     assert "model-size claim requires a separate predeclared, repeated design" in readme
+    assert "External evaluation is **not ready to run**" in readme
+    assert "No FeatureBench, Vals, or ProgramBench adapter or result" in blog
+    assert "Both arms may still reason internally" in blog
+    for stage_or_companion in (SLIDES.read_text(encoding="utf-8"), readme, blog):
+        assert "large policy effect" not in stage_or_companion
     for out_of_scope in (
         "Claw-SWE-Bench",
         "deep-swe",
