@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 DEFAULT_PROTOCOL = Path(__file__).with_name("canary-protocol.json")
 DEFAULT_ASKME_SOURCE = Path(__file__).resolve().parents[2] / "askme.py"
 POLICY_LOG_NAME = "askme-policy.jsonl"
+ENDPOINT_CATALOG_PREFLIGHT_NAME = "openrouter-endpoint-catalog-preflight.json"
 AGENT_COMPLETE_STATUSES = {"complete", "complete_deterministic_after_exhausted"}
 REQUIRED_CODE_FILES = {
     "tests/featurebench/askme_adapter.py",
@@ -149,6 +150,125 @@ def _expect_equal(
         audit.fail(code, f"{label} did not match the frozen value")
 
 
+def _audit_endpoint_catalog_preflight(
+    audit: _Audit,
+    provenance: Mapping[str, Any],
+    expected: Mapping[str, Any],
+) -> None:
+    """Audit the retained catalog gate when future provenance requires it."""
+    config_raw = provenance.get("endpoint_catalog_preflight")
+    if config_raw is None:
+        # Frozen v2 predates this gate and remains auditable at its pinned code.
+        return
+    config = _as_mapping(audit, config_raw, "endpoint_catalog_preflight_config")
+    if config is None:
+        return
+    if config.get("required") is not True:
+        audit.fail(
+            "endpoint_catalog_preflight_required",
+            "present endpoint-catalog provenance must declare the gate required",
+        )
+        return
+    relative_path = config.get("relative_path")
+    if relative_path != ENDPOINT_CATALOG_PREFLIGHT_NAME:
+        audit.fail(
+            "endpoint_catalog_preflight_path",
+            "required endpoint-catalog preflight path is not the fixed run-root file",
+        )
+        return
+
+    raw = audit.read_json(
+        audit.run_dir / ENDPOINT_CATALOG_PREFLIGHT_NAME,
+        "endpoint_catalog_preflight",
+    )
+    record = (
+        _as_mapping(audit, raw, "endpoint_catalog_preflight")
+        if raw is not None
+        else None
+    )
+    if record is None:
+        return
+
+    _expect_equal(
+        audit,
+        "endpoint_catalog_preflight_valid",
+        "endpoint-catalog preflight validity",
+        record.get("valid"),
+        True,
+    )
+    _expect_equal(
+        audit,
+        "endpoint_catalog_preflight_outcome_bearing",
+        "endpoint-catalog outcome-bearing marker",
+        record.get("outcome_bearing_model_call"),
+        False,
+    )
+    _expect_equal(
+        audit,
+        "endpoint_catalog_preflight_model",
+        "endpoint-catalog requested model",
+        record.get("requested_model"),
+        expected["model"],
+    )
+    _expect_equal(
+        audit,
+        "endpoint_catalog_preflight_provider",
+        "endpoint-catalog expected provider",
+        record.get("expected_provider"),
+        expected["provider"],
+    )
+    _expect_equal(
+        audit,
+        "endpoint_catalog_preflight_served_models",
+        "endpoint-catalog expected served models",
+        record.get("expected_served_models"),
+        expected["protocol_served_models"],
+    )
+
+    response_sha256 = record.get("response_sha256")
+    if (
+        not isinstance(response_sha256, str)
+        or len(response_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in response_sha256)
+    ):
+        audit.fail(
+            "endpoint_catalog_preflight_response_sha256",
+            "endpoint-catalog response SHA-256 must be 64 lowercase hexadecimal characters",
+        )
+
+    matches = record.get("matches")
+    if not isinstance(matches, list) or not all(
+        isinstance(match, dict) for match in matches
+    ):
+        audit.fail(
+            "endpoint_catalog_preflight_matches",
+            "endpoint-catalog matches must be a list of objects",
+        )
+        return
+    expected_models = expected["protocol_served_models"]
+    expected_provider = expected["provider"].casefold()
+    valid_matches = [
+        match
+        for match in matches
+        if isinstance(match.get("provider_name"), str)
+        and match["provider_name"].casefold() == expected_provider
+        and match.get("served_model") in expected_models
+        and match.get("model_id") == expected["model"]
+    ]
+    if len(matches) != len(expected_models) or len(valid_matches) != len(matches):
+        audit.fail(
+            "endpoint_catalog_preflight_matches",
+            "endpoint-catalog matches contain an unexpected model or provider",
+        )
+    for served_model in expected_models:
+        count = sum(match.get("served_model") == served_model for match in valid_matches)
+        if count != 1:
+            audit.fail(
+                "endpoint_catalog_preflight_matches",
+                "endpoint-catalog must retain exactly one provider match per expected model",
+            )
+
+
 def _protocol_expectations(
     audit: _Audit, protocol: Mapping[str, Any]
 ) -> Optional[dict[str, Any]]:
@@ -246,7 +366,7 @@ def _protocol_expectations(
             "protocol_code_files",
             "protocol must pin SHA-256 hashes for both canary code files",
         )
-    if not all(
+    if not expected["protocol_served_models"] or not all(
         isinstance(model, str) and bool(model.strip())
         for model in expected["protocol_served_models"]
     ):
@@ -951,7 +1071,8 @@ def audit_canary(
     """Audit one retained canary and return a JSON-serializable result.
 
     ``expected_served_models``, when supplied, must exactly repeat the protocol's
-    preregistered dated route IDs.  The requested model alias is also allowed.
+    preregistered dated route IDs. Those dated IDs are the sole allowed served
+    models; the requested alias is not an audit fallback.
     ``expected_run_revision`` identifies the later clean registration commit;
     it cannot be embedded as that commit's own Git hash in the protocol.
     ``api_key`` is used only as an exact byte sequence for the leak scan and is
@@ -1023,7 +1144,7 @@ def audit_canary(
             "expected_served_models_mismatch",
             "supplied served-model allowlist differs from the preregistered protocol",
         )
-    allowed_models = {expected["model"], *protocol_served_models}
+    allowed_models = protocol_served_models
 
     result["route"] = {
         "requested_model": expected["model"],
@@ -1077,6 +1198,7 @@ def audit_canary(
             "prediction success disagrees with structured AskMe completion",
         )
     if provenance is not None:
+        _audit_endpoint_catalog_preflight(audit, provenance, expected)
         recorded_models = provenance.get("expected_served_models")
         if (
             not isinstance(recorded_models, list)
@@ -1180,7 +1302,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--expected-served-model",
         action="append",
         default=[],
-        help="Explicitly allow one dated served-model ID (repeatable)",
+        help="Assert one preregistered dated served-model ID (repeatable)",
     )
     parser.add_argument(
         "--expected-run-revision",

@@ -281,6 +281,44 @@ def _codes(result):
     return {violation["code"] for violation in result["violations"]}
 
 
+def _require_endpoint_catalog_preflight(paths, *, write_record=True):
+    provenance_path = paths["root"] / "askme-canary.json"
+    provenance = json.loads(provenance_path.read_text())
+    provenance["endpoint_catalog_preflight"] = {
+        "required": True,
+        "relative_path": canary_audit.ENDPOINT_CATALOG_PREFLIGHT_NAME,
+        "timing": "immediately_before_inference_runner",
+        "outcome_bearing_model_call": False,
+    }
+    _json(provenance_path, provenance)
+
+    preflight_path = paths["root"] / canary_audit.ENDPOINT_CATALOG_PREFLIGHT_NAME
+    if write_record:
+        _json(
+            preflight_path,
+            {
+                "schema_version": 1,
+                "kind": "openrouter_endpoint_catalog_preflight",
+                "requested_model": MODEL,
+                "expected_provider": "siliconflow",
+                "expected_served_models": [DATED_MODEL],
+                "outcome_bearing_model_call": False,
+                "response_sha256": "a" * 64,
+                "valid": True,
+                "validation_errors": [],
+                "matches": [
+                    {
+                        "endpoint_name": f"SiliconFlow | {DATED_MODEL}",
+                        "model_id": MODEL,
+                        "provider_name": "SiliconFlow",
+                        "served_model": DATED_MODEL,
+                    }
+                ],
+            },
+        )
+    return preflight_path
+
+
 def _make_inner_timeout(paths, *, in_flight=False, reason="launcher received signal 15"):
     _json(
         paths["attempt"] / "askme-result.json",
@@ -344,6 +382,94 @@ def test_valid_audit_records_route_integrity_and_action_coverage(tmp_path):
     assert result["violations"] == []
     assert result["policy_compliant"] is True
     assert result["qualification_valid"] is True
+
+
+def test_historical_provenance_without_catalog_preflight_remains_valid(tmp_path):
+    paths = _fixture(tmp_path)
+    provenance = json.loads((paths["root"] / "askme-canary.json").read_text())
+
+    assert "endpoint_catalog_preflight" not in provenance
+    assert _audit(paths)["infrastructure_valid"] is True
+
+
+def test_required_endpoint_catalog_preflight_passes_post_run_audit(tmp_path):
+    paths = _fixture(tmp_path)
+    preflight_path = _require_endpoint_catalog_preflight(paths)
+
+    result = _audit(paths)
+
+    assert result["infrastructure_valid"] is True
+    assert result["artifacts"]["endpoint_catalog_preflight"] == preflight_path.name
+
+
+def test_required_endpoint_catalog_preflight_must_exist(tmp_path):
+    paths = _fixture(tmp_path)
+    _require_endpoint_catalog_preflight(paths, write_record=False)
+
+    result = _audit(paths)
+
+    assert result["infrastructure_valid"] is False
+    assert "endpoint_catalog_preflight_missing" in _codes(result)
+
+
+def test_present_endpoint_catalog_preflight_cannot_disable_requirement(tmp_path):
+    paths = _fixture(tmp_path)
+    _require_endpoint_catalog_preflight(paths)
+    provenance_path = paths["root"] / "askme-canary.json"
+    provenance = json.loads(provenance_path.read_text())
+    provenance["endpoint_catalog_preflight"]["required"] = False
+    _json(provenance_path, provenance)
+
+    result = _audit(paths)
+
+    assert result["infrastructure_valid"] is False
+    assert "endpoint_catalog_preflight_required" in _codes(result)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        ("invalid", "endpoint_catalog_preflight_valid"),
+        ("outcome_bearing", "endpoint_catalog_preflight_outcome_bearing"),
+        ("wrong_model", "endpoint_catalog_preflight_model"),
+        ("wrong_provider", "endpoint_catalog_preflight_provider"),
+        ("wrong_served_models", "endpoint_catalog_preflight_served_models"),
+        ("bad_response_sha", "endpoint_catalog_preflight_response_sha256"),
+        ("missing_match", "endpoint_catalog_preflight_matches"),
+        ("duplicate_match", "endpoint_catalog_preflight_matches"),
+        ("wrong_match_provider", "endpoint_catalog_preflight_matches"),
+    ],
+)
+def test_required_endpoint_catalog_preflight_rejects_tampering(
+    tmp_path, mutation, code
+):
+    paths = _fixture(tmp_path)
+    preflight_path = _require_endpoint_catalog_preflight(paths)
+    record = json.loads(preflight_path.read_text())
+    if mutation == "invalid":
+        record["valid"] = False
+    elif mutation == "outcome_bearing":
+        record["outcome_bearing_model_call"] = True
+    elif mutation == "wrong_model":
+        record["requested_model"] = "other/model"
+    elif mutation == "wrong_provider":
+        record["expected_provider"] = "other"
+    elif mutation == "wrong_served_models":
+        record["expected_served_models"] = [MODEL]
+    elif mutation == "bad_response_sha":
+        record["response_sha256"] = "short"
+    elif mutation == "missing_match":
+        record["matches"] = []
+    elif mutation == "duplicate_match":
+        record["matches"].append(dict(record["matches"][0]))
+    else:
+        record["matches"][0]["provider_name"] = "Other"
+    _json(preflight_path, record)
+
+    result = _audit(paths)
+
+    assert result["infrastructure_valid"] is False
+    assert code in _codes(result)
 
 
 def test_incomplete_agent_is_not_an_infrastructure_failure(tmp_path):
@@ -635,7 +761,7 @@ def test_every_token_event_must_use_the_approved_route(tmp_path):
     assert "token_served_model" in _codes(result)
 
 
-def test_requested_alias_is_an_allowed_served_model_without_extra_allowlist(tmp_path):
+def test_requested_alias_is_not_an_allowed_served_model(tmp_path):
     paths = _fixture(tmp_path, served_model=MODEL)
 
     result = canary_audit.audit_canary(
@@ -645,7 +771,9 @@ def test_requested_alias_is_an_allowed_served_model_without_extra_allowlist(tmp_
         api_key=API_KEY,
     )
 
-    assert result["infrastructure_valid"] is True
+    assert result["infrastructure_valid"] is False
+    assert result["route"]["allowed_served_models"] == [DATED_MODEL]
+    assert "token_served_model" in _codes(result)
 
 
 def test_api_served_model_list_cannot_expand_preregistered_route(tmp_path):

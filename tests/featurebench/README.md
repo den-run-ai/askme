@@ -9,6 +9,13 @@ comparison, or evidence about model size.
 The frozen values and outcome contract are also recorded in
 [`canary-protocol.json`](canary-protocol.json).
 
+> **Protocol-versioning warning:** the post-run guard, exact-route, and endpoint
+> catalog hardening now present on this branch is not part of frozen canary v2.
+> Exact v2 inspection or replay requires checkout `29ba811`; do not combine the
+> current adapter or audit code with v2's registered file hashes. Any future
+> outcome-bearing run must use a separately registered protocol version with a
+> new adapter revision and updated hashes before the first model response.
+
 ## Completed canary outcome
 
 The frozen run completed on 2026-07-13. Both qualification controls behaved as
@@ -131,6 +138,15 @@ disclosure, network clients, remote Git operations, and package installation.
 The launcher removes the OpenRouter credential from its process environment
 after loading AskMe, so model-issued child commands do not inherit the key. The
 guard decision log is retained for audit.
+
+Because this is a conservative text filter, some safe commands can be denied.
+In particular, a shell command beginning with `set ` (including `set -eu`) is
+treated as possible environment disclosure. Literal URLs, network-client names,
+environment-access expressions, or adapter paths in comments, test data,
+heredocs, and source text can also look like prohibited behavior. A standalone
+`..` path segment is denied whether it is bare, separated by whitespace, or
+uses `/` or `\\` separators. Treat these denials as guard false positives to
+audit, not as evidence that the model attempted exfiltration.
 
 This is defense in depth, not a container network sandbox. The container keeps
 default outbound connectivity because AskMe must call OpenRouter; container
@@ -317,6 +333,16 @@ a terminal result and preserve artifacts before the outer runner timeout. Do
 not rerun or replace the attempt after inference starts, including after a
 timeout or infrastructure failure. Retain the partial artifacts and report the
 failure category.
+
+Immediately before `InferenceRunner.run()`, the adapter performs an
+authenticated, read-only GET of OpenRouter's per-model endpoint catalog. This
+is not a chat-completion request and produces no model response. A
+credential-free record named `openrouter-endpoint-catalog-preflight.json` is
+retained in the run directory. In future canaries, inference is gated on the
+catalog exposing exactly one pinned-provider endpoint for every preregistered
+dated served-model ID; the post-run token log must then report those exact IDs.
+This gate was added after the completed v2 canary and does not rewrite that
+frozen run.
 
 ```sh
 INFERENCE_ROOT="$RUN_ROOT/inference"

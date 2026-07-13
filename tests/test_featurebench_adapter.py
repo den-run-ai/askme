@@ -181,6 +181,147 @@ def test_launcher_guards_actions_and_records_outcomes(tmp_path):
     assert all("transient-secret" not in json.dumps(event) for event in events)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "..",
+        "cd ..",
+        "cd   ..",
+        "cd ../sibling",
+        r"cd ..\sibling",
+        "cd package/../sibling",
+        r"cd package\..\sibling",
+        "cd './..'",
+    ],
+)
+def test_launcher_denies_parent_traversal_path_segments(tmp_path, command):
+    namespace = _launcher_namespace(tmp_path)
+
+    reason = namespace["_guard_reason"](
+        {"action": "shell", "arg": command}, str(namespace["WORKSPACE"])
+    )
+
+    assert reason == "parent_traversal"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ...",
+        "printf foo..bar",
+        "pytest tests/test_parent_paths.py -q",
+        "python -c 'print(1.25)'",
+    ],
+)
+def test_launcher_parent_guard_ignores_nonsegment_double_dots(tmp_path, command):
+    namespace = _launcher_namespace(tmp_path)
+
+    reason = namespace["_guard_reason"](
+        {"action": "shell", "arg": command}, str(namespace["WORKSPACE"])
+    )
+
+    assert reason is None
+
+
+class FakeCatalogResponse:
+    def __init__(self, payload, status=200):
+        self._body = json.dumps(payload).encode("utf-8")
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, _limit):
+        return self._body
+
+
+def test_endpoint_catalog_preflight_is_retained_and_exact(tmp_path):
+    model = "google/gemma-4-31b-it"
+    dated_model = "google/gemma-4-31b-it-20260402"
+    captured = {}
+    payload = {
+        "data": {
+            "id": model,
+            "endpoints": [
+                {
+                    "name": f"SiliconFlow | {dated_model}",
+                    "provider_name": "SiliconFlow",
+                    "model_id": model,
+                    "tag": "siliconflow/fp8",
+                    "quantization": "fp8",
+                    "status": 0,
+                },
+                {
+                    "name": f"Other | {dated_model}",
+                    "provider_name": "Other",
+                    "model_id": model,
+                },
+            ],
+        }
+    }
+
+    def request_get(request, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        return FakeCatalogResponse(payload)
+
+    output = tmp_path / adapter.ENDPOINT_CATALOG_PREFLIGHT
+    result = adapter.retained_endpoint_catalog_preflight(
+        model,
+        "siliconflow",
+        (dated_model,),
+        "secret-key",
+        output,
+        request_get=request_get,
+    )
+
+    assert result["valid"] is True
+    assert result["outcome_bearing_model_call"] is False
+    assert result["matches"] == [
+        {
+            "endpoint_name": f"SiliconFlow | {dated_model}",
+            "model_id": model,
+            "provider_name": "SiliconFlow",
+            "quantization": "fp8",
+            "served_model": dated_model,
+            "status": 0,
+            "tag": "siliconflow/fp8",
+        }
+    ]
+    assert captured == {
+        "url": f"https://openrouter.ai/api/v1/models/{model}/endpoints",
+        "authorization": "Bearer secret-key",
+        "timeout": 20,
+    }
+    assert "secret-key" not in output.read_text()
+
+
+def test_endpoint_catalog_preflight_blocks_before_inference_on_route_miss(tmp_path):
+    model = "google/gemma-4-31b-it"
+    output = tmp_path / adapter.ENDPOINT_CATALOG_PREFLIGHT
+
+    with pytest.raises(ValueError, match="found 0"):
+        adapter.retained_endpoint_catalog_preflight(
+            model,
+            "siliconflow",
+            ("google/gemma-4-31b-it-20260402",),
+            "secret-key",
+            output,
+            request_get=lambda *_args, **_kwargs: FakeCatalogResponse(
+                {"data": {"id": model, "endpoints": []}}
+            ),
+        )
+
+    record = json.loads(output.read_text())
+    assert record["valid"] is False
+    assert record["outcome_bearing_model_call"] is False
+    assert "secret-key" not in output.read_text()
+
+
 def test_agent_copies_pinned_source_and_passes_full_prompt_by_file(tmp_path):
     agent, cm, source = _agent(tmp_path)
     prompt = "Implement the feature safely; do not expand $(shell).\n" + "x" * 4096
@@ -314,6 +455,7 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
             self.output_dir.mkdir(parents=True)
 
         def run(self):
+            records.setdefault("events", []).append("runner")
             records["agent"] = run_infer_module.get_agent(
                 "askme",
                 container_manager=FakeContainerManager(),
@@ -340,7 +482,7 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
         model="qwen/qwen3.6-27b",
         askme_revision="featurebench-sha",
         protocol_path=protocol_path,
-        expected_served_models=("qwen/qwen3.6-27b",),
+        expected_served_models=("qwen/qwen3.6-27b-20260422",),
         cache_dir=tmp_path / "cache",
     )
     monkeypatch.setattr(adapter, "_git_revision", lambda _path: "featurebench-sha")
@@ -366,6 +508,24 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
         },
     )
 
+    def fake_catalog_preflight(model, provider, expected, api_key, output_path):
+        records.setdefault("events", []).append("catalog_preflight")
+        records["catalog_preflight"] = {
+            "model": model,
+            "provider": provider,
+            "expected": expected,
+            "api_key": api_key,
+            "output_path": output_path,
+        }
+        output_path.write_text('{"valid":true}\n', encoding="utf-8")
+        return {"valid": True}
+
+    monkeypatch.setattr(
+        adapter,
+        "retained_endpoint_catalog_preflight",
+        fake_catalog_preflight,
+    )
+
     exit_code, run_dir = adapter.run_canary(settings, "secret-key", api)
 
     assert exit_code == 0
@@ -378,6 +538,13 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
     assert records["config"]["without_interface_descriptions"] is False
     assert records["config"]["white_box"] is False
     assert isinstance(records["agent"], FakeBaseAgent)
+    assert records["events"] == ["catalog_preflight", "runner"]
+    assert records["catalog_preflight"]["expected"] == (
+        "qwen/qwen3.6-27b-20260422",
+    )
+    assert records["catalog_preflight"]["output_path"] == (
+        run_dir / adapter.ENDPOINT_CATALOG_PREFLIGHT
+    )
     assert run_infer_module.get_agent is original_get_agent
     assert "secret-key" not in records["config_path_text"]
     provenance_text = (run_dir / "askme-canary.json").read_text()
@@ -389,6 +556,12 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
     assert provenance["dataset_path"] == str(dataset_path.resolve())
     assert provenance["description"] == "AskMe-adapted FeatureBench one-task canary"
     assert provenance["goal_context"] == "full FeatureBench problem_statement"
+    assert provenance["endpoint_catalog_preflight"] == {
+        "required": True,
+        "relative_path": adapter.ENDPOINT_CATALOG_PREFLIGHT,
+        "timing": "immediately_before_inference_runner",
+        "outcome_bearing_model_call": False,
+    }
 
 
 def test_run_canary_rejects_wrong_or_dirty_featurebench_checkout(tmp_path, monkeypatch):

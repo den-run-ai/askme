@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime as dt
 import hashlib
 import importlib
 import json
@@ -17,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +37,7 @@ RUN_LOG_PATH = f"{LOG_DIR}/askme-run.jsonl"
 POLICY_LOG_PATH = f"{LOG_DIR}/askme-policy.jsonl"
 STDOUT_LOG_PATH = f"{LOG_DIR}/askme-stdout.log"
 ADAPTER_MANIFEST_PATH = f"{LOG_DIR}/askme-adapter.json"
+ENDPOINT_CATALOG_PREFLIGHT = "openrouter-endpoint-catalog-preflight.json"
 
 PRESERVED_ARTIFACTS = {
     RESULT_PATH: "askme-result.json",
@@ -93,7 +97,9 @@ def launcher_source() -> str:
             )),
             ("adapter_path", re.compile(r"/(?:installed-agent|agent-logs)(?:/|\\b)", re.I)),
             ("host_pseudo_fs", re.compile(r"/(?:proc|sys|dev)(?:/|\\b)", re.I)),
-            ("parent_traversal", re.compile(r"(?:^|/)\\.\\.(?:/|$)")),
+            ("parent_traversal", re.compile(
+                r"(?<![A-Za-z0-9_.-])\\.\\.(?![A-Za-z0-9_.-])"
+            )),
         )
         _action_sequence = 0
 
@@ -342,6 +348,164 @@ def validate_strict_env(env: Mapping[str, str]) -> None:
         mismatches.append("OPENROUTER_API_KEY must not enter the container environment")
     if mismatches:
         raise ValueError("invalid AskMe canary environment: " + "; ".join(mismatches))
+
+
+def retained_endpoint_catalog_preflight(
+    model: str,
+    provider: str,
+    expected_served_models: tuple[str, ...],
+    api_key: str,
+    output_path: Path,
+    *,
+    request_get: Any | None = None,
+) -> Mapping[str, Any]:
+    """Retain and validate a non-generation endpoint-catalog request.
+
+    The authenticated GET is deliberately separate from the chat-completions
+    API. Its credential-free record is written before validation errors are
+    raised, and callers must invoke it immediately before starting inference.
+    """
+    requested_model = model.strip()
+    requested_provider = provider.strip()
+    credential = api_key.strip()
+    expected = tuple(value.strip() for value in expected_served_models)
+    if not requested_model or requested_model.count("/") != 1:
+        raise ValueError("OpenRouter model must be an author/slug identifier")
+    if not requested_provider:
+        raise ValueError("OpenRouter provider is required")
+    if not credential:
+        raise ValueError("OPENROUTER_API_KEY is required for endpoint preflight")
+    if not expected or any(not value for value in expected):
+        raise ValueError("exact expected served-model IDs are required for endpoint preflight")
+    if len(set(expected)) != len(expected):
+        raise ValueError("expected served-model IDs must not contain duplicates")
+
+    author, slug = requested_model.split("/", 1)
+    url = (
+        "https://openrouter.ai/api/v1/models/"
+        f"{urllib.parse.quote(author, safe='')}/"
+        f"{urllib.parse.quote(slug, safe=':')}/endpoints"
+    )
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    record: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "openrouter_endpoint_catalog_preflight",
+        "method": "GET",
+        "url": url,
+        "requested_at_utc": started_at,
+        "requested_model": requested_model,
+        "expected_provider": requested_provider,
+        "expected_served_models": list(expected),
+        "authenticated": True,
+        "outcome_bearing_model_call": False,
+        "valid": False,
+    }
+
+    def retain() -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        rendered = json.dumps(record, indent=2, sort_keys=True) + "\n"
+        if credential in rendered:
+            raise RuntimeError("endpoint preflight record unexpectedly contains credential")
+        output_path.write_text(rendered, encoding="utf-8")
+
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {credential}",
+            },
+            method="GET",
+        )
+        get = request_get or urllib.request.urlopen
+        with get(request, timeout=20) as response:
+            status = getattr(response, "status", None)
+            body = response.read(10 * 1024 * 1024 + 1)
+        if status != 200:
+            raise RuntimeError(f"endpoint catalog returned HTTP {status!r}")
+        if len(body) > 10 * 1024 * 1024:
+            raise RuntimeError("endpoint catalog response exceeded 10 MiB")
+        payload = json.loads(body)
+    except Exception as error:
+        record.update(
+            {
+                "completed_at_utc": dt.datetime.now(dt.timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "error_type": type(error).__name__,
+            }
+        )
+        retain()
+        raise RuntimeError(
+            f"OpenRouter endpoint-catalog preflight failed ({type(error).__name__})"
+        ) from error
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    catalog_model = data.get("id") if isinstance(data, dict) else None
+    endpoints = data.get("endpoints") if isinstance(data, dict) else None
+    errors: list[str] = []
+    if catalog_model != requested_model:
+        errors.append("catalog model does not match requested model")
+    if not isinstance(endpoints, list):
+        errors.append("catalog endpoints is not a list")
+        endpoints = []
+
+    matches: list[dict[str, Any]] = []
+    expected_set = set(expected)
+    for endpoint in endpoints:
+        if not isinstance(endpoint, dict):
+            continue
+        provider_name = endpoint.get("provider_name")
+        endpoint_name = endpoint.get("name")
+        if (
+            not isinstance(provider_name, str)
+            or provider_name.casefold() != requested_provider.casefold()
+            or not isinstance(endpoint_name, str)
+            or " | " not in endpoint_name
+        ):
+            continue
+        served_model = endpoint_name.split(" | ", 1)[1]
+        if served_model not in expected_set:
+            continue
+        matches.append(
+            {
+                "endpoint_name": endpoint_name,
+                "model_id": endpoint.get("model_id"),
+                "provider_name": provider_name,
+                "quantization": endpoint.get("quantization"),
+                "served_model": served_model,
+                "status": endpoint.get("status"),
+                "tag": endpoint.get("tag"),
+            }
+        )
+
+    for served_model in expected:
+        count = sum(match["served_model"] == served_model for match in matches)
+        if count != 1:
+            errors.append(
+                f"expected exactly one {requested_provider} endpoint "
+                f"for {served_model}; found {count}"
+            )
+    if any(match.get("model_id") != requested_model for match in matches):
+        errors.append("matching endpoint model_id differs from requested model")
+
+    record.update(
+        {
+            "catalog_model": catalog_model,
+            "completed_at_utc": dt.datetime.now(dt.timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "endpoint_count": len(endpoints),
+            "matches": matches,
+            "response_sha256": hashlib.sha256(body).hexdigest(),
+            "validation_errors": errors,
+            "valid": not errors,
+        }
+    )
+    retain()
+    if errors:
+        raise ValueError("endpoint-catalog preflight rejected route: " + "; ".join(errors))
+    return record
 
 
 def _copy_bytes(cm: Any, container: Any, data: bytes, destination: str) -> None:
@@ -782,6 +946,12 @@ def _write_run_provenance(
         "network_enforcement": "auditable best-effort command and workspace-path guard",
         "container_egress_isolated": False,
         "credential_in_container_environment": False,
+        "endpoint_catalog_preflight": {
+            "required": True,
+            "relative_path": ENDPOINT_CATALOG_PREFLIGHT,
+            "timing": "immediately_before_inference_runner",
+            "outcome_bearing_model_call": False,
+        },
         "goal_context": "full FeatureBench problem_statement",
         "limits": {
             "max_planning_attempts": 3,
@@ -905,6 +1075,13 @@ def run_canary(
             settings,
             sha256_file(settings.askme_path),
             protocol,
+        )
+        retained_endpoint_catalog_preflight(
+            settings.model,
+            settings.provider,
+            settings.expected_served_models,
+            api_key,
+            runner.output_dir / ENDPOINT_CATALOG_PREFLIGHT,
         )
         with registered_askme_agent(api.run_infer_module, agent_class):
             runner_exit = runner.run()
