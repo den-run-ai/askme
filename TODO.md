@@ -25,8 +25,8 @@
 
 ## Documentation Drift
 
-- Reconcile all stated test counts across `README.md`, `ARCHITECTURE.md`, `gemma4-setup.md`, and `CLAUDE.md`.
-- Reconcile the claim that "all tests pass" with the currently documented subsets actually verified.
+- ~~Reconcile all stated test counts across `README.md`, `ARCHITECTURE.md`, `gemma4-setup.md`, and `CLAUDE.md`.~~ → `README.md` now carries a dated current-suite snapshot; older counts are explicitly historical phase records (2026-07-13).
+- ~~Reconcile the claim that "all tests pass" with the currently documented subsets actually verified.~~ → Current verification reports the exact `pytest -q` pass/skip outcome and labels backend-dependent skips (2026-07-13).
 - Clarify the difference between broken `--cache-reuse` and working slot save/restore so "cache enabled" is not misleading.
 - Working directory assumptions in command examples are now aligned across `README.md` and `CLAUDE.md`; keep them in sync if commands change again.
 
@@ -61,3 +61,12 @@
 ## Optional Follow-Up
 
 - Consider a diagnostics note describing which issues are code bugs vs known model limitations vs documentation-only inconsistencies.
+
+## Public Release Hygiene
+
+- [x] Add an explicit security boundary and untrusted-input guidance.
+- [x] Remove the private-fork and machine-specific path assumptions from primary setup docs.
+- [x] Record the FeatureBench structured-action failure in `PERFORMANCE.md` and `ARCHITECTURE.md`.
+- [ ] Run a dedicated full-history scanner such as Gitleaks or TruffleHog immediately before changing repository visibility. A basic filename-only regex scan on 2026-07-13 found no common key or private-key patterns, but it is not a substitute for a dedicated scanner.
+- [ ] Decide whether to enforce network isolation in code; changing `ALLOW_NETWORK` today would be a behavior and protocol change, not documentation hygiene.
+- [ ] Confirm every audience-facing repository link resolves after the repository visibility change.
