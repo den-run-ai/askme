@@ -508,9 +508,9 @@ turn structured actions into accepted workflows.
 <!--
 Speaker notes (~45s):
 AskMe is an experimental coding-agent harness. It keeps an explicit plan, asks the model
-for one structured action, executes it, and returns fresh test or runtime evidence. The
-harness keeps the contract and completed work in view, so the model can continue, repair
-locally, or replan when an assumption breaks. This approach assumes work decomposes into
+for one structured action, executes it, and returns fresh test or runtime evidence. AskMe
+keeps the current task and recent completed work in view; it can continue, repair, or
+replan. External acceptance retains the full contract. This approach assumes work decomposes into
 scoped actions, feedback is informative, and success is independently testable.
 Acceptance checks the required behavior and artifact.
 -->
@@ -686,7 +686,7 @@ Judge progress by delivered behavior.
   <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
   <div class="harness-cell row-head">Action surface</div><div class="harness-cell">6 fixed JSON actions; exactly one action per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
   <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Conversation state + append-only event log; optional persistence and configurable condenser.</div>
-  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> → conditional fail-open validation; held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> ends the run; benchmark evaluation remains a separate harness.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> → conditional fail-open validation; held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> signals completion; benchmark evaluation remains a separate harness.</div>
 </div>
 
 <div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>

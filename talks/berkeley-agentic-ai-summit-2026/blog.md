@@ -27,7 +27,7 @@ deliberately narrower than two prominent alternatives:
 |---|---|---|---|
 | Action surface | Six fixed JSON actions; one action per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
 | State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode | Conversation state and append-only event log; optional persistence and configurable condenser |
-| Completion boundary | `done`; conditional fail-open validation; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` ends the run; benchmark evaluation remains a separate harness |
+| Completion boundary | `done`; conditional fail-open validation; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` signals completion; benchmark evaluation remains a separate harness |
 
 This is a trade-off, not a ranking. AskMe spends more harness structure to reduce
 each turn's decision burden. Pi keeps a minimal, extensible, model-led core.

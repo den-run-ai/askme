@@ -109,6 +109,7 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "Trade-off, not ranking" in backup
     assert "conditional fail-open validation" in backup
     assert "optional persistence" in backup
+    assert "finish</code> signals completion" in backup
     assert "Databricks" not in backup
 
     assert "NanAgent" not in text
@@ -218,6 +219,8 @@ def test_companion_benchmark_shortlist_stays_bounded():
     root_readme = _single_line(ROOT_README.read_text(encoding="utf-8"))
     security = _single_line(SECURITY.read_text(encoding="utf-8"))
     assert "conditional, fail-open LLM validator" in root_readme
+    assert "up to three planning attempts" in root_readme
+    assert "Up to 3 replans" not in root_readme
     assert "Prompt-visible install policy; does not enforce host isolation" in root_readme
     assert "AskMe is experimental automation, **not a sandbox**" in root_readme
     assert "not an operating-system sandbox" in security

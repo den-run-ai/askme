@@ -29,7 +29,7 @@
 
 ## Evidence Boundary
 
-The talk keeps three kinds of statements separate:
+The talk keeps five kinds of statements separate:
 
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
 - **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. In the retained miss, a combined compile-and-run command exited zero at the wrong artifact path, but the required deliverable was absent.

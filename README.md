@@ -36,7 +36,7 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 
 ## How It Works
 
-**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. Up to 3 replans. Depending on `AGENT_FINAL_VALIDATE`, a conditional, fail-open LLM validator may review tentative completion; it is not independent acceptance. By default, AskMe instructs the model not to install software and to report missing prerequisites. Set `ALLOW_SYSTEM_INSTALLS=1` to tell the model that installs are allowed. These instructions are not host-level enforcement.
+**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. A run gets up to three planning attempts. Depending on `AGENT_FINAL_VALIDATE`, a conditional, fail-open LLM validator may review tentative completion; it is not independent acceptance. By default, AskMe instructs the model not to install software and to report missing prerequisites. Set `ALLOW_SYSTEM_INSTALLS=1` to tell the model that installs are allowed. These instructions are not host-level enforcement.
 
 ## Security
 
