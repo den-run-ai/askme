@@ -583,7 +583,7 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 <div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
 
-# All four variants ran; acceptance rejected one deliverable
+# All four variants ran; one deliverable was rejected
 
 <p class="subtitle">4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell</p>
 
@@ -622,7 +622,7 @@ These are one-shot receipts, not rankings.
 
 <div class="eyebrow">Two observed harness boundaries</div>
 
-# Feedback can repair only what enters—and returns to—the loop
+# Feedback works only when actions enter and failures return
 
 <p class="subtitle">One limit appeared before execution; another after reported completion.</p>
 

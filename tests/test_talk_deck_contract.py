@@ -70,7 +70,7 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
 
     boundary = slides[5]
     assert "Two observed harness boundaries" in boundary
-    assert "Feedback can repair only what enters—and returns to—the loop" in boundary
+    assert "Feedback works only when actions enter and failures return" in boundary
     assert "model → bounded action" in boundary
     assert "action → execute / test → evidence ↺" in boundary
     assert "artifact → independent acceptance" in boundary
