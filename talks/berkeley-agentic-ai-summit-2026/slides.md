@@ -581,14 +581,14 @@ receipts, not rankings; the Gemma thirty-one row was added post-hoc.
 
 <div class="eyebrow">Current AskMe boundary</div>
 
-# Execution feedback is inside the loop. Final acceptance is not—yet.
+# Execution feedback is inside the loop. Independent acceptance is outside.
 
 <p class="subtitle">The smoke measured delivery after the agent stopped.</p>
 
 <div class="boundary-grid">
   <div class="boundary-step run"><div class="num">01 · DURING THE RUN</div><strong>Execution feedback loops back</strong><p><code>bounded action → execute / test → evidence ↺</code><br><br>AskMe can continue, repair locally, or replan.</p></div>
   <div class="boundary-step delivery"><div class="num">02 · TENTATIVE COMPLETION</div><strong>The artifact leaves the loop</strong><p><code>report complete → deliver artifact → independent acceptance</code></p></div>
-  <div class="boundary-step gap"><div class="num">03 · CURRENT GAP</div><strong>A failed acceptance ends the run</strong><p>The failure is retained as evidence, but is not returned to AskMe for one more recovery turn.</p></div>
+  <div class="boundary-step gap"><div class="num">03 · CURRENT GAP</div><strong>A failed acceptance cannot re-enter the loop</strong><p>The failure is retained as evidence, but is not returned to AskMe for one more recovery turn.</p></div>
 </div>
 
 <div class="boundary-observation"><strong>Observed here:</strong> the Qwen wrong-path run was caught, not repaired.</div>

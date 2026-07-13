@@ -68,9 +68,10 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     boundary = slides[5]
     assert "Current AskMe boundary" in boundary
     assert "Execution feedback is inside the loop" in boundary
-    assert "Final acceptance is not—yet" in boundary
+    assert "Independent acceptance is outside" in boundary
     assert "bounded action → execute / test → evidence ↺" in boundary
     assert "report complete → deliver artifact → independent acceptance" in boundary
+    assert "A failed acceptance cannot re-enter the loop" in boundary
     assert "not returned to AskMe for one more recovery turn" in boundary
     assert "the Qwen wrong-path run was caught, not repaired" in boundary
     for roadmap_detail in ("reasoning-policy", "24-run", "FeatureBench", "Vals"):
