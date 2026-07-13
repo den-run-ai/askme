@@ -176,7 +176,8 @@ Show two distinct places where feedback currently cannot help:
 1. **Before execution:** one qualified FeatureBench-fast canary exhausted after
    four reads and no writes, leaving an empty patch. The 512-token structured
    action budget bound this trajectory. Label it one task and not a score.
-2. **During the run:** AskMe takes a bounded action, executes or tests it,
+2. **During the run:** AskMe takes one structured action from a fixed vocabulary,
+   executes or tests it,
    receives fresh evidence, and can continue, repair locally, or replan.
 3. **At tentative completion:** the agent reports complete and delivers an
    artifact to an independent acceptance check.

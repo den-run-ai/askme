@@ -27,7 +27,7 @@ python3 askme.py "your request here"
 # Run via OpenRouter
 LLM_BACKEND=openrouter python3 askme.py "your request here"
 
-# Allow software installs (disabled by default)
+# Tell the model that software installs are allowed (prompt policy, not enforcement)
 ALLOW_SYSTEM_INSTALLS=1 python3 askme.py "your request here"
 
 # Override final validation (auto=default, always, 0=disabled)

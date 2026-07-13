@@ -470,7 +470,7 @@ style: |
 
 # Are Small LLMs Ready for Coding Agents?
 
-<p class="title-message">Can tight execution feedback turn bounded small-model actions into accepted workflows?</p>
+<p class="title-message">Can tight execution feedback turn structured small-model actions into accepted workflows?</p>
 
 </div>
 
@@ -486,24 +486,24 @@ parameter cutoff. The hosted receipts span roughly three-to-four-billion-active 
 and twenty-seven-to-thirty-one-billion dense models; they do not measure local
 performance. Teams want control over speed, hardware, deployment, and post-training on
 their chosen hardware and stack. The question is whether tight execution feedback can
-turn bounded actions into accepted workflows.
+turn structured actions into accepted workflows.
 -->
 
 ---
 
 <div class="eyebrow">Why this matters now</div>
 
-# AskMe gives a small model one bounded move at a time
+# AskMe gives a small model one structured move at a time
 
 <p class="subtitle"><strong>AskMe</strong> is an experimental coding-agent harness: explicit plan → one JSON action → execution evidence ↺</p>
 
 <div class="bridge-grid">
   <div class="bridge-stage model-stage"><div class="num">01</div><div class="label">Controllable small LLMs</div><h2>Choose the model boundary</h2><ul><li>Execution speed</li><li>Hardware and deployment</li><li>Post-training access</li></ul></div>
   <div class="bridge-stage askme-stage"><div class="num">02</div><div class="label">AskMe loop</div><h2>One small action at a time</h2><div class="micro-loop">plan → act → execute / test<br>→ fresh evidence ↺</div><p>Interpret the result. Update locally when possible.</p></div>
-  <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">Accepted full workflow</div><h2>Keep and check the contract</h2><ul><li>Preserve completed work</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
+  <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">External acceptance layer</div><h2>Check the delivered workflow</h2><ul><li>Preserve the full contract</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
 </div>
 
-<div class="bridge-caption"><strong>The bridge:</strong> small action surface + fresh execution feedback + independent workflow acceptance.<span>Assumes bounded actions, informative feedback, and independently testable success.</span></div>
+<div class="bridge-caption"><strong>The bridge:</strong> fixed action vocabulary + fresh execution feedback + external workflow acceptance.<span>Assumes scoped actions, informative feedback, and independently testable success.</span></div>
 
 <!--
 Speaker notes (~45s):
@@ -511,7 +511,7 @@ AskMe is an experimental coding-agent harness. It keeps an explicit plan, asks t
 for one structured action, executes it, and returns fresh test or runtime evidence. The
 harness keeps the contract and completed work in view, so the model can continue, repair
 locally, or replan when an assumption breaks. This approach assumes work decomposes into
-bounded actions, feedback is informative, and success is independently testable.
+scoped actions, feedback is informative, and success is independently testable.
 Acceptance checks the required behavior and artifact.
 -->
 
@@ -588,7 +588,7 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 <p class="subtitle">4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell</p>
 
 <div class="matrix-summary">
-  <div><strong>8 / 8</strong><span>agent complete</span></div>
+  <div><strong>8 / 8</strong><span>reported complete</span></div>
   <div><strong>7 / 8</strong><span>artifact accepted</span></div>
   <div class="boundary">Compatibility smoke · n=1/cell · descriptive only</div>
 </div>
@@ -602,7 +602,7 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 </div>
 
 <div class="matrix-interpretation">
-  <div class="supported"><strong>Supported</strong>All four completed both checks; acceptance rejected one wrong deliverable.</div>
+  <div class="supported"><strong>Supported</strong>All four reported completion on both checks; acceptance rejected one wrong deliverable.</div>
   <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
 </div>
 
@@ -627,7 +627,7 @@ These are one-shot receipts, not rankings.
 <p class="subtitle">One limit appeared before execution; another after reported completion.</p>
 
 <div class="boundary-grid">
-  <div class="boundary-step entry"><div class="num">01 · ENTER THE LOOP</div><strong>The model must emit a valid action</strong><p><code>model → bounded action</code><br><br><b>FeatureBench-fast · 1 task · Gemma 4 31B:</b><br>3 plans → 4 reads → 0 writes → empty patch → unresolved.</p></div>
+  <div class="boundary-step entry"><div class="num">01 · ENTER THE LOOP</div><strong>The model must emit a valid action</strong><p><code>model → valid structured action</code><br><br><b>FeatureBench-fast · 1 task · Gemma 4 31B:</b><br>3 plans → 4 reads → 0 writes → empty patch → unresolved.</p></div>
   <div class="boundary-step run"><div class="num">02 · INSIDE THE LOOP</div><strong>Execution feedback can guide repair</strong><p><code>action → execute / test → evidence ↺</code><br><br>AskMe can continue, update locally, or replan.</p></div>
   <div class="boundary-step delivery"><div class="num">03 · AFTER COMPLETION</div><strong>Acceptance checks the deliverable</strong><p><code>artifact → independent acceptance</code><br><br>The Qwen wrong-path result was rejected, but not returned for recovery.</p></div>
 </div>
@@ -685,8 +685,8 @@ Judge progress by delivered behavior.
 <div class="harness-grid">
   <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
   <div class="harness-cell row-head">Action surface</div><div class="harness-cell">6 fixed JSON actions; exactly one action per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
-  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Persistent conversation state and event log; configurable context condenser.</div>
-  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> plus an internal check; held-out acceptance remains separate.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> ends the run; benchmark evaluation remains a separate harness.</div>
+  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Conversation state + append-only event log; optional persistence and configurable condenser.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> → conditional fail-open validation; held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> ends the run; benchmark evaluation remains a separate harness.</div>
 </div>
 
 <div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>

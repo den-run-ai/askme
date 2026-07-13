@@ -44,15 +44,17 @@ workflow runner and one qualified native fixture are merged, but the native
 reasoning-policy A/B is deferred and has zero measured runs. A Qwen-versus-Gemma
 or model-size claim would require a separate predeclared, repeated design.
 
-External evaluation now has one qualified FeatureBench adapter path, not a
-benchmark result. The registered one-task canary passed the gold, harmless-control,
-audit, and evaluator qualification checks; its only model attempt exhausted
-without emitting a patch and was unresolved. This is a negative one-task canary,
-not a FeatureBench score, reliability estimate, or readiness result. Vals Vibe
+External evaluation now has successful FeatureBench adapter/evaluator
+qualification and a valid negative one-task outcome. The registered canary
+passed the gold, harmless-control, audit, and evaluator qualification checks;
+its only model attempt exhausted without emitting a patch and was unresolved.
+This is an actionable interface signal, not a FeatureBench score, reliability
+estimate, or readiness result. Vals Vibe
 Code Bench remains an access-dependent full-app reference, and ProgramBench is
 only a later clean-room stress-test candidate. Slide 6 includes this one-task
-boundary diagnosis; protocol details and future evaluation remain tracked in
-[issue #2](https://github.com/den-run-ai/askme/issues/2).
+boundary diagnosis. [Issue #2](https://github.com/den-run-ai/askme/issues/2) is
+the closed protocol/history record; feature-scale interface work is active in
+[issue #7](https://github.com/den-run-ai/askme/issues/7).
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 

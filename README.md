@@ -36,7 +36,7 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 
 ## How It Works
 
-**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. Up to 3 replans. After all tasks complete, an LLM-based final validation verifies the goal was actually achieved (gated by complexity signals). By default, the agent will **not** install software — it fails fast with a prerequisite message. Set `ALLOW_SYSTEM_INSTALLS=1` to permit installs.
+**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. Up to 3 replans. Depending on `AGENT_FINAL_VALIDATE`, a conditional, fail-open LLM validator may review tentative completion; it is not independent acceptance. By default, AskMe instructs the model not to install software and to report missing prerequisites. Set `ALLOW_SYSTEM_INSTALLS=1` to tell the model that installs are allowed. These instructions are not host-level enforcement.
 
 ## Security
 
@@ -67,7 +67,7 @@ input.
 | `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
-| `ALLOW_SYSTEM_INSTALLS` | `0` | Whether the agent may install software |
+| `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
 | `AGENT_REASONING_POLICY` | `gated` | Explicit-reasoning requests: `gated` preserves the recovery policy; `off` suppresses them at every call site |
