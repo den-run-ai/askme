@@ -7,11 +7,10 @@ Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
 ## Quick Start
 
 ```bash
-# All commands below assume you're in the agent/ directory.
-# From the parent llama.cpp dir, prefix paths with agent/ (e.g. python3 agent/askme.py).
+# All AskMe commands below assume you are in this repository's root.
 
-# 1. Start llama-server (from llama.cpp root)
-cd /Users/macmone/code/llama.cpp
+# 1. Start llama-server from a separate llama.cpp checkout
+cd /path/to/llama.cpp
 mkdir -p /tmp/llama-cache
 ./build/bin/llama-server \
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
@@ -21,7 +20,8 @@ mkdir -p /tmp/llama-cache
   -np 1 --slot-save-path /tmp/llama-cache \
   --port 8080
 
-# 2. Run the agent (from agent/ directory)
+# 2. In another terminal, run the agent from the AskMe checkout
+cd /path/to/askme
 python3 askme.py "create a hello world program in C and compile it"
 
 # Or via OpenRouter (set OPENROUTER_API_KEY in .env)
@@ -36,7 +36,24 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 
 ## How It Works
 
-**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. Up to 3 replans. After all tasks complete, an LLM-based final validation verifies the goal was actually achieved (gated by complexity signals). By default, the agent will **not** install software — it fails fast with a prerequisite message. Set `ALLOW_SYSTEM_INSTALLS=1` to permit installs.
+**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. A run gets up to three planning attempts. Depending on `AGENT_FINAL_VALIDATE`, a conditional, fail-open LLM validator may review tentative completion; it is not independent acceptance. By default, AskMe instructs the model not to install software and to report missing prerequisites. Set `ALLOW_SYSTEM_INSTALLS=1` to tell the model that installs are allowed. These instructions are not host-level enforcement.
+
+## Security
+
+AskMe is experimental automation, **not a sandbox**. It executes model-generated
+shell commands with the current user's host permissions. Its temporary working
+directory prevents routine output from landing in the repository; it does not
+confine shell commands or prevent absolute/traversal paths from reaching other
+host files.
+
+Do not run untrusted prompts or repositories directly on a workstation that has
+credentials or valuable data. Use a disposable container or VM with least-privilege
+credentials, restricted mounts, and network controls. `ALLOW_SYSTEM_INSTALLS` and
+`ALLOW_NETWORK` are prompt-visible policy signals, not security boundaries;
+`ALLOW_NETWORK` is currently reserved and does not enforce network isolation.
+OpenRouter runs also send selected prompt and workspace context to the configured
+remote provider. See [SECURITY.md](SECURITY.md) before exposing AskMe to untrusted
+input.
 
 ## Configuration
 
@@ -50,7 +67,8 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 | `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
-| `ALLOW_SYSTEM_INSTALLS` | `0` | Whether the agent may install software |
+| `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
+| `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
 | `AGENT_REASONING_POLICY` | `gated` | Explicit-reasoning requests: `gated` preserves the recovery policy; `off` suppresses them at every call site |
 | `AGENT_GOAL_CONTEXT_CHARS` | `300` | Goal characters retained for executor and task-local replan context; independent of result/history truncation |
@@ -62,6 +80,11 @@ requested policy, trigger, and effective reasoning level when `AGENT_RUN_LOG` is
 enabled.
 
 ## Tests
+
+Current verification snapshot (2026-07-13): `pytest -q` completed with **367
+passed and 27 skipped**. Backend-dependent integration tests skip when their
+server or credential is unavailable. Counts in dated benchmark/setup sections
+are historical snapshots, not the current suite size.
 
 ```bash
 # Unit tests (mocked, no LLM needed)
@@ -101,4 +124,5 @@ python3 tests/workflow_eval.py \
 - [ARCHITECTURE.md](ARCHITECTURE.md) — loop design, state model, action model, current constraints
 - [gemma4-setup.md](gemma4-setup.md) — llama-server config, KV cache, model notes
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices
+- [SECURITY.md](SECURITY.md) — threat boundary and safe-use guidance
 - [CLAUDE.md](CLAUDE.md) — guidance for AI agents working in this directory

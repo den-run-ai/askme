@@ -8,6 +8,26 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## FeatureBench One-Task Canary — 2026-07-13, OpenRouter (Gemma 4 31B)
+
+One frozen FeatureBench fast task qualified the adapter with passing gold and
+harmless controls, then produced a supported negative outcome. The agent made
+three planning attempts and four reads, but zero writes, edits, or shell
+actions; the resulting patch was empty and the official evaluator completed
+without an infrastructure error but did not resolve the task.
+
+The binding constraint in this trajectory was the 512-token non-reasoning
+structured-action cap: implementation write proposals were truncated at that
+limit or returned malformed JSON, and the bounded retries did not recover a
+valid write. This observation motivates testing chunked writes, localized
+edits, or an adaptive action budget before broader feature-scale evaluation.
+
+This is one canary on one task, not a FeatureBench score, reliability estimate,
+model-family comparison, model-size result, or proof that raising the cap alone
+would make the task pass. See the
+[published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json)
+and [qualified runbook](tests/featurebench/README.md).
+
 ## E01 Harness Baseline — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
 
 Local E4B baseline with Phase 6 server config (`--swa-full --cache-reuse 256`). 3 trials per test. Build `a702f395`, M1 16 GB.
