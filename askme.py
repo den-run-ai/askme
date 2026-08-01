@@ -1913,12 +1913,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         # observation tail reserve.
                         commit_executed += 1
                     if act == "write" and result["ok"] and not action.get("append"):
-                        target = _step_path(action.get("arg", ""), working_dir)
-                        if target == last_write_target:
-                            consecutive_target_writes += 1
+                        if truncated_write:
+                            # A partial (truncated) write is not a completed
+                            # rewrite (Codex P1, PR #21): the file is
+                            # incomplete, and the recovery path may
+                            # legitimately append to it or restart the write.
+                            last_write_target = None
+                            consecutive_target_writes = 0
                         else:
-                            last_write_target = target
-                            consecutive_target_writes = 1
+                            target = _step_path(action.get("arg", ""), working_dir)
+                            if target == last_write_target:
+                                consecutive_target_writes += 1
+                            else:
+                                last_write_target = target
+                                consecutive_target_writes = 1
                     elif act in ("shell", "edit") and result["ok"]:
                         # Verification or a targeted fix breaks the rewrite
                         # streak; observations do not (the v6 Gemma loop

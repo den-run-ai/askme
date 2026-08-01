@@ -1482,3 +1482,44 @@ class TestValidateAfterWrite:
         assert len(plan_msgs) == 1
         assert "no_write_executed" not in plan_msgs[0]
         assert "unvalidated_write" not in plan_msgs[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_truncated_writes_do_not_advance_rewrite_streak(self, mock_llm,
+                                                            mock_replan,
+                                                            tmp_path):
+        # Codex P1 (PR #21): a partial write from a truncated sentinel block
+        # is not a completed rewrite — neither the validate note nor the
+        # rewrite_loop skip may fire while the file is incomplete.
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n in (2, 3, 4):
+                return {"action": "write", "arg": "big.py",
+                        "content": f"try{n} line1\ntry{n} par",
+                        "content_truncated": True}
+            if n == 5:
+                return {"action": "write", "arg": "big.py",
+                        "content": "final\nversion\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        # The clean restart after repeated truncations must execute.
+        assert (tmp_path / "big.py").read_text() == "final\nversion\n"
+        assert all("Do NOT write the whole file again" not in s for s in seen)
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "rewrite_loop" not in reasons
