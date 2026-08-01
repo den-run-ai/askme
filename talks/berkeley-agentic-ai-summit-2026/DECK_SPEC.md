@@ -100,9 +100,10 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   not returned to AskMe for another correction. Feeding a focused acceptance
   failure back into the loop while retaining a held-out scorer is future harness
   work, not a feature of the published smoke.
-- Keep external-benchmark scope narrow. Slide 6 may name the negative one-task
-  FeatureBench-fast canary only as an external boundary probe, never as a score,
-  reliability estimate, or readiness result. The companion roadmap may name
+- Keep external-benchmark scope narrow. Slide 6 may show the one-task
+  FeatureBench-fast canary's progression from the negative July result to the
+  revision-3 requalification, never as a score, reliability estimate, or
+  readiness result. The companion roadmap may name
   FeatureBench for feature development, Vals Vibe
   Code Bench for complete web applications, and one optional third candidate:
   ProgramBench as a later clean-room reconstruction stress test. Vals is
@@ -178,44 +179,31 @@ assumption. Emphasize preserving progress and avoiding repeated/stuck steps.
 
 ### 5. Four-model descriptive comparison
 
-Restore the visible two-variant-per-family comparison. Show model shape plus the
-build and repair outcomes for all four hosted models. Keep `8/8 complete` and
-`7/8 accepted` visible, but do not let aggregate totals replace the model rows.
-Per-cell wall time, steps, tokens, and replan counts may be shown only as
-observed trajectory detail; they are not scores or model-speed estimates.
-Label the matrix `n=1/cell`, simple, hosted, and descriptive only.
-State the experiment, observed result, supported harness conclusion, and
-unsupported model inferences separately. Any displayed timing is an observed
-trajectory time, not model speed.
+Restore the visible two-variant-per-family comparison. Show the model names and
+build and repair acceptance outcomes for all four hosted models. Keep `8/8
+complete` and `7/8 accepted` visible, but do not let aggregate totals replace
+the model rows. Keep per-cell wall time, steps, tokens, replans, and model-shape
+detail in the repository receipts rather than the stage slide. Label the matrix
+`n=1/cell`, simple, hosted, and descriptive only, with no model ranking.
 
-### 6. Two observed AskMe boundaries
+### 6. FeatureBench progression and next bottleneck
 
-Show two distinct places where feedback currently cannot help:
+Give the slide one job: make the revision-3 improvement unmistakable.
 
-1. **Before execution:** one qualified FeatureBench-fast canary exhausted after
-   four reads and no writes, leaving an empty patch. The 512-token structured
-   action budget bound this trajectory. Label it one task and not a score.
-2. **During the run:** AskMe takes one structured action from a fixed vocabulary,
-   executes or tests it,
-   receives fresh evidence, and can continue, repair locally, or replan.
-3. **At tentative completion:** the agent reports complete and delivers an
-   artifact to an independent acceptance check.
-4. **After completion:** acceptance scored the finished artifact, but a failing
-   result was not returned to AskMe for another recovery turn.
+1. **Before — July:** the frozen FeatureBench-fast canary produced zero writes,
+   an empty patch, and an unresolved task.
+2. **After — Aug 1:** under the revision-3 bundle and a changed serving stack,
+   both attempts produced patches that applied. Gemma reached 11/13 target
+   tests; Qwen reached 7/13.
+3. **Next bottleneck:** neither attempt validated and finished cleanly. Gemma
+   rewrote 18 times without testing; Qwen wrote once and returned to reading;
+   neither emitted `done`.
 
-Tie the boundary to the retained observation: the Qwen wrong-path run was
-caught, not repaired. This is a concrete harness limit, not an argument about
-model size or family.
-
-The slide may close with the 2026-08-01 revision-3 requalification strip: under
-the bundled interface changes and a changed serving stack, both canary cells
-produced applied but unresolved patches. Gemma matched the exploratory pi
-reference at 11/13 with the same two failures; Qwen reached 7/13 versus the pi
-reference's 10/13. Both exhausted without `done`, but only Gemma entered the
-18-write, zero-test rewrite loop; Qwen wrote once and returned to observation.
-Keep one-task canary-not-score language on the strip and the serving-stack
-confound, waived local-neutrality bar, and Qwen mechanism caveats in the slide
-footer or companion documents.
+State the supported observation directly: AskMe now reaches applied, partially
+working FeatureBench code on this canary. Keep the one-task, one-attempt/model,
+changed-serving-stack caveats visible, so the progression does not read as a
+FeatureBench score or transport-only causal claim. The retained wrong-path
+smoke example belongs on slide 3 and should not compete with this story.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
@@ -226,8 +214,10 @@ in issue #2 and the companion material.
 Return to the title question. The bounded answer is that small LLMs are
 promising for bounded coding loops, while realistic feature readiness is not
 demonstrated. Treat readiness as a property of the model, harness, task, and
-evaluator together. The current evidence exposes two interface boundaries; it
-does not validate a causal harness benefit or settle general model readiness.
+evaluator together. The current evidence shows meaningful progress from empty
+to applied patches and exposes validation and termination as the next harness
+problems; it does not validate a transport-only causal benefit or settle
+general model readiness.
 
 ### 8. Backup: AskMe, pi, and OpenHands
 
@@ -243,8 +233,8 @@ and enterprise positioning off the slide.
   words in total, followed by one backup slide without a main-talk note block.
 - Slide 1 must have substantial whitespace.
 - Slide 2 should communicate one relationship, not survey a market.
-- Slide 5 is the one intentionally dense evidence slide; favor a readable table
-  over cards full of prose.
+- Slide 5 keeps a readable acceptance table; trajectory detail stays in the
+  repository receipts.
 - Use `AskMe` consistently. Do not reintroduce `NanAgent`.
 - Prefer execution, test, integration, and artifact language over compiler-error
   framing.
@@ -291,6 +281,10 @@ and enterprise positioning off the slide.
   and companion documents; the
   revision-4 validate-after-write work is named only as in-progress future
   work, never as done.
+- The latest slide review makes that progression the primary message on slide
+  6: AskMe moved from zero writes to applied, partially working patches. The
+  wrong-path smoke example remains on slide 3; slide 6 now names validation and
+  termination as the next bottlenecks.
 
 ## Pre-render drift check
 
@@ -302,17 +296,17 @@ and enterprise positioning off the slide.
 - [ ] Slide 2 contains no product/vendor taxonomy.
 - [ ] The retained wrong-path workflow miss remains visible.
 - [ ] Reasoning is framed as trajectory quality and bounded replanning.
-- [ ] All four model rows and their dense/MoE shapes are visible.
-- [ ] Both MoE rows show total and active parameter counts.
+- [ ] All four hosted model rows and both acceptance outcomes are visible.
 - [ ] The model matrix is labeled descriptive, hosted, simple, and `n=1/cell`.
-- [ ] Timings, if retained, are labeled observed trajectory time—not model speed.
+- [ ] Per-cell timings, tokens, steps, replans, and model-shape detail remain in
+      the repository receipts rather than the stage slide.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
-- [ ] Slide 6 separates the pre-execution action boundary, in-loop execution
-      feedback, and post-run independent acceptance.
-- [ ] Slide 6 labels FeatureBench-fast as one task and not a score.
-- [ ] Slide 6 states that the retained wrong-path result was caught, not
-      repaired.
+- [ ] Slide 6 leads with the progression from zero writes and an empty patch to
+      applied patches reaching Gemma 11/13 and Qwen 7/13 target tests.
+- [ ] Slide 6 separates that progress from the remaining validation and clean
+      termination failures.
+- [ ] Slide 6 labels the canary one task, one attempt/model, and not a score.
 - [ ] The unfinished reasoning-policy pilot is absent from the stage narrative
       and is not presented as a prerequisite for a shareable talk.
 - [ ] No FeatureBench score, reliability estimate, or external readiness claim
@@ -320,8 +314,8 @@ and enterprise positioning off the slide.
 - [ ] Vals Vibe Code Bench and ProgramBench remain companion-material only.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
 - [ ] Companion benchmark scope is capped at those three distinct candidates.
-- [ ] The v6 requalification strip keeps one-task adapter-canary boundary
-      language and never reads as a FeatureBench score.
+- [ ] The v6 progression keeps one-task adapter-canary boundary language and
+      never reads as a FeatureBench score.
 - [ ] Any v6 comparison to v4 or the pi ablation carries the serving-stack
       confound, the waived local-neutrality bar, and the Codex P2 caveats on
       the slide footer or in companion documents.

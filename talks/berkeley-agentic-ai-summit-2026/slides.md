@@ -231,82 +231,60 @@ style: |
     font-size: 14px;
     margin: 8px 0 0;
   }
-  .matrix-summary {
+  .smoke-layout {
+    align-items: start;
     display: grid;
-    gap: 12px;
-    grid-template-columns: 0.72fr 0.72fr 1.56fr;
-    margin: 13px 0 12px;
+    gap: 36px;
+    grid-template-columns: 0.7fr 1.55fr;
+    margin-top: 24px;
   }
-  .matrix-summary > div {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    min-height: 50px;
-    padding: 8px 13px;
+  .smoke-scores {
+    border-top: 6px solid var(--blue);
+    padding-top: 16px;
   }
-  .matrix-summary strong { color: var(--blue); font-size: 24px; margin-right: 7px; }
-  .matrix-summary span { color: var(--muted); font-size: 14px; }
-  .matrix-summary .boundary {
-    align-items: center;
-    background: #fff7e9;
-    border-color: #f0d5a6;
-    color: #8a5700;
-    display: flex;
-    font-size: 14px;
-    font-weight: 800;
+  .smoke-score { margin-bottom: 22px; }
+  .smoke-score strong { color: var(--blue); display: block; font-size: 50px; line-height: 1; }
+  .smoke-score span { color: var(--muted); display: block; font-size: 19px; margin-top: 5px; }
+  .smoke-insight {
+    border-left: 5px solid var(--coral);
+    color: var(--ink);
+    font-size: 17px;
+    line-height: 1.3;
+    margin-top: 28px;
+    padding-left: 12px;
   }
-  .matrix-grid {
+  .smoke-table {
     display: grid;
-    gap: 5px;
-    grid-template-columns: 1.05fr 1.32fr 1.32fr;
+    grid-template-columns: 1.45fr 1fr 1fr;
   }
-  .matrix-cell {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    font-size: 14px;
-    min-height: 52px;
-    padding: 7px 10px;
+  .smoke-table > div {
+    border-bottom: 1px solid var(--line);
+    font-size: 17px;
+    min-height: 54px;
+    padding: 14px 10px;
   }
-  .matrix-cell.head {
-    background: transparent;
-    border-color: transparent;
+  .smoke-table .head {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 850;
-    min-height: 20px;
-    padding-bottom: 3px;
+    min-height: 36px;
+    padding-top: 0;
     text-transform: uppercase;
   }
-  .matrix-cell.model-name { font-weight: 850; }
-  .matrix-cell small { color: var(--muted); display: block; font-size: 11px; line-height: 1.28; margin-top: 2px; }
-  .shape { font-weight: 850; }
-  .shape.dense { color: var(--blue); }
-  .shape.moe { color: #7256c9; }
-  .matrix-status { font-size: 13px; font-weight: 900; }
-  .matrix-status.pass { color: var(--teal); }
-  .matrix-status.fail { color: var(--coral); }
-  .matrix-caveat {
-    color: var(--muted);
-    font-size: 13px;
+  .smoke-model { font-weight: 800; }
+  .smoke-status { font-weight: 900; }
+  .smoke-status.pass { color: var(--teal); }
+  .smoke-status.fail { color: var(--coral); }
+  .smoke-limit {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    color: #7a5008;
+    font-size: 17px;
     line-height: 1.3;
-    margin: 10px 0 0;
+    margin-top: 24px;
+    padding: 11px 15px;
   }
-  .matrix-interpretation {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: 0.9fr 1.4fr;
-    margin-top: 10px;
-  }
-  .matrix-interpretation > div {
-    border-radius: 5px;
-    font-size: 13px;
-    line-height: 1.3;
-    padding: 8px 11px;
-  }
-  .matrix-interpretation strong { display: block; font-size: 14px; margin-bottom: 2px; }
-  .matrix-interpretation .supported { background: #e9f7f3; color: #285d53; }
-  .matrix-interpretation .unsupported { background: #fff2df; color: #7a5008; }
   .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
   .experiment { min-height: 145px; }
   .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
@@ -329,61 +307,65 @@ style: |
     margin-top: 13px;
     padding: 10px 15px;
   }
-  .external-status {
-    background: #edf4ff;
-    border-left: 6px solid var(--blue);
-    border-radius: 4px;
-    color: #27476f;
-    font-size: 14px;
-    margin-top: 8px;
-    padding: 7px 13px;
-  }
-  .boundary-grid {
+  .feature-progress {
     display: grid;
-    gap: 16px;
+    gap: 38px;
     grid-template-columns: repeat(3, 1fr);
-    margin-top: 15px;
+    margin-top: 30px;
   }
-  .boundary-step {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    min-height: 190px;
-    padding: 18px 19px;
+  .feature-stage {
+    border-top: 7px solid var(--blue);
+    min-height: 215px;
+    padding: 17px 10px 0 0;
     position: relative;
   }
-  .boundary-step:not(:last-child)::after {
+  .feature-stage.before { border-color: var(--coral); }
+  .feature-stage.after { border-color: var(--teal); }
+  .feature-stage.next { border-color: var(--amber); }
+  .feature-stage:not(:last-child)::after {
     color: var(--blue);
     content: "→";
-    font-size: 30px;
+    font-size: 34px;
     font-weight: 900;
     position: absolute;
-    right: -25px;
-    top: 80px;
+    right: -31px;
+    top: 86px;
     z-index: 2;
   }
-  .boundary-step.run { border-top: 7px solid var(--blue); }
-  .boundary-step.entry { border-top: 7px solid var(--coral); }
-  .boundary-step.delivery { border-top: 7px solid var(--teal); }
-  .boundary-step.gap { border-top: 7px solid var(--coral); }
-  .boundary-step .num { color: var(--blue); font-size: 14px; font-weight: 900; }
-  .boundary-step strong { display: block; font-size: 20px; margin: 8px 0 12px; }
-  .boundary-step p { color: var(--muted); font-size: 16px; margin: 0; }
-  .boundary-step code { color: var(--ink); font-size: 14px; }
-  .boundary-observation {
-    background: #fff2df;
-    border-left: 6px solid var(--amber);
+  .feature-label {
+    color: var(--blue);
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .feature-stage.before .feature-label { color: var(--coral); }
+  .feature-stage.after .feature-label { color: var(--teal); }
+  .feature-stage.next .feature-label { color: var(--amber); }
+  .feature-stage h2 { font-size: 28px; margin: 10px 0 10px; }
+  .feature-stage p { color: var(--muted); font-size: 18px; line-height: 1.35; margin: 0; }
+  .feature-stage .big-result { color: var(--coral); font-size: 48px; font-weight: 900; line-height: 1; }
+  .feature-results { display: flex; gap: 28px; margin-top: 12px; }
+  .feature-results strong { color: var(--teal); display: block; font-size: 34px; line-height: 1; }
+  .feature-results span { color: var(--muted); font-size: 15px; }
+  .feature-takeaway {
+    background: #e9f7f3;
+    border-left: 6px solid var(--teal);
     border-radius: 4px;
-    color: #7a5008;
-    font-size: 17px;
-    margin-top: 12px;
-    padding: 9px 13px;
+    color: #285d53;
+    font-size: 20px;
+    margin-top: 22px;
+    padding: 12px 15px;
+  }
+  .feature-caveat {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 9px;
   }
   .harness-grid {
     display: grid;
     gap: 5px;
     grid-template-columns: 0.72fr repeat(3, 1fr);
-    margin-top: 18px;
+    margin-top: 12px;
   }
   .harness-cell {
     background: #fff;
@@ -391,8 +373,8 @@ style: |
     border-radius: 5px;
     font-size: 14px;
     line-height: 1.28;
-    min-height: 83px;
-    padding: 11px 12px;
+    min-height: 76px;
+    padding: 9px 10px;
   }
   .harness-cell.head {
     background: var(--terminal);
@@ -415,10 +397,10 @@ style: |
     border-left: 6px solid var(--teal);
     border-radius: 4px;
     color: #285d53;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.3;
-    margin-top: 14px;
-    padding: 10px 14px;
+    margin-top: 10px;
+    padding: 8px 12px;
   }
   .conclusion-grid {
     display: grid;
@@ -583,69 +565,84 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 <div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
 
-# All four variants ran; one deliverable was rejected
+# Acceptance caught the one bad deliverable
 
-<p class="subtitle">4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell</p>
+<p class="subtitle">Eight one-shot cells across four hosted variants</p>
 
-<div class="matrix-summary">
-  <div><strong>8 / 8</strong><span>reported complete</span></div>
-  <div><strong>7 / 8</strong><span>artifact accepted</span></div>
-  <div class="boundary">Compatibility smoke · n=1/cell · descriptive only</div>
+<div class="smoke-layout">
+  <div class="smoke-scores">
+    <div class="smoke-score"><strong>8 / 8</strong><span>reported complete</span></div>
+    <div class="smoke-score"><strong>7 / 8</strong><span>artifacts accepted</span></div>
+    <div class="smoke-insight"><strong>The fastest build was the rejected one.</strong><br>Completion and speed were not enough.</div>
+  </div>
+  <div class="smoke-table">
+    <div class="head">Hosted variant</div><div class="head">Artifact build</div><div class="head">Sanity repair</div>
+    <div class="smoke-model">Gemma 4 26B A4B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Gemma 4 31B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Qwen3.6-27B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Qwen3.6-35B-A3B</div><div class="smoke-status fail">Wrong path</div><div class="smoke-status pass">Accepted</div>
+  </div>
 </div>
 
-<div class="matrix-grid">
-  <div class="matrix-cell head">Model · shape</div><div class="matrix-cell head">Artifact build · observed trajectory</div><div class="matrix-cell head">Sanity repair · observed trajectory</div>
-  <div class="matrix-cell model-name">Gemma 4 26B A4B<small><span class="shape moe">◆ MoE</span> · 25.2B total / 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>603.6s · 19 steps · 19.5k tok<br>1 full / 1 local replan</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>20.0s · 7 steps · 4.5k tok<br>0 full / 0 local replans</small></div>
-  <div class="matrix-cell model-name">Gemma 4 31B<small><span class="shape dense">● Dense</span> · 30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>66.5s · 4 steps · 4.4k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>22.4s · 5 steps · 4.2k tok<br>0 full / 1 local replan</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-27B<small><span class="shape dense">● Dense</span> · 27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>47.9s · 6 steps · 5.3k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>23.0s · 6 steps · 4.1k tok<br>0 full / 0 local replans</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-35B-A3B<small><span class="shape moe">◆ MoE</span> · 35B total / 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>17.7s · 3 steps · 3.5k tok<br>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>11.8s · 4 steps · 2.5k tok<br>0 full / 0 local replans</small></div>
-</div>
+<div class="smoke-limit"><strong>Compatibility smoke, not a ranking:</strong> n=1/cell, descriptive only; no speed, family, size, reasoning, or reliability inference.</div>
 
-<div class="matrix-interpretation">
-  <div class="supported"><strong>Supported</strong>All four reported completion on both checks; acceptance rejected one wrong deliverable.</div>
-  <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
-</div>
-
-<div class="source">Four hosted models × two deliberately simple checks × one unseeded run/cell · evals/README.md</div>
+<div class="source">Four hosted variants × two simple checks × one unseeded run/cell · detailed receipts: evals/README.md</div>
 
 <!--
 Speaker notes (~45s):
 Four hosted variants each ran two simple checks once. Every agent reported completion;
 independent checks accepted seven artifacts. The shortest build trajectory was the rejected
 one, which is why completion and speed alone are insufficient. The rows preserve Gemma and
-Qwen size, shape, steps, tokens, and replans as descriptive trajectory context. No pair
+Qwen acceptance status; steps, tokens, and replans remain in the records. No pair
 isolates size, architecture, active compute, family, run order, reasoning, or reliability.
 These are one-shot receipts, not rankings.
 -->
 
 ---
 
-<div class="eyebrow">Two observed harness boundaries</div>
+<div class="eyebrow">FeatureBench canary · revision 3 requalification</div>
 
-# Feedback works only when actions enter and failures return
+# AskMe now makes FeatureBench edits
 
-<p class="subtitle">One limit appeared before execution; another after reported completion.</p>
+<p class="subtitle">The same frozen task moved from no write to partially working code.</p>
 
-<div class="boundary-grid">
-  <div class="boundary-step entry"><div class="num">01 · ENTER THE LOOP</div><strong>The model must emit a valid action</strong><p><code>model → valid structured action</code><br><br><b>FeatureBench-fast · 1 task · Gemma 4 31B:</b><br>3 plans → 4 reads → 0 writes → empty patch → unresolved.</p></div>
-  <div class="boundary-step run"><div class="num">02 · INSIDE THE LOOP</div><strong>Execution feedback can guide repair</strong><p><code>action → execute / test → evidence ↺</code><br><br>AskMe can continue, update locally, or replan.</p></div>
-  <div class="boundary-step delivery"><div class="num">03 · AFTER COMPLETION</div><strong>Acceptance checks the deliverable</strong><p><code>artifact → independent acceptance</code><br><br>The Qwen wrong-path result was rejected, but not returned for recovery.</p></div>
+<div class="feature-progress">
+  <div class="feature-stage before">
+    <div class="feature-label">Before · July canary</div>
+    <div class="big-result">0 writes</div>
+    <h2>Empty patch</h2>
+    <p>The action interface blocked the edit. The task stayed unresolved.</p>
+  </div>
+  <div class="feature-stage after">
+    <div class="feature-label">After · Aug 1</div>
+    <h2>Both patches applied</h2>
+    <div class="feature-results">
+      <div><strong>11 / 13</strong><span>Gemma target tests</span></div>
+      <div><strong>7 / 13</strong><span>Qwen target tests</span></div>
+    </div>
+    <p>AskMe reached partially working code in both attempts.</p>
+  </div>
+  <div class="feature-stage next">
+    <div class="feature-label">Next bottleneck</div>
+    <h2>No clean validation or finish</h2>
+    <p><b>Gemma:</b> 18 writes, 0 tests<br><b>Qwen:</b> 1 write, then reading<br><b>Both:</b> no <code>done</code></p>
+  </div>
 </div>
 
-<div class="boundary-observation"><strong>External boundary probe—not a score:</strong> the FeatureBench canary exposed a 512-token structured-action bottleneck before a patch existed. One task cannot separate model capability from this model–harness interface.</div>
+<div class="feature-takeaway"><strong>What changed:</strong> AskMe now makes code changes; validation and termination are the remaining harness problems.</div>
 
-<div class="external-status"><strong>Requalified Aug 1 · one task, one attempt/model:</strong> under the revision-3 bundle and a changed serving stack, both patches applied but remained unresolved — Gemma 11/13 target tests (same two failures as the exploratory pi run); Qwen 7/13 (pi: 10/13). Gemma rewrote 18 times without testing; Qwen wrote once, then resumed reading; neither emitted <code>done</code>.</div>
+<div class="feature-caveat">One task · one attempt/model · changed serving stack · evidence of progress, not a FeatureBench score or transport-only causal claim.</div>
 
-<div class="source">One-task canaries, not scores · v6: CoreWeave (Gemma bf16, Qwen fp8); v4/pi: SiliconFlow fp8 · no local-neutrality claim · records: featurebench/results/ + featurebench/pi-ablation/results/</div>
+<div class="source">Frozen canary records: featurebench/results/ · revision-3 protocol: issues #17–#20</div>
 
 <!--
 Speaker notes (~45s):
-Feedback helps only after a valid action enters the loop. In July, Gemma's attempted writes
-overflowed AskMe's structured-action budget, leaving an empty patch. Under the revision-three
-bundle and a changed serving stack, both models produced applying but unresolved patches.
-Gemma matched the exploratory pi run at eleven of thirteen target tests, then rewrote
-eighteen times without testing. Qwen passed seven of thirteen, wrote once, and returned to
-reading. Neither emitted done. Harness changes moved failure downstream.
+Revision three changed the outcome on the same FeatureBench task. The July canary produced
+no write and an empty patch. On August first, both models produced patches that applied:
+Gemma passed eleven of thirteen tests, while Qwen passed seven. The task remained unresolved
+because the loop did not validate and finish cleanly. Gemma rewrote eighteen times without
+testing; Qwen wrote once, then returned to reading. This is meaningful progress on one task,
+not a benchmark score.
 -->
 
 ---

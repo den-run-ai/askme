@@ -23,7 +23,7 @@
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
-6. Show two observed boundaries: a FeatureBench-fast canary that never emitted a write, and a wrong deliverable that independent acceptance caught only after the agent stopped — then the Aug 1 revision-3 requalification that moved both cells to applied but unresolved patches and exposed distinct downstream failures: Gemma rewrote without testing; Qwen returned to observation after one write.
+6. Show the FeatureBench progression directly: revision 3 moved the frozen canary from no write and an empty patch to applied, partially working code in both attempts; validation and clean termination are now the visible bottlenecks.
 7. Answer cautiously: bounded loops look promising, but realistic feature readiness remains open and belongs to the model–harness–task combination.
 8. Keep a backup comparison of AskMe, pi, and OpenHands technical boundaries for Q&A.
 
