@@ -59,7 +59,26 @@ secret is visible to model-issued commands (bounded by the proxy's
 allowed-model pin and call cap). Do not reuse this setup on untrusted
 repositories or tasks.
 
-## Results
+## Results (2026-08-01)
 
-Recorded in `results/` next to this file, one JSON per cell, following the
-outcome contract in the protocol file.
+Both cells ran one masked attempt each (records in `results/`). Both models —
+which produced empty patches under AskMe v4 — delivered clean-applying,
+from-scratch implementations under pi. Neither fully resolved the task.
+
+| Cell | AskMe v4 outcome | pi outcome | F2P | P2P | Cost | Agent time |
+|---|---|---|---|---|---|---|
+| Gemma 4 31B | empty patch (16/33 responses truncated) | applied, unresolved | 11/13 (84.6%) | 387/387 | $0.0056 | 83 s |
+| Qwen3.6 27B | empty patch (0 writes in 27 steps) | applied, unresolved | 10/13 (76.9%) | 387/387 | $0.1916 | 16 min |
+
+Interpretation within the claim boundary: on this one task, the AskMe action
+interface — the 1536-token retry cap for Gemma, the action-selection stall for
+Qwen — was the binding constraint, not model capability. Both routes were
+fully pinned (every generation served by SiliconFlow as the exact dated
+model). The first Gemma attempt was invalid (unmasked `/testbed`; see the
+`masked-init-fix` amendment in the protocol) and is retained separately.
+
+Two incidental findings worth noting: FeatureBench's official inference
+runtime leaves the mask patch readable at `/tmp/mask.patch` inside the agent
+container (this runner deletes it after applying), and SiliconFlow's qwen3.6
+endpoint emitted 1,528 native reasoning tokens despite reasoning being
+disabled in the request config.

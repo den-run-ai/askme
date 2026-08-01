@@ -1,0 +1,98 @@
+{
+  "label": "one-task pi harness ablation (exploratory)",
+  "experiment_id": "askme-featurebench-pi-harness-ablation-v1",
+  "not_a_canary": true,
+  "cell": "gemma",
+  "attempt_started": "2026-08-01T04:15:30Z",
+  "attempt_finished": "2026-08-01T04:16:53Z",
+  "harness": {
+    "name": "pi coding agent",
+    "version": "0.83.0",
+    "node": "v22.23.2",
+    "tools": [
+      "read",
+      "write",
+      "edit",
+      "bash",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "max_tokens": 8192,
+    "reasoning_requested": false,
+    "step_cap": null,
+    "wall_cap_seconds": 3540
+  },
+  "task": {
+    "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+    "masked_init": "replicates featurebench/infer/runtime.py _initialize_level1; mask patch removed from container after applying"
+  },
+  "route": {
+    "requested_model": "google/gemma-4-31b-it",
+    "requested_provider": "siliconflow",
+    "served_models": [
+      "google/gemma-4-31b-it-20260402"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ],
+    "expected_served_model": "google/gemma-4-31b-it-20260402",
+    "route_pinned": true,
+    "calls": 7,
+    "statuses": {
+      "200": 6,
+      "502": 1
+    },
+    "failed_forward_calls": 1
+  },
+  "usage": {
+    "prompt": 33907,
+    "completion": 2904,
+    "reasoning": 0,
+    "cost": 0.00556775,
+    "agent_wall_seconds": 83,
+    "finish_reasons": {
+      "tool_calls": 10,
+      "stop": 2
+    }
+  },
+  "joint_outcome": {
+    "agent_completion": true,
+    "f2p_pass_rate": 0.8462,
+    "feature_acceptance": false,
+    "patch_applied": true
+  },
+  "acceptance_detail": {
+    "patch_bytes": 8028,
+    "f2p_passed": 11,
+    "f2p_failed": 2,
+    "f2p_failing_tests": [
+      "tests/test_algorithms.py::test_bootstrap_reproducibility",
+      "tests/test_algorithms.py::test_nanaware_func_warning"
+    ],
+    "p2p_passed": 387,
+    "p2p_failed": 0,
+    "pass_rate": 0.8462
+  },
+  "observed": "With the official masked init, Gemma wrote a from-scratch bootstrap implementation in 83 seconds over 6 served calls with no reasoning tokens. The patch applied cleanly and passed 11 of 13 FAIL_TO_PASS tests (84.6%) and all 387 PASS_TO_PASS tests; failing: test_bootstrap_reproducibility, test_nanaware_func_warning. Under AskMe v4 the same model, task, and endpoint produced an empty patch after 16 of 33 responses truncated at the 1536-token retry cap: consistent with the output budget, not model capability, being the binding constraint for this cell.",
+  "invalid_first_attempt": {
+    "run_directory": "/tmp/askme-featurebench-runs/pi-ablation-gemma-full-20260801T040845Z",
+    "classification": "invalid_setup_reference_leakage",
+    "reason": "ran against the raw image /testbed without FeatureBench's official masking init; the agent saw the unmasked reference implementation",
+    "cost_usd": 0.00975002,
+    "see": "pi-ablation-protocol.json amendment masked-init-fix"
+  },
+  "retained_run_directory": "/tmp/askme-featurebench-runs/pi-ablation-gemma-full-20260801T041511Z",
+  "retained_artifact_sha256": {
+    "patch.diff": "018d0d8ce568d72dd2c4a910a5b806424249a81d0225e8be3681a6038044da04",
+    "route-audit.json": "9767c2e919a800f92ce51fc8545e30ab1ee4583583e8d7efba43d8275f1a118e",
+    "joint-outcome.json": "52b895d24f1c58474206b6cbffddb4231a6e79a8df63b21e9802c2f65e6d6352",
+    "output.jsonl": "17665f6be718014e73754384ad3d52d908b0b2a1b277491f2d4a80a3a280f8f6",
+    "featurebench-report.json": "1c87297fea6339f4feb5add08be0751e4ef71167a571413c6a77215e667fbbe3",
+    "pi-events.ndjson": "98f61332ced508ad94a71fcbdc43d3efbaf89fe02f4b94a9b5690d683f77450e"
+  },
+  "interpretation": "Exploratory single-attempt harness ablation contrasting with the v4 AskMe canary on the same frozen cell. Not a FeatureBench score, not a harness or model comparison result; n=1 per cell."
+}
