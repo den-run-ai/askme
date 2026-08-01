@@ -65,6 +65,16 @@
     "no gold/harmless control reruns (the v4 controls on the identical image/dataset/evaluator stand; this is not a qualification run)",
     "session capture is pi's own JSONL plus the proxy tee, not AskMe's run log schema"
   ],
+  "amendments": [
+    {
+      "date": "2026-08-01",
+      "id": "masked-init-fix",
+      "what_happened": "The first Gemma attempt ran against the raw image /testbed without FeatureBench's official Level-1 inference init (restore from /root/my_repo, apply dataset mask patch, delete FAIL_TO_PASS files, git re-init). The agent therefore saw the unmasked repository including the reference implementation, and its diff baseline did not match the evaluator's masked tree.",
+      "classification": "invalid_setup_reference_leakage",
+      "disposition": "Attempt retained and recorded as invalid; runner fixed to replicate featurebench/infer/runtime.py _initialize_level1 and the official patch extraction before any replacement attempt. Replacement authorized because this is an exploratory ablation and the invalid attempt was a setup-infrastructure failure, not an unfavorable model outcome.",
+      "deviation_from_official_init": "the mask patch is deleted from the container after applying so the agent cannot read the masked-out implementation from /tmp"
+    }
+  ],
   "outcome_contract": {
     "per_cell": [
       "pi exit code and agent_end presence (agent completion)",

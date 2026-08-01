@@ -89,17 +89,23 @@ print(path)
 PY
 )"
   export DATASET_PATH
-  $FB_PYTHON - "$DATASET_PATH" "$TASK_ID" "$PROMPT_SHA256" "$RUN_ROOT/prompt.txt" <<'PY'
-import hashlib, sys
+  $FB_PYTHON - "$DATASET_PATH" "$TASK_ID" "$PROMPT_SHA256" "$RUN_ROOT" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
 from datasets import load_dataset
-dataset_path, task_id, want_sha, out = sys.argv[1:]
+dataset_path, task_id, want_sha, run_root = sys.argv[1:]
 rows = [r for r in load_dataset(dataset_path, split="fast") if r["instance_id"] == task_id]
 assert len(rows) == 1, f"expected one pinned task, found {len(rows)}"
-prompt = rows[0]["problem_statement"]
+row = rows[0]
+prompt = row["problem_statement"]
 got = hashlib.sha256(prompt.encode()).hexdigest()
 assert got == want_sha, f"prompt hash mismatch: {got}"
-open(out, "w", encoding="utf-8").write(prompt)
-print(f"prompt verified: {len(prompt)} chars")
+Path(run_root, "prompt.txt").write_text(prompt, encoding="utf-8")
+Path(run_root, "mask.patch").write_text(row["patch"], encoding="utf-8")
+f2p = row["FAIL_TO_PASS"]
+f2p = f2p if isinstance(f2p, list) else [f2p]
+Path(run_root, "f2p-files.txt").write_text("\n".join(f2p) + "\n", encoding="utf-8")
+print(f"prompt verified: {len(prompt)} chars; mask {len(row['patch'])} bytes; f2p {f2p}")
 PY
 fi
 
@@ -125,9 +131,25 @@ curl -fsS "http://127.0.0.1:$PROXY_PORT/health" >/dev/null
 echo "=== $(ts) [4] container setup"
 docker run -d --platform linux/amd64 --name "$CTR" "$PINNED_IMAGE" \
   tail -f /dev/null >/dev/null
-docker exec "$CTR" bash -lc 'test -z "$(git -C /testbed status --porcelain)"'
-TESTBED_HEAD="$(docker exec "$CTR" git -C /testbed rev-parse HEAD)"
-echo "testbed HEAD: $TESTBED_HEAD"
+
+# Replicate FeatureBench's official Level-1 inference init exactly
+# (featurebench/infer/runtime.py _initialize_level1): restore the pristine
+# repo, apply the dataset mask patch, delete FAIL_TO_PASS test files, and
+# re-initialize git as the diff baseline. One deliberate deviation: the mask
+# patch is deleted from the container after applying, so the agent cannot
+# read the masked-out reference implementation from /tmp.
+if [ "$MODE" != "smoke" ]; then
+  docker exec "$CTR" bash -lc \
+    'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && rm -rf /testbed/* && cp -r /root/my_repo/* /testbed/ && rm -rf /root/my_repo'
+  docker cp "$RUN_ROOT/mask.patch" "$CTR:/tmp/mask.patch"
+  docker exec "$CTR" bash -lc \
+    'cd /testbed && git apply --whitespace=fix /tmp/mask.patch && rm -f /tmp/mask.patch'
+  while IFS= read -r f2p; do
+    [ -n "$f2p" ] && docker exec "$CTR" rm -f "/testbed/$f2p"
+  done < "$RUN_ROOT/f2p-files.txt"
+  docker exec "$CTR" bash -lc \
+    'cd /testbed && rm -rf .git && git init -q && git config user.email "fb@bench.com" && git config user.name "FeatureBench" && git add -A && git commit -q -m "Initial commit for FeatureBench evaluation" --allow-empty && git rev-parse HEAD'
+fi
 
 docker cp "$CACHE_DIR/node-$NODE_VERSION-linux-x64.tar.gz" "$CTR:/tmp/node.tar.gz"
 docker exec "$CTR" bash -lc \
@@ -174,9 +196,18 @@ printf '%s\n' "$PI_EXIT" > "$RUN_ROOT/pi-exit-code.txt"
 echo "pi exit: $PI_EXIT"
 
 # ---- [6] Patch + artifacts --------------------------------------------------
+# Mirrors the official post-run extraction: stage everything, unstage files
+# git reports as binary, and diff against the re-initialized root commit.
 echo "=== $(ts) [6] patch and artifacts"
-docker exec "$CTR" git -C /testbed add -A .
-docker exec "$CTR" git -C /testbed diff --cached --binary > "$RUN_ROOT/patch.diff"
+docker exec "$CTR" bash -lc '
+  cd /testbed && git add -A
+  git diff --cached --numstat --no-renames --diff-filter=ACMRTD \
+    | awk -F "\t" "\$1==\"-\" || \$2==\"-\" {print \$3}" \
+    | while IFS= read -r file; do
+        git reset HEAD -- "$file" >/dev/null 2>&1 || true
+      done
+  git diff --no-color --cached "$(git rev-list --max-parents=0 HEAD)"' \
+  > "$RUN_ROOT/patch.diff"
 docker exec "$CTR" git -C /testbed status --porcelain > "$RUN_ROOT/testbed-status.txt"
 docker cp "$CTR:/agent-logs" "$RUN_ROOT/agent-logs"
 wc -c "$RUN_ROOT/patch.diff"
