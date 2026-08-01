@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "protocol_id": "askme-featurebench-fast-qwen-27b-adapter-canary-v6",
+  "status": "registered_before_outcome_bearing_model_call",
+  "registered_at": "2026-08-01T14:35:00Z",
+  "purpose": "Rerun the qualified AskMe-to-FeatureBench adapter on the same frozen task with Qwen3.6 27B under the revision-3 AskMe action interface (issues #15/#17): measure how much of the v4 empty-patch outcome the sentinel transport, backend-aware budgets, and write-forcing policy recover, with the pi harness ablation as the preregistered comparison ceiling; do not estimate benchmark performance or model-family reliability.",
+  "claim_boundary": {
+    "allowed_label": "one-task FeatureBench fast Qwen3.6 27B adapter canary",
+    "is_benchmark_score": false,
+    "is_reliability_estimate": false,
+    "is_model_comparison": false,
+    "aggregate_percentage_allowed": false
+  },
+  "sources": {
+    "askme": {
+      "repository": "https://github.com/den-run-ai/askme",
+      "base_commit": "491dbc03d3b97631372ca32763d34ba0458ff256",
+      "base_source_sha256": "a9037d479bdf737f28f3ab47521acd2d8dd872409ab1b2f92e38e70b9fa595e7",
+      "adapter_code_revision": "491dbc03d3b97631372ca32763d34ba0458ff256",
+      "code_files": {
+        "tests/featurebench/askme_adapter.py": "cb63af48ba837ad38f8aa99f245eeab3b9006a669600d5ad7fd0dbd1861dd9b6",
+        "tests/featurebench/canary_audit.py": "585922d763677d45ad10834ad8ab7d1662aceb64abc1cd16333ddadee8b07568"
+      },
+      "execution_revision_registration": "Use the clean commit containing this protocol, created before inference, as --askme-revision.",
+      "action_interface": {
+        "revision": 3,
+        "reference": "tests/workflows/PROTOCOL.md",
+        "changed_from_prior_canaries": [
+          "sentinel-framed write content transport (<<<CONTENT / CONTENT>>>) after the action JSON: no JSON-string escaping, truncation keeps complete lines",
+          "content_truncated recovery: partial sentinel content is written, with a resume anchor (line count + last written line) steering chunked append continuation",
+          "backend-aware budgets: STEP_TOKENS=4096 and STEP_WRITE_TOKENS=8192 on OpenRouter; local 256/512 unchanged",
+          "write-forcing executor policy on write-shaped tasks: after WRITE_PRESSURE_OBSERVATIONS=3 executed observation steps the next action must commit",
+          "observation actions cannot consume the last OBSERVE_TAIL_RESERVE=3 steps of an attempt (observe_tail_reserved warning skip, then observe_tail_exhausted auto-fail)",
+          "first-class no_write_executed flag in full and task-local replan state, scoped to the failed task's steps"
+        ],
+        "deterministic_acceptance_tests": "tests/test_agent_actions.py",
+        "why_v5": "Protocol v4 was consumed by the 2026-08-01 canaries (one attempt per cell, both empty-patch unresolved); the action interface changed to revision 3 (issue #15, PR #16) after those results, so a new protocol version is required before the next outcome-bearing run."
+      }
+    },
+    "featurebench": {
+      "repository": "https://github.com/LiberCoders/FeatureBench",
+      "commit": "445dcbaec0b2e136061b0acb54e753c0a9f1888e"
+    },
+    "dataset": {
+      "repository": "LiberCoders/FeatureBench",
+      "revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+      "split": "fast",
+      "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+      "problem_statement_chars": 11144,
+      "problem_statement_sha256": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+      "moving_default_branch_permitted": false
+    },
+    "container": {
+      "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+      "digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+      "pinned_reference": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb@sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+      "verify_digest_after_pull": true
+    }
+  },
+  "security_boundary": {
+    "trusted_inputs_only": true,
+    "trusted_inputs": [
+      "pinned FeatureBench source",
+      "pinned dataset row",
+      "pinned repository image",
+      "benchmark tests"
+    ],
+    "untrusted_repository_or_task_supported": false,
+    "command_level_guard": {
+      "direct_file_actions_must_resolve_under": "/testbed",
+      "guarded_direct_file_actions": [
+        "read",
+        "write",
+        "edit"
+      ],
+      "shell_text_denials": [
+        "adapter and log paths",
+        "parent traversal",
+        "environment disclosure",
+        "network clients",
+        "remote Git operations",
+        "package installation"
+      ],
+      "is_general_shell_parser": false,
+      "is_adversarial_code_sandbox": false,
+      "decision_log_required": true
+    },
+    "credential_isolation": {
+      "credential_in_container_environment": false,
+      "credential_in_model_issued_child_environment": false,
+      "transient_credential_file_unlinked_before_agent_loop": true,
+      "retained_artifacts_must_not_contain_credential": true
+    },
+    "network": {
+      "agent_action_policy_requested": "deny",
+      "enforcement": "auditable best-effort command and workspace-path guard; not a general shell parser",
+      "container_egress_isolated": false,
+      "outbound_openrouter_access_required": true
+    }
+  },
+  "agent_cell": {
+    "attempts": 1,
+    "model": "qwen/qwen3.6-27b",
+    "expected_served_models": [
+      "qwen/qwen3.6-27b-20260422"
+    ],
+    "backend": "openrouter",
+    "provider": {
+      "order": [
+        "coreweave"
+      ],
+      "allow_fallbacks": false,
+      "require_parameters": true,
+      "served_model_and_provider_must_be_recorded": true,
+      "comparison_caveat": "the v4 baseline and the pi-ablation ceiling were served by SiliconFlow fp8 endpoints; v6 changes the serving provider (CoreWeave fp8, same quantization as SiliconFlow) for this cell, so provider-stack differences are a confound when comparing v6 outcomes against the v4/pi records"
+    },
+    "reasoning_policy": "gated",
+    "limits": {
+      "max_planning_attempts_total": 3,
+      "max_tasks_per_plan": 10,
+      "max_steps_per_task_attempt": 10,
+      "max_task_local_replans_per_task": 1,
+      "max_task_attempts_per_task": 2,
+      "askme_cli_parameters": {
+        "max_replans": 3,
+        "max_tasks": 10,
+        "max_steps": 10
+      },
+      "askme_source_constant": "MAX_TASK_LOCAL_REPLANS=1",
+      "goal_context": "full_problem_statement"
+    },
+    "timeouts": {
+      "inner_askme_seconds": 3540,
+      "inner_kill_grace_seconds": 15,
+      "outer_featurebench_seconds": 3600,
+      "inner_is_strictly_below_outer": true
+    },
+    "cold_start": true,
+    "fresh_container": true,
+    "replacement_attempts_after_model_response": 0,
+    "reruns_after_inference_starts": 0
+  },
+  "sequence": [
+    {
+      "order": 1,
+      "id": "gold_control",
+      "operation": "official_featurebench_eval",
+      "predictions": "gold",
+      "expected": {
+        "evaluation_completed": true,
+        "resolved": true,
+        "error_present": false,
+        "traceback_present": false
+      }
+    },
+    {
+      "order": 2,
+      "id": "harmless_nonempty_control",
+      "operation": "official_featurebench_eval",
+      "prediction": {
+        "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+        "agent": "harmless-control",
+        "model": "none",
+        "n_attempt": 1,
+        "success": true,
+        "model_patch": "diff --git a/ASKME_FEATUREBENCH_CONTROL.txt b/ASKME_FEATUREBENCH_CONTROL.txt\nnew file mode 100644\nindex 0000000..4d6d14c\n--- /dev/null\n+++ b/ASKME_FEATUREBENCH_CONTROL.txt\n@@ -0,0 +1 @@\n+adapter qualification control\n",
+        "model_patch_kind": "add_file_only",
+        "path": "ASKME_FEATUREBENCH_CONTROL.txt",
+        "content": "adapter qualification control\n",
+        "must_be_nonempty": true
+      },
+      "evaluator_arguments": [
+        "--include-failed"
+      ],
+      "expected": {
+        "evaluation_completed": true,
+        "patch_applied": true,
+        "resolved": false,
+        "error_present": false,
+        "traceback_present": false
+      }
+    },
+    {
+      "order": 3,
+      "id": "askme_adapter_run",
+      "operation": "cold_start_agent_inference",
+      "emit_prediction_even_if_agent_incomplete": true,
+      "expected_artifacts": [
+        "askme_result_json",
+        "askme_run_log",
+        "askme_policy_decision_log",
+        "featurebench_prediction_jsonl",
+        "git_diff",
+        "route_and_usage_metadata"
+      ]
+    },
+    {
+      "order": 4,
+      "id": "deterministic_post_run_audit",
+      "operation": "verify_single_prediction_and_retained_provenance_before_acceptance",
+      "checks": [
+        "exactly one prediction for the frozen task and attempt",
+        "prediction success agrees with AskMe structured status",
+        "full prompt hash and goal-context length agree",
+        "frozen execution budgets and inner timeout agree",
+        "AskMe adapter, FeatureBench, and dataset revisions agree",
+        "both source checkouts were clean",
+        "launcher guard start is recorded",
+        "endpoint catalog matched the exact dated served model on the pinned provider",
+        "credential is absent from every retained artifact"
+      ],
+      "expected": {
+        "audit_executed": true,
+        "audit_passed": true
+      }
+    },
+    {
+      "order": 5,
+      "id": "adapter_prediction_acceptance",
+      "operation": "official_featurebench_eval",
+      "evaluator_arguments": [
+        "--predictions-path",
+        "<featurebench_prediction_jsonl>",
+        "--dataset",
+        "<pinned_dataset_snapshot>",
+        "--split",
+        "fast",
+        "--task-id",
+        "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+        "--n-concurrent",
+        "1",
+        "--include-failed"
+      ],
+      "expected": {
+        "evaluation_completed": true,
+        "resolved": "record_observed_boolean",
+        "error_present": false,
+        "traceback_present": false
+      }
+    }
+  ],
+  "outcome_contract": {
+    "agent_completion": {
+      "source": "AskMe structured result status",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "feature_acceptance": {
+      "source": "Official FeatureBench evaluator resolved field",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "must_report_joint_outcome": true,
+    "agent_complete_does_not_imply_acceptance": true,
+    "acceptance_does_not_require_agent_complete": true
+  },
+  "adapter_qualification": {
+    "requires_gold_control_resolved": true,
+    "requires_harmless_control_unresolved": true,
+    "requires_harmless_control_patch_applied": true,
+    "requires_prediction_serialized_for_the_only_attempt": true,
+    "requires_deterministic_post_run_audit_passed": true,
+    "requires_official_eval_categorical_outcome": true,
+    "rejects_official_evaluator_error_or_traceback": true,
+    "requires_agent_patch_resolved": false
+  },
+  "audit_fields_required": [
+    "execution_started_at",
+    "execution_finished_at",
+    "host_platform",
+    "askme_run_commit",
+    "askme_git_dirty",
+    "adapter_code_revision",
+    "execution_revision",
+    "featurebench_commit",
+    "dataset_revision",
+    "container_digest",
+    "requested_model",
+    "served_model",
+    "requested_provider",
+    "served_provider",
+    "reasoning_policy",
+    "runner_exit",
+    "deterministic_post_run_audit",
+    "policy_decision_log",
+    "credential_leak_audit",
+    "agent_completion",
+    "feature_acceptance",
+    "wall_seconds",
+    "prompt_tokens",
+    "completion_tokens",
+    "billed_cost",
+    "artifact_paths"
+  ],
+  "supersedes": {
+    "protocol_id": "askme-featurebench-fast-qwen-27b-adapter-canary-v5",
+    "consumed": false,
+    "model_calls_under_superseded_protocol": 0,
+    "reason": "maintainer directive 2026-08-01: route via CoreWeave instead of SiliconFlow for reliability/speed; registered before any outcome-bearing model call under v5 or v6"
+  }
+}

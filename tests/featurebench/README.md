@@ -16,6 +16,21 @@ The frozen values and outcome contract are also recorded in
 > outcome-bearing run must use a separately registered protocol version with a
 > new adapter revision and updated hashes before the first model response.
 
+## v6 amendment (CoreWeave provider re-pin)
+
+Before any model call under v5, the maintainer re-pinned the provider from
+SiliconFlow to CoreWeave (reliability/speed). The v6 protocols
+([`gemma-31b-canary-protocol-v6.json`](gemma-31b-canary-protocol-v6.json),
+[`qwen-27b-canary-protocol-v6.json`](qwen-27b-canary-protocol-v6.json))
+supersede the unconsumed v5 protocols and change **only**
+`agent_cell.provider.order`; the dated served-model IDs, task, dataset,
+image, budgets, timeouts, and AskMe base are unchanged. The v5 controls carry
+over (provider-independent); the CoreWeave endpoint-catalog gate and the
+comparison caveats — provider stack differs from the SiliconFlow-served v4/pi
+records, and the Gemma cell moves fp8→bf16 — are recorded in
+[`results/2026-08-01-v6-provider-amendment.json`](results/2026-08-01-v6-provider-amendment.json).
+One attempt per cell, as before.
+
 ## v5 registration (revision-3 action interface)
 
 Both v4 attempts were consumed on 2026-08-01 (empty-patch unresolved in both

@@ -22,10 +22,11 @@ after results require a new protocol version.
 **FeatureBench protocol numbering:** the FeatureBench canary series (issue #7)
 has consumed protocol versions up to v4 (both v4 cells spent their single
 attempt on 2026-08-01 under the revision-2 interface; empty-patch unresolved,
-records in `tests/featurebench/results/`). Frozen **v5** protocols reflecting
+records in `tests/featurebench/results/`). Frozen **v6** protocols reflecting
 this revision-3 action interface are registered in `tests/featurebench/` (one
 Gemma 4 31B cell, one Qwen 3.6 27B cell), with the gold and harmless controls
-requalified before any model call. Each cell allows one model attempt on the
+requalified before any model call; v6 supersedes the unconsumed v5 protocols
+with a provider re-pin (SiliconFlow → CoreWeave) and no other change. Each cell allows one model attempt on the
 same canary task; subset expansion requires a patch reaching execution and
 held-out acceptance first.
 
