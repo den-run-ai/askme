@@ -8,6 +8,12 @@ RESULT_PATH = (
     / "results"
     / "2026-07-13-gemma-4-31b-canary.json"
 )
+QWEN_RESULT_PATH = (
+    Path(__file__).parent
+    / "featurebench"
+    / "results"
+    / "2026-07-31-qwen-3.6-27b-canary.json"
+)
 
 
 def test_published_canary_result_is_internally_consistent():
@@ -26,7 +32,10 @@ def test_published_canary_result_is_internally_consistent():
     }
 
     usage = result["usage"]
-    assert usage["prompt_tokens"] + usage["completion_tokens"] == usage["total_tokens"]
+    assert (
+        usage["prompt_tokens"] + usage["completion_tokens"]
+        == usage["total_tokens"]
+    )
     assert usage["responses"] == 28
     assert usage["openrouter_cost_usd"] == 0.01585905
 
@@ -36,6 +45,63 @@ def test_published_canary_result_is_internally_consistent():
     assert result["cell"]["served_providers"] == ["SiliconFlow"]
     assert result["agent"]["status"] == "exhausted"
     assert result["agent"]["reported_completion"] is False
+    assert result["agent"]["patch_bytes"] == 0
+    assert result["official_acceptance"] == {
+        "featurebench_eval_completed": True,
+        "resolved": False,
+        "patch_successfully_applied": False,
+        "empty_patch": True,
+        "error_instances": 0,
+    }
+    assert result["audit"]["strict_served_model_match"] is True
+    assert result["audit"]["api_key_leaks"] == 0
+
+    interpretation = result["interpretation"]
+    for unsupported_claim in (
+        "not a FeatureBench score",
+        "model-family comparison",
+        "model-size result",
+        "causal estimate",
+    ):
+        assert unsupported_claim in interpretation
+
+
+def test_published_qwen_canary_result_is_internally_consistent():
+    result = json.loads(QWEN_RESULT_PATH.read_text(encoding="utf-8"))
+
+    assert result["label"] == (
+        "one-task FeatureBench fast Qwen3.6 27B adapter canary"
+    )
+    assert result["protocol_id"] == (
+        "askme-featurebench-fast-qwen-27b-adapter-canary-v3"
+    )
+    assert result["qualification"]["valid"] is True
+    assert result["qualification"]["gold_control"]["resolved_instances"] == 1
+    assert result["qualification"]["harmless_nonempty_control"] == {
+        "completed_instances": 1,
+        "patch_successfully_applied": True,
+        "resolved": False,
+        "error_instances": 0,
+    }
+
+    usage = result["usage"]
+    assert usage["prompt_tokens"] + usage["completion_tokens"] == usage["total_tokens"]
+    assert usage["responses"] == 20
+    assert usage["openrouter_cost_usd"] == 0.0217836
+
+    assert result["cell"]["served_models"] == [
+        "qwen/qwen3.6-27b-20260422"
+    ]
+    assert result["cell"]["served_providers"] == ["SiliconFlow"]
+    assert result["agent"]["status"] == "exhausted"
+    assert result["agent"]["reported_completion"] is False
+    assert result["agent"]["selected_actions"] == {
+        "read": 14,
+        "write": 0,
+        "edit": 0,
+        "shell": 0,
+    }
+    assert result["agent"]["executed_actions"]["read"] == 2
     assert result["agent"]["patch_bytes"] == 0
     assert result["official_acceptance"] == {
         "featurebench_eval_completed": True,

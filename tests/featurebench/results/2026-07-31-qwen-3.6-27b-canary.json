@@ -1,0 +1,104 @@
+{
+  "label": "one-task FeatureBench fast Qwen3.6 27B adapter canary",
+  "protocol_id": "askme-featurebench-fast-qwen-27b-adapter-canary-v3",
+  "protocol_registered_at": "2026-08-01T00:06:51Z",
+  "started_at": "2026-08-01T00:09:59Z",
+  "completed_at": "2026-08-01T00:17:41Z",
+  "qualification": {
+    "valid": true,
+    "gold_control": {
+      "completed_instances": 1,
+      "resolved_instances": 1,
+      "f2p_pass_rate": 1.0,
+      "error_instances": 0
+    },
+    "harmless_nonempty_control": {
+      "completed_instances": 1,
+      "patch_successfully_applied": true,
+      "resolved": false,
+      "error_instances": 0
+    }
+  },
+  "sources": {
+    "askme_base_revision": "0dd686c42ee0d325195aec3a500eee4c0ec4c8c9",
+    "askme_adapter_code_revision": "902285c84edfbbed264a456ab615439f5c919a31",
+    "askme_execution_revision": "d6b2917611320a5b22c93de3b4528022e129a8a6",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "qwen/qwen3.6-27b",
+    "requested_provider": "siliconflow",
+    "provider_fallback": false,
+    "served_models": [
+      "qwen/qwen3.6-27b-20260422"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ]
+  },
+  "usage": {
+    "responses": 20,
+    "reasoning_responses": 2,
+    "prompt_tokens": 55748,
+    "completion_tokens": 1581,
+    "total_tokens": 57329,
+    "openrouter_cost_usd": 0.0217836,
+    "agent_trajectory_seconds": 96.09
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "selected_actions": {
+      "read": 14,
+      "write": 0,
+      "edit": 0,
+      "shell": 0
+    },
+    "executed_actions": {
+      "read": 2,
+      "write": 0,
+      "edit": 0,
+      "shell": 0
+    },
+    "duplicate_read_skips": 6,
+    "same_read_auto_failures": 6,
+    "prediction_success": false,
+    "patch_bytes": 0,
+    "observed_failure": "All 14 executor action responses selected read on the same file. Two reads executed and returned the frozen 300-character prefix; six duplicate reads were skipped and six triggered the repeated-read stuck-loop guard. Three task-local replans and all three planning attempts produced no write, edit, or shell action, so the agent exhausted with an empty patch."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": false,
+    "empty_patch": true,
+    "error_instances": 0
+  },
+  "audit": {
+    "infrastructure_valid": true,
+    "qualification_valid": true,
+    "policy_compliant": true,
+    "policy_action_decisions": 2,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "5c4d6a581f5dd94edcf9fa1af1b00a7a18ee97e15d2a0a8a0d59716e53e4a41f",
+      "deterministic-post-run-audit.json": "fc8a9cc4f523c1596d779d0ec8b9defe000c47577fa379a94daeeffbe4835be9",
+      "askme-result.json": "05314c4131c979b74bb6b192383840c430b707b1a2c8ef32c7ab1ea3f5f3fd7e",
+      "output.jsonl": "39654c4853e368a1dc59ab41c702d2abf86d4c4dc7c24b04a762d7231acd869d",
+      "featurebench-report.json": "99a0feef98d4a6881aed4f0ebeca6f13ad2c3b0dca068a7815d3fe048f4fac9f",
+      "joint-outcome.json": "60b7b0a40f1e8e9d85dd86ca83b2bf9ca218838f71eeaa2482978019390b3356"
+    }
+  },
+  "comparison_boundary": "The task, AskMe source, limits, requested provider, and official evaluator match the earlier Gemma canary, but this v3 run uses the later hardened adapter and audit path. The two retained outcomes may be contrasted descriptively, not treated as a controlled model ranking.",
+  "interpretation": "This is one supported negative Qwen3.6 27B canary of the frozen AskMe action protocol on one task. It is not a FeatureBench score, reliability estimate, model-family comparison, model-size result, or causal estimate of the reasoning policy."
+}

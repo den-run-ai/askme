@@ -33,7 +33,28 @@ The compact, hash-linked record is
 This is a supported negative canary of the frozen action protocol on one task.
 It is not a FeatureBench score, a reliability estimate, a model-family or
 model-size result, or a causal estimate of the reasoning policy. No replacement
-model attempt was made.
+model attempt was made under the v2 protocol.
+
+## Qwen3.6 27B follow-up canary
+
+A separately preregistered v3 follow-up ran the same task, AskMe source,
+budgets, strict SiliconFlow provider, and official evaluator with
+`qwen/qwen3.6-27b`. Both controls passed, the exact dated route was verified,
+and the retained infrastructure and credential-leak audits were valid. Across
+20 responses, Qwen selected the same file read 14 times: two reads executed,
+six were skipped as duplicates, and six triggered the repeated-read guard. It
+never selected a write, edit, or shell action, exhausted three planning
+attempts, produced an empty patch, and was unresolved by the official
+evaluator. The retained record is
+[`results/2026-07-31-qwen-3.6-27b-canary.json`](results/2026-07-31-qwen-3.6-27b-canary.json),
+and its frozen protocol is
+[`qwen-27b-canary-protocol-v3.json`](qwen-27b-canary-protocol-v3.json).
+
+This is another supported negative boundary canary, not a FeatureBench score or
+a model ranking. The task, AskMe source, and execution limits match v2, but v3
+uses the later hardened adapter and audit path. The observed failure also
+differs: Gemma reached implementation-write attempts that did not survive the
+structured-action boundary, while Qwen remained in a repeated-read loop.
 
 ## Frozen sources and cell
 
