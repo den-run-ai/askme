@@ -184,11 +184,13 @@ build and repair acceptance outcomes for all four hosted models. Keep `8/8
 complete` and `7/8 accepted` visible, but do not let aggregate totals replace
 the model rows. Keep per-cell wall time, steps, tokens, replans, and model-shape
 detail in the repository receipts rather than the stage slide. Label the matrix
-`n=1/cell`, simple, hosted, and descriptive only, with no model ranking.
+with one short caveat — a compatibility smoke with single runs, not a ranking;
+the full boundary language lives in the eval receipts.
 
 ### 6. FeatureBench progression and next bottleneck
 
-Give the slide one job: make the revision-3 improvement unmistakable.
+Give the slide one job: state the plain result — both models build partially
+working app features but fail on testing.
 
 1. **Before — July:** the frozen FeatureBench-fast canary produced zero writes,
    an empty patch, and an unresolved task.
@@ -200,10 +202,11 @@ Give the slide one job: make the revision-3 improvement unmistakable.
    neither emitted `done`.
 
 State the supported observation directly: AskMe now reaches applied, partially
-working FeatureBench code on this canary. Keep the one-task, one-attempt/model,
-changed-serving-stack caveats visible, so the progression does not read as a
-FeatureBench score or transport-only causal claim. The retained wrong-path
-smoke example belongs on slide 3 and should not compete with this story.
+working FeatureBench code on this canary. The stage caveat is one short line —
+one task, one attempt per model, not a benchmark score — so the progression
+does not read as a FeatureBench score; the serving-stack and mechanism caveats
+stay in companion documents. The retained wrong-path smoke example belongs on
+slide 3 and should not compete with this story.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
@@ -229,8 +232,12 @@ and enterprise positioning off the slide.
 
 ## Visual and editorial constraints
 
-- Exactly eight rendered slides: seven main slides with exactly 499 speaker-note
+- Exactly eight rendered slides: seven main slides with exactly 511 speaker-note
   words in total, followed by one backup slide without a main-talk note block.
+- Stage slides carry no PR or issue numbers; receipts and protocol pointers
+  live in the talk README and evals documents.
+- Main slides carry at most one short caveat line and no source footers; the
+  backup slide keeps its external-documentation attribution footer.
 - Slide 1 must have substantial whitespace.
 - Slide 2 should communicate one relationship, not survey a market.
 - Slide 5 keeps a readable acceptance table; trajectory detail stays in the
@@ -277,14 +284,20 @@ and enterprise positioning off the slide.
   serving stack, Gemma matched the exploratory pi reference at 11/13 while Qwen
   reached 7/13 versus the pi reference's 10/13. This is an observed harness
   outcome, not causal isolation of transport or write forcing. Numbers stay
-  bounded as one-task adapter canaries; provider names stay in slide footers
-  and companion documents; the
+  bounded as one-task adapter canaries; provider names stay in companion
+  documents; the
   revision-4 validate-after-write work is named only as in-progress future
   work, never as done.
 - The latest slide review makes that progression the primary message on slide
   6: AskMe moved from zero writes to applied, partially working patches. The
   wrong-path smoke example remains on slide 3; slide 6 now names validation and
   termination as the next bottlenecks.
+- The 2026-08-01 simplification instruction prioritizes stage clarity: no PR or
+  issue numbers on any slide, at most one short caveat line per main slide, and
+  no source footers on the main slides (the backup slide keeps its external-doc
+  attribution). Slide 6 leads with the plain result — both models build
+  partially working app features but fail on testing — while the serving-stack,
+  local-neutrality, and Codex caveats remain in companion documents.
 
 ## Pre-render drift check
 
@@ -297,13 +310,14 @@ and enterprise positioning off the slide.
 - [ ] The retained wrong-path workflow miss remains visible.
 - [ ] Reasoning is framed as trajectory quality and bounded replanning.
 - [ ] All four hosted model rows and both acceptance outcomes are visible.
-- [ ] The model matrix is labeled descriptive, hosted, simple, and `n=1/cell`.
+- [ ] The model matrix carries the single compatibility-smoke, not-a-ranking
+      caveat.
 - [ ] Per-cell timings, tokens, steps, replans, and model-shape detail remain in
       the repository receipts rather than the stage slide.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
-- [ ] Slide 6 leads with the progression from zero writes and an empty patch to
-      applied patches reaching Gemma 11/13 and Qwen 7/13 target tests.
+- [ ] Slide 6 leads with the plain result: both models build partially working
+      app features (Gemma 11/13, Qwen 7/13 target tests) but fail on testing.
 - [ ] Slide 6 separates that progress from the remaining validation and clean
       termination failures.
 - [ ] Slide 6 labels the canary one task, one attempt/model, and not a score.
@@ -317,9 +331,11 @@ and enterprise positioning off the slide.
 - [ ] The v6 progression keeps one-task adapter-canary boundary language and
       never reads as a FeatureBench score.
 - [ ] Any v6 comparison to v4 or the pi ablation carries the serving-stack
-      confound, the waived local-neutrality bar, and the Codex P2 caveats on
-      the slide footer or in companion documents.
-- [ ] Revision-4 validate-after-write work is labeled in progress, not merged.
+      confound, the waived local-neutrality bar, and the Codex P2 caveats in
+      companion documents.
+- [ ] No PR or issue numbers appear on any slide; revision-4 status stays in
+      companion documents and is never presented as done.
+- [ ] Main slides have no source footers and at most one short caveat line.
 - [ ] Backup slide 8 compares AskMe, pi, and OpenHands without a product ranking.
 - [ ] Eight slides render without clipping; the seven main speaker-note blocks
-      total 499 words.
+      total 511 words.

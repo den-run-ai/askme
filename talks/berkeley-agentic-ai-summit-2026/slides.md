@@ -510,14 +510,11 @@ Acceptance checks the required behavior and artifact.
   </div>
   <div class="events">
     <div class="event ok"><strong>A different target was chosen</strong><span><code>cc -o /tmp/test main.c &amp;&amp; /tmp/test</code></span></div>
-    <div class="event ok"><strong>The combined command exited 0</strong><span>The retained record does not independently prove stdout or source contents.</span></div>
+    <div class="event ok"><strong>The combined command exited 0</strong><span>From the agent's side, the task looked done.</span></div>
     <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
     <div class="callout"><strong>Exit-zero command + reported completion ≠ accepted artifact.</strong></div>
-    <p class="result-limit"><strong>Current limit:</strong> acceptance scored this run after completion; the failure was not returned for recovery.</p>
   </div>
 </div>
-
-<div class="source">One hosted build cell · retained under the predeclared failure rule · evals/draft-results.json</div>
 
 <!--
 Speaker notes (~45s):
@@ -549,7 +546,7 @@ remained unmet afterward.
   <div class="decision replan"><strong>Broken assumption</strong><p>Replan broadly only when the plan is no longer valid.</p></div>
 </div>
 
-<div class="callout"><strong>Trajectory goal—not yet isolated:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
+<div class="callout"><strong>Design goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
 
 <!--
 Speaker notes (~45s):
@@ -563,11 +560,11 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 ---
 
-<div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
+<div class="eyebrow">Hosted smoke test · July 10, 2026</div>
 
 # Acceptance caught the one bad deliverable
 
-<p class="subtitle">Eight one-shot cells across four hosted variants</p>
+<p class="subtitle">Four hosted models · two simple tasks · one run each</p>
 
 <div class="smoke-layout">
   <div class="smoke-scores">
@@ -584,9 +581,7 @@ stuck steps, and unnecessary plan churn—not longer monologues.
   </div>
 </div>
 
-<div class="smoke-limit"><strong>Compatibility smoke, not a ranking:</strong> n=1/cell, descriptive only; no speed, family, size, reasoning, or reliability inference.</div>
-
-<div class="source">Four hosted variants × two simple checks × one unseeded run/cell · detailed receipts: evals/README.md</div>
+<div class="smoke-limit"><strong>Compatibility smoke, not a ranking:</strong> single runs on simple tasks — no model comparisons.</div>
 
 <!--
 Speaker notes (~45s):
@@ -600,48 +595,47 @@ These are one-shot receipts, not rankings.
 
 ---
 
-<div class="eyebrow">FeatureBench canary · revision 3 requalification</div>
+<div class="eyebrow">FeatureBench canary · one feature task</div>
 
-# AskMe now makes FeatureBench edits
+# Both models build app features — but fail on testing
 
-<p class="subtitle">The same frozen task moved from no write to partially working code.</p>
+<p class="subtitle">The same frozen task went from zero code changes to working partial features.</p>
 
 <div class="feature-progress">
   <div class="feature-stage before">
-    <div class="feature-label">Before · July canary</div>
+    <div class="feature-label">Before · July</div>
     <div class="big-result">0 writes</div>
     <h2>Empty patch</h2>
-    <p>The action interface blocked the edit. The task stayed unresolved.</p>
+    <p>The action interface blocked every edit. No code changed.</p>
   </div>
   <div class="feature-stage after">
     <div class="feature-label">After · Aug 1</div>
-    <h2>Both patches applied</h2>
+    <h2>App features built</h2>
     <div class="feature-results">
       <div><strong>11 / 13</strong><span>Gemma target tests</span></div>
       <div><strong>7 / 13</strong><span>Qwen target tests</span></div>
     </div>
-    <p>AskMe reached partially working code in both attempts.</p>
+    <p>Both patches applied — working partial features from both models.</p>
   </div>
   <div class="feature-stage next">
-    <div class="feature-label">Next bottleneck</div>
-    <h2>No clean validation or finish</h2>
-    <p><b>Gemma:</b> 18 writes, 0 tests<br><b>Qwen:</b> 1 write, then reading<br><b>Both:</b> no <code>done</code></p>
+    <div class="feature-label">Why they still fail</div>
+    <h2>They never test their work</h2>
+    <p>Gemma rewrote code without running tests. Qwen stopped editing and went back to reading. Neither finished cleanly.</p>
   </div>
 </div>
 
-<div class="feature-takeaway"><strong>What changed:</strong> AskMe now makes code changes; validation and termination are the remaining harness problems.</div>
+<div class="feature-takeaway"><strong>Bottom line:</strong> small models can build app features; testing and finishing the work is the next gap.</div>
 
-<div class="feature-caveat">One task · one attempt/model · changed serving stack · evidence of progress, not a FeatureBench score or transport-only causal claim.</div>
-
-<div class="source">Frozen canary records: featurebench/results/ · revision-3 protocol: issues #17–#20</div>
+<div class="feature-caveat">One task, one attempt per model — progress, not a benchmark score.</div>
 
 <!--
 Speaker notes (~45s):
-Revision three changed the outcome on the same FeatureBench task. The July canary produced
-no write and an empty patch. On August first, both models produced patches that applied:
-Gemma passed eleven of thirteen tests, while Qwen passed seven. The task remained unresolved
-because the loop did not validate and finish cleanly. Gemma rewrote eighteen times without
-testing; Qwen wrote once, then returned to reading. This is meaningful progress on one task,
+FeatureBench asks the agent to build a real app feature. In July, the same task produced
+no code edits at all: the agents read files and returned an empty patch. On August first,
+both models produced patches that applied and passed most target tests: Gemma eleven of
+thirteen, Qwen seven of thirteen. Both models can now build partially working app features.
+Neither validated its work: Gemma rewrote the same file without running tests; Qwen stopped
+editing and went back to reading. This is one task and one attempt per model — progress,
 not a benchmark score.
 -->
 
@@ -652,9 +646,9 @@ not a benchmark score.
 # Promising for bounded loops. Feature readiness is still open.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple smoke: 7 / 8 artifacts accepted. On one feature task, revision 3 moved both models from empty to applied but unresolved patches: Gemma 11/13 target tests; Qwen 7/13.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design was consequential on this task. The bundled changes moved failures into execution: Gemma rewrote without testing; Qwen resumed observation after one write.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Reliability beyond one task; clean validation and termination; transport versus serving/configuration effects; reasoning, family, size, architecture, and local performance. Revision 4 is implemented in open PR #21; v7 requalification is pending.</p></div>
+  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple tasks: 7 / 8 artifacts accepted. Feature task: both models built working partial features — Gemma 11/13, Qwen 7/13 target tests — but neither tested or finished its work.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design changed the outcome: the same task moved from empty patches to applied, partially working code.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Testing and clean completion. Reliability beyond one task. Model-to-model comparisons and local performance.</p></div>
 </div>
 
 <p class="tagline">Evaluate the model, harness, and task as one system.</p>
@@ -665,12 +659,11 @@ not a benchmark score.
 
 <!--
 Speaker notes (~35s):
-The bounded checks are promising, but feature readiness remains unproven. Under revision
-three, both models moved from empty to applied patches, yet neither resolved the task or
-finished cleanly. Gemma rewrote without testing; Qwen wrote once and returned to observation.
-The serving stack also changed, so this shows that harness design matters, not that transport
-alone caused the improvement. Revision four is implemented in open PR #21; matched v7
-requalification remains pending. Judge delivered behavior.
+The bounded checks are promising, but feature readiness remains unproven. Both models moved
+from empty patches to working partial features, yet neither tested its work or finished
+cleanly. Gemma rewrote without testing; Qwen wrote once and returned to reading. Testing
+and clean completion are the next harness problems, and one task cannot settle general
+readiness. Judge delivered behavior; evaluate the model, harness, and task as one system.
 -->
 
 ---

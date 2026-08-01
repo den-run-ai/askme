@@ -10,7 +10,7 @@
 ## Contents
 
 - [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
-- [`slides.md`](slides.md) — Marp source with 499 words of notes across the seven main slides, plus one backup slide.
+- [`slides.md`](slides.md) — Marp source with 511 words of notes across the seven main slides, plus one backup slide.
 - `slides.pdf` — rendered deck.
 - [`blog.md`](blog.md) — companion argument and citations.
 - [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
