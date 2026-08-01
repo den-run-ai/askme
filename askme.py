@@ -143,6 +143,16 @@ MAX_STEPS = 10
 MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 
+# Write-forcing executor policy (issue #15): on a write-shaped task,
+# observation may not consume the whole step budget — the 2026-08-01 Qwen
+# canary spent all 27 executed steps on tree/read and never selected a write.
+WRITE_PRESSURE_OBSERVATIONS = 3  # observation steps before the executor must commit
+OBSERVE_TAIL_RESERVE = 3         # final steps per attempt reserved for commitment
+_WRITE_TASK_RE = re.compile(
+    r"\b(implement|write|create|patch|add|fix|edit|update|replace|insert|include)\b",
+    re.I,
+)
+
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
 # stay navigable without blowing up executor state.
@@ -157,8 +167,13 @@ TREE_MAX_CHARS = 1500     # bounded tree output
 TREE_MAX_DEPTH = 3        # bounded tree walk depth
 OBSERVE_ACTIONS = frozenset({"read", "search", "tree"})
 OBSERVE_STATE_CHARS = 1500  # executor-state budget for observation step output
+# Backend-aware output budgets (issue #15): small caps are a wall-clock
+# necessity at ~7 tok/s locally but a pure artifact on OpenRouter, where an
+# 8KB implementation file is ~3000 tokens and can never fit under 512/1536.
+# Local values are unchanged — the local path keeps chunked append instead.
+STEP_TOKENS = 4096 if LLM_BACKEND == "openrouter" else 256
 # Retry budget when a truncated write/edit payload fails to parse.
-STEP_WRITE_TOKENS = 1024 if LLM_BACKEND == "openrouter" else 512
+STEP_WRITE_TOKENS = 8192 if LLM_BACKEND == "openrouter" else 512
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
 REASONING_POLICIES = ("gated", "off")
 DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
@@ -224,6 +239,11 @@ read: may take "offset"/"limit" (lines); if output says "continue: offset=N", re
 search: literal pattern in "arg", optional "path" (default "."); bounded matches
 tree: directory in "arg" (default "."); bounded listing
 write: whole file; add "append":true to append the next chunk instead
+write content may follow the JSON between sentinel lines instead of "content":
+{"action":"write","arg":"f.py","reasoning":"..."}
+<<<CONTENT
+raw file lines, no escaping
+CONTENT>>>
 edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
 Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}"""
 
@@ -295,6 +315,33 @@ def _accept_or_raise(obj, text):
 
 
 _STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
+
+# Sentinel-framed content transport (issue #15): implementation-scale write
+# content travels between sentinel lines after the action JSON instead of
+# inside a JSON string — no escaping overhead, and truncation is recoverable:
+# a missing closing sentinel at finish_reason=length means "the complete lines
+# arrived; continue via chunked append" instead of an all-or-nothing parse
+# failure.
+CONTENT_OPEN = "<<<CONTENT"
+CONTENT_CLOSE = "CONTENT>>>"
+
+
+def _split_content_block(text):
+    """Split a response into (header_text, content, closed).
+    content is None when no sentinel block is present."""
+    lines = text.split("\n")
+    open_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == CONTENT_OPEN:
+            open_idx = i
+            break
+    if open_idx is None:
+        return text, None, False
+    header = "\n".join(lines[:open_idx])
+    for j in range(open_idx + 1, len(lines)):
+        if lines[j].strip() == CONTENT_CLOSE:
+            return header, "\n".join(lines[open_idx + 1:j]), True
+    return header, "\n".join(lines[open_idx + 1:]), False
 
 # Truncated write/edit payloads are the most common large-output parse failure;
 # detect the attempted action so the retry gets a payload-sized budget.
@@ -481,20 +528,30 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         # Strip markdown code fences if present
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+        # Sentinel content block (issue #15): content rides outside the JSON.
+        text, block, block_closed = _split_content_block(text)
         # Try to extract JSON object from anywhere in the text
         if not text.startswith("{") and "{" in text:
             text = text[text.index("{"):]
+
+        def _attach_block(obj):
+            if block is not None and isinstance(obj, dict):
+                obj["content"] = block
+                if not block_closed and finish_reason == "length":
+                    obj["content_truncated"] = True
+            return obj
+
         try:
             parsed = json.loads(text)
             if not isinstance(parsed, dict):
                 raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
-            return _accept_or_raise(parsed, text)
+            return _accept_or_raise(_attach_block(parsed), text)
         except json.JSONDecodeError as parse_err:
             # E03: attempt mechanical repair before burning a retry
             repaired = _repair_json(text)
             if repaired is not None:
                 try:
-                    accepted = _accept_or_raise(repaired, text)
+                    accepted = _accept_or_raise(_attach_block(repaired), text)
                     log(f"  JSON repaired on attempt {attempt}")
                     return accepted
                 except json.JSONDecodeError:
@@ -608,6 +665,13 @@ def get_plan(user_prompt, state):
     recent = _step_digest(state.get("all_steps", []))
     if recent:
         plan_state["recent_steps"] = recent
+        # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
+        # replans restated the failed task text; make "no write happened yet"
+        # the visible problem instead.
+        if _WRITE_TASK_RE.search(user_prompt) and not any(
+                s.get("action") in ("write", "edit") and s.get("ok")
+                for s in state.get("all_steps", [])):
+            plan_state["no_write_executed"] = True
     if "environment" not in plan_state:
         plan_state["environment"] = {}
     if "policy" not in plan_state:
@@ -638,7 +702,8 @@ if GOAL_CONTEXT_CHARS < 1:
 def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
              reasoning_policy=DEFAULT_REASONING_POLICY,
              reasoning_trigger="executor",
-             goal_context_chars=GOAL_CONTEXT_CHARS):
+             goal_context_chars=GOAL_CONTEXT_CHARS,
+             write_pressure=False):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -673,12 +738,13 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
     slim["policy"] = state.get("policy", get_policy())
     goal_line = f"GOAL:\n{goal[:goal_context_chars]}\n\n" if goal else ""
     user_msg = f"{goal_line}TASK:\n{task[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(slim)}"
-    # Use higher token budget for OpenRouter (faster model, needs room for write content + reasoning)
-    step_tokens = 512 if LLM_BACKEND == "openrouter" else 256
+    if write_pressure:
+        user_msg += ("\nNOTE: several observation steps done but no write yet. "
+                     "Next action MUST be write, edit, or shell — or fail with a one-line reason.")
     return ask_llm([
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
-    ], max_tokens=step_tokens, think=think,
+    ], max_tokens=STEP_TOKENS, think=think,
        reasoning_policy=reasoning_policy,
        reasoning_trigger=reasoning_trigger)
 
@@ -774,6 +840,10 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     failed_steps = _step_digest(state.get("all_steps", []), count=3)
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
+        if _WRITE_TASK_RE.search(failed_task) and not any(
+                s.get("action") in ("write", "edit") and s.get("ok")
+                for s in state.get("all_steps", [])):
+            replan_state["no_write_executed"] = True
     env = state.get("environment", {})
     if env.get("missing_tools"):
         replan_state["missing_tools"] = env["missing_tools"]
@@ -1509,6 +1579,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 reasoning_trigger = "executor"
                 dup_skip_count = 0
                 last_successful_edit = None
+                observe_executed = 0
+                commit_executed = 0
+                observe_blocked = 0
+                task_wants_write = bool(_WRITE_TASK_RE.search(task))
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
                 if completed_repair:
                     log(f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})")
@@ -1524,6 +1598,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             reasoning_policy=reasoning_policy,
                             reasoning_trigger=reasoning_trigger,
                             goal_context_chars=goal_context_chars,
+                            write_pressure=(
+                                task_wants_write and commit_executed == 0
+                                and observe_executed >= WRITE_PRESSURE_OBSERVATIONS),
                         )
                     except LLMTransportError as e:
                         log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
@@ -1561,6 +1638,41 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         state["errors"].append(f"Task '{task}': {reason}")
                         break
 
+                    # Sentinel transport truncation (issue #15): keep the
+                    # complete lines that arrived and steer the model to finish
+                    # the file with chunked append instead of failing the step.
+                    truncated_write = act == "write" and action.pop("content_truncated", False)
+                    if truncated_write:
+                        kept = action.get("content", "")
+                        kept = kept[: kept.rfind("\n") + 1]
+                        if not kept:
+                            log(f"  [{step + 1}] skip (write truncated before a complete line)")
+                            _skip_step(i, step, act, action, "truncated_write_empty")
+                            state["last_steps"].append({
+                                "action": act, "arg": action.get("arg", ""), "ok": True,
+                                "output": "Write truncated before a complete line. Resend as smaller append:true chunks."})
+                            continue
+                        action["content"] = kept
+
+                    # Write-forcing tail reserve (issue #15): on a write-shaped
+                    # task the final steps are reserved for committing actions.
+                    if (act in OBSERVE_ACTIONS and task_wants_write
+                            and commit_executed == 0
+                            and max_steps - step <= OBSERVE_TAIL_RESERVE):
+                        observe_blocked += 1
+                        if observe_blocked >= 2:
+                            log(f"  [{step + 1}] auto-fail (observation steps exhausted without a write)")
+                            state["errors"].append(
+                                f"[stuck_loop] {act} {action.get('arg', '')[:60]}: observation steps exhausted without a write")
+                            _skip_step(i, step, act, action, "observe_tail_exhausted")
+                            break
+                        log(f"  [{step + 1}] skip ({act} blocked: remaining steps reserved for write)")
+                        _skip_step(i, step, act, action, "observe_tail_reserved")
+                        state["last_steps"].append({
+                            "action": act, "arg": action.get("arg", ""), "ok": True,
+                            "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason."})
+                        continue
+
                     # Duplicate action guard — per-action-type loop detection
                     last = state["last_steps"][-1:] if state["last_steps"] else []
                     if last and last[0]["action"] == act:
@@ -1590,14 +1702,21 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 dup_skip_count += 1
                                 log(f"  [{step + 1}] skip (duplicate {act}, same content)")
                                 _skip_step(i, step, act, action, f"duplicate_{act}")
+                                if prev.get("_truncated_write"):
+                                    dup_msg = ("File is incomplete — the earlier write was truncated. "
+                                               "Continue with append:true for the rest.")
+                                else:
+                                    dup_msg = "Already done — file unchanged. Move to next action or emit done."
                                 entry = {
                                     "action": act, "arg": action.get("arg", ""),
                                     "ok": True,
-                                    "output": "Already done — file unchanged. Move to next action or emit done."
+                                    "output": dup_msg
                                 }
                                 # Preserve match metadata so guard still detects duplicates on subsequent turns
                                 if act == "write":
                                     entry["_content"] = action.get("content", "")
+                                    if prev.get("_truncated_write"):
+                                        entry["_truncated_write"] = True
                                 elif act == "edit":
                                     entry["_find"] = action.get("find", "")
                                     entry["_replace"] = action.get("replace", "")
@@ -1679,7 +1798,14 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
                     dup_skip_count = 0  # reset on any non-skipped action
                     state["executed_steps"] += 1
+                    if act in OBSERVE_ACTIONS:
+                        observe_executed += 1
+                    else:
+                        commit_executed += 1
                     result = execute(action, working_dir)
+                    if truncated_write and result["ok"]:
+                        result["output"] += (" (truncated mid-file; continue with"
+                                             " append:true from the next line)")
                     ok_str = "OK" if result["ok"] else "FAIL"
                     log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
@@ -1698,6 +1824,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         step_entry["_content"] = action.get("content", "")
                         if action.get("append"):
                             step_entry["_append"] = True
+                        if truncated_write:
+                            step_entry["_truncated_write"] = True
                     if act == "edit":
                         step_entry["_find"] = action.get("find", "")
                         step_entry["_replace"] = action.get("replace", "")
@@ -1716,6 +1844,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 "wall_s": round(time.time() - t_step, 2)}
                     if result.get("truncated"):
                         step_log["truncated"] = True
+                    if truncated_write:
+                        step_log["truncated_write"] = True
                     # Hash-linked read audit: which content, how much of it,
                     # and where the window ended.
                     if act == "read" and result.get("sha256"):
