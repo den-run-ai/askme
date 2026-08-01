@@ -36,10 +36,33 @@ hardened adapter/audit hashes, and the same task, dataset revision, image
 digest, budgets, and timeouts as v2/v3. The gold and harmless controls were
 requalified under this interface before any model call; see
 [`results/2026-08-01-v4-control-requalification.json`](results/2026-08-01-v4-control-requalification.json).
-The clean commit containing the v4 protocols is the execution revision to pass
-as `--askme-revision`. The two model attempts remain unrun until triggered
-deliberately; nothing in this section authorizes more than one attempt per
-registered cell.
+The clean merge commit containing the v4 protocols, `72b78c2`, was the
+execution revision passed as `--askme-revision`. Both registered attempts have
+now been consumed; nothing in this section authorizes any further attempt under
+these protocols.
+
+### v4 outcomes (2026-08-01)
+
+Both cells ran their single attempt on 2026-08-01 and were fully qualified:
+gold control resolved, harmless control applied and unresolved, exactly one
+prediction serialized per cell, deterministic audits
+`valid_infrastructure_policy_compliant`, and official acceptance categorical
+with no evaluator error. Every token event in both cells was served by
+SiliconFlow as the exact preregistered dated model.
+
+- **Gemma 4 31B** — agent `exhausted`, empty patch, unresolved. 16 of 33
+  responses hit the output-token cap; under the revision-2 interface these
+  surfaced as typed `response_truncated` step failures instead of malformed
+  JSON. No write or edit was ever executed.
+  Record: [`results/2026-08-01-gemma-4-31b-canary-v4.json`](results/2026-08-01-gemma-4-31b-canary-v4.json).
+- **Qwen3.6 27B** — agent `exhausted`, empty patch, unresolved, with zero
+  parse failures: all 27 executed steps were observation actions (tree/read);
+  the model never attempted a write before its budgets ran out.
+  Record: [`results/2026-08-01-qwen36-27b-canary-v4.json`](results/2026-08-01-qwen36-27b-canary-v4.json).
+
+Each is one supported negative canary of the revision-2 action interface on
+one frozen task — not a FeatureBench score, a reliability estimate, or a
+model comparison.
 
 ## Completed canary outcome
 

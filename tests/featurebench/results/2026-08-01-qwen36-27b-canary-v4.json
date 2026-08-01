@@ -1,0 +1,116 @@
+{
+  "label": "one-task FeatureBench fast Qwen3.6 27B adapter canary",
+  "protocol_id": "askme-featurebench-fast-qwen-27b-adapter-canary-v4",
+  "action_interface_revision": 2,
+  "started_at": "2026-08-01T03:21:50Z",
+  "completed_at": "2026-08-01T03:29:18Z",
+  "host_platform": "macOS 25.5.0 Apple Silicon host; linux/amd64 task image under Docker Rosetta",
+  "qualification": {
+    "valid": true,
+    "gold_control": {
+      "completed_instances": 1,
+      "resolved_instances": 1,
+      "f2p_pass_rate": 1.0,
+      "error_instances": 0,
+      "wall_time_seconds": 79
+    },
+    "harmless_nonempty_control": {
+      "completed_instances": 1,
+      "patch_successfully_applied": true,
+      "resolved": false,
+      "error_instances": 0,
+      "wall_time_seconds": 81
+    }
+  },
+  "sources": {
+    "askme_base_revision": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+    "askme_adapter_code_revision": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+    "askme_execution_revision": "72b78c2bc9e679b853ca0c17a0acb8b9d7c7cc73",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "qwen/qwen3.6-27b",
+    "requested_provider": "siliconflow",
+    "provider_fallback": false,
+    "served_models": [
+      "qwen/qwen3.6-27b-20260422"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ]
+  },
+  "endpoint_catalog_gate": {
+    "authenticated_read_only_get": true,
+    "endpoint_count": 9,
+    "pinned_provider_matches": 1,
+    "matched_status": -2,
+    "matched_quantization": "fp8",
+    "valid": true
+  },
+  "usage": {
+    "responses": 42,
+    "reasoning_responses": 4,
+    "prompt_tokens": 132490,
+    "completion_tokens": 2157,
+    "total_tokens": 134647,
+    "openrouter_cost_usd": 0.0466494,
+    "finish_reasons": {
+      "stop": 41,
+      "length": 1
+    },
+    "agent_trajectory_seconds": 216.6
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "executed_actions": {
+      "tree": 14,
+      "read": 13,
+      "search": 0,
+      "shell": 0,
+      "write": 0,
+      "edit": 0,
+      "append": 0
+    },
+    "prediction_success": false,
+    "patch_bytes": 0,
+    "observed_failure": "The agent never issued a write, edit, or shell action: all 27 executed steps were bounded observation actions (14 tree, 13 read) across three planning attempts, with 8 further steps skipped by selected-vs-executed accounting and no typed parse failures (0 response_truncated, 0 malformed_action; 41 of 42 responses finished with stop). The run ended exhausted with an empty diff after 2,157 total completion tokens."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": false,
+    "empty_patch": true,
+    "error_instances": 0
+  },
+  "audit": {
+    "infrastructure_valid": true,
+    "qualification_valid": true,
+    "policy_compliant": true,
+    "policy_action_decisions": 27,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "runner_exit": 0,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "a5ee39a2b4f15f58ba060eba166b4e127206f826dc0c522d01bdbf886c299d9d",
+      "deterministic-post-run-audit.json": "9813affe3437086db885b8fdc79b606d013cfaa92f72bac2566a3d55c0529261",
+      "askme-result.json": "143e86523a6a1ede82614296c4cc1632b229187fdc3e3e4a78eb6506fb5695dc",
+      "output.jsonl": "39654c4853e368a1dc59ab41c702d2abf86d4c4dc7c24b04a762d7231acd869d",
+      "featurebench-report.json": "ae4bd1484a96268524d28594c56ef3484d7468a894b48055f52672f23da431b7",
+      "joint-outcome.json": "60b7b0a40f1e8e9d85dd86ca83b2bf9ca218838f71eeaa2482978019390b3356",
+      "openrouter-endpoint-catalog-preflight.json": "c7c54e67c614d9fc50f55f3dd0f6d525bf819e51234723a246ee10d3a6387f16"
+    }
+  },
+  "retained_run_directory": "/tmp/askme-featurebench-runs/canary-qwen-20260801T032150Z",
+  "interpretation": "This is one supported negative canary of the revision-2 AskMe action interface on one frozen task. It is not a FeatureBench score, reliability estimate, model-family comparison, model-size result, or causal estimate of the reasoning policy."
+}
