@@ -736,3 +736,535 @@ class TestEndToEndFeatureScale:
         assert st["executed_steps"] == 7
         assert st["skipped_steps"] == 0
         assert not st["errors"]
+
+
+# --- Revision 3 (issue #15): sentinel-framed content transport ---
+
+class TestSentinelSplit:
+    def test_no_block(self):
+        assert askme._split_content_block('{"action":"done"}') == (
+            '{"action":"done"}', None, False)
+
+    def test_closed_block(self):
+        text = 'HDR\n<<<CONTENT\na\nb\nCONTENT>>>'
+        assert askme._split_content_block(text) == ("HDR", "a\nb", True)
+
+    def test_unclosed_block(self):
+        text = 'HDR\n<<<CONTENT\na\nb'
+        assert askme._split_content_block(text) == ("HDR", "a\nb", False)
+
+    def test_prompt_advertises_sentinels(self):
+        assert askme.CONTENT_OPEN in askme.SYSTEM_STEP
+        assert askme.CONTENT_CLOSE in askme.SYSTEM_STEP
+
+
+class TestSentinelTransport:
+    def test_sentinel_write_parses_without_escaping(self):
+        code = 'import numpy as np\n\ndef seed(n):\n    return {"x": n}'
+        text = ('{"action":"write","arg":"impl.py","reasoning":"impl"}\n'
+                '<<<CONTENT\n' + code + '\nCONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["action"] == "write"
+        assert result["content"] == code
+        assert "content_truncated" not in result
+
+    def test_block_overrides_header_content(self):
+        text = ('{"action":"write","arg":"a.py","content":"stub"}\n'
+                '<<<CONTENT\nreal\nCONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "real"
+
+    def test_unclosed_block_at_length_marks_truncated(self):
+        text = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\nline1\nline2\nline3 par')
+        with patch("askme.requests.post", return_value=_length_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "line1\nline2\nline3 par"
+        assert result["content_truncated"] is True
+
+    def test_unclosed_block_at_stop_is_complete(self):
+        # A model that forgot the closing sentinel but stopped on its own
+        # emitted everything it meant to — accept the content as complete.
+        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2'
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "line1\nline2"
+        assert "content_truncated" not in result
+
+    def test_unclosed_block_at_length_keeps_last_complete_line(self):
+        # Cutoff on a line boundary: the response's trailing newline is the
+        # proof the last line is complete — it must survive the strip chain
+        # so the run loop's partial-line trim does not drop the line.
+        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\n'
+        with patch("askme.requests.post", return_value=_length_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "line1\nline2\n"
+        assert result["content_truncated"] is True
+
+    def test_embedded_close_line_stays_content(self):
+        # Content lines that resemble the terminator (docs/fixtures about this
+        # protocol) must not end the block when a real terminator follows.
+        code = 'print("demo")\nCONTENT>>>\nprint("after")'
+        text = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\n' + code + '\nCONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == code
+
+    def test_indented_close_is_content_not_terminator(self):
+        text = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\nexample:\n    CONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "example:\n    CONTENT>>>"
+
+    def test_empty_block_at_length_retries_with_payload_budget(self):
+        cut = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n'
+        good = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\nx = 1\nCONTENT>>>')
+        responses = [_length_response(cut), _stop_response(good)]
+        with patch("askme.requests.post", side_effect=responses) as mock_post:
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_tokens=256, max_retries=1,
+                                   reasoning_policy="off")
+        assert result["content"] == "x = 1"
+        bodies = [c.kwargs["json"] for c in mock_post.call_args_list]
+        assert bodies[1]["max_tokens"] == STEP_WRITE_TOKENS
+
+
+class TestTruncatedWriteContinuation:
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_partial_lines_written_then_append_completes(self, mock_llm,
+                                                         mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create impl.py with the implementation"]},
+            {"action": "write", "arg": "impl.py",
+             "content": "line1\nline2\nline3 par", "content_truncated": True},
+            {"action": "write", "arg": "impl.py",
+             "content": "line3 full\nline4\n", "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        # The trailing partial line was dropped; append resumed from there.
+        assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\nline3 full\nline4\n"
+        writes = [s for s in result["state"]["all_steps"] if s["action"] == "write"]
+        assert "continue with append:true" in writes[0]["output"]
+        assert writes[0]["_truncated_write"] is True
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_truncated_write_output_carries_resume_anchor(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        """The executor is stateless per step: the observation after a
+        truncated write must say where the write stopped, or the append
+        continuation can duplicate or skip lines."""
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line1\nline2\nline3 par",
+                        "content_truncated": True}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line3\n", "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        writes = [s for s in result["state"]["all_steps"] if s["action"] == "write"]
+        assert "truncated after 2 lines" in writes[0]["output"]
+        assert "'line2'" in writes[0]["output"]
+        # The anchor must reach the next executor call, not just the log.
+        assert "'line2'" in seen[2]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncated_write_not_told_to_append(self, mock_llm,
+                                                      mock_replan, tmp_path):
+        """No chunk was written: appending would land on the stale existing
+        file, so the retry instruction must stay a non-append write."""
+        Path(tmp_path, "impl.py").write_text("OLD CONTENT\n")
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "nonewline", "content_truncated": True}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py", "content": "new\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        assert "Resend the write (no append)" in seen[2]
+        assert Path(tmp_path, "impl.py").read_text() == "new\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncated_append_chunk_stays_append(self, mock_llm,
+                                                       mock_replan, tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line1\n"}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py", "append": True,
+                        "content": "nonewline", "content_truncated": True}
+            if n == 4:
+                return {"action": "write", "arg": "impl.py", "append": True,
+                        "content": "line2\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=6)
+        assert result["status"] == "complete"
+        assert "Resend a smaller append:true chunk" in seen[3]
+        assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_line_boundary_truncation_drops_nothing(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create impl.py with the implementation"]},
+            {"action": "write", "arg": "impl.py",
+             "content": "line1\nline2\n", "content_truncated": True},
+            {"action": "write", "arg": "impl.py", "content": "line3\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\nline3\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_no_complete_line_skips_dispatch(self, mock_llm, mock_replan,
+                                             tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create impl.py with the implementation"]},
+            {"action": "write", "arg": "impl.py",
+             "content": "nonewline", "content_truncated": True},
+            {"action": "write", "arg": "impl.py", "content": "ok\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create impl.py with the implementation",
+                               str(tmp_path), max_replans=1, max_tasks=1,
+                               max_steps=5)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert Path(tmp_path, "impl.py").read_text() == "ok\n"
+        assert result["state"]["skipped_steps"] == 1
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert reasons == ["truncated_write_empty"]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_reemitted_truncated_write_points_at_append(self, mock_llm,
+                                                        mock_replan, tmp_path):
+        """Retrying the full write after truncation must not read as 'done'."""
+        mock_llm.side_effect = [
+            {"tasks": ["create impl.py with the implementation"]},
+            {"action": "write", "arg": "impl.py",
+             "content": "a\nb par", "content_truncated": True},
+            {"action": "write", "arg": "impl.py", "content": "a\n"},
+            {"action": "write", "arg": "impl.py", "content": "b\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        captured = []
+        original_get_step = askme.get_step
+
+        def spy_get_step(task, state, **kwargs):
+            captured.extend(s.get("output", "") for s in state.get("last_steps", []))
+            return original_get_step(task, state, **kwargs)
+
+        with patch("askme.get_step", side_effect=spy_get_step):
+            result = _run_loop("create impl.py with the implementation",
+                               str(tmp_path), max_replans=1, max_tasks=1,
+                               max_steps=6)
+        assert result["status"] == "complete"
+        assert Path(tmp_path, "impl.py").read_text() == "a\nb\n"
+        assert any("File is incomplete" in o for o in captured)
+        assert not any("Already done" in o for o in captured)
+
+
+# --- Revision 3 (issue #15): backend-aware output budgets ---
+
+class TestBackendAwareBudgets:
+    def test_budgets_keyed_by_backend(self):
+        if askme.LLM_BACKEND == "openrouter":
+            assert askme.STEP_TOKENS == 4096
+            assert askme.STEP_WRITE_TOKENS == 8192
+        else:
+            assert askme.STEP_TOKENS == 256
+            assert askme.STEP_WRITE_TOKENS == 512
+
+    def test_get_step_requests_backend_budget(self):
+        with patch("askme.ask_llm", return_value={"action": "done"}) as m:
+            askme.get_step("do a thing", {})
+        assert m.call_args.kwargs["max_tokens"] == askme.STEP_TOKENS
+
+
+# --- Revision 3 (issue #15): write-forcing executor policy ---
+
+class TestWriteForcingPolicy:
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_pressure_note_after_three_observations(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["fix big.py bug"]}
+            if n == 2:
+                return {"action": "read", "arg": "big.py"}
+            if n == 3:
+                return {"action": "tree", "arg": "."}
+            if n == 4:
+                return {"action": "search", "arg": "def f1"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py", "content": "fixed\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("fix big.py bug", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert all("MUST be write" not in s for s in seen[:4])
+        assert "MUST be write" in seen[4]
+        assert "MUST be write" not in seen[5]  # write executed — pressure off
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_no_pressure_on_observe_shaped_task(self, mock_llm, mock_replan,
+                                                tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["inspect big.py structure"]}
+            if n <= 5:
+                return {"action": "read", "arg": "big.py",
+                        "offset": 1 + 60 * (n - 2)}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("inspect big.py structure", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert result["state"]["skipped_steps"] == 0
+        assert all("MUST be write" not in s for s in seen)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_tail_reserve_blocks_observation_then_auto_fails(self, mock_llm,
+                                                             mock_replan,
+                                                             tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        mock_llm.side_effect = [
+            {"tasks": ["fix big.py bug"]},
+            {"action": "read", "arg": "big.py"},
+            {"action": "tree", "arg": "."},
+            {"action": "read", "arg": "big.py", "offset": 61},   # tail: blocked
+            {"action": "search", "arg": "def f1"},               # tail: auto-fail
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("fix big.py bug", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=5)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "exhausted"
+        assert any("observation steps exhausted without a write" in e
+                   for e in result["state"]["errors"])
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert reasons == ["observe_tail_reserved", "observe_tail_exhausted"]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_tail_allows_observation_after_commit(self, mock_llm, mock_replan,
+                                                  tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        mock_llm.side_effect = [
+            {"tasks": ["fix big.py bug"]},
+            {"action": "write", "arg": "big.py", "content": "fixed\n"},
+            {"action": "read", "arg": "big.py"},
+            {"action": "read", "arg": "big.py", "offset": 2},  # tail, but committed
+            {"action": "done"},
+        ]
+        result = _run_loop("fix big.py bug", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert result["state"]["skipped_steps"] == 0
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_replan_sees_no_write_executed(self, mock_llm, mock_replan,
+                                           tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        plan_msgs = []
+        call_idx = {"n": 0}
+
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n == 2:
+                return {"action": "read", "arg": "big.py"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "cannot"}
+            if n == 4:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = tracking_llm
+        result = _run_loop("implement feature in big.py", str(tmp_path),
+                           max_replans=2, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert '"no_write_executed": true' in plan_msgs[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_no_flag_after_successful_write(self, mock_llm, mock_replan,
+                                            tmp_path):
+        plan_msgs = []
+        call_idx = {"n": 0}
+
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["implement feature in app.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "app.py", "content": "x = 1\n"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "tests missing"}
+            if n == 4:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = tracking_llm
+        result = _run_loop("implement feature in app.py", str(tmp_path),
+                           max_replans=2, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert "no_write_executed" not in plan_msgs[0]
+
+    def test_task_replan_sees_no_write_flag(self):
+        state = {"all_steps": [{"action": "read", "arg": "app.py", "ok": True}]}
+        with patch("askme.ask_llm",
+                   return_value={"task": "create the feature code in app.py"}) as m:
+            askme.replan_task("implement feature in app.py",
+                              ["[unknown] stalled"], [], state, "goal")
+        msg = m.call_args.args[0][-1]["content"]
+        assert '"no_write_executed": true' in msg
+
+    def test_task_replan_flag_scoped_to_current_task(self):
+        # A write from an earlier task must not mask this task's stall.
+        state = {
+            "all_steps": [
+                {"action": "write", "arg": "a.py", "ok": True},
+                {"action": "read", "arg": "b.py", "ok": True},
+            ],
+            "task_start_step_count": 1,
+        }
+        with patch("askme.ask_llm",
+                   return_value={"task": "create the logic in b.py"}) as m:
+            askme.replan_task("fix b.py logic",
+                              ["[unknown] stalled"], [], state, "goal")
+        msg = m.call_args.args[0][-1]["content"]
+        assert '"no_write_executed": true' in msg
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_replan_flag_scoped_across_tasks(self, mock_llm, mock_replan,
+                                             tmp_path):
+        """Task 1's successful write must not mask task 2's stall."""
+        Path(tmp_path, "b.py").write_text("x = 0\n")
+        plan_msgs = []
+        call_idx = {"n": 0}
+
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["create a.py", "fix b.py logic"]}
+            if n == 2:
+                return {"action": "write", "arg": "a.py", "content": "x = 1\n"}
+            if n == 3:
+                return {"action": "done"}
+            if n == 4:
+                return {"action": "read", "arg": "b.py"}
+            if n == 5:
+                return {"action": "fail", "reasoning": "cannot"}
+            if n == 6:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = tracking_llm
+        result = _run_loop("create a.py then fix b.py logic", str(tmp_path),
+                           max_replans=2, max_tasks=2, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert '"no_write_executed": true' in plan_msgs[0]
