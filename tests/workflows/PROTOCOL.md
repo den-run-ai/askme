@@ -1,26 +1,33 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 2 (2026-08-01). Revision 2 changes the AskMe action
-interface used by outcome-bearing runs (issue #7, app-development harness
-findings): ranged `read` windows with continuation metadata plus hash-linked
-totals (`total_lines`/`total_bytes`/`sha256`), bounded `search` and `tree`
-actions, atomic `write`/`edit` with chunked `append` transport,
-observation-action state budgets with truncation flags, typed
-`malformed_action`/`response_truncated` parse failures, selected-vs-executed
-step accounting (`step_skipped` events), and curated replan state (step
-digests instead of raw write payloads). Any FeatureBench or workflow matrix
-recorded under revision 1 must be re-run under this revision before
-comparison; per the rule below, action/budget changes after results require a
-new protocol version.
+**Protocol revision:** 3 (2026-08-01). Revision 3 changes the AskMe action
+interface used by outcome-bearing runs (issue #15, from the v4 canary and pi
+ablation findings): sentinel-framed `write` content transport
+(`<<<CONTENT`/`CONTENT>>>` after the action JSON — no JSON-string escaping,
+truncation keeps complete lines and recovers via a resume anchor plus chunked
+`append`), backend-aware budgets (`STEP_TOKENS=4096`/`STEP_WRITE_TOKENS=8192`
+on OpenRouter; local 256/512 unchanged), and a write-forcing executor policy
+on write-shaped tasks (commitment pressure after 3 executed observation
+steps, an observation-free step-tail reserve, and a first-class
+`no_write_executed` replan flag scoped to the failed task). Revision 2
+(2026-08-01, issue #7) introduced ranged `read` windows with continuation
+metadata plus hash-linked totals, bounded `search` and `tree` actions, atomic
+`write`/`edit` with chunked `append` transport, observation-action state
+budgets with truncation flags, typed `malformed_action`/`response_truncated`
+parse failures, selected-vs-executed step accounting, and curated replan
+state. Any matrix recorded under an earlier revision must be re-run under
+this revision before comparison; per the rule below, action/budget changes
+after results require a new protocol version.
 
 **FeatureBench protocol numbering:** the FeatureBench canary series (issue #7)
-has consumed protocol versions up to v3 (v3 by the 2026-07-31 Qwen 3.6-27B
-follow-up on `agent/qwen36-featurebench-canary`). Frozen **v4** protocols
-reflecting this revision-2 action interface are registered in
-`tests/featurebench/` (one Gemma 4 31B cell, one Qwen 3.6 27B cell), with the
-gold and harmless controls requalified before any model call. Each cell allows
-one model attempt on the same canary task; subset expansion requires a patch
-reaching execution and held-out acceptance first.
+has consumed protocol versions up to v4 (both v4 cells spent their single
+attempt on 2026-08-01 under the revision-2 interface; empty-patch unresolved,
+records in `tests/featurebench/results/`). Frozen **v5** protocols reflecting
+this revision-3 action interface are registered in `tests/featurebench/` (one
+Gemma 4 31B cell, one Qwen 3.6 27B cell), with the gold and harmless controls
+requalified before any model call. Each cell allows one model attempt on the
+same canary task; subset expansion requires a patch reaching execution and
+held-out acceptance first.
 
 **Status:** infrastructure and task qualification only. No outcome-bearing
 model call has been made under this protocol. The four-task paired pilot is not

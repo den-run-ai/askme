@@ -16,6 +16,48 @@ The frozen values and outcome contract are also recorded in
 > outcome-bearing run must use a separately registered protocol version with a
 > new adapter revision and updated hashes before the first model response.
 
+## v5 registration (revision-3 action interface)
+
+Both v4 attempts were consumed on 2026-08-01 (empty-patch unresolved in both
+cells). After those results the AskMe action interface changed (issue #15,
+protocol revision 3 in [`../workflows/PROTOCOL.md`](../workflows/PROTOCOL.md)):
+sentinel-framed `write` content transport with truncation recovery and resume
+anchors, backend-aware budgets (`STEP_TOKENS=4096`/`STEP_WRITE_TOKENS=8192` on
+OpenRouter), and a write-forcing executor policy (commitment pressure,
+observation-free step tail, `no_write_executed` replan flag). Two v5 protocols
+are registered for the requalification of the same frozen task under that
+interface (issue #17), one per model cell:
+
+- [`gemma-31b-canary-protocol-v5.json`](gemma-31b-canary-protocol-v5.json) —
+  `google/gemma-4-31b-it`, expected served `google/gemma-4-31b-it-20260402`
+- [`qwen-27b-canary-protocol-v5.json`](qwen-27b-canary-protocol-v5.json) —
+  `qwen/qwen3.6-27b`, expected served `qwen/qwen3.6-27b-20260422`
+
+Both pin AskMe base `491dbc0` (`askme.py` sha256 `a9037d47…`), the unchanged
+hardened adapter/audit hashes, and the same task, dataset revision, image
+digest, budgets, and timeouts as v2/v3/v4. The pi harness ablation
+([PR #14](https://github.com/den-run-ai/askme/pull/14)) is the preregistered
+comparison ceiling on the identical masked task and pinned endpoints (Gemma
+84.6% F2P, Qwen 76.9% F2P, both applied): if v5 moves a cell from empty patch
+to applied with ~its ceiling F2P, the transport/policy fixes were the binding
+constraint; any residual gap belongs to the plan/execute loop (interpretation
+rule preregistered in issue #17). The
+gold and harmless controls were requalified under this interface before any
+model call; see
+[`results/2026-08-01-v5-control-requalification.json`](results/2026-08-01-v5-control-requalification.json).
+The clean commit containing the v5 protocols is the execution revision to pass
+as `--askme-revision`. The two model attempts remain unrun until triggered
+deliberately; nothing in this section authorizes more than one attempt per
+registered cell.
+
+Two registration-time caveats are recorded in the requalification record
+rather than silently dropped: the local bench neutrality check from issue #15
+was explicitly waived by the maintainer (OpenRouter is the only outcome-bearing
+path; a same-day A/B showed the local easy-suite drift predates revision 3),
+and three post-merge Codex P2 findings on the revision-3 write-forcing
+mechanics are frozen as-is and must be considered when interpreting the Qwen
+cell (details and impact assessment in the record).
+
 ## v4 registration (revision-2 action interface)
 
 Protocol v3 was consumed by the 2026-07-31 Qwen 3.6 27B canary. After that

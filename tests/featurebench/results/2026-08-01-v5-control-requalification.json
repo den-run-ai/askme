@@ -1,0 +1,134 @@
+{
+  "record_kind": "control_requalification_before_outcome_bearing_run",
+  "recorded_at": "2026-08-01T14:20:00Z",
+  "claim_boundary": {
+    "allowed_label": "v5 protocol registration and control requalification",
+    "model_calls_made": 0,
+    "chat_completion_requests_made": 0,
+    "is_benchmark_score": false,
+    "is_model_result": false,
+    "authorizes_replacement_attempts": false
+  },
+  "registered_protocols": {
+    "tests/featurebench/gemma-31b-canary-protocol-v5.json": "c1ad8ac054d25a7680075ee93476286f2027909edd903e9dde03733b3ee01805",
+    "tests/featurebench/qwen-27b-canary-protocol-v5.json": "c007cbc2c521db31d78133fdd09d43273b5c85ffefb6e96b6d6fee756c004191"
+  },
+  "sources": {
+    "askme_base_commit": "491dbc03d3b97631372ca32763d34ba0458ff256",
+    "askme_source_sha256": "a9037d479bdf737f28f3ab47521acd2d8dd872409ab1b2f92e38e70b9fa595e7",
+    "action_interface_revision": 3,
+    "adapter_sha256": "cb63af48ba837ad38f8aa99f245eeab3b9006a669600d5ad7fd0dbd1861dd9b6",
+    "audit_sha256": "585922d763677d45ad10834ad8ab7d1662aceb64abc1cd16333ddadee8b07568",
+    "featurebench_commit": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "host": {
+    "platform": "Darwin 25.5.0 arm64",
+    "docker": "24.0.2 build 659604f",
+    "image_architecture": "amd64",
+    "image_source": "local cache matching the pinned digest; no new pull required"
+  },
+  "verifications": {
+    "featurebench_checkout": {
+      "clean": true,
+      "commit_matches_protocol": true,
+      "uv_sync_frozen": true
+    },
+    "dataset_snapshot": {
+      "revision_matches_protocol": true,
+      "task_image_name_matches": true,
+      "problem_statement_chars": 11144,
+      "problem_statement_sha256_matches": true
+    },
+    "offline_test_suite": {
+      "askme_source_commit": "491dbc03d3b97631372ca32763d34ba0458ff256",
+      "working_tree": "registration branch; askme.py and tests identical to the base commit, docs/protocol files only on top",
+      "command": "pytest tests/ -k \"not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter\"",
+      "passed": 448,
+      "failed": 0
+    },
+    "endpoint_catalog_preflight": {
+      "request_kind": "authenticated read-only GET of the OpenRouter per-model endpoint catalog; not a chat completion; no model response produced",
+      "google/gemma-4-31b-it": {
+        "siliconflow_endpoints": 1,
+        "dated_served_model": "google/gemma-4-31b-it-20260402",
+        "status": 0,
+        "quantization": "fp8"
+      },
+      "qwen/qwen3.6-27b": {
+        "siliconflow_endpoints": 1,
+        "dated_served_model": "qwen/qwen3.6-27b-20260422",
+        "status": 0,
+        "quantization": "fp8",
+        "note": "the non-zero catalog status observed at v4 registration has cleared; both cells gate on the adapter's automatic preflight immediately before inference"
+      }
+    }
+  },
+  "controls": {
+    "gold": {
+      "operation": "official_featurebench_eval",
+      "predictions": "gold",
+      "report": {
+        "total_instances": 1,
+        "completed_instances": 1,
+        "resolved_instances": 1,
+        "error_instances": 0
+      },
+      "outcome": "resolved",
+      "meets_protocol_expectation": true
+    },
+    "harmless_nonempty": {
+      "operation": "official_featurebench_eval",
+      "prediction_source": "sequence[1].prediction of the v5 protocol",
+      "report": {
+        "featurebench_eval_completed": true,
+        "patch_successfully_applied": true,
+        "resolved": false,
+        "error_present": false,
+        "traceback_present": false
+      },
+      "outcome": "applied_and_unresolved",
+      "meets_protocol_expectation": true
+    }
+  },
+  "local_bench_neutrality_check": {
+    "issue_15_acceptance_bar": "strictly neutral easy/medium local results via tests/bench_harness.py",
+    "status": "waived_by_maintainer",
+    "waiver_reason": "maintainer directive 2026-08-01: OpenRouter is the only outcome-bearing path for the v5 canaries; minimize local testing ahead of presentation",
+    "what_ran_before_waiver": {
+      "revision_3_easy_suite": "9/9 trials executed (create_and_read_file 3/3 pass, shell_and_write 3/3 pass, multi_step_build 2/3 pass); wall times elevated vs the 2026-04-26 E01 baseline",
+      "attribution": "baseline is stale: llama.cpp server rebuilt (a702f395 -> c34b92235) and the baseline predates action-interface revision 2; elevated walls driven by 256-token-cap truncation followed by thinking retries, a pattern also present in the aborted same-day revision-2 A/B leg; zero revision-3 mechanism events (no observe_tail_reserved/observe_tail_exhausted skips, no write-pressure-eligible step sequences) in any trial",
+      "revision_2_ab_leg": "started for a clean same-server comparison, aborted after trial 1 by the maintainer directive"
+    },
+    "constraint_on_claims": "no claim of local-path neutrality for revision 3 is licensed by this registration; the v5 canary outcomes are OpenRouter-path evidence only"
+  },
+  "known_findings_at_registration": {
+    "source": "post-merge Codex review comments on PR #16, verified against the frozen source before registration",
+    "frozen_as_is_per": "issue #17 out-of-scope rule: no interface changes before the v5 outcome is recorded",
+    "findings": [
+      {
+        "id": "commit_counter_counts_failed_mutations",
+        "location": "askme.py step loop: commit_executed increments before execute() reports failure",
+        "impact": "one failed write/edit/shell disarms the write-pressure note and observation tail reserve for the remainder of the task attempt; interpret Qwen-cell write-forcing observables with this in mind"
+      },
+      {
+        "id": "no_write_executed_uses_whole_request_intent",
+        "location": "askme.py replan-state builder: _WRITE_TASK_RE runs on the full user prompt, steps are task-scoped",
+        "impact": "benign for this canary (the entire frozen problem statement is implement-shaped) but the flag can fire on failed observation-only tasks"
+      },
+      {
+        "id": "write_task_regex_matches_passive_phrasing",
+        "location": "askme.py _WRITE_TASK_RE: matches include/add/update in any grammatical role",
+        "impact": "exploration tasks worded with these verbs are treated as write-shaped; write-pressure and tail-reserve firing counts may include spurious firings on observation tasks"
+      }
+    ],
+    "observability_note": "write-pressure prompt-note firings are not emitted as JSONL events; they are reconstructed deterministically from retained step events (pure function of task text and executed-step history)"
+  },
+  "remaining_before_outcome_bearing_run": [
+    "merge this registration to main; the clean merged commit is the execution revision passed as --askme-revision",
+    "re-check the OpenRouter endpoint catalog immediately before inference (adapter does this automatically)",
+    "run exactly one adapter attempt per registered cell (sections 6-8 of the runbook); no reruns after inference starts"
+  ]
+}
