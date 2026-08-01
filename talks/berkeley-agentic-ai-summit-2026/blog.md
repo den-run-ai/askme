@@ -147,6 +147,30 @@ a FeatureBench score, reliability estimate, or readiness result. Repeating more
 tasks under the same known action bottleneck would add little. A result-bearing
 subset should follow an action-interface fix and its own frozen protocol.
 
+*Update (Aug 1, 2026).* That action-interface fix landed as revision 3—a
+sentinel-framed write transport, backend-aware budgets (4096/8192 on
+OpenRouter), and a write-forcing policy—and the same frozen task was
+requalified under preregistered v6 protocols. Both cells moved from empty
+patch to an applied patch: Gemma 4 31B reached 11/13 F2P (84.62%), exactly the
+preregistered pi-ablation ceiling with the identical two failing tests, and
+Qwen3.6-27B reached 7/13 (53.85%) against its 76.92% ceiling. Under the
+preregistered interpretation rule, the transport was the whole story for
+Gemma's patch quality on this cell, while write forcing broke Qwen's
+observation stall and the residual gap belongs to the loop. Both agents still
+exhausted their planning attempts without emitting `done`; the headline
+failure mode inverted into a commit-without-validate rewrite loop—Gemma
+rewrote one file 18 times and ran zero tests. These remain one-task adapter
+canaries, not FeatureBench scores, reliability estimates, or model
+comparisons, and three caveats travel with any v4/pi comparison: the v6 runs
+were served by CoreWeave (Gemma bf16, Qwen fp8) while the v4 and pi-ablation
+records were served by SiliconFlow fp8—a serving-stack confound, with
+identical dated served-model IDs; the issue-15 local-bench neutrality bar was
+waived by the maintainer, so no local-neutrality claim is licensed for
+revision 3; and three frozen Codex P2 findings on write-forcing mechanics
+caveat the Qwen cell's mechanism-level counts. A validate-after-write
+counterpart—acceptance pressure after writes, rewrite damping, an
+unvalidated-write replan flag—is in progress and not merged.
+
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.
 [ProgramBench](https://github.com/facebookresearch/programbench) remains only a
