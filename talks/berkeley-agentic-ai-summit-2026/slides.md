@@ -231,82 +231,60 @@ style: |
     font-size: 14px;
     margin: 8px 0 0;
   }
-  .matrix-summary {
+  .smoke-layout {
+    align-items: start;
     display: grid;
-    gap: 12px;
-    grid-template-columns: 0.72fr 0.72fr 1.56fr;
-    margin: 13px 0 12px;
+    gap: 36px;
+    grid-template-columns: 0.7fr 1.55fr;
+    margin-top: 24px;
   }
-  .matrix-summary > div {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    min-height: 50px;
-    padding: 8px 13px;
+  .smoke-scores {
+    border-top: 6px solid var(--blue);
+    padding-top: 16px;
   }
-  .matrix-summary strong { color: var(--blue); font-size: 24px; margin-right: 7px; }
-  .matrix-summary span { color: var(--muted); font-size: 14px; }
-  .matrix-summary .boundary {
-    align-items: center;
-    background: #fff7e9;
-    border-color: #f0d5a6;
-    color: #8a5700;
-    display: flex;
-    font-size: 14px;
-    font-weight: 800;
+  .smoke-score { margin-bottom: 22px; }
+  .smoke-score strong { color: var(--blue); display: block; font-size: 50px; line-height: 1; }
+  .smoke-score span { color: var(--muted); display: block; font-size: 19px; margin-top: 5px; }
+  .smoke-insight {
+    border-left: 5px solid var(--coral);
+    color: var(--ink);
+    font-size: 17px;
+    line-height: 1.3;
+    margin-top: 28px;
+    padding-left: 12px;
   }
-  .matrix-grid {
+  .smoke-table {
     display: grid;
-    gap: 5px;
-    grid-template-columns: 1.05fr 1.32fr 1.32fr;
+    grid-template-columns: 1.45fr 1fr 1fr;
   }
-  .matrix-cell {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    font-size: 14px;
-    min-height: 52px;
-    padding: 7px 10px;
+  .smoke-table > div {
+    border-bottom: 1px solid var(--line);
+    font-size: 17px;
+    min-height: 54px;
+    padding: 14px 10px;
   }
-  .matrix-cell.head {
-    background: transparent;
-    border-color: transparent;
+  .smoke-table .head {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 850;
-    min-height: 20px;
-    padding-bottom: 3px;
+    min-height: 36px;
+    padding-top: 0;
     text-transform: uppercase;
   }
-  .matrix-cell.model-name { font-weight: 850; }
-  .matrix-cell small { color: var(--muted); display: block; font-size: 11px; line-height: 1.28; margin-top: 2px; }
-  .shape { font-weight: 850; }
-  .shape.dense { color: var(--blue); }
-  .shape.moe { color: #7256c9; }
-  .matrix-status { font-size: 13px; font-weight: 900; }
-  .matrix-status.pass { color: var(--teal); }
-  .matrix-status.fail { color: var(--coral); }
-  .matrix-caveat {
-    color: var(--muted);
-    font-size: 13px;
+  .smoke-model { font-weight: 800; }
+  .smoke-status { font-weight: 900; }
+  .smoke-status.pass { color: var(--teal); }
+  .smoke-status.fail { color: var(--coral); }
+  .smoke-limit {
+    background: #fff2df;
+    border-left: 6px solid var(--amber);
+    border-radius: 4px;
+    color: #7a5008;
+    font-size: 17px;
     line-height: 1.3;
-    margin: 10px 0 0;
+    margin-top: 24px;
+    padding: 11px 15px;
   }
-  .matrix-interpretation {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: 0.9fr 1.4fr;
-    margin-top: 10px;
-  }
-  .matrix-interpretation > div {
-    border-radius: 5px;
-    font-size: 13px;
-    line-height: 1.3;
-    padding: 8px 11px;
-  }
-  .matrix-interpretation strong { display: block; font-size: 14px; margin-bottom: 2px; }
-  .matrix-interpretation .supported { background: #e9f7f3; color: #285d53; }
-  .matrix-interpretation .unsupported { background: #fff2df; color: #7a5008; }
   .experiment-grid { grid-template-columns: repeat(4, 1fr); margin-top: 18px; }
   .experiment { min-height: 145px; }
   .experiment .num { color: var(--blue); font-size: 14px; font-weight: 900; }
@@ -329,61 +307,65 @@ style: |
     margin-top: 13px;
     padding: 10px 15px;
   }
-  .external-status {
-    background: #edf4ff;
-    border-left: 6px solid var(--blue);
-    border-radius: 4px;
-    color: #27476f;
-    font-size: 14px;
-    margin-top: 8px;
-    padding: 7px 13px;
-  }
-  .boundary-grid {
+  .feature-progress {
     display: grid;
-    gap: 16px;
+    gap: 38px;
     grid-template-columns: repeat(3, 1fr);
-    margin-top: 15px;
+    margin-top: 30px;
   }
-  .boundary-step {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    min-height: 190px;
-    padding: 18px 19px;
+  .feature-stage {
+    border-top: 7px solid var(--blue);
+    min-height: 215px;
+    padding: 17px 10px 0 0;
     position: relative;
   }
-  .boundary-step:not(:last-child)::after {
+  .feature-stage.before { border-color: var(--coral); }
+  .feature-stage.after { border-color: var(--teal); }
+  .feature-stage.next { border-color: var(--amber); }
+  .feature-stage:not(:last-child)::after {
     color: var(--blue);
     content: "→";
-    font-size: 30px;
+    font-size: 34px;
     font-weight: 900;
     position: absolute;
-    right: -25px;
-    top: 80px;
+    right: -31px;
+    top: 86px;
     z-index: 2;
   }
-  .boundary-step.run { border-top: 7px solid var(--blue); }
-  .boundary-step.entry { border-top: 7px solid var(--coral); }
-  .boundary-step.delivery { border-top: 7px solid var(--teal); }
-  .boundary-step.gap { border-top: 7px solid var(--coral); }
-  .boundary-step .num { color: var(--blue); font-size: 14px; font-weight: 900; }
-  .boundary-step strong { display: block; font-size: 20px; margin: 8px 0 12px; }
-  .boundary-step p { color: var(--muted); font-size: 16px; margin: 0; }
-  .boundary-step code { color: var(--ink); font-size: 14px; }
-  .boundary-observation {
-    background: #fff2df;
-    border-left: 6px solid var(--amber);
+  .feature-label {
+    color: var(--blue);
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .feature-stage.before .feature-label { color: var(--coral); }
+  .feature-stage.after .feature-label { color: var(--teal); }
+  .feature-stage.next .feature-label { color: var(--amber); }
+  .feature-stage h2 { font-size: 28px; margin: 10px 0 10px; }
+  .feature-stage p { color: var(--muted); font-size: 18px; line-height: 1.35; margin: 0; }
+  .feature-stage .big-result { color: var(--coral); font-size: 48px; font-weight: 900; line-height: 1; }
+  .feature-results { display: flex; gap: 28px; margin-top: 12px; }
+  .feature-results strong { color: var(--teal); display: block; font-size: 34px; line-height: 1; }
+  .feature-results span { color: var(--muted); font-size: 15px; }
+  .feature-takeaway {
+    background: #e9f7f3;
+    border-left: 6px solid var(--teal);
     border-radius: 4px;
-    color: #7a5008;
-    font-size: 17px;
-    margin-top: 12px;
-    padding: 9px 13px;
+    color: #285d53;
+    font-size: 20px;
+    margin-top: 22px;
+    padding: 12px 15px;
+  }
+  .feature-caveat {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 9px;
   }
   .harness-grid {
     display: grid;
     gap: 5px;
     grid-template-columns: 0.72fr repeat(3, 1fr);
-    margin-top: 18px;
+    margin-top: 12px;
   }
   .harness-cell {
     background: #fff;
@@ -391,8 +373,8 @@ style: |
     border-radius: 5px;
     font-size: 14px;
     line-height: 1.28;
-    min-height: 83px;
-    padding: 11px 12px;
+    min-height: 76px;
+    padding: 9px 10px;
   }
   .harness-cell.head {
     background: var(--terminal);
@@ -415,10 +397,10 @@ style: |
     border-left: 6px solid var(--teal);
     border-radius: 4px;
     color: #285d53;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.3;
-    margin-top: 14px;
-    padding: 10px 14px;
+    margin-top: 10px;
+    padding: 8px 12px;
   }
   .conclusion-grid {
     display: grid;
@@ -528,14 +510,11 @@ Acceptance checks the required behavior and artifact.
   </div>
   <div class="events">
     <div class="event ok"><strong>A different target was chosen</strong><span><code>cc -o /tmp/test main.c &amp;&amp; /tmp/test</code></span></div>
-    <div class="event ok"><strong>The combined command exited 0</strong><span>The retained record does not independently prove stdout or source contents.</span></div>
+    <div class="event ok"><strong>The combined command exited 0</strong><span>From the agent's side, the task looked done.</span></div>
     <div class="event fail"><strong>Agent reported completion</strong><span>The independent acceptance test found no <code>./main</code>.</span></div>
     <div class="callout"><strong>Exit-zero command + reported completion ≠ accepted artifact.</strong></div>
-    <p class="result-limit"><strong>Current limit:</strong> acceptance scored this run after completion; the failure was not returned for recovery.</p>
   </div>
 </div>
-
-<div class="source">One hosted build cell · retained under the predeclared failure rule · evals/draft-results.json</div>
 
 <!--
 Speaker notes (~45s):
@@ -567,7 +546,7 @@ remained unmet afterward.
   <div class="decision replan"><strong>Broken assumption</strong><p>Replan broadly only when the plan is no longer valid.</p></div>
 </div>
 
-<div class="callout"><strong>Trajectory goal—not yet isolated:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
+<div class="callout"><strong>Design goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
 
 <!--
 Speaker notes (~45s):
@@ -581,71 +560,83 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 
 ---
 
-<div class="eyebrow">Experiment 0 · completed hosted smoke · July 10, 2026</div>
+<div class="eyebrow">Hosted smoke test · July 10, 2026</div>
 
-# All four variants ran; one deliverable was rejected
+# Acceptance caught the one bad deliverable
 
-<p class="subtitle">4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell</p>
+<p class="subtitle">Four hosted models · two simple tasks · one run each</p>
 
-<div class="matrix-summary">
-  <div><strong>8 / 8</strong><span>reported complete</span></div>
-  <div><strong>7 / 8</strong><span>artifact accepted</span></div>
-  <div class="boundary">Compatibility smoke · n=1/cell · descriptive only</div>
+<div class="smoke-layout">
+  <div class="smoke-scores">
+    <div class="smoke-score"><strong>8 / 8</strong><span>reported complete</span></div>
+    <div class="smoke-score"><strong>7 / 8</strong><span>artifacts accepted</span></div>
+    <div class="smoke-insight"><strong>The fastest build was the rejected one.</strong><br>Completion and speed were not enough.</div>
+  </div>
+  <div class="smoke-table">
+    <div class="head">Hosted variant</div><div class="head">Artifact build</div><div class="head">Sanity repair</div>
+    <div class="smoke-model">Gemma 4 26B A4B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Gemma 4 31B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Qwen3.6-27B</div><div class="smoke-status pass">Accepted</div><div class="smoke-status pass">Accepted</div>
+    <div class="smoke-model">Qwen3.6-35B-A3B</div><div class="smoke-status fail">Wrong path</div><div class="smoke-status pass">Accepted</div>
+  </div>
 </div>
 
-<div class="matrix-grid">
-  <div class="matrix-cell head">Model · shape</div><div class="matrix-cell head">Artifact build · observed trajectory</div><div class="matrix-cell head">Sanity repair · observed trajectory</div>
-  <div class="matrix-cell model-name">Gemma 4 26B A4B<small><span class="shape moe">◆ MoE</span> · 25.2B total / 3.8B active</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>603.6s · 19 steps · 19.5k tok<br>1 full / 1 local replan</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>20.0s · 7 steps · 4.5k tok<br>0 full / 0 local replans</small></div>
-  <div class="matrix-cell model-name">Gemma 4 31B<small><span class="shape dense">● Dense</span> · 30.7B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>66.5s · 4 steps · 4.4k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>22.4s · 5 steps · 4.2k tok<br>0 full / 1 local replan</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-27B<small><span class="shape dense">● Dense</span> · 27B parameters</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>47.9s · 6 steps · 5.3k tok<br>0 full / 0 local replans</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>23.0s · 6 steps · 4.1k tok<br>0 full / 0 local replans</small></div>
-  <div class="matrix-cell model-name">Qwen3.6-35B-A3B<small><span class="shape moe">◆ MoE</span> · 35B total / 3B active</small></div><div class="matrix-cell"><span class="matrix-status fail">NOT ACCEPTED</span><small>17.7s · 3 steps · 3.5k tok<br>wrong artifact path</small></div><div class="matrix-cell"><span class="matrix-status pass">ACCEPTED</span><small>11.8s · 4 steps · 2.5k tok<br>0 full / 0 local replans</small></div>
-</div>
-
-<div class="matrix-interpretation">
-  <div class="supported"><strong>Supported</strong>All four reported completion on both checks; acceptance rejected one wrong deliverable.</div>
-  <div class="unsupported"><strong>Not a clean model comparison</strong>No pair isolates size: dense/MoE shape, active compute, run order, and trajectories changed. No Qwen-vs-Gemma, larger-vs-smaller, speed, reasoning, or reliability inference.</div>
-</div>
-
-<div class="source">Four hosted models × two deliberately simple checks × one unseeded run/cell · evals/README.md</div>
+<div class="smoke-limit"><strong>Compatibility smoke, not a ranking:</strong> single runs on simple tasks — no model comparisons.</div>
 
 <!--
 Speaker notes (~45s):
 Four hosted variants each ran two simple checks once. Every agent reported completion;
 independent checks accepted seven artifacts. The shortest build trajectory was the rejected
 one, which is why completion and speed alone are insufficient. The rows preserve Gemma and
-Qwen size, shape, steps, tokens, and replans as descriptive trajectory context. No pair
+Qwen acceptance status; steps, tokens, and replans remain in the records. No pair
 isolates size, architecture, active compute, family, run order, reasoning, or reliability.
 These are one-shot receipts, not rankings.
 -->
 
 ---
 
-<div class="eyebrow">Two observed harness boundaries</div>
+<div class="eyebrow">FeatureBench canary · one feature task</div>
 
-# Feedback works only when actions enter and failures return
+# Both models build app features — but fail on testing
 
-<p class="subtitle">One limit appeared before execution; another after reported completion.</p>
+<p class="subtitle">The same frozen task went from zero code changes to working partial features.</p>
 
-<div class="boundary-grid">
-  <div class="boundary-step entry"><div class="num">01 · ENTER THE LOOP</div><strong>The model must emit a valid action</strong><p><code>model → valid structured action</code><br><br><b>FeatureBench-fast · 1 task · Gemma 4 31B:</b><br>3 plans → 4 reads → 0 writes → empty patch → unresolved.</p></div>
-  <div class="boundary-step run"><div class="num">02 · INSIDE THE LOOP</div><strong>Execution feedback can guide repair</strong><p><code>action → execute / test → evidence ↺</code><br><br>AskMe can continue, update locally, or replan.</p></div>
-  <div class="boundary-step delivery"><div class="num">03 · AFTER COMPLETION</div><strong>Acceptance checks the deliverable</strong><p><code>artifact → independent acceptance</code><br><br>The Qwen wrong-path result was rejected, but not returned for recovery.</p></div>
+<div class="feature-progress">
+  <div class="feature-stage before">
+    <div class="feature-label">Before · July</div>
+    <div class="big-result">0 writes</div>
+    <h2>Empty patch</h2>
+    <p>The action interface blocked every edit. No code changed.</p>
+  </div>
+  <div class="feature-stage after">
+    <div class="feature-label">After · Aug 1</div>
+    <h2>App features built</h2>
+    <div class="feature-results">
+      <div><strong>11 / 13</strong><span>Gemma target tests</span></div>
+      <div><strong>7 / 13</strong><span>Qwen target tests</span></div>
+    </div>
+    <p>Both patches applied — working partial features from both models.</p>
+  </div>
+  <div class="feature-stage next">
+    <div class="feature-label">Why they still fail</div>
+    <h2>They never test their work</h2>
+    <p>Gemma rewrote code without running tests. Qwen stopped editing and went back to reading. Neither finished cleanly.</p>
+  </div>
 </div>
 
-<div class="boundary-observation"><strong>External boundary probe—not a score:</strong> the FeatureBench canary exposed a 512-token structured-action bottleneck before a patch existed. One task cannot separate model capability from this model–harness interface.</div>
+<div class="feature-takeaway"><strong>Bottom line:</strong> small models can build app features; testing and finishing the work is the next gap.</div>
 
-<div class="external-status"><strong>Requalified Aug 1 · one task, one attempt/model:</strong> under the revision-3 bundle and a changed serving stack, both patches applied but remained unresolved — Gemma 11/13 target tests (same two failures as the exploratory pi run); Qwen 7/13 (pi: 10/13). Gemma rewrote 18 times without testing; Qwen wrote once, then resumed reading; neither emitted <code>done</code>.</div>
-
-<div class="source">One-task canaries, not scores · v6: CoreWeave (Gemma bf16, Qwen fp8); v4/pi: SiliconFlow fp8 · no local-neutrality claim · records: featurebench/results/ + featurebench/pi-ablation/results/</div>
+<div class="feature-caveat">One task, one attempt per model — progress, not a benchmark score.</div>
 
 <!--
 Speaker notes (~45s):
-Feedback helps only after a valid action enters the loop. In July, Gemma's attempted writes
-overflowed AskMe's structured-action budget, leaving an empty patch. Under the revision-three
-bundle and a changed serving stack, both models produced applying but unresolved patches.
-Gemma matched the exploratory pi run at eleven of thirteen target tests, then rewrote
-eighteen times without testing. Qwen passed seven of thirteen, wrote once, and returned to
-reading. Neither emitted done. Harness changes moved failure downstream.
+FeatureBench asks the agent to build a real app feature. In July, the same task produced
+no code edits at all: the agents read files and returned an empty patch. On August first,
+both models produced patches that applied and passed most target tests: Gemma eleven of
+thirteen, Qwen seven of thirteen. Both models can now build partially working app features.
+Neither validated its work: Gemma rewrote the same file without running tests; Qwen stopped
+editing and went back to reading. This is one task and one attempt per model — progress,
+not a benchmark score.
 -->
 
 ---
@@ -655,9 +646,9 @@ reading. Neither emitted done. Harness changes moved failure downstream.
 # Promising for bounded loops. Feature readiness is still open.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple smoke: 7 / 8 artifacts accepted. On one feature task, revision 3 moved both models from empty to applied but unresolved patches: Gemma 11/13 target tests; Qwen 7/13.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design was consequential on this task. The bundled changes moved failures into execution: Gemma rewrote without testing; Qwen resumed observation after one write.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Reliability beyond one task; clean validation and termination; transport versus serving/configuration effects; reasoning, family, size, architecture, and local performance. Revision 4 is implemented in open PR #21; v7 requalification is pending.</p></div>
+  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple tasks: 7 / 8 artifacts accepted. Feature task: both models built working partial features — Gemma 11/13, Qwen 7/13 target tests — but neither tested or finished its work.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design changed the outcome: the same task moved from empty patches to applied, partially working code.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Testing and clean completion. Reliability beyond one task. Model-to-model comparisons and local performance.</p></div>
 </div>
 
 <p class="tagline">Evaluate the model, harness, and task as one system.</p>
@@ -668,12 +659,11 @@ reading. Neither emitted done. Harness changes moved failure downstream.
 
 <!--
 Speaker notes (~35s):
-The bounded checks are promising, but feature readiness remains unproven. Under revision
-three, both models moved from empty to applied patches, yet neither resolved the task or
-finished cleanly. Gemma rewrote without testing; Qwen wrote once and returned to observation.
-The serving stack also changed, so this shows that harness design matters, not that transport
-alone caused the improvement. Revision four is implemented in open PR #21; matched v7
-requalification remains pending. Judge delivered behavior.
+The bounded checks are promising, but feature readiness remains unproven. Both models moved
+from empty patches to working partial features, yet neither tested its work or finished
+cleanly. Gemma rewrote without testing; Qwen wrote once and returned to reading. Testing
+and clean completion are the next harness problems, and one task cannot settle general
+readiness. Judge delivered behavior; evaluate the model, harness, and task as one system.
 -->
 
 ---

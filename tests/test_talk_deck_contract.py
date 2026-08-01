@@ -63,30 +63,28 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "7 / 8" in comparison
     assert "reported complete" in comparison
     assert "agent complete" not in comparison
-    assert "n=1/cell" in comparison
-    assert "descriptive only" in comparison
-    assert "4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell" in comparison
-    assert "35B total / 3B active" in comparison
-    assert "Supported" in comparison
-    assert "All four reported completion on both checks" in comparison
-    assert "All four completed both checks" not in comparison
-    assert "Not a clean model comparison" in comparison
-    assert "No Qwen-vs-Gemma, larger-vs-smaller" in comparison
-    for trajectory_detail in ("603.6s", "66.5s", "47.9s", "17.7s", "steps", "tok", "replan"):
-        assert trajectory_detail in comparison
-    assert "observed trajectory" in comparison
+    assert "Acceptance caught the one bad deliverable" in comparison
+    assert "Four hosted models · two simple tasks · one run each" in comparison
+    assert "The fastest build was the rejected one" in comparison
+    assert "Completion and speed were not enough" in comparison
+    assert "Compatibility smoke, not a ranking" in comparison
+    assert "no model comparisons" in comparison
+    for trajectory_detail in ("603.6s", "66.5s", "47.9s", "17.7s", "19.5k tok"):
+        assert trajectory_detail not in comparison
 
     boundary = slides[5]
-    assert "Two observed harness boundaries" in boundary
-    assert "Feedback works only when actions enter and failures return" in boundary
-    assert "model → valid structured action" in boundary
-    assert "action → execute / test → evidence ↺" in boundary
-    assert "artifact → independent acceptance" in boundary
-    assert "FeatureBench-fast · 1 task · Gemma 4 31B" in boundary
-    assert "4 reads → 0 writes → empty patch → unresolved" in boundary
-    assert "512-token structured-action bottleneck" in boundary
-    assert "External boundary probe—not a score" in boundary
-    assert "Qwen wrong-path result was rejected, but not returned for recovery" in boundary
+    assert "FeatureBench canary" in boundary
+    assert "Both models build app features — but fail on testing" in boundary
+    assert "0 writes" in boundary
+    assert "Empty patch" in boundary
+    assert "App features built" in boundary
+    assert "11 / 13" in boundary
+    assert "7 / 13" in boundary
+    assert "They never test their work" in boundary
+    assert "Neither finished cleanly" in boundary
+    assert "testing and finishing the work is the next gap" in boundary
+    assert "One task, one attempt per model — progress, not a benchmark score" in boundary
+    assert "Qwen wrong-path result" not in boundary
     for roadmap_detail in ("reasoning-policy", "24-run", "Vals"):
         assert roadmap_detail not in boundary
 
@@ -113,6 +111,12 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "Databricks" not in backup
 
     assert "NanAgent" not in text
+    # 2026-08-01 simplification: stage slides carry no PR/issue numbers and
+    # main slides carry no source footers.
+    assert "PR #" not in text
+    assert re.search(r"[Ii]ssues? #\d", text) is None
+    for main_slide in slides[:7]:
+        assert 'class="source"' not in main_slide
 
 
 def test_deck_contract_guards_notes_and_review_spec():
@@ -123,8 +127,8 @@ def test_deck_contract_guards_notes_and_review_spec():
         flags=re.DOTALL,
     )
     assert len(note_blocks) == 7
-    assert sum(len(block.split()) for block in note_blocks) == 499
-    assert "FeatureBench-fast" in text
+    assert sum(len(block.split()) for block in note_blocks) == 511
+    assert "FeatureBench canary" in text
     for benchmark in ("Vals", "ProgramBench"):
         assert benchmark not in text
     for out_of_scope in (
@@ -146,11 +150,12 @@ def test_deck_contract_guards_notes_and_review_spec():
         "Slide 2 contains no product/vendor taxonomy",
         "experimental coding-agent harness",
         "A one-task `gron` run may qualify an adapter",
-        "Slide 6 may name the negative one-task FeatureBench-fast canary",
+        "Slide 6 may show the one-task FeatureBench-fast canary's progression",
         '"small" is an engineering and deployment class',
-        "does not validate a causal harness benefit",
-        "Two observed AskMe boundaries",
-        "one feature-scale action that never reached execution",
+        "does not validate a transport-only causal benefit",
+        "FeatureBench progression and next bottleneck",
+        "AskMe now reaches applied, partially working FeatureBench code",
+        "no PR or issue numbers on any slide",
         "presentation-first instruction removes the unfinished 24-run",
         "single registered model canary exhausted without emitting a patch",
         "one backup slide comparing AskMe, pi, and OpenHands",
