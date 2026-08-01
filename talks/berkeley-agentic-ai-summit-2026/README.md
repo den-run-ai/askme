@@ -23,7 +23,7 @@
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
-6. Show two observed boundaries: a FeatureBench-fast canary that never emitted a write, and a wrong deliverable that independent acceptance caught only after the agent stopped — then the Aug 1 revision-3 requalification that moved both canary cells to applied patches (Gemma exactly at the preregistered ceiling) and exposed a commit-without-validate rewrite loop.
+6. Show two observed boundaries: a FeatureBench-fast canary that never emitted a write, and a wrong deliverable that independent acceptance caught only after the agent stopped — then the Aug 1 revision-3 requalification that moved both cells to applied but unresolved patches and exposed distinct downstream failures: Gemma rewrote without testing; Qwen returned to observation after one write.
 7. Answer cautiously: bounded loops look promising, but realistic feature readiness remains open and belongs to the model–harness–task combination.
 8. Keep a backup comparison of AskMe, pi, and OpenHands technical boundaries for Q&A.
 
@@ -55,15 +55,18 @@ only a later clean-room stress-test candidate. Slide 6 includes this one-task
 boundary diagnosis. [Issue #2](https://github.com/den-run-ai/askme/issues/2) is
 the closed protocol/history record; feature-scale interface work is active in
 [issue #7](https://github.com/den-run-ai/askme/issues/7) and continues in the
-revision-4 validate-after-write follow-up (in progress, not merged).
+revision-4 validate-after-write follow-up (#21; implemented, v7 requalification
+pending).
 
 On Aug 1, 2026, the revision-3 action interface (sentinel write transport,
 backend-aware budgets, write-forcing policy) requalified that same frozen task
-under preregistered v6 protocols. Both cells produced applied patches: Gemma 4
-31B at 11/13 F2P (84.62%) — exactly the preregistered pi-ablation ceiling with
-the identical two failing tests — and Qwen3.6-27B at 7/13 (53.85%) vs its
-76.92% ceiling. Both agents still exhausted without emitting `done`; the new
-observed failure mode is a commit-without-validate rewrite loop. These remain
+under preregistered v6 protocols. Under the bundled interface changes and a
+changed serving stack, both cells produced applied but unresolved patches:
+Gemma 4 31B reached 11/13 F2P (84.62%), with the same two failures as the
+exploratory one-attempt pi reference, while Qwen3.6-27B reached 7/13 (53.85%)
+versus the pi reference's 10/13. Both agents exhausted without emitting `done`,
+but only Gemma entered a rewrite loop (18 writes, zero tests); Qwen wrote once
+and returned to observation. These remain
 one-task adapter canaries — not FeatureBench scores, reliability estimates, or
 model comparisons — and carry recorded caveats: a serving-stack confound vs the
 SiliconFlow-served v4/pi records (v6 ran on CoreWeave; Gemma bf16, Qwen fp8;

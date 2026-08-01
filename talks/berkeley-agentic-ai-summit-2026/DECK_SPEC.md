@@ -114,18 +114,21 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   slide may compare the technical model-facing boundaries of AskMe, pi, and
   OpenHands without ranking products or discussing vendor positioning.
 - The 2026-08-01 revision-3 requalification (v6) may appear on slide 6 as the
-  canary's continuation: both cells moved from empty patch to an applied patch,
-  Gemma 4 31B at 11/13 F2P (84.62%) — exactly the preregistered pi-ablation
-  ceiling with the identical two failing tests — and Qwen3.6-27B at 7/13
-  (53.85%) vs its 76.92% ceiling. Wherever those numbers appear they keep
+  canary's continuation: under the bundled interface changes and a changed
+  serving stack, both cells moved from empty patches to applied but unresolved
+  patches. Gemma 4 31B reached 11/13 F2P (84.62%), with the same two failures
+  as the exploratory one-attempt pi reference; Qwen3.6-27B reached 7/13
+  (53.85%) versus the pi reference's 10/13. Wherever those numbers appear they keep
   one-task adapter-canary boundary language: not FeatureBench scores, not
   reliability estimates, not model comparisons. Required caveats travel with
   any v4/pi comparison: the v6 serving stack (CoreWeave; Gemma bf16, Qwen fp8)
   differs from the SiliconFlow-fp8 v4/pi records while dated served-model IDs
   are identical; the issue-15 local-neutrality bar was waived, so no
   local-neutrality claim is licensed for revision 3; and three frozen Codex P2
-  findings caveat Qwen mechanism-level write-forcing counts. The
-  commit-without-validate rewrite loop is the newly observed failure mode; its
+  findings caveat Qwen mechanism-level write-forcing counts. Both agents
+  exhausted without `done`, but their failure modes differed: Gemma rewrote one
+  file 18 times without testing, while Qwen wrote once and returned to
+  observation. The
   revision-4 counterpart (validate-after-write pressure, rewrite damping, an
   unvalidated-write replan flag) is future work in progress and is never
   presented as done.
@@ -204,13 +207,15 @@ Tie the boundary to the retained observation: the Qwen wrong-path run was
 caught, not repaired. This is a concrete harness limit, not an argument about
 model size or family.
 
-The slide may close with the 2026-08-01 revision-3 requalification strip:
-transport, budget, and write-forcing fixes moved both canary cells to applied
-patches, with Gemma exactly at the preregistered pi-ablation ceiling and the
-identical two failing tests, while both agents still exhausted without `done`
-in a commit-without-validate rewrite loop. Keep one-task canary-not-score
-language on the strip and the serving-stack confound, waived local-neutrality
-bar, and Codex P2 caveats in the slide footer or companion documents.
+The slide may close with the 2026-08-01 revision-3 requalification strip: under
+the bundled interface changes and a changed serving stack, both canary cells
+produced applied but unresolved patches. Gemma matched the exploratory pi
+reference at 11/13 with the same two failures; Qwen reached 7/13 versus the pi
+reference's 10/13. Both exhausted without `done`, but only Gemma entered the
+18-write, zero-test rewrite loop; Qwen wrote once and returned to observation.
+Keep one-task canary-not-score language on the strip and the serving-stack
+confound, waived local-neutrality bar, and Qwen mechanism caveats in the slide
+footer or companion documents.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
@@ -278,11 +283,12 @@ and enterprise positioning off the slide.
   the first executable adapter; Vals is access-dependent, and a one-task
   ProgramBench canary is infrastructure qualification rather than evidence.
 - The 2026-08-01 instruction adds the v6 revision-3 requalification outcome to
-  slide 6 and the conclusion: the preregistered issue-#17 rule resolved cleanly
-  for Gemma (the transport was the whole story for patch quality on this cell)
-  and partially for Qwen (write forcing broke the observation stall; the
-  residual gap belongs to the loop). Numbers stay bounded as one-task adapter
-  canaries; provider names stay in slide footers and companion documents; the
+  slide 6 and the conclusion: under the bundled interface changes and a changed
+  serving stack, Gemma matched the exploratory pi reference at 11/13 while Qwen
+  reached 7/13 versus the pi reference's 10/13. This is an observed harness
+  outcome, not causal isolation of transport or write forcing. Numbers stay
+  bounded as one-task adapter canaries; provider names stay in slide footers
+  and companion documents; the
   revision-4 validate-after-write work is named only as in-progress future
   work, never as done.
 
