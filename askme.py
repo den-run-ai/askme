@@ -328,7 +328,11 @@ CONTENT_CLOSE = "CONTENT>>>"
 
 def _split_content_block(text):
     """Split a response into (header_text, content, closed).
-    content is None when no sentinel block is present."""
+    content is None when no sentinel block is present. The closing sentinel
+    must be flush-left and is matched from the end, so content lines that
+    merely resemble it (indented examples, embedded docs) stay content. A
+    file whose genuinely-final flush-left line is the sentinel itself cannot
+    ride this transport — use JSON "content" or chunked append for that."""
     lines = text.split("\n")
     open_idx = None
     for i, line in enumerate(lines):
@@ -338,8 +342,8 @@ def _split_content_block(text):
     if open_idx is None:
         return text, None, False
     header = "\n".join(lines[:open_idx])
-    for j in range(open_idx + 1, len(lines)):
-        if lines[j].strip() == CONTENT_CLOSE:
+    for j in range(len(lines) - 1, open_idx, -1):
+        if lines[j].rstrip() == CONTENT_CLOSE:
             return header, "\n".join(lines[open_idx + 1:j]), True
     return header, "\n".join(lines[open_idx + 1:]), False
 
@@ -519,6 +523,9 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             text = reasoning
         if raw:
             return text
+        # The strip chain below removes a trailing newline; remember it so a
+        # truncated sentinel block can keep its last complete line.
+        ends_with_newline = text.endswith("\n")
         # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
@@ -536,9 +543,15 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
 
         def _attach_block(obj):
             if block is not None and isinstance(obj, dict):
-                obj["content"] = block
+                content = block
                 if not block_closed and finish_reason == "length":
                     obj["content_truncated"] = True
+                    # The cutoff landed on a line boundary: the last line is
+                    # complete, not partial — restore the stripped newline so
+                    # the run loop's partial-line trim keeps it.
+                    if ends_with_newline:
+                        content += "\n"
+                obj["content"] = content
             return obj
 
         try:
@@ -667,10 +680,11 @@ def get_plan(user_prompt, state):
         plan_state["recent_steps"] = recent
         # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
         # replans restated the failed task text; make "no write happened yet"
-        # the visible problem instead.
+        # the visible problem instead. Scoped to the failed task's steps.
+        task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
         if _WRITE_TASK_RE.search(user_prompt) and not any(
                 s.get("action") in ("write", "edit") and s.get("ok")
-                for s in state.get("all_steps", [])):
+                for s in task_steps):
             plan_state["no_write_executed"] = True
     if "environment" not in plan_state:
         plan_state["environment"] = {}
@@ -840,9 +854,10 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     failed_steps = _step_digest(state.get("all_steps", []), count=3)
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
+        task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
         if _WRITE_TASK_RE.search(failed_task) and not any(
                 s.get("action") in ("write", "edit") and s.get("ok")
-                for s in state.get("all_steps", [])):
+                for s in task_steps):
             replan_state["no_write_executed"] = True
     env = state.get("environment", {})
     if env.get("missing_tools"):
@@ -1494,6 +1509,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         "validated_step_count": 0,
         "completed_step_groups": [],
         "all_steps": [],
+        "task_start_step_count": 0,
         "reasoning_policy": reasoning_policy,
         "goal_context_chars": goal_context_chars,
         # Selected vs executed accounting (issue #7): the Qwen canary selected
@@ -1562,6 +1578,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             # Carry over last step from previous task so executor has cross-task context
             prev_last = state["last_steps"][-1:] if state.get("last_steps") else []
             t_task = time.time()
+            # Scope for no_write_executed: an earlier task's write must not
+            # mask a stall in this one.
+            state["task_start_step_count"] = len(state["all_steps"])
 
             # E11: inner retry loop — try task-local replan before full replan
             task_done = False

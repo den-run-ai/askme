@@ -797,6 +797,36 @@ class TestSentinelTransport:
         assert result["content"] == "line1\nline2"
         assert "content_truncated" not in result
 
+    def test_unclosed_block_at_length_keeps_last_complete_line(self):
+        # Cutoff on a line boundary: the response's trailing newline is the
+        # proof the last line is complete — it must survive the strip chain
+        # so the run loop's partial-line trim does not drop the line.
+        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\n'
+        with patch("askme.requests.post", return_value=_length_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "line1\nline2\n"
+        assert result["content_truncated"] is True
+
+    def test_embedded_close_line_stays_content(self):
+        # Content lines that resemble the terminator (docs/fixtures about this
+        # protocol) must not end the block when a real terminator follows.
+        code = 'print("demo")\nCONTENT>>>\nprint("after")'
+        text = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\n' + code + '\nCONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == code
+
+    def test_indented_close_is_content_not_terminator(self):
+        text = ('{"action":"write","arg":"a.py"}\n'
+                '<<<CONTENT\nexample:\n    CONTENT>>>')
+        with patch("askme.requests.post", return_value=_stop_response(text)):
+            result = askme.ask_llm([{"role": "user", "content": "hi"}],
+                                   max_retries=0, reasoning_policy="off")
+        assert result["content"] == "example:\n    CONTENT>>>"
+
     def test_empty_block_at_length_retries_with_payload_budget(self):
         cut = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n'
         good = ('{"action":"write","arg":"a.py"}\n'
@@ -833,6 +863,24 @@ class TestTruncatedWriteContinuation:
         writes = [s for s in result["state"]["all_steps"] if s["action"] == "write"]
         assert "continue with append:true" in writes[0]["output"]
         assert writes[0]["_truncated_write"] is True
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_line_boundary_truncation_drops_nothing(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create impl.py with the implementation"]},
+            {"action": "write", "arg": "impl.py",
+             "content": "line1\nline2\n", "content_truncated": True},
+            {"action": "write", "arg": "impl.py", "content": "line3\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\nline3\n"
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
@@ -1076,3 +1124,53 @@ class TestWriteForcingPolicy:
                               ["[unknown] stalled"], [], state, "goal")
         msg = m.call_args.args[0][-1]["content"]
         assert '"no_write_executed": true' in msg
+
+    def test_task_replan_flag_scoped_to_current_task(self):
+        # A write from an earlier task must not mask this task's stall.
+        state = {
+            "all_steps": [
+                {"action": "write", "arg": "a.py", "ok": True},
+                {"action": "read", "arg": "b.py", "ok": True},
+            ],
+            "task_start_step_count": 1,
+        }
+        with patch("askme.ask_llm",
+                   return_value={"task": "create the logic in b.py"}) as m:
+            askme.replan_task("fix b.py logic",
+                              ["[unknown] stalled"], [], state, "goal")
+        msg = m.call_args.args[0][-1]["content"]
+        assert '"no_write_executed": true' in msg
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_replan_flag_scoped_across_tasks(self, mock_llm, mock_replan,
+                                             tmp_path):
+        """Task 1's successful write must not mask task 2's stall."""
+        Path(tmp_path, "b.py").write_text("x = 0\n")
+        plan_msgs = []
+        call_idx = {"n": 0}
+
+        def tracking_llm(messages, **kwargs):
+            call_idx["n"] += 1
+            n = call_idx["n"]
+            if n == 1:
+                return {"tasks": ["create a.py", "fix b.py logic"]}
+            if n == 2:
+                return {"action": "write", "arg": "a.py", "content": "x = 1\n"}
+            if n == 3:
+                return {"action": "done"}
+            if n == 4:
+                return {"action": "read", "arg": "b.py"}
+            if n == 5:
+                return {"action": "fail", "reasoning": "cannot"}
+            if n == 6:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = tracking_llm
+        result = _run_loop("create a.py then fix b.py logic", str(tmp_path),
+                           max_replans=2, max_tasks=2, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert '"no_write_executed": true' in plan_msgs[0]
