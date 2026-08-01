@@ -1,0 +1,116 @@
+{
+  "label": "one-task FeatureBench fast Gemma 4 31B adapter canary",
+  "protocol_id": "askme-featurebench-fast-gemma-31b-adapter-canary-v4",
+  "action_interface_revision": 2,
+  "started_at": "2026-08-01T03:09:36Z",
+  "completed_at": "2026-08-01T03:20:26Z",
+  "host_platform": "macOS 25.5.0 Apple Silicon host; linux/amd64 task image under Docker Rosetta",
+  "qualification": {
+    "valid": true,
+    "gold_control": {
+      "completed_instances": 1,
+      "resolved_instances": 1,
+      "f2p_pass_rate": 1.0,
+      "error_instances": 0,
+      "wall_time_seconds": 56
+    },
+    "harmless_nonempty_control": {
+      "completed_instances": 1,
+      "patch_successfully_applied": true,
+      "resolved": false,
+      "error_instances": 0,
+      "wall_time_seconds": 51
+    }
+  },
+  "sources": {
+    "askme_base_revision": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+    "askme_adapter_code_revision": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+    "askme_execution_revision": "72b78c2bc9e679b853ca0c17a0acb8b9d7c7cc73",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "google/gemma-4-31b-it",
+    "requested_provider": "siliconflow",
+    "provider_fallback": false,
+    "served_models": [
+      "google/gemma-4-31b-it-20260402"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ]
+  },
+  "endpoint_catalog_gate": {
+    "authenticated_read_only_get": true,
+    "endpoint_count": 18,
+    "pinned_provider_matches": 1,
+    "matched_status": 0,
+    "matched_quantization": "fp8",
+    "valid": true
+  },
+  "usage": {
+    "responses": 33,
+    "reasoning_responses": 8,
+    "prompt_tokens": 103850,
+    "completion_tokens": 17939,
+    "total_tokens": 121789,
+    "openrouter_cost_usd": 0.0206761,
+    "finish_reasons": {
+      "stop": 17,
+      "length": 16
+    },
+    "agent_trajectory_seconds": 488.2
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "executed_actions": {
+      "tree": 6,
+      "read": 2,
+      "search": 0,
+      "shell": 2,
+      "write": 0,
+      "edit": 0,
+      "append": 0
+    },
+    "prediction_success": false,
+    "patch_bytes": 0,
+    "observed_failure": "The agent executed 10 steps (6 tree, 2 shell, 2 read) and never issued a write or edit. 16 of 33 model responses were truncated at the output-token limit (finish_reason=length); under the revision-2 interface these surfaced as typed response_truncated step failures (5 step_error events, 0 malformed_action), the task failed three times through task-local replans, and the agent exhausted three planning attempts with an empty diff."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": false,
+    "empty_patch": true,
+    "error_instances": 0
+  },
+  "audit": {
+    "infrastructure_valid": true,
+    "qualification_valid": true,
+    "policy_compliant": true,
+    "policy_action_decisions": 10,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "runner_exit": 0,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "c794fea4dc3064b803bf981ec1edfc74e52cac05ef26e7de247dde855e2a0505",
+      "deterministic-post-run-audit.json": "5286fd1eb9120a897feb96d20f510d6558a7c7c8344d512e92c657e2ad275f87",
+      "askme-result.json": "6ea701269066c0aa4c5bcbafb01f3ad7cd8484d46878ee894d19bc6bbed70340",
+      "output.jsonl": "666935be51920548b3c93b7b693d369cdfd9d558f85a2660eeeb7aa1ab9b96c0",
+      "featurebench-report.json": "57c3472e3cd44189215c92cb6c9da05b8fa991e8e5441b79f646baa2757215d2",
+      "joint-outcome.json": "60b7b0a40f1e8e9d85dd86ca83b2bf9ca218838f71eeaa2482978019390b3356",
+      "openrouter-endpoint-catalog-preflight.json": "dac5902204f9e7f729cd768ff70538e8248df7a5ae408a60d6d9aa25e20ca10f"
+    }
+  },
+  "retained_run_directory": "/tmp/askme-featurebench-runs/canary-gemma-20260801T030936Z",
+  "interpretation": "This is one supported negative canary of the revision-2 AskMe action interface on one frozen task. It is not a FeatureBench score, reliability estimate, model-family comparison, model-size result, or causal estimate of the reasoning policy."
+}

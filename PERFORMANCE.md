@@ -428,3 +428,30 @@ Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and loca
 - On local, `think=True` caused JSON truncation failures (thinking tokens consumed the 768-token budget, truncating task lists — 2/3 header_dep runs failed all retry attempts).
 - On OpenRouter, `think=True` was the only mode with rubric failures (header_dep: 2 FAILs vs 0 for `think=False`).
 - Speed: local `think=True` averaged 40-55s vs 3-12s for `think=False` (5-12x); OpenRouter 12.1s vs 1.1s (11x).
+
+## FeatureBench v4 Canary Observations (2026-08-01)
+
+Both registered v4 cells ran their single adapter attempt at execution revision
+`72b78c2` (protocols in `tests/featurebench/`, records in
+`tests/featurebench/results/`). Harness, routing, and audits were fully green in
+both cells; both model attempts produced empty patches and were unresolved.
+
+1. **Gemma 4 31B: output-cap truncation persists under the revision-2
+   interface.** 16 of 33 responses finished with `length`; the interface
+   converted them into typed `response_truncated` step failures (5 events, 0
+   `malformed_action`) instead of v2's malformed-JSON cascade. The failure is
+   now legible but not prevented: no write or edit was ever executed before the
+   three planning attempts were exhausted (10 steps: 6 tree, 2 shell, 2 read).
+2. **Qwen3.6 27B: exploration-only stall — a distinct failure mode.** Zero
+   typed parse failures (0 `response_truncated`, 0 `malformed_action`); 41/42
+   responses finished `stop` and one reached the output cap without producing
+   a parse failure (2,157 completion tokens total). All 27 executed steps were
+   observation actions (14 tree, 13 read) with 8 more skipped by
+   selected-vs-executed accounting.
+   The model never attempted a write in any of the three planning attempts, so
+   budgets ran out with an empty diff. Unlike the Gemma cell, nothing blocked
+   an implementation write except the model's own action selection.
+3. **Infrastructure note.** A full host disk made Docker's VM filesystem go
+   read-only during a control eval; the failure was caught pre-inference by the
+   control gates, so no model attempt was consumed. Restarting Docker Desktop
+   compacted the VM disk and recovered ~16GB.
