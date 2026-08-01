@@ -16,6 +16,7 @@ settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
+| `CACHE_WORKAROUND` | `0` | Obsolete manual slot save/restore bypass (local only). Measured 40% slower than baseline; superseded by `--swa-full --cache-reuse 256`. Kept in code only for retesting after server rebuilds — leave at `0`. See [gemma4-setup.md](gemma4-setup.md). |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |

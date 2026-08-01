@@ -37,8 +37,10 @@ flowchart TD
     PL --> EX["execute — one JSON action per step<br/>shell · write · edit · read · search · tree"]
     EX -- task failed --> RE[replan]
     RE --> PL
-    EX -- all tasks done --> V[fail-open validation]
-    V --> DONE([done])
+    EX -- "all done · validation skipped" --> DONE([done])
+    EX -- "all done · risk signals" --> V[fail-open LLM validation]
+    V -- valid --> DONE
+    V -- invalid --> RE
 ```
 
 Before planning, the agent probes the environment (platform, available tools,
