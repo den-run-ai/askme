@@ -1,0 +1,90 @@
+{
+  "label": "one-task pi harness ablation (exploratory)",
+  "experiment_id": "askme-featurebench-pi-harness-ablation-v1",
+  "not_a_canary": true,
+  "cell": "qwen",
+  "attempt_started": "2026-08-01T04:19:56Z",
+  "attempt_finished": "2026-08-01T04:35:44Z",
+  "harness": {
+    "name": "pi coding agent",
+    "version": "0.83.0",
+    "node": "v22.23.2",
+    "tools": [
+      "read",
+      "write",
+      "edit",
+      "bash",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "max_tokens": 8192,
+    "reasoning_requested": false,
+    "step_cap": null,
+    "wall_cap_seconds": 3540
+  },
+  "task": {
+    "instance_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+    "masked_init": "replicates featurebench/infer/runtime.py _initialize_level1; mask patch removed from container after applying"
+  },
+  "route": {
+    "requested_model": "qwen/qwen3.6-27b",
+    "requested_provider": "siliconflow",
+    "served_models": [
+      "qwen/qwen3.6-27b-20260422"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ],
+    "expected_served_model": "qwen/qwen3.6-27b-20260422",
+    "route_pinned": true,
+    "calls": 44,
+    "statuses": {
+      "200": 44
+    },
+    "failed_forward_calls": 0
+  },
+  "usage": {
+    "prompt": 497141,
+    "completion": 6769,
+    "reasoning": 1528,
+    "cost": 0.1916404,
+    "agent_wall_seconds": 948,
+    "finish_reasons": {
+      "tool_calls": 86,
+      "stop": 2
+    }
+  },
+  "joint_outcome": {
+    "agent_completion": true,
+    "feature_acceptance": false,
+    "patch_applied": true
+  },
+  "acceptance_detail": {
+    "patch_bytes": 8283,
+    "f2p_passed": 10,
+    "f2p_failed": 3,
+    "f2p_failing_tests": [
+      "tests/test_algorithms.py::test_bootstrap_string_func",
+      "tests/test_algorithms.py::test_bootstrap_reproducibility",
+      "tests/test_algorithms.py::test_nanaware_func_warning"
+    ],
+    "p2p_passed": 387,
+    "p2p_failed": 0,
+    "pass_rate": 0.7692
+  },
+  "observed": "Qwen worked for ~16 minutes across 44 served calls (86 tool-call finishes) and delivered an implementation patch that applied cleanly and passed 10 of 13 FAIL_TO_PASS tests (76.9%) and all 387 PASS_TO_PASS tests. Under AskMe v4 the same model never issued a single write action in 27 executed steps. The provider reported 1,528 native reasoning tokens despite reasoning being disabled in the pi model config; SiliconFlow's qwen3.6 endpoint appears to emit some native thinking regardless.",
+  "retained_run_directory": "/tmp/askme-featurebench-runs/pi-ablation-qwen-full-20260801T041937Z",
+  "retained_artifact_sha256": {
+    "patch.diff": "52b36eb678c8b856c4eacdc8a50705feefc50f1fa248e43a5ca757e514d351f3",
+    "route-audit.json": "6ea15954a2249f3b0867b248d98f3ea9afd917b222abc884c18906583ca6e6ee",
+    "joint-outcome.json": "e45a5a13fb9d4a0e32a1cbfade97b04284ff2546273ecf1a55d83ffd6a83ebc2",
+    "output.jsonl": "466d7c94514016e42e78c21b167176a344fb3fb3001c220dc765637eff955667",
+    "featurebench-report.json": "ab4af89dc06e16673c26a15ae117a3b87f0d784cc91464c6469ce811c676ed9f",
+    "pi-events.ndjson": "6a1083cf46aeea40e4c57b7444d618ce27f7f930f2458047cabca297f077adbb"
+  },
+  "interpretation": "Exploratory single-attempt harness ablation contrasting with the v4 AskMe canary on the same frozen cell. Not a FeatureBench score, not a harness or model comparison result; n=1 per cell."
+}

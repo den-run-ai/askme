@@ -428,3 +428,25 @@ Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and loca
 - On local, `think=True` caused JSON truncation failures (thinking tokens consumed the 768-token budget, truncating task lists — 2/3 header_dep runs failed all retry attempts).
 - On OpenRouter, `think=True` was the only mode with rubric failures (header_dep: 2 FAILs vs 0 for `think=False`).
 - Speed: local `think=True` averaged 40-55s vs 3-12s for `think=False` (5-12x); OpenRouter 12.1s vs 1.1s (11x).
+
+## pi Harness Ablation vs v4 Canaries (2026-08-01)
+
+Exploratory single-attempt ablation (tests/featurebench/pi-ablation/): same
+frozen task, dated SiliconFlow endpoints, and wall budget as the v4 canaries,
+executed by the pi coding agent (free-form read/write/edit/bash tools, 8192
+output tokens, no step cap, reasoning off) with FeatureBench's official masked
+init replicated. Both models that delivered empty patches under AskMe v4
+delivered clean-applying implementations under pi:
+
+- **Gemma 4 31B**: 83 s, 6 calls, $0.0056 → patch applied, F2P 11/13 (84.6%),
+  P2P 387/387. Supports the truncation hypothesis: AskMe's 1536-token retry
+  cap, not model capability, blocked the write.
+- **Qwen3.6 27B**: 16 min, 44 calls, $0.19 → patch applied, F2P 10/13
+  (76.9%), P2P 387/387. The AskMe-side stall was action selection (never
+  chose write); given free-form tools it implements.
+
+Design implications for AskMe: raise the implementation-write token budget
+(1536 is the binding constraint for feature-scale writes), and revisit the
+action-selection prompt/menu that let a capable model observe indefinitely.
+Caveat: n=1 per cell, hypothesis-generating only; neither model resolved the
+task (both fail 2-3 acceptance tests, e.g. bootstrap seed reproducibility).
