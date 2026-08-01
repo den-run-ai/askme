@@ -42,7 +42,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | done     |
 | 9   | E17 | Expected-failure task completion semantics              | 3    | P1       | S      | planned  |
 | 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | planned  |
-| 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | planned  |
+| 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | done     |
 | 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | planned  |
 | 13  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
 | 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
@@ -137,6 +137,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Adds an action the planner must learn. Mitigate by adding a one-line hint in `SYSTEM_STEP` once E02 lands.
 - **Code.** `askme.py:550` (`execute`), `askme.py:189` (`SYSTEM_STEP` — actions list).
 - **Effort.** M.
+- **Status.** Done (2026-08-01, issue #7). Implemented as a dependency-free pure-Python bounded literal search (no `rg` requirement) plus a bounded `tree` action, with skip rules for VCS/dependency/hidden/binary files and caps (`SEARCH_MAX_MATCHES`/`SEARCH_MAX_CHARS`/`SEARCH_MAX_FILES`, `TREE_MAX_*`). `SYSTEM_STEP` documents both and nudges search/tree over shell grep/find/ls. Deterministic coverage in `tests/test_agent_actions.py`. Integration-side metric (shell-call reduction) still pending an E01 harness run.
 
 ### E10 — Batched actions per LLM call **[P3 — redesign-scale]**
 

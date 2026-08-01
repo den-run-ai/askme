@@ -1,6 +1,6 @@
 # AskMe
 
-Minimal agent that runs on local LLMs. Takes a prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. Single file, no frameworks, no dependencies beyond `requests`.
+Minimal agent that runs on local LLMs. Takes a prompt, plans tasks, executes them via shell/write/edit/read/search/tree actions, and replans on failure. Single file, no frameworks, no dependencies beyond `requests`.
 
 Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
 
@@ -36,7 +36,7 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 
 ## How It Works
 
-**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, read), and replans if something fails. Up to 3 replans. After all tasks complete, an LLM-based final validation verifies the goal was actually achieved (gated by complexity signals). By default, the agent will **not** install software — it fails fast with a prerequisite message. Set `ALLOW_SYSTEM_INSTALLS=1` to permit installs.
+**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, ranged read, bounded search/tree), and replans if something fails. Up to 3 replans. After all tasks complete, an LLM-based final validation verifies the goal was actually achieved (gated by complexity signals). By default, the agent will **not** install software — it fails fast with a prerequisite message. Set `ALLOW_SYSTEM_INSTALLS=1` to permit installs.
 
 ## Configuration
 

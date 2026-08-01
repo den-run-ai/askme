@@ -7,7 +7,7 @@ import pytest
 
 from askme import (execute, ask_llm, run, _run_loop, LLMTransportError,
                    LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX,
-                   _validate_action_contract)
+                   _validate_action_contract, READ_CHARS)
 from _test_support import mock_response, mock_response_raw
 
 
@@ -85,9 +85,13 @@ class TestExecuteRead:
         assert result["ok"] is False
 
     def test_read_truncated(self, work_dir):
-        Path(work_dir, "big.txt").write_text("x" * 500)
+        """Reads return bounded windows with truncation metadata (issue #7)."""
+        Path(work_dir, "big.txt").write_text("x" * 5000)
         result = execute({"action": "read", "arg": f"{work_dir}/big.txt"}, work_dir)
-        assert len(result["output"]) <= 300
+        assert result["ok"] is True
+        assert result["truncated"] is True
+        assert result["output"].startswith("[big.txt: lines 1-1 of 1")
+        assert len(result["output"]) <= READ_CHARS + 120  # window + header
 
 
 class TestExecuteEdit:
