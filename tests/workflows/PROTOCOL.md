@@ -1,6 +1,14 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 3 (2026-08-01). Revision 3 changes the AskMe action
+**Protocol revision:** 4 (2026-08-01). Revision 4 adds the validate-after-write
+executor policy (from the v6 canary's commit-without-validate rewrite loop):
+verification pressure after repeated same-target full writes, `rewrite_loop`
+damping skips, an `unvalidated_write` replan flag, and the three post-merge
+Codex P2 fixes to the revision-3 write-forcing mechanics (success-only commit
+counting, failed-task-scoped intent classification, passive-phrasing
+exemptions in the write-task regex). Any outcome-bearing run under revision 4
+requires a newly registered **v7** canary protocol; the recorded v6 outcomes
+remain revision-3 results. Revision 3 (2026-08-01) changed the AskMe action
 interface used by outcome-bearing runs (issue #15, from the v4 canary and pi
 ablation findings): sentinel-framed `write` content transport
 (`<<<CONTENT`/`CONTENT>>>` after the action JSON — no JSON-string escaping,

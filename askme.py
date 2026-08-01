@@ -148,10 +148,29 @@ MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 # canary spent all 27 executed steps on tree/read and never selected a write.
 WRITE_PRESSURE_OBSERVATIONS = 3  # observation steps before the executor must commit
 OBSERVE_TAIL_RESERVE = 3         # final steps per attempt reserved for commitment
+# Validate-after-write policy (revision 4): on a write-shaped task, repeated
+# whole-file rewrites of the same target may not consume the step budget —
+# the 2026-08-01 v6 Gemma canary rewrote one file 18 times without ever
+# verifying it or emitting done.
+REWRITE_PRESSURE_WRITES = 2  # same-target full writes before the executor must verify
+REWRITE_SKIP_WRITES = 3      # same-target full writes after which further rewrites are skipped
+# "include" dropped (Codex P2, PR #16): it matched passive phrasing like
+# "files that include deprecated.h" and misclassified observation tasks.
 _WRITE_TASK_RE = re.compile(
-    r"\b(implement|write|create|patch|add|fix|edit|update|replace|insert|include)\b",
+    r"\b(implement|write|create|patch|add|fix|edit|update|replace|insert)\b",
     re.I,
 )
+# A leading observation verb marks inspection intent even when a mutation
+# verb appears later ("find where to add the import").
+_OBSERVE_TASK_RE = re.compile(
+    r"^\s*(find|search|locate|inspect|read|list|review|explore|examine|look|check|show)\b",
+    re.I,
+)
+
+
+def _is_write_shaped(task):
+    return (bool(task) and bool(_WRITE_TASK_RE.search(task))
+            and not _OBSERVE_TASK_RE.match(task))
 
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
@@ -664,6 +683,27 @@ def _step_digest(steps, count=6):
     return digest
 
 
+def _write_visibility_flag(task_steps):
+    """Replanner visibility for a failed write-shaped task (issue #15 / rev 4).
+
+    Returns {"no_write_executed": True} when the task never landed a write,
+    {"unvalidated_write": <basename>} when it wrote but never verified after
+    the last successful write — the v6 Gemma replans restated the task while
+    a finished implementation sat on disk — or None.
+    """
+    ok_mutations = [idx for idx, s in enumerate(task_steps)
+                    if s.get("action") in ("write", "edit") and s.get("ok")]
+    if not ok_mutations:
+        return {"no_write_executed": True}
+    last_mutation = ok_mutations[-1]
+    validated = any(s.get("action") == "shell" and s.get("ok")
+                    for s in task_steps[last_mutation + 1:])
+    if validated:
+        return None
+    arg = task_steps[last_mutation].get("arg", "")
+    return {"unvalidated_write": Path(arg).name if arg else True}
+
+
 def get_plan(user_prompt, state):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
@@ -680,12 +720,15 @@ def get_plan(user_prompt, state):
         plan_state["recent_steps"] = recent
         # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
         # replans restated the failed task text; make "no write happened yet"
-        # the visible problem instead. Scoped to the failed task's steps.
+        # the visible problem instead. Scoped to the failed task's steps, and
+        # classified from the failed task itself (Codex P2, PR #16) — a
+        # failed inspection task in a mixed request is not a write stall.
         task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
-        if _WRITE_TASK_RE.search(user_prompt) and not any(
-                s.get("action") in ("write", "edit") and s.get("ok")
-                for s in task_steps):
-            plan_state["no_write_executed"] = True
+        current_task = state.get("current_task", "")
+        if _is_write_shaped(current_task):
+            flag = _write_visibility_flag(task_steps)
+            if flag:
+                plan_state.update(flag)
     if "environment" not in plan_state:
         plan_state["environment"] = {}
     if "policy" not in plan_state:
@@ -717,7 +760,7 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
              reasoning_policy=DEFAULT_REASONING_POLICY,
              reasoning_trigger="executor",
              goal_context_chars=GOAL_CONTEXT_CHARS,
-             write_pressure=False):
+             write_pressure=False, validate_pressure=None):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -755,6 +798,10 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
     if write_pressure:
         user_msg += ("\nNOTE: several observation steps done but no write yet. "
                      "Next action MUST be write, edit, or shell — or fail with a one-line reason.")
+    if validate_pressure:
+        user_msg += (f"\nNOTE: {validate_pressure} is already written. Do NOT write the whole "
+                     "file again. Next action MUST be shell (verify it), edit (targeted fix), "
+                     "or done.")
     return ask_llm([
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
@@ -855,10 +902,10 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
         task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
-        if _WRITE_TASK_RE.search(failed_task) and not any(
-                s.get("action") in ("write", "edit") and s.get("ok")
-                for s in task_steps):
-            replan_state["no_write_executed"] = True
+        if _is_write_shaped(failed_task):
+            flag = _write_visibility_flag(task_steps)
+            if flag:
+                replan_state.update(flag)
     env = state.get("environment", {})
     if env.get("missing_tools"):
         replan_state["missing_tools"] = env["missing_tools"]
@@ -1601,7 +1648,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 observe_executed = 0
                 commit_executed = 0
                 observe_blocked = 0
-                task_wants_write = bool(_WRITE_TASK_RE.search(task))
+                last_write_target = None
+                consecutive_target_writes = 0
+                task_wants_write = _is_write_shaped(task)
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
                 if completed_repair:
                     log(f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})")
@@ -1620,6 +1669,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             write_pressure=(
                                 task_wants_write and commit_executed == 0
                                 and observe_executed >= WRITE_PRESSURE_OBSERVATIONS),
+                            validate_pressure=(
+                                Path(str(last_write_target)).name
+                                if task_wants_write and last_write_target is not None
+                                and consecutive_target_writes >= REWRITE_PRESSURE_WRITES
+                                else None),
                         )
                     except LLMTransportError as e:
                         log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
@@ -1701,6 +1755,28 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         state["last_steps"].append({
                             "action": act, "arg": action.get("arg", ""), "ok": True,
                             "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason."})
+                        continue
+
+                    # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES
+                    # successful full writes of the same target with no
+                    # intervening successful shell/edit, further full rewrites
+                    # are skipped — verify, edit, or finish instead.
+                    if (act == "write" and not action.get("append")
+                            and task_wants_write and last_write_target is not None
+                            and consecutive_target_writes >= REWRITE_SKIP_WRITES
+                            and _step_path(action.get("arg", ""), working_dir)
+                            == last_write_target):
+                        dup_skip_count += 1
+                        log(f"  [{step + 1}] skip (rewrite loop: "
+                            f"{action.get('arg', '')[:40]} already written "
+                            f"{consecutive_target_writes}x)")
+                        _skip_step(i, step, act, action, "rewrite_loop")
+                        state["last_steps"].append({
+                            "action": act, "arg": action.get("arg", ""), "ok": True,
+                            "output": (f"Already written {consecutive_target_writes} times. "
+                                       "Do NOT write it again — verify with shell, make a "
+                                       "targeted edit, or emit done."),
+                        })
                         continue
 
                     # Duplicate action guard — per-action-type loop detection
@@ -1830,9 +1906,24 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     state["executed_steps"] += 1
                     if act in OBSERVE_ACTIONS:
                         observe_executed += 1
-                    else:
-                        commit_executed += 1
                     result = execute(action, working_dir)
+                    if act not in OBSERVE_ACTIONS and result["ok"]:
+                        # Counted only on success (Codex P2, PR #16): a failed
+                        # mutation must not disarm write pressure or the
+                        # observation tail reserve.
+                        commit_executed += 1
+                    if act == "write" and result["ok"] and not action.get("append"):
+                        target = _step_path(action.get("arg", ""), working_dir)
+                        if target == last_write_target:
+                            consecutive_target_writes += 1
+                        else:
+                            last_write_target = target
+                            consecutive_target_writes = 1
+                    elif act in ("shell", "edit") and result["ok"]:
+                        # Verification or a targeted fix breaks the rewrite
+                        # streak; observations do not (the v6 Gemma loop
+                        # interleaved tree/read between rewrites).
+                        consecutive_target_writes = 0
                     if truncated_write and result["ok"]:
                         # The executor is stateless per step: without a resume
                         # anchor the model cannot know where the write stopped.

@@ -1268,3 +1268,217 @@ class TestWriteForcingPolicy:
         assert result["status"] == "complete"
         assert len(plan_msgs) == 1
         assert '"no_write_executed": true' in plan_msgs[0]
+
+
+# --- Validate-after-write policy (revision 4) ---
+
+class TestWriteShapedClassification:
+    def test_mutation_verbs_are_write_shaped(self):
+        assert askme._is_write_shaped("implement bootstrap in algorithms.py")
+        assert askme._is_write_shaped("update the config defaults")
+        assert askme._is_write_shaped("fix the parser bug")
+
+    def test_passive_include_is_not_write_shaped(self):
+        # Codex P2 (PR #16): "include" matched passive phrasing.
+        assert not askme._is_write_shaped("find files that include deprecated.h")
+        assert not askme._is_write_shaped("list modules that include the header")
+
+    def test_leading_observation_verb_wins(self):
+        assert not askme._is_write_shaped("find where to add the import")
+        assert not askme._is_write_shaped("locate the file to update")
+        assert not askme._is_write_shaped("check whether main.c needs a fix")
+
+    def test_empty_task_is_not_write_shaped(self):
+        assert not askme._is_write_shaped("")
+
+
+class TestValidateAfterWrite:
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_validate_note_after_two_rewrites(self, mock_llm, mock_replan,
+                                              tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "big.py", "content": "v1\n"}
+            if n == 3:
+                return {"action": "write", "arg": "big.py", "content": "v2\n"}
+            if n == 4:
+                return {"action": "shell", "arg": "echo verified"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("implement feature in big.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert all("Do NOT write the whole file again" not in s
+                   for s in seen[:3])
+        assert "Do NOT write the whole file again" in seen[3]
+        assert "big.py is already written" in seen[3]
+        # A successful shell verification clears the pressure.
+        assert "Do NOT write the whole file again" not in seen[4]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_loop_skip_after_three(self, mock_llm, mock_replan,
+                                           tmp_path):
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n <= 4:
+                return {"action": "write", "arg": "big.py",
+                        "content": f"v{n - 1}\n"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py", "content": "v4\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        # The fourth consecutive full write is damped, not executed.
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "rewrite_loop" in reasons
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_append_chunks_do_not_count_as_rewrites(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create big.py from chunks"]}
+            if n == 2:
+                return {"action": "write", "arg": "big.py", "content": "a\n"}
+            if n == 3:
+                return {"action": "write", "arg": "big.py", "content": "b\n",
+                        "append": True}
+            if n == 4:
+                return {"action": "write", "arg": "big.py", "content": "c\n",
+                        "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create big.py from chunks", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "a\nb\nc\n"
+        assert all("Do NOT write the whole file again" not in s for s in seen)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_mutation_keeps_write_pressure(self, mock_llm, mock_replan,
+                                                  tmp_path):
+        # Codex P2 (PR #16): a failed edit must not disarm the pressure note.
+        _big_file(str(tmp_path), lines=200)
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["fix big.py bug"]}
+            if n == 2:
+                return {"action": "read", "arg": "big.py"}
+            if n == 3:
+                return {"action": "tree", "arg": "."}
+            if n == 4:
+                return {"action": "search", "arg": "def f1"}
+            if n == 5:
+                return {"action": "edit", "arg": "big.py",
+                        "find": "no such text anywhere", "replace": "x"}
+            if n == 6:
+                return {"action": "write", "arg": "big.py", "content": "ok\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("fix big.py bug", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert "MUST be write" in seen[4]
+        # Pre-fix, the failed edit incremented commit_executed and the
+        # pressure vanished here.
+        assert "MUST be write" in seen[5]
+        assert "MUST be write" not in seen[6]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_replan_sees_unvalidated_write(self, mock_llm, mock_replan,
+                                           tmp_path):
+        plan_msgs = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in app.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "app.py", "content": "x = 1\n"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "unsure"}
+            if n == 4:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("implement feature in app.py", str(tmp_path),
+                           max_replans=2, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert '"unvalidated_write": "app.py"' in plan_msgs[0]
+        assert "no_write_executed" not in plan_msgs[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_inspection_task_is_not_a_write_stall(self, mock_llm,
+                                                         mock_replan,
+                                                         tmp_path):
+        # Codex P2 (PR #16): "create a.py, then inspect b.py" — a failure in
+        # the inspection task must not flag no_write_executed.
+        plan_msgs = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["create a.py with hello",
+                                  "inspect b.py structure"]}
+            if n == 2:
+                return {"action": "write", "arg": "a.py",
+                        "content": "print('hello')\n"}
+            if n == 3:
+                return {"action": "done"}
+            if n == 4:
+                return {"action": "fail", "reasoning": "b.py is missing"}
+            if n == 5:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create a.py with hello, then inspect b.py",
+                           str(tmp_path),
+                           max_replans=2, max_tasks=2, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert "no_write_executed" not in plan_msgs[0]
+        assert "unvalidated_write" not in plan_msgs[0]
