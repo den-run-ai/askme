@@ -438,14 +438,16 @@ both cells; both model attempts produced empty patches and were unresolved.
 
 1. **Gemma 4 31B: output-cap truncation persists under the revision-2
    interface.** 16 of 33 responses finished with `length`; the interface
-   converted them into typed `response_truncated` step failures (6 events, 0
+   converted them into typed `response_truncated` step failures (5 events, 0
    `malformed_action`) instead of v2's malformed-JSON cascade. The failure is
    now legible but not prevented: no write or edit was ever executed before the
    three planning attempts were exhausted (10 steps: 6 tree, 2 shell, 2 read).
 2. **Qwen3.6 27B: exploration-only stall — a distinct failure mode.** Zero
-   parse failures and zero truncation pressure (41/42 `stop` finishes, 2,157
-   completion tokens total), yet all 27 executed steps were observation actions
-   (14 tree, 13 read) with 8 more skipped by selected-vs-executed accounting.
+   typed parse failures (0 `response_truncated`, 0 `malformed_action`); 41/42
+   responses finished `stop` and one reached the output cap without producing
+   a parse failure (2,157 completion tokens total). All 27 executed steps were
+   observation actions (14 tree, 13 read) with 8 more skipped by
+   selected-vs-executed accounting.
    The model never attempted a write in any of the three planning attempts, so
    budgets ran out with an empty diff. Unlike the Gemma cell, nothing blocked
    an implementation write except the model's own action selection.
