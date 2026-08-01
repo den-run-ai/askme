@@ -1,0 +1,99 @@
+{
+  "record_kind": "control_requalification_before_outcome_bearing_run",
+  "recorded_at": "2026-08-01T02:35:00Z",
+  "claim_boundary": {
+    "allowed_label": "v4 protocol registration and control requalification",
+    "model_calls_made": 0,
+    "chat_completion_requests_made": 0,
+    "is_benchmark_score": false,
+    "is_model_result": false,
+    "authorizes_replacement_attempts": false
+  },
+  "registered_protocols": {
+    "tests/featurebench/gemma-31b-canary-protocol-v4.json": "3cdddd05a77b5a734a94685e8b526285d6e51d969d66a947615754575eaeb0d1",
+    "tests/featurebench/qwen-27b-canary-protocol-v4.json": "38fba05682f3c3c35c63879fc24d2a3062b980a4502a2c3d2458f947adfb713f"
+  },
+  "sources": {
+    "askme_base_commit": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+    "askme_source_sha256": "bc677b326dce7c3b2b9b55ebdc70d48fe0df406adbc2572f46f194a0a98357ab",
+    "action_interface_revision": 2,
+    "adapter_sha256": "cb63af48ba837ad38f8aa99f245eeab3b9006a669600d5ad7fd0dbd1861dd9b6",
+    "audit_sha256": "585922d763677d45ad10834ad8ab7d1662aceb64abc1cd16333ddadee8b07568",
+    "featurebench_commit": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "host": {
+    "platform": "Darwin 25.5.0 arm64",
+    "docker": "24.0.2 build cb74dfc",
+    "image_architecture": "amd64",
+    "image_source": "local cache matching the pinned digest; no new pull required"
+  },
+  "verifications": {
+    "featurebench_checkout": {
+      "clean": true,
+      "commit_matches_protocol": true,
+      "uv_sync_frozen": true
+    },
+    "dataset_snapshot": {
+      "revision_matches_protocol": true,
+      "task_image_name_matches": true,
+      "problem_statement_chars": 11144,
+      "problem_statement_sha256_matches": true
+    },
+    "offline_test_suite": {
+      "commit": "44574fb98e2c10980e68fbfdf2e50eaecdd549fc",
+      "command": "pytest tests/ -k \"not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter\"",
+      "passed": 418,
+      "failed": 0
+    },
+    "endpoint_catalog_preflight": {
+      "request_kind": "authenticated read-only GET of the OpenRouter per-model endpoint catalog; not a chat completion; no model response produced",
+      "google/gemma-4-31b-it": {
+        "siliconflow_endpoints": 1,
+        "dated_served_model": "google/gemma-4-31b-it-20260402",
+        "status": 0
+      },
+      "qwen/qwen3.6-27b": {
+        "siliconflow_endpoints": 1,
+        "dated_served_model": "qwen/qwen3.6-27b-20260422",
+        "status": -2,
+        "caveat": "endpoint present with the preregistered dated ID but reporting a non-zero catalog status at registration time; re-check the catalog immediately before inference and do not substitute a different route if it is unavailable"
+      }
+    }
+  },
+  "controls": {
+    "gold": {
+      "operation": "official_featurebench_eval",
+      "predictions": "gold",
+      "report": {
+        "total_instances": 1,
+        "completed_instances": 1,
+        "resolved_instances": 1,
+        "error_instances": 0
+      },
+      "outcome": "resolved",
+      "meets_protocol_expectation": true,
+      "approx_wall_seconds": 58
+    },
+    "harmless_nonempty": {
+      "operation": "official_featurebench_eval",
+      "prediction_source": "sequence[1].prediction of the v4 protocol",
+      "report": {
+        "featurebench_eval_completed": true,
+        "patch_successfully_applied": true,
+        "resolved": false,
+        "error_present": false,
+        "traceback_present": false
+      },
+      "outcome": "applied_and_unresolved",
+      "meets_protocol_expectation": true
+    }
+  },
+  "remaining_before_outcome_bearing_run": [
+    "merge this registration to main; the clean merged commit is the execution revision passed as --askme-revision",
+    "re-check the OpenRouter endpoint catalog immediately before inference (adapter does this automatically)",
+    "run exactly one adapter attempt per registered cell (sections 6-8 of the runbook); no reruns after inference starts"
+  ]
+}
