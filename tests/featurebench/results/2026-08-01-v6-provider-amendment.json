@@ -1,0 +1,65 @@
+{
+  "record_kind": "protocol_amendment_before_outcome_bearing_run",
+  "recorded_at": "2026-08-01T14:38:00Z",
+  "claim_boundary": {
+    "allowed_label": "v6 protocol registration (provider re-pin); no model result",
+    "model_calls_made": 0,
+    "chat_completion_requests_made": 0,
+    "is_benchmark_score": false,
+    "is_model_result": false,
+    "authorizes_replacement_attempts": false
+  },
+  "amends": {
+    "superseded_protocols": {
+      "tests/featurebench/gemma-31b-canary-protocol-v5.json": "c1ad8ac054d25a7680075ee93476286f2027909edd903e9dde03733b3ee01805",
+      "tests/featurebench/qwen-27b-canary-protocol-v5.json": "c007cbc2c521db31d78133fdd09d43273b5c85ffefb6e96b6d6fee756c004191"
+    },
+    "v5_consumed": false,
+    "model_calls_under_v5": 0,
+    "only_change": "agent_cell.provider.order: [\"siliconflow\"] -> [\"coreweave\"]; expected dated served-model IDs, task, dataset, image, budgets, timeouts, reasoning policy, and AskMe base (491dbc0, askme.py sha256 a9037d47...) are unchanged"
+  },
+  "registered_protocols": {
+    "tests/featurebench/gemma-31b-canary-protocol-v6.json": "3c509295e965b8f83387cc87f9b1e88fd59199d3d41d1316c8fca853bdde4671",
+    "tests/featurebench/qwen-27b-canary-protocol-v6.json": "1eafde0942a4e2d9a20a960caf63ba12e6a6edffbbe8e87ea6a10f07526d0764"
+  },
+  "reason": "maintainer directive 2026-08-01: SiliconFlow judged unreliable/slow for same-day presentation needs; route the single attempt per cell via CoreWeave",
+  "interpretation_caveats": [
+    "the v4 empty-patch baseline and the pi-ablation ceilings (Gemma 84.6% F2P, Qwen 76.9% F2P) were served by SiliconFlow fp8 endpoints; v6 outcomes add a serving-provider confound to those preregistered comparisons",
+    "Gemma cell quantization changes: CoreWeave serves bf16 where SiliconFlow served fp8; the Qwen cell stays fp8 on both providers",
+    "the dated served-model IDs are identical to v4/pi, which bounds the confound to the serving stack rather than the model snapshot"
+  ],
+  "endpoint_catalog_preflight": {
+    "request_kind": "authenticated read-only GET of the OpenRouter per-model endpoint catalog; not a chat completion; no model response produced",
+    "google/gemma-4-31b-it": {
+      "coreweave_endpoints": 1,
+      "dated_served_model": "google/gemma-4-31b-it-20260402",
+      "status": 0,
+      "quantization": "bf16"
+    },
+    "qwen/qwen3.6-27b": {
+      "coreweave_endpoints": 1,
+      "dated_served_model": "qwen/qwen3.6-27b-20260422",
+      "status": 0,
+      "quantization": "fp8"
+    }
+  },
+  "controls_carried_over": {
+    "from_record": "tests/featurebench/results/2026-08-01-v5-control-requalification.json",
+    "provider_independent": [
+      "gold control resolved",
+      "harmless nonempty control applied-and-unresolved",
+      "pinned dataset snapshot verification",
+      "image digest verification",
+      "offline test suite 448 passed at the registered AskMe source"
+    ],
+    "also_carried_over": [
+      "maintainer waiver of the issue-15 local bench neutrality bar",
+      "three post-merge Codex P2 findings on revision-3 write-forcing mechanics, frozen as-is with recorded impact"
+    ]
+  },
+  "remaining_before_outcome_bearing_run": [
+    "merge this amendment to main; the clean merged commit is the execution revision passed as --askme-revision",
+    "adapter re-checks the CoreWeave endpoint catalog immediately before inference",
+    "run exactly one adapter attempt per registered v6 cell; no reruns after inference starts"
+  ]
+}
