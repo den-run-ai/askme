@@ -1,0 +1,138 @@
+{
+  "label": "one-task FeatureBench fast Qwen3.6 27B adapter canary",
+  "protocol_id": "askme-featurebench-fast-qwen-27b-adapter-canary-v6",
+  "action_interface_revision": 3,
+  "started_at": "2026-08-01__07-49-44",
+  "host_platform": "macOS 25.5.0 Apple Silicon host; linux/amd64 task image under Docker Rosetta",
+  "qualification": {
+    "valid": true,
+    "controls": "carried over from results/2026-08-01-v5-control-requalification.json (provider-independent); gold resolved, harmless nonempty applied-and-unresolved"
+  },
+  "sources": {
+    "askme_base_revision": "491dbc03d3b97631372ca32763d34ba0458ff256",
+    "askme_adapter_code_revision": "491dbc03d3b97631372ca32763d34ba0458ff256",
+    "askme_execution_revision": "7025e9f205ed57b93e7b43a4e0caba6ffa5ac83d",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "qwen/qwen3.6-27b",
+    "requested_provider": "coreweave",
+    "provider_fallback": false,
+    "served_models": [
+      "qwen/qwen3.6-27b-20260422"
+    ],
+    "served_providers": [
+      "CoreWeave"
+    ],
+    "served_quantization": "fp8",
+    "provider_amendment": "v6 re-pin from SiliconFlow per results/2026-08-01-v6-provider-amendment.json; v4/pi comparisons carry a serving-stack confound"
+  },
+  "endpoint_catalog_gate": {
+    "authenticated_read_only_get": true,
+    "endpoint_count": 9,
+    "pinned_provider_matches": 1,
+    "matched_status": 0,
+    "matched_quantization": "fp8",
+    "valid": true
+  },
+  "usage": {
+    "responses": 60,
+    "reasoning_responses": 9,
+    "prompt_tokens": 201108,
+    "completion_tokens": 5726,
+    "openrouter_cost_usd": 0.0900989,
+    "finish_reasons": {
+      "stop": 60
+    },
+    "agent_trajectory_seconds": 103.1
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "task_local_replans": 3,
+    "executed_actions": {
+      "tree": 7,
+      "read": 23,
+      "search": 2,
+      "write": 1
+    },
+    "successful_actions": {
+      "tree": 6,
+      "read": 18,
+      "search": 2,
+      "write": 1
+    },
+    "step_skips": {
+      "duplicate_read": 8,
+      "stuck_read": 5
+    },
+    "prediction_success": false,
+    "patch_bytes": 8382,
+    "revision_3_observables": {
+      "response_truncated_step_errors": 0,
+      "malformed_action_step_errors": 0,
+      "content_truncated_recoveries": 0,
+      "truncated_write_events": 0,
+      "observe_tail_reserved_skips": 0,
+      "observe_tail_exhausted_skips": 0,
+      "no_write_executed_flag_in_replans": 0,
+      "note": "write-pressure prompt-note firings are not JSONL events; reconstructable from step history per the v5 registration record"
+    },
+    "observed_failure": "The agent executed 33 steps across 3 planning attempts (7 tree, 23 read, 2 search, 1 write) with 13 skips (8 duplicate_read, 5 stuck_read) and zero typed parse failures (60/60 responses finished stop). Unlike v4 (27 executed steps, zero writes), it selected and executed one successful write of /testbed/seaborn/algorithms.py, then returned to observation until budgets exhausted; no done was emitted. The single-write implementation was emitted as a nonempty patch that applied cleanly."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": true,
+    "empty_patch": false,
+    "f2p_pass_rate": 0.5385,
+    "f2p_passed": 7,
+    "f2p_failed": 6,
+    "f2p_failing_tests": [
+      "tests/test_algorithms.py::test_bootstrap_multiarg",
+      "tests/test_algorithms.py::test_bootstrap_axis",
+      "tests/test_algorithms.py::test_bootstrap_ols",
+      "tests/test_algorithms.py::test_bootstrap_string_func",
+      "tests/test_algorithms.py::test_bootstrap_reproducibility",
+      "tests/test_algorithms.py::test_nanaware_func_warning"
+    ],
+    "error_instances": 0
+  },
+  "pi_ablation_comparison": {
+    "ceiling_f2p": 0.7692,
+    "preregistered_rule": "issue #17",
+    "caveat": "pi cells were served by SiliconFlow fp8; v6 by CoreWeave - serving-stack confound recorded in the v6 amendment"
+  },
+  "audit": {
+    "original_audit_classification": "invalid_infrastructure",
+    "original_audit_defect": "canary_audit.py hardcoded SiliconFlow as the required provider instead of deriving it from the protocol; every CoreWeave-served token event and the v6 protocol itself were flagged",
+    "corrected_audit_classification": "valid_infrastructure_policy_compliant",
+    "corrected_audit_tool_sha256": "b9d342c00959a77c12fd19fbdf31d8db19893da8a1c48f49a4a2d83463bb72b3",
+    "corrected_audit_code_root": "clean checkout of the execution revision 7025e9f (the code that ran at inference time)",
+    "both_audit_outputs_retained": true,
+    "policy_compliant": true,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "c71faf91c603851dd1c9082f52c5f1ece79618ed6f06662e83448132b47fcd5d",
+      "deterministic-post-run-audit.json": "aa9f3175fec3337e49a7a4e8834c62ec0cf90fad94007685988d38753635aa27",
+      "deterministic-post-run-audit-corrected.json": "a945cc329915a253fc2ae1dbc0eb577aa7eb126111e3cb5e8df06aa75e1f8e23",
+      "askme-result.json": "a28c62c214d5b5e465d8d21aa2c77e7677e923c7ccea7329d789bd82c837bf1f",
+      "output.jsonl": "5e58e464eb8a368aaf73ffb6d773e40d7fad7c9e0eb5200235aab8b22205d517",
+      "featurebench-report.json": "2d3618e0c3d403ff74119d9f5508475641d0abca6b3501cf1f9cffb73fd93231",
+      "openrouter-endpoint-catalog-preflight.json": "7d3f71ab51b43911ffa029afee5078efb3486c7d0d21d10af9247e4ad21503c8"
+    }
+  },
+  "retained_run_directory": "/tmp/askme-featurebench-runs/canary-qwen-20260801T144942Z",
+  "interpretation": "Under the preregistered issue-#17 rule: the write-forcing policy broke the v4 observation stall - a write was selected (v4: zero) and the patch applied with 7/13 F2P (53.85%). The residual gap vs the pi ceiling (76.92%) belongs to the loop and model behavior: one uniterated write with no test execution, still observation-dominant (23 of 33 executed steps were reads). The three registration-time Codex P2 caveats on write-forcing mechanics apply to this cell's mechanism-level counts."
+}

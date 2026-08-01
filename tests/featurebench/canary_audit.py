@@ -340,8 +340,6 @@ def _protocol_expectations(
         audit.fail("protocol_attempts", "canary protocol must freeze exactly one attempt")
     if not isinstance(expected["provider"], str) or not expected["provider"]:
         audit.fail("protocol_provider", "protocol must freeze one provider")
-    elif expected["provider"].casefold() != "siliconflow":
-        audit.fail("protocol_provider", "canary protocol must pin SiliconFlow")
     if expected["reasoning_policy"] != "gated":
         audit.fail("protocol_reasoning_policy", "canary protocol must freeze gated policy")
     if not isinstance(expected["prompt_chars"], int) or expected["prompt_chars"] < 1:
@@ -730,10 +728,14 @@ def _audit_run_log(
                 f"token event {index} used an unapproved served model",
             )
         provider = event.get("provider")
-        if not isinstance(provider, str) or provider.casefold() != "siliconflow":
+        if (
+            not isinstance(provider, str)
+            or provider.casefold() != expected["provider"].casefold()
+        ):
             audit.fail(
                 "token_served_provider",
-                f"token event {index} was not served by SiliconFlow",
+                f"token event {index} was not served by the pinned provider "
+                f"{expected['provider']!r}",
             )
 
     decisions = [

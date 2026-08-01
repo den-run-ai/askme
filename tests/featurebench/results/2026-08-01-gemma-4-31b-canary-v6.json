@@ -1,0 +1,134 @@
+{
+  "label": "one-task FeatureBench fast Gemma 4 31B adapter canary",
+  "protocol_id": "askme-featurebench-fast-gemma-31b-adapter-canary-v6",
+  "action_interface_revision": 3,
+  "started_at": "2026-08-01__07-25-40",
+  "host_platform": "macOS 25.5.0 Apple Silicon host; linux/amd64 task image under Docker Rosetta",
+  "qualification": {
+    "valid": true,
+    "controls": "carried over from results/2026-08-01-v5-control-requalification.json (provider-independent); gold resolved, harmless nonempty applied-and-unresolved"
+  },
+  "sources": {
+    "askme_base_revision": "491dbc03d3b97631372ca32763d34ba0458ff256",
+    "askme_adapter_code_revision": "491dbc03d3b97631372ca32763d34ba0458ff256",
+    "askme_execution_revision": "7025e9f205ed57b93e7b43a4e0caba6ffa5ac83d",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "google/gemma-4-31b-it",
+    "requested_provider": "coreweave",
+    "provider_fallback": false,
+    "served_models": [
+      "google/gemma-4-31b-it-20260402"
+    ],
+    "served_providers": [
+      "CoreWeave"
+    ],
+    "served_quantization": "bf16",
+    "provider_amendment": "v6 re-pin from SiliconFlow per results/2026-08-01-v6-provider-amendment.json; v4/pi comparisons carry a serving-stack confound"
+  },
+  "endpoint_catalog_gate": {
+    "authenticated_read_only_get": true,
+    "endpoint_count": 18,
+    "pinned_provider_matches": 1,
+    "matched_status": 0,
+    "matched_quantization": "bf16",
+    "valid": true
+  },
+  "usage": {
+    "responses": 56,
+    "reasoning_responses": 11,
+    "prompt_tokens": 185060,
+    "completion_tokens": 39428,
+    "openrouter_cost_usd": 0.0319115,
+    "finish_reasons": {
+      "stop": 56
+    },
+    "agent_trajectory_seconds": 1289.4
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "task_local_replans": 3,
+    "executed_actions": {
+      "": 7,
+      "tree": 9,
+      "read": 9,
+      "write": 18,
+      "edit": 1,
+      "shell": 4
+    },
+    "successful_actions": {
+      "tree": 7,
+      "read": 8,
+      "write": 18,
+      "edit": 1,
+      "shell": 4
+    },
+    "step_skips": {},
+    "prediction_success": false,
+    "patch_bytes": 7351,
+    "revision_3_observables": {
+      "response_truncated_step_errors": 0,
+      "malformed_action_step_errors": 0,
+      "content_truncated_recoveries": 0,
+      "truncated_write_events": 0,
+      "observe_tail_reserved_skips": 0,
+      "observe_tail_exhausted_skips": 0,
+      "no_write_executed_flag_in_replans": 0,
+      "note": "write-pressure prompt-note firings are not JSONL events; reconstructable from step history per the v5 registration record"
+    },
+    "observed_failure": "The agent executed 48 selected/48-accounted steps across 3 planning attempts (9 tree, 9 read, 18 write, 1 edit, 4 shell, 7 empty-action failures) and wrote /testbed/seaborn/algorithms.py 18 times through the sentinel transport with zero truncation: 56/56 responses finished stop (v4: 16/33 length), 0 response_truncated, 0 malformed_action step errors, no content_truncated recovery needed. It never ran the delivered tests and never emitted done, exhausting all three planning attempts in a rewrite loop; the final on-disk implementation was emitted as a 7351-byte patch. One OpenRouter ReadTimeout (host network change) was absorbed by the typed transport-error retry path."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": true,
+    "empty_patch": false,
+    "f2p_pass_rate": 0.8462,
+    "f2p_passed": 11,
+    "f2p_failed": 2,
+    "f2p_failing_tests": [
+      "tests/test_algorithms.py::test_bootstrap_reproducibility",
+      "tests/test_algorithms.py::test_nanaware_func_warning"
+    ],
+    "error_instances": 0
+  },
+  "pi_ablation_comparison": {
+    "ceiling_f2p": 0.8462,
+    "preregistered_rule": "issue #17",
+    "caveat": "pi cells were served by SiliconFlow fp8; v6 by CoreWeave - serving-stack confound recorded in the v6 amendment"
+  },
+  "audit": {
+    "original_audit_classification": "invalid_infrastructure",
+    "original_audit_defect": "canary_audit.py hardcoded SiliconFlow as the required provider instead of deriving it from the protocol; every CoreWeave-served token event and the v6 protocol itself were flagged",
+    "corrected_audit_classification": "valid_infrastructure_policy_compliant",
+    "corrected_audit_tool_sha256": "b9d342c00959a77c12fd19fbdf31d8db19893da8a1c48f49a4a2d83463bb72b3",
+    "corrected_audit_code_root": "clean checkout of the execution revision 7025e9f (the code that ran at inference time)",
+    "both_audit_outputs_retained": true,
+    "policy_compliant": true,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "2445e30e486c6db465b9451d94fb1228d4e534ef23516a3b98fec3bb98e1afd1",
+      "deterministic-post-run-audit.json": "c21226c0558d6247f17e2d0690474b67ee4ced27fb3e2eda2d4b4a753da8c47a",
+      "deterministic-post-run-audit-corrected.json": "2935d8b21e547e3c341f9be4890611e9e1bbf6462b18121ef5d9b8dedfa6a8af",
+      "askme-result.json": "b3b6245694bde513188cd83687484622774422127dd2377b187cf38e215a0f2f",
+      "output.jsonl": "2517cc5cf1321b4081cda5c6773362ce8f70a6a5cf053cd12f0a1b10a1a5c4c6",
+      "featurebench-report.json": "2f49873cb5e10dc79f36c4af26c0969059c5c26f5d0dfb3c20faaa5d0b04c4b1",
+      "openrouter-endpoint-catalog-preflight.json": "bfb7c36089d5b59e073da41413252d4924ab3a40e4c4095c86eea2ba0d1d9163"
+    }
+  },
+  "retained_run_directory": "/tmp/askme-featurebench-runs/canary-gemma-20260801T142539Z",
+  "interpretation": "Under the preregistered issue-#17 rule this reads as: the JSON-string content transport was the whole story for patch production on this cell - v6 moves Gemma from empty patch to applied with 11/13 F2P (84.62%), exactly the pi-ablation ceiling with the identical two failing tests. The residual gap vs pi is completion signaling and efficiency (exhausted after 21.5 min / 56 calls vs pi complete in 83 s / 12 calls), which belongs to the plan/execute loop (commit-without-validate rewrite loop)."
+}

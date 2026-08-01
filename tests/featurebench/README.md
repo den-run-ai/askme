@@ -31,6 +31,37 @@ records, and the Gemma cell moves fp8→bf16 — are recorded in
 [`results/2026-08-01-v6-provider-amendment.json`](results/2026-08-01-v6-provider-amendment.json).
 One attempt per cell, as before.
 
+### v6 outcomes (2026-08-01)
+
+Both cells ran their single attempt on CoreWeave and produced **nonempty,
+cleanly applying patches** — the categorical change from v4's two empty-patch
+failures. Both agents still exhausted their planning attempts without emitting
+`done`, so agent completion is false in both cells; acceptance was evaluated
+on the delivered patches per the outcome contract.
+
+- **Gemma 4 31B** — patch applied, **11/13 F2P (84.62%) — exactly the pi
+  ceiling, with the identical two failing tests**. 56/56 responses finished
+  `stop` (v4: 16/33 `length`); 18 sentinel-transport writes, zero truncation
+  or parse failures. Failure mode inverted: a commit-without-validate rewrite
+  loop exhausted the step budgets. 21.5 min, $0.032.
+  Record: [`results/2026-08-01-gemma-4-31b-canary-v6.json`](results/2026-08-01-gemma-4-31b-canary-v6.json).
+- **Qwen3.6 27B** — patch applied, 7/13 F2P (53.85%) vs the 76.92% pi
+  ceiling. The v4 observation stall broke: one successful write was selected
+  and executed (v4: zero across 27 steps), though the trajectory stayed
+  observation-dominant (23/33 reads). 103 s, $0.090.
+  Record: [`results/2026-08-01-qwen36-27b-canary-v6.json`](results/2026-08-01-qwen36-27b-canary-v6.json).
+
+Both runs' original deterministic audits returned a false
+`invalid_infrastructure`: `canary_audit.py` hardcoded SiliconFlow instead of
+reading the pinned provider from the protocol. The corrected tool (provider
+derived from `agent_cell.provider.order`; fixed in the results PR) re-audited
+the retained artifacts against a clean checkout of the execution revision and
+classified both cells `valid_infrastructure_policy_compliant` with zero
+violations and zero credential leaks; both audit outputs are retained and
+hash-linked in the records. Each cell is one supported canary of the
+revision-3 action interface on one frozen task — not a FeatureBench score, a
+reliability estimate, or a model comparison.
+
 ## v5 registration (revision-3 action interface)
 
 Both v4 attempts were consumed on 2026-08-01 (empty-patch unresolved in both

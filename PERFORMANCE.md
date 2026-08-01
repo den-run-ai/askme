@@ -429,6 +429,49 @@ Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and loca
 - On OpenRouter, `think=True` was the only mode with rubric failures (header_dep: 2 FAILs vs 0 for `think=False`).
 - Speed: local `think=True` averaged 40-55s vs 3-12s for `think=False` (5-12x); OpenRouter 12.1s vs 1.1s (11x).
 
+## FeatureBench v6 Canary Observations (2026-08-01, revision-3 interface, CoreWeave)
+
+Requalification of the frozen cell under the revision-3 action interface
+(issue #17; protocols v5 registered then re-pinned to CoreWeave as v6 before
+any model call). Both cells produced **nonempty, cleanly applying patches**
+(v4: both empty). Both agents exhausted planning attempts without `done`.
+
+| Cell | v4 | v6 | pi ceiling |
+|---|---|---|---|
+| Gemma 4 31B | empty patch, 16/33 `length` | applied, **11/13 F2P (84.62%)**, 56/56 `stop`, 21.5 min, $0.032 | 11/13 (84.62%) — identical failing tests |
+| Qwen3.6 27B | empty patch, 0 writes/27 steps | applied, 7/13 F2P (53.85%), 1 write/33 steps, 103 s, $0.090 | 10/13 (76.92%) |
+
+1. **Gemma: the transport was the whole story for patch quality.** Zero
+   truncation under the sentinel transport + 4096/8192 budgets (v4: 16/33
+   `length` finishes); v6 lands exactly on the pi ceiling with the same two
+   failing tests. The failure mode inverted into a **commit-without-validate
+   rewrite loop**: 18 successful whole-file writes, zero test runs, no
+   `done`, three planning attempts exhausted with a working implementation on
+   disk. Write-forcing addresses "never writes"; nothing yet addresses "never
+   stops rewriting".
+2. **Qwen: write-forcing broke the observation stall** — one write selected
+   and executed (v4: zero), patch applied at 53.85% F2P vs the 76.92%
+   ceiling. Trajectory remained observation-dominant (23/33 reads, 8
+   duplicate-read skips). Residual gap belongs to the loop/model: a single
+   uniterated write, no test execution. The three registration-time Codex P2
+   caveats on write-forcing mechanics apply to mechanism-level counts.
+3. **Empty-action envelopes**: Gemma burned 7 steps on `action: ""` parse
+   artifacts (pi's native tool_calls: 0 malformed calls in 12). Quantifies
+   the cost of the JSON action protocol vs native tool calling (deferred,
+   issue #15).
+4. **Audit-tool provider hardcode (infrastructure bug)**: `canary_audit.py`
+   required SiliconFlow literally instead of the protocol's pinned provider,
+   flagging the flawless CoreWeave route as `invalid_infrastructure`. Fixed
+   in the results PR; corrected audits on retained artifacts:
+   `valid_infrastructure_policy_compliant`, 0 violations, both cells.
+5. **Transport-error resilience**: one OpenRouter `ReadTimeout` during a host
+   network change was absorbed by the typed transport-error retry (thinking
+   escalation), costing one call — the run continued and qualified.
+6. Caveats: CoreWeave serving stack (Gemma bf16) vs SiliconFlow fp8 for
+   v4/pi comparisons (recorded in the v6 amendment); the issue-15 local
+   neutrality bar was waived by the maintainer (recorded in the v5
+   requalification record).
+
 ## FeatureBench v4 Canary Observations (2026-08-01)
 
 Both registered v4 cells ran their single adapter attempt at execution revision
