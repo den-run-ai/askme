@@ -2,81 +2,92 @@
 
 Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026 · 5-minute lightning talk
 
-This is the full spoken script, one section per main slide. It is extracted
-verbatim from the presenter-note comments in [`slides.md`](slides.md), which
-remain the canonical source (Marp presenter mode reads them from there). Seven
-sections, 511 words, ~5:00 total. The backup slide has no script — it exists
+This is the personal delivery script — the story to speak on stage: the dream
+is a fully local coding agent on a 16GB MacBook, and this talk is a progress
+report toward that dream. Speak from this document. The slides and the inline
+presenter-note comments in [`slides.md`](slides.md) are intentionally
+untouched; for delivery, this script supersedes the inline notes. About 690
+words — roughly 5:00 at a brisk conversational pace, so rehearse once with a
+timer. If you are over time, the flex cuts are the last sentence of slide 4
+and the last sentence of slide 5. The backup slide has no script — it exists
 for Q&A only.
 
-## Slide 1 — Title: Are Small LLMs Ready for Coding Agents? (~40s)
+## Slide 1 — Title: Are Small LLMs Ready for Coding Agents? (~45s)
 
-The title is a question, not a verdict. Here, small is a deployment class, not
-one parameter cutoff. The hosted receipts span roughly
-three-to-four-billion-active mixtures and twenty-seven-to-thirty-one-billion
-dense models; they do not measure local performance. Teams want control over
-speed, hardware, deployment, and post-training on their chosen hardware and
-stack. The question is whether tight execution feedback can turn structured
-actions into accepted workflows.
+A few months ago I was on a plane with no wifi, and I caught myself completely
+stuck. I had ideas I wanted to try — and without a live coding agent, the
+honest truth was it would take me ages alone. I felt genuinely helpless, and it
+bothered me the whole flight. So I made myself a promise — call it the dream:
+small open models, running on my own MacBook through llama.cpp, doing real
+coding work with me, anywhere. This talk is that dream, in progress. Small here
+means a deployment class, not a parameter count. One warning up front: the
+hosted numbers you'll see today do not measure local performance.
 
 ## Slide 2 — AskMe gives a small model one structured move at a time (~45s)
 
-AskMe is an experimental coding-agent harness. It keeps an explicit plan, asks
-the model for one structured action, executes it, and returns fresh test or
-runtime evidence. AskMe keeps the current task and recent completed work in
-view; it can continue, repair, or replan. External acceptance retains the full
-contract. This approach assumes work decomposes into scoped actions, feedback
-is informative, and success is independently testable. Acceptance checks the
-required behavior and artifact.
+To chase the dream I wrote AskMe — an experimental coding-agent harness small
+enough to read in one sitting. I made three bets for small models. One: pass as
+little context as possible — the planner sees full state, the executor gets a
+slim, curated view. Two: keep every action small and granular — one JSON action
+per turn, an edit instead of a rewrite. Three: spend reasoning tokens only
+where they earn their cost, mostly in recovery. The loop executes each action
+and feeds fresh evidence back, and an independent check accepts the delivered
+workflow.
 
-## Slide 3 — A command passed. The workflow still failed. (~45s)
+## Slide 3 — A command passed. The workflow still failed. (~40s)
 
-This Qwen build run shows the agent problem: a successful command can still
-miss the workflow contract. The retained evidence shows a combined
-compile-and-run command targeting slash tmp slash test returning zero, followed
-by reported completion. It does not preserve stdout or prove the source
-contents. Acceptance expected dot slash main and found none. AskMe did not
-receive that failure for recovery. The workflow contract remained unmet
-afterward.
+The first lesson small models taught me: success signals lie. In this Qwen
+build run, the model compiled and ran its program at slash tmp slash test, saw
+exit code zero, and reported the task complete. From inside the loop everything
+looked green. The contract asked for dot slash main. The acceptance test looked
+and found nothing. A passing command plus a confident completion still added up
+to a missing deliverable. That run shaped the whole design: judge the delivered
+artifact, not the agent's self-report.
 
-## Slide 4 — Hypothesis: update only what fresh evidence invalidates (~45s)
+## Slide 4 — Hypothesis: update only what fresh evidence invalidates (~40s)
 
-This is a design hypothesis, not a result from the smoke. Reasoning should keep
-the contract in view, interpret execution feedback, and decide how much of the
-plan changed. A local mismatch should produce a local correction while
-completed work stays completed. Broad replanning belongs to broken assumptions,
-not every red command. The target is trajectory quality across these fast
-execution-feedback loops: fewer repeated failures, stuck steps, and unnecessary
-plan churn—not longer monologues.
+My third bet is still a hypothesis — let me say that plainly. The control
+flow I want is boring on purpose. When evidence matches the plan, continue.
+When one step misses, repair that step and rerun its check — don't melt the
+whole plan. Replan broadly only when an assumption actually broke. I care about
+trajectory quality — fewer repeated failures, fewer stuck steps, less plan
+churn — not longer monologues. I haven't measured this benefit yet. It's the
+bet I'd most like to be right about.
 
 ## Slide 5 — Acceptance caught the one bad deliverable (~45s)
 
-Four hosted variants each ran two simple checks once. Every agent reported
-completion; independent checks accepted seven artifacts. The shortest build
-trajectory was the rejected one, which is why completion and speed alone are
-insufficient. The rows preserve Gemma and Qwen acceptance status; steps,
-tokens, and replans remain in the records. No pair isolates size, architecture,
-active compute, family, run order, reasoning, or reliability. These are
-one-shot receipts, not rankings.
+First waypoint: does the loop hold together at all? Four hosted variants — two
+Gemmas, two Qwens — each ran two deliberately simple tasks once. Hosted cousins
+of my local setup, because hosted is where I could benchmark — they say nothing
+about MacBook speed. All eight runs reported complete; the independent check
+accepted seven. The one rejection was the fastest run — that wrong-path build.
+One run per cell, so no rankings. But acceptance caught exactly what the
+completion signal missed. And the small mixture-of-experts Gemma runs this same
+loop on my sixteen-gigabyte MacBook — slowly.
 
 ## Slide 6 — Both models build app features — but fail on testing (~45s)
 
-FeatureBench asks the agent to build a real app feature. In July, the same task
-produced no code edits at all: the agents read files and returned an empty
-patch. On August first, both models produced patches that applied and passed
-most target tests: Gemma eleven of thirteen, Qwen seven of thirteen. Both
-models can now build partially working app features. Neither validated its
-work: Gemma rewrote the same file without running tests; Qwen stopped editing
-and went back to reading. This is one task and one attempt per model —
-progress, not a benchmark score.
+Then I raised the ambition: can the harness build a real app feature?
+FeatureBench gave me the wall I needed. In July, on one frozen task, both
+models produced nothing — zero writes, an empty patch. That failure was mine;
+my action interface blocked their edits. I rebuilt the write path — changing
+more than one thing at once — and on August first both models delivered
+applied patches: Gemma passed eleven of thirteen target tests, Qwen seven.
+Real partial features. Then neither ran a single test or finished cleanly —
+Gemma rewrote one file eighteen times, Qwen drifted back to reading. One task,
+one attempt each: progress, not a score.
 
-## Slide 7 — Promising for bounded loops. Feature readiness is still open. (~35s)
+## Slide 7 — Promising for bounded loops. Feature readiness is still open. (~40s)
 
-The bounded checks are promising, but feature readiness remains unproven. Both
-models moved from empty patches to working partial features, yet neither tested
-its work or finished cleanly. Gemma rewrote without testing; Qwen wrote once
-and returned to reading. Testing and clean completion are the next harness
-problems, and one task cannot settle general readiness. Judge delivered
-behavior; evaluate the model, harness, and task as one system.
+So — is the dream real? Not yet. This is a progress report from the middle.
+Bounded loops with independent acceptance: genuinely promising. Feature-scale
+work: the models can now build, but they don't test their own work and don't
+know when to stop. Those are my next harness problems.
+Two of my three bets held up in bounded checks; the reasoning bet is still
+unmeasured. If you take one thing from me: judge delivered behavior — evaluate
+the model, the harness, and the task as one system. Somewhere over the ocean
+there's still a version of me waiting for this to work mid-flight. That's who
+I'm building it for.
 
 ## Slide 8 — Backup: AskMe, pi, and OpenHands
 
