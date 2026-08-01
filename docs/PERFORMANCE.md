@@ -8,6 +8,28 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## Test Suite Snapshot — 2026-07-13
+
+`pytest -q` completed with **367 passed and 27 skipped**. Backend-dependent
+integration tests skip when their server or credential is unavailable. Pytest
+counts in dated sections below are historical snapshots, not the current suite
+size.
+
+## Reproducing Multi-Trial Entries
+
+Entries from E01 onward use `tests/bench_harness.py` (median + range across N
+trials):
+
+```bash
+python3 tests/bench_harness.py                                    # 3 trials, easy, local
+python3 tests/bench_harness.py --suite medium --trials 5          # 5 trials, medium, local
+python3 tests/bench_harness.py --backend openrouter --suite hard  # 3 trials, hard, openrouter
+python3 tests/bench_harness.py --backend openrouter --suite easy --trials 1 \
+  --model qwen/qwen3.6-27b --provider siliconflow                 # strict provider pin
+python3 tests/bench_harness.py --test test_shell_and_write        # single test
+python3 tests/bench_harness.py --list                             # show available tests
+```
+
 ## FeatureBench One-Task Canary — 2026-07-13, OpenRouter (Gemma 4 31B)
 
 One frozen FeatureBench fast task qualified the adapter with passing gold and
@@ -25,8 +47,8 @@ edits, or an adaptive action budget before broader feature-scale evaluation.
 This is one canary on one task, not a FeatureBench score, reliability estimate,
 model-family comparison, model-size result, or proof that raising the cap alone
 would make the task pass. See the
-[published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json)
-and [qualified runbook](tests/featurebench/README.md).
+[published result](../tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json)
+and [qualified runbook](../tests/featurebench/README.md).
 
 ## E01 Harness Baseline — 2026-04-26, Local (Gemma 4 E4B Q4_K_M)
 

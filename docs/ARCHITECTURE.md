@@ -2,7 +2,7 @@
 
 Designed for: Gemma 4 E4B (dense PLE, 4.5B effective / 8B including embeddings), 16K context, 16GB M1 Mac.
 
-For usage, quickstart, and test commands see [README.md](README.md). For model/server/runtime configuration see [gemma4-setup.md](gemma4-setup.md). For benchmark history and test-run matrices see [PERFORMANCE.md](PERFORMANCE.md).
+For usage, quickstart, and test commands see [README.md](../README.md). For model/server/runtime configuration see [gemma4-setup.md](gemma4-setup.md). For benchmark history and test-run matrices see [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Architecture: Plan → Execute → Replan Loop
 
@@ -114,7 +114,7 @@ Every HTTP attempt emits a `reasoning_decision` JSONL event with the policy,
 named trigger, requested level, effective level, and attempt number. The `off`
 policy nulls the effective level even when a caller requests an explicit level.
 The frozen evaluation contract lives in
-[`tests/workflows/PROTOCOL.md`](tests/workflows/PROTOCOL.md).
+[`tests/workflows/PROTOCOL.md`](../tests/workflows/PROTOCOL.md).
 
 Outcome-bearing native evaluations do not import `askme` into the evaluator.
 The runner first copies a seed into a fresh workspace, then launches `askme.py`
@@ -249,7 +249,7 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 
 Active limitations that still shape the design.
 
-- **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json). Chunked `append` writes, ranged reads, and per-action budgets now exist (issue #7, protocol revision 2); the 2026-08-01 v4 canaries plus the pi harness ablation isolated the remaining binding constraints to the JSON content transport and OpenRouter budgets, addressed by revision 3 (issue #15: sentinel transport, `STEP_TOKENS=4096`/`STEP_WRITE_TOKENS=8192` on OpenRouter, write-forcing policy). The 2026-08-01 v6 requalification (CoreWeave-pinned, issue #17) confirmed the diagnosis: both cells produced nonempty applying patches — Gemma at exactly the pi-ablation F2P ceiling (11/13, zero truncation across 56 responses), Qwen breaking its observation stall with one executed write (7/13 F2P vs the 76.9% ceiling).
+- **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](../tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json). Chunked `append` writes, ranged reads, and per-action budgets now exist (issue #7, protocol revision 2); the 2026-08-01 v4 canaries plus the pi harness ablation isolated the remaining binding constraints to the JSON content transport and OpenRouter budgets, addressed by revision 3 (issue #15: sentinel transport, `STEP_TOKENS=4096`/`STEP_WRITE_TOKENS=8192` on OpenRouter, write-forcing policy). The 2026-08-01 v6 requalification (CoreWeave-pinned, issue #17) confirmed the diagnosis: both cells produced nonempty applying patches — Gemma at exactly the pi-ablation F2P ceiling (11/13, zero truncation across 56 responses), Qwen breaking its observation stall with one executed write (7/13 F2P vs the 76.9% ceiling).
 - **Commit-without-validate rewrite loop (revision 3, observed 2026-08-01).** With the transport fixed, the inverted failure mode surfaced: Gemma 4 31B rewrote the same implementation file 18 times without ever running the delivered tests or emitting `done`, exhausting all planning attempts with a working patch on disk. Write-forcing counters commit avoidance but nothing yet pressures validation/termination after a successful write; replans restate the task because `no_write_executed` is false. A validate-after-write policy (run tests / emit `done` pressure) is the open counterpart to write forcing.
 - **Write content truncation (local Gemma 4 E4B).** The 256-token executor budget can't fit multi-line file content with escapes. The `edit` action is the primary workaround for localized changes; for new large files, chunked `append` writes assemble the file in budget-sized pieces, and a truncated `write`/`edit` payload that fails to parse retries with a `STEP_WRITE_TOKENS` budget.
 - **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; conditional validation may catch some that slip through.
@@ -270,7 +270,7 @@ Thinking mechanisms differ:
 - **OpenRouter**: `reasoning.enabled=true` with `reasoning.effort` ("medium"/"high"). Reasoning tokens share the outer `max_tokens` on Parasail; `content` can be `null` if reasoning exhausts the budget.
 - **Local**: `<|think|>` prepended to the system prompt; `--reasoning on` at server launch. `<|channel>...<channel|>` blocks stripped from output.
 
-Env var reference lives in [README.md](README.md).
+Env var reference lives in [configuration.md](configuration.md).
 
 ## Scope
 
@@ -288,10 +288,11 @@ Env var reference lives in [README.md](README.md).
 
 ## References
 
-- [README.md](README.md) — usage, quickstart, tests
+- [README.md](../README.md) — usage, quickstart, tests
+- [configuration.md](configuration.md) — env var reference and automation CLI
 - [gemma4-setup.md](gemma4-setup.md) — server config, KV cache, model-specific notes
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices
-- [CLAUDE.md](CLAUDE.md) — agent authoring guidance for this repo
+- [CLAUDE.md](../CLAUDE.md) — agent authoring guidance for this repo
 - [llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) — `--reasoning on`, `--reasoning-budget`, `--reasoning-format`
 - [OpenRouter reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
 - [#21468](https://github.com/ggml-org/llama.cpp/issues/21468) — `--cache-reuse` broken for Gemma 4 iSWA

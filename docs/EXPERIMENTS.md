@@ -340,4 +340,4 @@ Moved to [Archived / rejected](#archived--rejected).
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history; completed experiments land here.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — design decisions + current constraints.
 - [gemma4-setup.md](gemma4-setup.md) — server config; runtime experiments (E08, E09) land here.
-- [CLAUDE.md](CLAUDE.md) — agent authoring guidance.
+- [CLAUDE.md](../CLAUDE.md) — agent authoring guidance.
