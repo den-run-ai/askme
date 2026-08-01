@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "experiment_id": "askme-featurebench-pi-harness-ablation-v1",
+  "status": "registered_before_outcome_bearing_model_call",
+  "kind": "exploratory_harness_ablation",
+  "not_a_canary": true,
+  "purpose": "Diagnose whether the v4 canary failures are harness-bound or model-bound by running the same frozen task, models, and route under the pi coding agent (free-form tools, no output-cap pressure, no action-JSON protocol). One attempt per model cell.",
+  "claim_boundary": {
+    "allowed_label": "one-task pi harness ablation (exploratory)",
+    "is_benchmark_score": false,
+    "is_reliability_estimate": false,
+    "is_model_comparison": false,
+    "is_harness_comparison_result": false,
+    "aggregate_percentage_allowed": false,
+    "n_per_cell": 1,
+    "comparison_use": "hypothesis-generating contrast with the v4 canary cells only"
+  },
+  "hypotheses_from_v4": {
+    "gemma": "Gemma 4 31B attempted the implementation write and was truncated at AskMe's 1536-token retry cap; with an 8192-token budget and free-form edit tools it should at least deliver a nonempty patch.",
+    "qwen": "Qwen3.6 27B never selected a write action under AskMe's action menu despite no truncation pressure; tests whether a free-form interface elicits any write at all."
+  },
+  "shared_pins_with_v4_canaries": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "dataset_repository": "LiberCoders/FeatureBench",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "split": "fast",
+    "problem_statement_sha256": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+    "featurebench_commit": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "provider_routing": {
+      "order": ["siliconflow"],
+      "allow_fallbacks": false,
+      "require_parameters": true
+    },
+    "expected_served_models": {
+      "gemma": "google/gemma-4-31b-it-20260402",
+      "qwen": "qwen/qwen3.6-27b-20260422"
+    },
+    "inner_wall_timeout_seconds": 3540,
+    "attempts_per_cell": 1
+  },
+  "harness_under_test": {
+    "name": "pi coding agent",
+    "repository": "https://github.com/earendil-works/pi",
+    "npm_package": "@earendil-works/pi-coding-agent",
+    "version": "0.83.0",
+    "node_version": "v22.23.2",
+    "invocation": "pi --provider openrouter-pinned --model <model> --mode json -p <problem statement>",
+    "tools": ["read", "write", "edit", "bash", "grep", "find", "ls"],
+    "max_tokens": 8192,
+    "reasoning": "disabled in both cells (reasoning:false, supportsReasoningEffort:false) so the ablation varies the harness, not the reasoning policy",
+    "step_cap": "none (pi has no native turn cap); wall-clock cap and proxy call cap only",
+    "proxy_call_cap": 200
+  },
+  "route_enforcement": {
+    "mechanism": "host-side forwarding proxy (openrouter_pin_proxy.py) injects the provider block, restricts the request model to the cell's pinned ID, caps calls, and tees every request/response body for the post-run route audit",
+    "credential_isolation": "real OPENROUTER_API_KEY exists only in the host proxy process; the container, pi, and model-issued commands see only a per-run random secret that is useless outside the proxy's lifetime",
+    "post_run_audit": "every teed response frame must report served provider SiliconFlow and the exact dated served model; any other value fails the run"
+  },
+  "known_deviations_from_canary_protocol": [
+    "no command-level guard: pi's bash tool is unrestricted inside the container (trusted pinned task only; do not reuse on untrusted tasks)",
+    "no per-step or planning budgets; wall clock and proxy call cap bound the run",
+    "the per-run proxy secret is visible inside the container, so model-issued commands could call the proxy directly; spend is bounded by the call cap and allowed-model pin",
+    "no gold/harmless control reruns (the v4 controls on the identical image/dataset/evaluator stand; this is not a qualification run)",
+    "session capture is pi's own JSONL plus the proxy tee, not AskMe's run log schema"
+  ],
+  "outcome_contract": {
+    "per_cell": [
+      "pi exit code and agent_end presence (agent completion)",
+      "patch bytes and official evaluator patch_successfully_applied / resolved",
+      "route audit: calls, served models/providers, usage, finish reasons",
+      "credential-leak grep over all retained artifacts"
+    ],
+    "must_report_joint_outcome": true,
+    "evaluator_error_is_infrastructure_failure": true
+  }
+}
