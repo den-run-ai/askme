@@ -11,10 +11,11 @@ AskMe is a minimal, self-contained agent in a single file (`askme.py`). It takes
 
 Where to look:
 - [README.md](README.md) — usage, quickstart, test commands
-- [ARCHITECTURE.md](ARCHITECTURE.md) — loop design, state shapes, action model, current constraints
-- [gemma4-setup.md](gemma4-setup.md) — llama-server config, KV cache, model notes
-- [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices
-- [SECURITY.md](SECURITY.md) — threat boundary and safe-use guidance
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — loop design, state shapes, action model, current constraints
+- [docs/configuration.md](docs/configuration.md) — full env var reference and automation CLI
+- [docs/gemma4-setup.md](docs/gemma4-setup.md) — llama-server config, KV cache, model notes
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — benchmark history and test-run matrices
+- [docs/SECURITY.md](docs/SECURITY.md) — threat boundary and safe-use guidance
 
 ## Commands
 
@@ -55,7 +56,7 @@ python3 tests/bench_harness.py --suite medium --backend openrouter # 3 trials, m
 python3 tests/bench_harness.py --list                             # show available tests
 ```
 
-For the `llama-server` launch command, see [README.md](README.md) or [gemma4-setup.md](gemma4-setup.md).
+For the `llama-server` launch command, see [README.md](README.md) or [docs/gemma4-setup.md](docs/gemma4-setup.md).
 
 ## Test Layout
 
@@ -72,5 +73,5 @@ Unit tests mock `ask_llm` or `requests.post` — no LLM needed. Integration test
 
 - `askme.py` is a single file. Prefer extending it over splitting it unless the file grows unreasonably.
 - Token minimization matters — the local model is ~7 tok/s. Before adding to a system prompt or state payload, consider the per-call cost.
-- State split is load-bearing: planner sees full state, executor sees slim state. See [ARCHITECTURE.md](ARCHITECTURE.md#core-file).
-- When a test run exposes a new failure mode, record the observation in [PERFORMANCE.md](PERFORMANCE.md) with a date. If it shapes current design, add a bullet to Current Constraints in [ARCHITECTURE.md](ARCHITECTURE.md#current-constraints).
+- State split is load-bearing: planner sees full state, executor sees slim state. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#core-file).
+- When a test run exposes a new failure mode, record the observation in [docs/PERFORMANCE.md](docs/PERFORMANCE.md) with a date. If it shapes current design, add a bullet to Current Constraints in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#current-constraints).

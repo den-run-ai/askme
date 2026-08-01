@@ -26,65 +26,59 @@ python3 askme.py "create a hello world program in C and compile it"
 
 # Or via OpenRouter (set OPENROUTER_API_KEY in .env)
 LLM_BACKEND=openrouter python3 askme.py "your task here"
-
-# Evaluation/automation adapter: fixed workspace, prompt file, structured result
-mkdir -p /tmp/task-workspace
-python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
-  --result-json /tmp/run.json --reasoning-policy gated \
-  --max-replans 3 --max-tasks 4 --max-steps 10 --goal-context-chars 1200
 ```
 
 ## How It Works
 
-**Preflight → Plan → Execute → Replan.** Before planning, the agent probes the environment (platform, available tools, package managers). The LLM breaks your prompt into tasks, executes each one step-by-step (shell, write, edit, ranged read, bounded search/tree), and replans if something fails. A run gets up to three planning attempts. Depending on `AGENT_FINAL_VALIDATE`, a conditional, fail-open LLM validator may review tentative completion; it is not independent acceptance. By default, AskMe instructs the model not to install software and to report missing prerequisites. Set `ALLOW_SYSTEM_INSTALLS=1` to tell the model that installs are allowed. These instructions are not host-level enforcement.
+```mermaid
+flowchart TD
+    U([user prompt]) --> PF[preflight probe]
+    PF --> PL[plan — LLM proposes task list]
+    PL --> EX["execute — one JSON action per step<br/>shell · write · edit · read · search · tree"]
+    EX -- task failed --> RE[replan]
+    RE --> PL
+    EX -- "all done · validation skipped" --> DONE([done])
+    EX -- "all done · risk signals" --> V[fail-open LLM validation]
+    V -- valid --> DONE
+    V -- invalid --> RE
+```
+
+Before planning, the agent probes the environment (platform, available tools,
+package managers). The LLM breaks your prompt into tasks and executes each one
+step-by-step, replanning on failure — a run gets up to three planning attempts.
+A conditional, fail-open LLM validator may review tentative completion. By
+default AskMe instructs the model not to install software;
+`ALLOW_SYSTEM_INSTALLS=1` relaxes that instruction. Both are prompt policies,
+not host-level enforcement.
+
+Loop design, state model, action model, and current constraints:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Security
 
 AskMe is experimental automation, **not a sandbox**. It executes model-generated
-shell commands with the current user's host permissions. Its temporary working
-directory prevents routine output from landing in the repository; it does not
-confine shell commands or prevent absolute/traversal paths from reaching other
-host files.
-
-Do not run untrusted prompts or repositories directly on a workstation that has
-credentials or valuable data. Use a disposable container or VM with least-privilege
-credentials, restricted mounts, and network controls. `ALLOW_SYSTEM_INSTALLS` and
-`ALLOW_NETWORK` are prompt-visible policy signals, not security boundaries;
-`ALLOW_NETWORK` is currently reserved and does not enforce network isolation.
-OpenRouter runs also send selected prompt and workspace context to the configured
-remote provider. See [SECURITY.md](SECURITY.md) before exposing AskMe to untrusted
-input.
+shell commands with the current user's host permissions, and the policy env vars
+are prompt-visible signals, not security boundaries. Run untrusted prompts or
+repositories only in a disposable container or VM. See
+[docs/SECURITY.md](docs/SECURITY.md) for the threat boundary and safe-use
+guidance.
 
 ## Configuration
+
+The everyday knobs:
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `LLM_BACKEND` | `local` | `local` or `openrouter` |
 | `OPENROUTER_API_KEY` | (from `.env`) | API key for OpenRouter |
-| `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | OpenRouter model |
-| `OPENROUTER_PROVIDER` | `Parasail` | Preferred OpenRouter provider; empty means automatic routing |
-| `OPENROUTER_ALLOW_FALLBACKS` | `1` | Whether OpenRouter may leave the preferred provider |
-| `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
-| `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
-| `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
-| `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
-| `AGENT_REASONING_POLICY` | `gated` | Explicit-reasoning requests: `gated` preserves the recovery policy; `off` suppresses them at every call site |
-| `AGENT_GOAL_CONTEXT_CHARS` | `300` | Goal characters retained for executor and task-local replan context; independent of result/history truncation |
-| `AGENT_RUN_LOG` | (unset) | Path to append JSONL events (`run_start`, `reasoning_decision`, `plan`, `tokens`, `step`, `task_complete`, `task_failed`, `validation`, `run_end`). Disabled when unset. |
 
-`off` controls explicit reasoning requests sent by the harness; it is not a claim
-that the model performs no internal reasoning. Each request attempt logs the
-requested policy, trigger, and effective reasoning level when `AGENT_RUN_LOG` is
-enabled.
+Advanced configuration — OpenRouter model/provider routing, reasoning policy,
+run logging, context budgets, and the automation/evaluation CLI — lives in
+[docs/configuration.md](docs/configuration.md).
 
 ## Tests
-
-Current verification snapshot (2026-07-13): `pytest -q` completed with **367
-passed and 27 skipped**. Backend-dependent integration tests skip when their
-server or credential is unavailable. Counts in dated benchmark/setup sections
-are historical snapshots, not the current suite size.
 
 ```bash
 # Unit tests (mocked, no LLM needed)
@@ -99,13 +93,8 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"
 python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 
 # Multi-trial benchmark harness (reports median + range across N trials)
-python3 tests/bench_harness.py                                    # 3 trials, easy, local
-python3 tests/bench_harness.py --suite medium --trials 5          # 5 trials, medium, local
-python3 tests/bench_harness.py --backend openrouter --suite hard  # 3 trials, hard, openrouter
-python3 tests/bench_harness.py --backend openrouter --suite easy --trials 1 \
-  --model qwen/qwen3.6-27b --provider siliconflow              # strict provider pin
-python3 tests/bench_harness.py --test test_shell_and_write        # single test
-python3 tests/bench_harness.py --list                             # show available tests
+python3 tests/bench_harness.py          # 3 trials, easy, local
+python3 tests/bench_harness.py --list   # available tests; --help for suites, backends, model/provider pins
 
 # Native semantic-workflow qualification (offline; no model call)
 python3 -m pytest \
@@ -114,15 +103,22 @@ python3 tests/workflow_eval.py \
   tests/workflows/config_precedence/manifest.json --agent noop
 ```
 
+Backend-dependent integration tests skip automatically when their server or
+credential is unavailable. Dated run matrices and suite-size snapshots live in
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
 ## Files
 
 - `askme.py` — the agent
 - `tests/` — unit and integration tests, split by concern
-- `tests/bench_harness.py` — multi-trial benchmark harness (E01)
+- `tests/bench_harness.py` — multi-trial benchmark harness
 - `tests/workflow_eval.py` — manifest-driven native workflow evaluator
 - `tests/workflows/` — versioned semantic fixtures and [evaluation protocol](tests/workflows/PROTOCOL.md)
-- [ARCHITECTURE.md](ARCHITECTURE.md) — loop design, state model, action model, current constraints
-- [gemma4-setup.md](gemma4-setup.md) — llama-server config, KV cache, model notes
-- [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices
-- [SECURITY.md](SECURITY.md) — threat boundary and safe-use guidance
+- `tests/featurebench/` — FeatureBench adapter and [qualified canary runbook](tests/featurebench/README.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — loop design, state model, action model, current constraints
+- [docs/configuration.md](docs/configuration.md) — full env var reference and automation CLI
+- [docs/gemma4-setup.md](docs/gemma4-setup.md) — llama-server config, KV cache, model notes
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — benchmark history and test-run matrices
+- [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) — active experiment backlog
+- [docs/SECURITY.md](docs/SECURITY.md) — threat boundary and safe-use guidance
 - [CLAUDE.md](CLAUDE.md) — guidance for AI agents working in this directory

@@ -11,7 +11,7 @@ SPEC = TALK / "DECK_SPEC.md"
 BLOG = TALK / "blog.md"
 README = TALK / "README.md"
 ROOT_README = ROOT / "README.md"
-SECURITY = ROOT / "SECURITY.md"
+SECURITY = ROOT / "docs" / "SECURITY.md"
 
 
 def _rendered_slide_sources(text):
