@@ -866,6 +866,100 @@ class TestTruncatedWriteContinuation:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
+    def test_truncated_write_output_carries_resume_anchor(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        """The executor is stateless per step: the observation after a
+        truncated write must say where the write stopped, or the append
+        continuation can duplicate or skip lines."""
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line1\nline2\nline3 par",
+                        "content_truncated": True}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line3\n", "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        writes = [s for s in result["state"]["all_steps"] if s["action"] == "write"]
+        assert "truncated after 2 lines" in writes[0]["output"]
+        assert "'line2'" in writes[0]["output"]
+        # The anchor must reach the next executor call, not just the log.
+        assert "'line2'" in seen[2]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncated_write_not_told_to_append(self, mock_llm,
+                                                      mock_replan, tmp_path):
+        """No chunk was written: appending would land on the stale existing
+        file, so the retry instruction must stay a non-append write."""
+        Path(tmp_path, "impl.py").write_text("OLD CONTENT\n")
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "nonewline", "content_truncated": True}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py", "content": "new\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=5)
+        assert result["status"] == "complete"
+        assert "Resend the write (no append)" in seen[2]
+        assert Path(tmp_path, "impl.py").read_text() == "new\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncated_append_chunk_stays_append(self, mock_llm,
+                                                       mock_replan, tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create impl.py with the implementation"]}
+            if n == 2:
+                return {"action": "write", "arg": "impl.py",
+                        "content": "line1\n"}
+            if n == 3:
+                return {"action": "write", "arg": "impl.py", "append": True,
+                        "content": "nonewline", "content_truncated": True}
+            if n == 4:
+                return {"action": "write", "arg": "impl.py", "append": True,
+                        "content": "line2\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create impl.py with the implementation",
+                           str(tmp_path), max_replans=1, max_tasks=1,
+                           max_steps=6)
+        assert result["status"] == "complete"
+        assert "Resend a smaller append:true chunk" in seen[3]
+        assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
     def test_line_boundary_truncation_drops_nothing(self, mock_llm,
                                                     mock_replan, tmp_path):
         mock_llm.side_effect = [

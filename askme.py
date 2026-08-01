@@ -1667,9 +1667,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         if not kept:
                             log(f"  [{step + 1}] skip (write truncated before a complete line)")
                             _skip_step(i, step, act, action, "truncated_write_empty")
+                            # Nothing was written: the first dispatched chunk
+                            # must stay a non-append write (append would land
+                            # on a stale existing file), only later chunks
+                            # may append.
+                            if action.get("append"):
+                                obs = ("Append truncated before a complete line. "
+                                       "Resend a smaller append:true chunk.")
+                            else:
+                                obs = ("Write truncated before a complete line. Resend the "
+                                       "write (no append) with a shorter first chunk, then "
+                                       "continue with append:true chunks.")
                             state["last_steps"].append({
                                 "action": act, "arg": action.get("arg", ""), "ok": True,
-                                "output": "Write truncated before a complete line. Resend as smaller append:true chunks."})
+                                "output": obs})
                             continue
                         action["content"] = kept
 
@@ -1823,12 +1834,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         commit_executed += 1
                     result = execute(action, working_dir)
                     if truncated_write and result["ok"]:
-                        result["output"] += (" (truncated mid-file; continue with"
-                                             " append:true from the next line)")
+                        # The executor is stateless per step: without a resume
+                        # anchor the model cannot know where the write stopped.
+                        anchor = kept.splitlines()[-1][-80:]
+                        result["output"] += (
+                            f" (truncated after {kept.count(chr(10))} lines; "
+                            f"last written line: {anchor!r}; continue with "
+                            "append:true starting after that line)")
                     ok_str = "OK" if result["ok"] else "FAIL"
                     log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
-                    out_cap = OBSERVE_STATE_CHARS if act in OBSERVE_ACTIONS else 100
+                    # Truncated-write outputs carry the resume anchor the next
+                    # step navigates by — observation-class budget, not 100.
+                    out_cap = (OBSERVE_STATE_CHARS
+                               if act in OBSERVE_ACTIONS or truncated_write else 100)
                     step_entry = {
                         "action": act,
                         "arg": action.get("arg", ""),
