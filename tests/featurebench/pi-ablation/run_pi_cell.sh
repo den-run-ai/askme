@@ -181,52 +181,99 @@ docker exec "$CTR" git -C /testbed status --porcelain > "$RUN_ROOT/testbed-statu
 docker cp "$CTR:/agent-logs" "$RUN_ROOT/agent-logs"
 wc -c "$RUN_ROOT/patch.diff"
 
-# ---- [7] Route audit (all calls must be pinned provider + dated model) ------
+# ---- [7] Route audit --------------------------------------------------------
+# Streaming chunks echo the requested group ID, so the served-model check uses
+# OpenRouter's per-generation metadata (authoritative dated model, provider,
+# native token counts, billed cost) for every forwarded call.
 echo "=== $(ts) [7] route audit"
+OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
 python3 - "$LOG_DIR" "$EXPECTED_SERVED_MODEL" "$RUN_ROOT/route-audit.json" <<'PY'
-import json, re, sys
+import json, os, re, sys, time, urllib.request
 from pathlib import Path
 log_dir, expected, out = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-calls, served, providers, usage = 0, set(), set(), {"prompt": 0, "completion": 0, "cost": 0.0}
-finish = {}
+key = os.environ["OPENROUTER_API_KEY"]
+calls, gen_ids = 0, []
+finish, statuses, denied, dropped = {}, {}, 0, set()
+streamed = {"prompt": 0, "completion": 0, "cost": 0.0}
 for entry in (json.loads(l) for l in open(log_dir / "route-log.jsonl")):
+    if entry.get("event") == "denied_model":
+        denied += 1
     if entry.get("event") != "forward":
         continue
     calls += 1
+    st = entry.get("status", "none")
+    statuses[str(st)] = statuses.get(str(st), 0) + 1
+    dropped.update(entry.get("dropped_params", []))
     blob = (log_dir / entry["response_file"]).read_bytes().decode("utf-8", "replace")
-    frames = []
+    m = re.search(r'"id":"(gen-[^"]+)"', blob)
+    if m:
+        gen_ids.append(m.group(1))
     for line in blob.splitlines():
         line = line.strip()
         if line.startswith("data: ") and line != "data: [DONE]":
-            try: frames.append(json.loads(line[6:]))
-            except ValueError: pass
-    if not frames:
-        try: frames = [json.loads(blob)]
-        except ValueError: continue
-    for f in frames:
-        if f.get("model"): served.add(f["model"])
-        if f.get("provider"): providers.add(f["provider"])
-        u = f.get("usage")
-        if u:
-            usage["prompt"] += u.get("prompt_tokens", 0)
-            usage["completion"] += u.get("completion_tokens", 0)
-            usage["cost"] += (u.get("cost") or 0)
-        for ch in f.get("choices", []):
-            fr = ch.get("finish_reason")
-            if fr: finish[fr] = finish.get(fr, 0) + 1
+            try: f = json.loads(line[6:])
+            except ValueError: continue
+            u = f.get("usage")
+            if u:
+                streamed["prompt"] += u.get("prompt_tokens", 0)
+                streamed["completion"] += u.get("completion_tokens", 0)
+                streamed["cost"] += (u.get("cost") or 0)
+            for ch in f.get("choices", []):
+                if ch.get("finish_reason"):
+                    finish[ch["finish_reason"]] = finish.get(ch["finish_reason"], 0) + 1
+
+served, providers = set(), set()
+gen_usage = {"prompt": 0, "completion": 0, "reasoning": 0, "cost": 0.0}
+unresolved = []
+for gid in gen_ids:
+    data = None
+    for attempt in range(5):
+        try:
+            req = urllib.request.Request(
+                f"https://openrouter.ai/api/v1/generation?id={gid}",
+                headers={"Authorization": f"Bearer {key}"})
+            data = json.load(urllib.request.urlopen(req, timeout=30)).get("data")
+            if data: break
+        except Exception:
+            pass
+        time.sleep(2 + attempt)
+    if not data:
+        unresolved.append(gid)
+        continue
+    served.add(data.get("model"))
+    providers.add(data.get("provider_name"))
+    gen_usage["prompt"] += data.get("tokens_prompt") or 0
+    gen_usage["completion"] += data.get("tokens_completion") or 0
+    gen_usage["reasoning"] += data.get("native_tokens_reasoning") or 0
+    gen_usage["cost"] += data.get("total_cost") or 0
+
 audit = {
     "calls": calls,
+    "statuses": statuses,
+    "denied_model_requests": denied,
+    "dropped_params": sorted(dropped),
+    "generations_resolved": len(gen_ids) - len(unresolved),
+    "generations_unresolved": unresolved,
     "served_models": sorted(served),
     "served_providers": sorted(providers),
     "expected_served_model": expected,
-    "route_pinned": served <= {expected} and providers <= {"SiliconFlow"},
-    "usage": usage,
+    "route_pinned": (
+        calls > 0
+        and not unresolved
+        and len(gen_ids) == calls
+        and served == {expected}
+        and providers == {"SiliconFlow"}
+        and set(statuses) == {"200"}
+        and denied == 0
+    ),
+    "generation_usage": gen_usage,
+    "streamed_usage": streamed,
     "finish_reasons": finish,
 }
 Path(out).write_text(json.dumps(audit, indent=2) + "\n")
 print(json.dumps(audit, indent=2))
-if calls and not audit["route_pinned"]:
-    raise SystemExit("ROUTE PIN VIOLATION")
+if not audit["route_pinned"]:
+    raise SystemExit("ROUTE PIN VIOLATION (or no successful pinned call)")
 PY
 
 # Credential-leak check: real key must appear in zero retained artifacts.

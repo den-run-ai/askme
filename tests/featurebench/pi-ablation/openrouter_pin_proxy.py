@@ -41,6 +41,17 @@ PROVIDER_BLOCK = {
     "require_parameters": True,
 }
 
+# With require_parameters, every body param must be in the pinned endpoint's
+# supported_parameters. pi emits OpenAI-dialect params SiliconFlow doesn't
+# list; normalize instead of failing the route: rename max_completion_tokens
+# -> max_tokens, drop the rest, and log what was dropped for the audit.
+PARAM_RENAMES = {"max_completion_tokens": "max_tokens"}
+PARAM_KEEP = {
+    "model", "messages", "stream", "tools", "tool_choice", "max_tokens",
+    "temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty",
+    "response_format", "stop", "seed", "provider", "usage",
+}
+
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 _route_log = open(LOG_DIR / "route-log.jsonl", "a", encoding="utf-8")
 _lock = threading.Lock()
@@ -105,6 +116,12 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(429, "ablation call cap reached")
             return
 
+        for old, new in PARAM_RENAMES.items():
+            if old in body and new not in body:
+                body[new] = body.pop(old)
+        dropped = sorted(k for k in body if k not in PARAM_KEEP)
+        for k in dropped:
+            body.pop(k)
         body["provider"] = PROVIDER_BLOCK
         usage = body.get("usage")
         body["usage"] = dict(usage or {}, include=True) if isinstance(usage, dict) else {"include": True}
@@ -119,6 +136,7 @@ class Handler(BaseHTTPRequestHandler):
             "request_model": model,
             "request_max_tokens": body.get("max_tokens") or body.get("max_completion_tokens"),
             "stream": bool(body.get("stream")),
+            "dropped_params": dropped,
             "request_file": req_file.name, "response_file": resp_file.name,
         }
         try:
