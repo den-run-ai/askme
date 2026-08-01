@@ -7,7 +7,7 @@ project's contribution rules in addition to this file.
 
 ## Orientation
 
-AskMe is a minimal, self-contained agent in a single file (`askme.py`). It takes a user prompt, plans tasks, executes them via shell/write/edit/read actions, and replans on failure. No frameworks, only `requests` as a dependency. Each run uses an isolated `/tmp/askme_*` directory, so agent-created files never pollute the repo.
+AskMe is a minimal, self-contained agent in a single file (`askme.py`). It takes a user prompt, plans tasks, executes them via shell/write/edit/read/search/tree actions, and replans on failure. No frameworks, only `requests` as a dependency. Each run uses an isolated `/tmp/askme_*` directory, so agent-created files never pollute the repo.
 
 Where to look:
 - [README.md](README.md) — usage, quickstart, test commands

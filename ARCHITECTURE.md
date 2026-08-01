@@ -44,22 +44,25 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 - `replan_task(failed_task, errors, completed_tasks, state, user_prompt)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (`max_tokens=96`, no retries). Returns string or None. Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
 - `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
-- `execute(action, working_dir)` — runs shell/write/edit/read/done/fail with command-aware timeouts
+- `execute(action, working_dir)` — runs shell/write/edit/read/search/tree/done/fail with command-aware timeouts, bounded observation windows, and atomic file writes
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`
 - `_run_loop(...)` — structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper returning a boolean
 
 **State** is an in-memory dict (no files). Planner and executor see different views.
 
-Planner (`get_plan`) — full state:
+Planner (`get_plan`) — curated full state (raw write payloads never included):
 ```json
 {
   "completed_tasks": ["task1"],
   "errors": ["[missing_tool] shell go run: /bin/sh: go: command not found"],
   "environment": {"platform": "darwin", "arch": "arm64", "available_tools": ["python3", "gcc"], "missing_tools": ["go"], "package_managers": ["brew"], "dir_listing": ["main.go"]},
-  "policy": {"allow_system_installs": false, "allow_network": true}
+  "policy": {"allow_system_installs": false, "allow_network": true},
+  "recent_steps": [{"action": "shell", "arg": "go run main.go", "ok": false, "output": "/bin/sh: go: command not found"}]
 }
 ```
+
+`recent_steps` is a digest of the last 6 executed steps (`_step_digest` — action/arg/ok/output only). Full file contents from `write` steps stay in run state but are never sent to the planner, keeping replan state bounded on write-heavy runs.
 
 Executor (`get_step`) — slim state, token-optimized:
 ```json
@@ -77,7 +80,7 @@ Executor (`get_step`) — slim state, token-optimized:
 ```
 
 State design:
-- `last_steps` is a sliding window of `MAX_STEP_HISTORY=3`, step output truncated to 100 chars
+- `last_steps` is a sliding window of `MAX_STEP_HISTORY=3`; mutating-action output truncated to 100 chars, observation actions (`read`/`search`/`tree`) to `OBSERVE_STATE_CHARS=1500`
 - `completed_tasks` (last 3, truncated to 80 chars each) gives executor cross-task awareness
 - Last step from previous task carries over so executor knows what just happened
 - Write/read `arg` fields use basename to save tokens
@@ -127,13 +130,19 @@ callbacks because those paths make no model call.
 | Action | Purpose | Notes |
 |---|---|---|
 | `shell` | Run command with timeout | Command-aware timeouts (`SHELL_TIMEOUT`, `SHELL_TIMEOUT_LONG` for install/build, `SHELL_TIMEOUT_MAX` hard cap) |
-| `write` | Create or replace a whole file | For new files. Dict/list content auto-serialized to JSON |
-| `edit` | Exact single-match string replacement | For localized changes. Fails on zero or multiple matches |
-| `read` | Read file contents | Truncates large files |
+| `write` | Create or replace a whole file | Atomic (temp file + rename). Dict/list content auto-serialized to JSON. `"append": true` appends one chunk — chunked-write transport for files larger than the executor token budget |
+| `edit` | Exact single-match string replacement | For localized changes. Fails on zero or multiple matches. Atomic write |
+| `read` | Ranged read of a file window | `offset`/`limit` (1-based lines); returns a header `[file: lines X-Y of N; continue: offset=Z]` plus the bounded window. `truncated`/`continuation` fields drive navigation; `total_lines`/`total_bytes`/`sha256` fields hash-link each read for the run-log audit (not sent to the model) |
+| `search` | Bounded literal search | `arg` = literal pattern, optional `path` (default `.`). Skips VCS/dependency/hidden/binary files; caps matches and chars; suggests narrowing when capped |
+| `tree` | Bounded repository listing | `arg` = directory (default `.`). Depth-, entry-, and char-capped; directories marked with `/` |
 | `done` | Mark current task complete | Terminal |
 | `fail` | Mark current task failed | Triggers replan |
 
-`edit` exists because full-file `write` content frequently exceeds the local model's 256-token executor budget on multi-line files. Edit payloads fit in ~40-80 tokens; the 26B model on OpenRouter also spontaneously prefers `edit` for fixes.
+`edit` exists because full-file `write` content frequently exceeds the local model's 256-token executor budget on multi-line files. Edit payloads fit in ~40-80 tokens; the 26B model on OpenRouter also spontaneously prefers `edit` for fixes. For new large files, chunked `append` writes cover what `edit` cannot.
+
+Observation actions (`read`/`search`/`tree`) carry their own budgets (issue #7): results are bounded by `READ_CHARS`/`SEARCH_MAX_CHARS`/`TREE_MAX_CHARS`, flagged with `truncated`, and kept in executor step history up to `OBSERVE_STATE_CHARS` (vs 100 chars for mutating actions) — large files stay navigable without flooding executor state. On the model-output side, `ask_llm` records `finish_reason` in every `tokens` JSONL event; when a truncated `write`/`edit` payload fails to parse, the retry gets a payload-sized budget (`STEP_WRITE_TOKENS`) instead of more reasoning, and an unrecoverable parse failure surfaces as a typed `[malformed_action]` or `[response_truncated]` error (the latter when the final attempt hit the token budget) that the replanner sees.
+
+The run loop also accounts for selected vs executed actions: every action the executor emits increments `selected_steps`, only dispatched ones increment `executed_steps`, and each guard-suppressed one increments `skipped_steps` and logs a `step_skipped` JSONL event with a typed reason (`duplicate_read`, `stuck_read`, `stuck_append`, …). The 2026-07-31 Qwen canary selected 14 reads of which only 2 executed — that gap is now first-class in `run_end` metrics instead of being reconstructed from logs.
 
 ## Failure and Replanning
 
@@ -181,7 +190,12 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `PLANNER_MAX_TOKENS` | 768 | Task list budget; shared with thinking on replans |
 | `ALLOW_SYSTEM_INSTALLS` | false | Prompt-visible install policy; not host-level enforcement |
 | `ALLOW_NETWORK` | true | Reserved for future use |
-| Step output | 100 chars | Max output stored per step in history |
+| Step output | 100 chars | Max output stored per mutating-action step in history |
+| Observation step output | 1500 chars | `OBSERVE_STATE_CHARS` — history budget for `read`/`search`/`tree` results |
+| Read window | 60 lines / 1200 chars | `READ_LINES` / `READ_CHARS`; `READ_LIMIT_MAX=200` caps model-specified limit |
+| Search bound | 15 matches / 1500 chars / 500 files | `SEARCH_MAX_MATCHES` / `SEARCH_MAX_CHARS` / `SEARCH_MAX_FILES` |
+| Tree bound | 60 entries / 1500 chars / depth 3 | `TREE_MAX_ENTRIES` / `TREE_MAX_CHARS` / `TREE_MAX_DEPTH` |
+| Write-payload retry budget | 512 (local) / 1024 (OpenRouter) | `STEP_WRITE_TOKENS` — bumped when a truncated write/edit payload fails to parse |
 | Step tokens (local) | 256 | Max completion tokens (local) |
 | Step tokens (OpenRouter) | 512 | Max completion tokens (OpenRouter) |
 | Thinking tokens (local) | 512 (medium) / 768 (high) | Must be bumped when thinking is enabled |
@@ -212,7 +226,9 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Strict final retry (E03) | Final auto-retry (attempt 2) disables explicit reasoning and appends a strict JSON-only instruction. Caller-specified levels (for example `_validate_completion`) are respected under `gated` and suppressed under `off`. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. Only `edit_failed` and `missing_file` have hints; adding more requires evidence of wasted thinking cycles |
 | Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, `max_tokens=96`, `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
-| Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once, then auto-fail as `stuck_loop`. This preserves cheap first recovery while preventing no-thinking loops |
+| Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once with a typed observation (continuation offset when the window was truncated), then auto-fail as `stuck_loop`. Read duplicate detection is offset-aware — navigating to a new range of the same file is legitimate. Same-chunk append repeats auto-fail as `stuck_loop` |
+| App-dev action surface (issue #7) | Ranged `read` windows with continuation metadata and hash-linked totals, bounded `search`/`tree` actions, atomic `write`/`edit` with chunked `append`, per-action observation budgets with `truncated` flags, `finish_reason` logged per LLM attempt, typed `malformed_action`/`response_truncated` parse failures, and selected/executed/skipped step accounting. Deterministic coverage in `tests/test_agent_actions.py` (incl. an end-to-end synthetic-repo case: symbol beyond the first read window, patch > 512 tokens); protocol revision 2 in `tests/workflows/PROTOCOL.md` |
+| Curated replan state | Planner sees `completed_tasks`/`errors`/`environment`/`policy` plus a `recent_steps` digest; raw write contents stay out of planner prompts. Task-local replanner additionally sees a `failed_steps` digest |
 | Planner thinking | `gated` requests it only for replans (`think=bool(errors or completed_tasks)`); `off` suppresses the effective level. Benchmarked: requesting it on the first plan caused JSON truncation on the local 768-token budget and no quality gain on either backend |
 | Duplicate action guard | Per-action-type loop detection. `write(same content)` → skip+continue. `shell(same+ok)` → auto-done. `shell(same+fail)` → auto-fail (stuck). `read(same+ok)` → skip once with "Already read" observation, then auto-fail if repeated. First skip injects corrective observation only; 2+ consecutive write skips activate thinking |
 | Write content comparison | Duplicate guard on `write` must compare content, not just arg — matching only on `(action, arg)` would kill the write → compile fail → write fix pattern |
@@ -226,8 +242,8 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 
 Active limitations that still shape the design.
 
-- **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json).
-- **Write content truncation (local Gemma 4 E4B).** The 256-token executor budget can't fit multi-line file content with escapes. The `edit` action is the primary workaround for localized changes; `write` is practical mainly for new files.
+- **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json). Chunked `append` writes, ranged reads, and per-action budgets now exist (issue #7, protocol revision 2); requalification under a frozen v4 FeatureBench protocol is pending.
+- **Write content truncation (local Gemma 4 E4B).** The 256-token executor budget can't fit multi-line file content with escapes. The `edit` action is the primary workaround for localized changes; for new large files, chunked `append` writes assemble the file in budget-sized pieces, and a truncated `write`/`edit` payload that fails to parse retries with a `STEP_WRITE_TOKENS` budget.
 - **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; conditional validation may catch some that slip through.
 - **Path truncation in long temp paths (local).** The local model reproduces long absolute paths in shell commands and sometimes truncates them. `SYSTEM_STEP` recommends relative paths; the 26B model on OpenRouter handles this correctly.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.

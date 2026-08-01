@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex
+import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex, hashlib
 from pathlib import Path
 
 
@@ -142,6 +142,23 @@ MAX_TASKS = 10
 MAX_STEPS = 10
 MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
+
+# Observation-action budgets (issue #7): reads/searches/trees are the navigation
+# surface for app development; they get their own bounded windows so large repos
+# stay navigable without blowing up executor state.
+READ_LINES = 60           # max lines per read window
+READ_CHARS = 1200         # max chars per read window
+READ_LIMIT_MAX = 200      # hard cap on model-specified read limit
+SEARCH_MAX_MATCHES = 15   # bounded literal search results
+SEARCH_MAX_CHARS = 1500   # bounded search output
+SEARCH_MAX_FILES = 500    # bounded search scan
+TREE_MAX_ENTRIES = 60     # bounded repository-tree listing
+TREE_MAX_CHARS = 1500     # bounded tree output
+TREE_MAX_DEPTH = 3        # bounded tree walk depth
+OBSERVE_ACTIONS = frozenset({"read", "search", "tree"})
+OBSERVE_STATE_CHARS = 1500  # executor-state budget for observation step output
+# Retry budget when a truncated write/edit payload fails to parse.
+STEP_WRITE_TOKENS = 1024 if LLM_BACKEND == "openrouter" else 512
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
 REASONING_POLICIES = ("gated", "off")
 DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
@@ -201,7 +218,12 @@ Rules:
 - Relative paths. Reasoning max 10 words
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
-Actions: shell, write, edit, read, done, fail.
+- Prefer search/tree over shell grep/find/ls
+Actions: shell, write, edit, read, search, tree, done, fail.
+read: may take "offset"/"limit" (lines); if output says "continue: offset=N", read that offset for more
+search: literal pattern in "arg", optional "path" (default "."); bounded matches
+tree: directory in "arg" (default "."); bounded listing
+write: whole file; add "append":true to append the next chunk instead
 edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
 Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}"""
 
@@ -261,7 +283,7 @@ def _validate_action_contract(obj):
         return (_valid_nonempty_str(obj.get("arg"))
                 and _valid_nonempty_str(obj.get("find"))
                 and "replace" in obj)
-    if action in ("shell", "read"):
+    if action in ("shell", "read", "search"):
         return _valid_nonempty_str(obj.get("arg"))
     return True
 
@@ -274,6 +296,10 @@ def _accept_or_raise(obj, text):
 
 _STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
 
+# Truncated write/edit payloads are the most common large-output parse failure;
+# detect the attempted action so the retry gets a payload-sized budget.
+_WRITE_ATTEMPT_RE = re.compile(r'"action"\s*:\s*"(?:write|edit)"')
+
 
 def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             max_retries=MAX_LLM_RETRIES, raw=False, timeout=None,
@@ -283,6 +309,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         raise ValueError(
             f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}"
         )
+    budget = max_tokens
     for attempt in range(max_retries + 1):
         # Determine thinking level: explicit think_level overrides auto-escalation.
         # E03: on final auto-retry (attempt 2), disable thinking and use strict
@@ -327,7 +354,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             "model": MODEL,
             "messages": messages,
             "temperature": 0.1,
-            "max_tokens": max_tokens,
+            "max_tokens": budget,
         }
         if LLM_BACKEND == "openrouter":
             if OPENROUTER_PROVIDER:
@@ -343,7 +370,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 }
                 # Reasoning tokens count against max_tokens with Parasail provider,
                 # despite OpenRouter docs claiming they're separate. Bump to compensate.
-                body["max_tokens"] = max(max_tokens, 2048 if effective_think_level == "high" else 1536)
+                body["max_tokens"] = max(budget, 2048 if effective_think_level == "high" else 1536)
             else:
                 # Some models reason by default. Keep the harness policy model-independent.
                 body["reasoning"] = {"enabled": False}
@@ -354,7 +381,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 msgs[0] = dict(msgs[0])
                 msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
             body["messages"] = msgs
-            body["max_tokens"] = max(max_tokens, 768 if effective_think_level == "high" else 512)
+            body["max_tokens"] = max(budget, 768 if effective_think_level == "high" else 512)
 
         # E03: strict contract on final auto-retry — suppress reasoning leaks
         if attempt >= 2 and not think_level:
@@ -404,6 +431,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             raise KeyError(f"API error: {rj['error']}")
         # Log token usage if available
         usage = rj.get("usage", {})
+        finish_reason = (rj.get("choices") or [{}])[0].get("finish_reason", "")
         if usage:
             metadata = rj.get("openrouter_metadata") or {}
             route = metadata.get("endpoints", {})
@@ -427,8 +455,11 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 "provider": selected.get("provider") or rj.get("provider", ""),
                 "route_attempt": selected.get("attempt"),
                 "thinking": effective_think_level,
+                "finish_reason": finish_reason,
                 "attempt": attempt,
             })
+        if finish_reason == "length":
+            log("  output hit token budget (finish_reason=length)")
         msg = rj["choices"][0]["message"]
         text = msg.get("content") or ""
         # OpenRouter reasoning: if content is null/empty, try reasoning_content
@@ -458,7 +489,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             if not isinstance(parsed, dict):
                 raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
             return _accept_or_raise(parsed, text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as parse_err:
             # E03: attempt mechanical repair before burning a retry
             repaired = _repair_json(text)
             if repaired is not None:
@@ -469,14 +500,25 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 except json.JSONDecodeError:
                     pass
             if attempt < max_retries:
+                # Action-specific budget: a truncated write/edit payload needs
+                # room for content, not more reasoning.
+                if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(text):
+                    budget = STEP_WRITE_TOKENS
+                    log(f"  write/edit payload budget -> {budget}")
                 think_str = f" thinking={effective_think_level}" if effective_think_level else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
+                # Typed classification for the caller (issue #7): output that
+                # hit the token budget is a transport failure of the action
+                # envelope, not model noise — the recovery differs.
+                parse_err.malformed_action = True
+                parse_err.response_truncated = finish_reason == "length"
                 raise
 
 
 _KNOWN_ERROR_TYPES = {"timeout", "missing_tool", "permission_denied", "missing_file",
-                      "compile_error", "edit_failed", "stuck_loop", "unknown"}
+                      "compile_error", "edit_failed", "stuck_loop", "unknown",
+                      "malformed_action", "response_truncated"}
 
 # E05: Error types where thinking escalation is counterproductive.
 # These are structural failures — the scaffold knows what went wrong and the model
@@ -539,14 +581,33 @@ def summarize_errors(errors):
     return result
 
 
+def _step_digest(steps, count=6):
+    """Compact digest of recent executed steps for planning (never file contents)."""
+    digest = []
+    for s in steps[-count:]:
+        digest.append({
+            "action": s.get("action"),
+            "arg": (s.get("arg") or "")[-120:],
+            "ok": s.get("ok"),
+            "output": (s.get("output") or "")[:80],
+        })
+    return digest
+
+
 def get_plan(user_prompt, state):
-    # Include environment and policy in planner state
+    # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
-    # model. Keeping it out also preserves the default planner prompt contract.
+    # model, and raw step payloads (write contents) never reach the planner —
+    # only a curated digest does. This keeps replan state bounded on
+    # write-heavy runs while still telling the planner what already happened.
     plan_state = {
-        key: value for key, value in state.items()
-        if key not in ("reasoning_policy", "goal_context_chars")
+        key: state[key]
+        for key in ("completed_tasks", "errors", "environment", "policy")
+        if key in state
     }
+    recent = _step_digest(state.get("all_steps", []))
+    if recent:
+        plan_state["recent_steps"] = recent
     if "environment" not in plan_state:
         plan_state["environment"] = {}
     if "policy" not in plan_state:
@@ -584,13 +645,16 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
     for s in steps:
         # Use basename for file paths to avoid long tmp_path bloat
         arg = s.get("arg", "")
-        if s["action"] in ("write", "read", "edit") and "/" in arg:
+        if s["action"] in ("write", "read", "edit", "tree") and "/" in arg:
             arg = Path(arg).name
         else:
             arg = arg[-MAX_INPUT:]
+        # Observation actions (read/search/tree) carry the content the model
+        # navigates by; they get a larger output budget than mutating actions.
+        out_cap = OBSERVE_STATE_CHARS if s["action"] in OBSERVE_ACTIONS else MAX_INPUT
         slim_steps.append({
             "action": s["action"], "arg": arg,
-            "ok": s["ok"], "output": s.get("output", "")[:MAX_INPUT]
+            "ok": s["ok"], "output": s.get("output", "")[:out_cap]
         })
     slim = {
         "task": state.get("current_task", task)[:MAX_INPUT],
@@ -705,6 +769,11 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
         "errors": summarize_errors(errors),
         "completed_tasks": [t[:80] for t in completed_tasks[-3:]],
     }
+    # Stateful replanning: the mini-planner sees what the executor actually did
+    # on the failed task (actions + outcomes), not just typed error strings.
+    failed_steps = _step_digest(state.get("all_steps", []), count=3)
+    if failed_steps:
+        replan_state["failed_steps"] = failed_steps
     env = state.get("environment", {})
     if env.get("missing_tools"):
         replan_state["missing_tools"] = env["missing_tools"]
@@ -1085,6 +1154,51 @@ def _get_shell_timeout(cmd, hint=None):
     return SHELL_TIMEOUT
 
 
+def _atomic_write_text(path, content):
+    """Write via temp file + rename so a crashed/interrupted write never
+    leaves a partial file behind."""
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    tmp.write_text(content)
+    os.replace(tmp, path)
+
+
+# VCS / dependency / build directories excluded from search and tree walks.
+_REPO_SKIP_DIRS = frozenset({
+    ".git", ".hg", ".svn", "node_modules", "__pycache__",
+    ".venv", "venv", "target", "dist", "build",
+})
+
+
+def _iter_repo_files(root, max_files=SEARCH_MAX_FILES):
+    """Yield visible repo files under root, bounded and deterministic."""
+    count = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _REPO_SKIP_DIRS and not d.startswith(".")
+        )
+        for name in sorted(filenames):
+            if name.startswith("."):
+                continue
+            yield Path(dirpath) / name
+            count += 1
+            if count >= max_files:
+                return
+
+
+def _read_offset_limit(action):
+    """Normalized 1-based read window (offset, limit) from an action dict."""
+    try:
+        offset = max(1, int(action.get("offset") or 1))
+    except (TypeError, ValueError):
+        offset = 1
+    try:
+        limit = max(1, min(int(action.get("limit") or READ_LINES), READ_LIMIT_MAX))
+    except (TypeError, ValueError):
+        limit = READ_LINES
+    return offset, limit
+
+
 def execute(action, working_dir="."):
     act = action.get("action", "")
     if act == "shell":
@@ -1112,7 +1226,17 @@ def execute(action, working_dir="."):
             # instead of escaped strings (e.g. "content": {"key": "val"} not "content": "{\"key\": \"val\"}")
             if isinstance(content, (dict, list)):
                 content = json.dumps(content, indent=2)
-            p.write_text(content)
+            if action.get("append"):
+                # Chunked-write transport: append one chunk at a time so large
+                # files fit within the executor token budget.
+                existed = p.exists()
+                with open(p, "a") as f:
+                    f.write(content)
+                size = p.stat().st_size
+                verb = "Appended to" if existed else "Wrote"
+                return {"ok": True,
+                        "output": f"{verb} {p.name} (+{len(content)} chars, total {size})"}
+            _atomic_write_text(p, content)
             return {"ok": True, "output": f"Wrote {p.name}"}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
@@ -1139,7 +1263,7 @@ def execute(action, working_dir="."):
                 return {"ok": False,
                         "output": f"Ambiguous: find string matches {count} times in {p.name}",
                         "error_type": "edit_failed"}
-            p.write_text(text.replace(find, replace, 1))
+            _atomic_write_text(p, text.replace(find, replace, 1))
             return {"ok": True, "output": f"Edited {p.name}"}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
@@ -1149,10 +1273,122 @@ def execute(action, working_dir="."):
             p = Path(action["arg"])
             if not p.is_absolute():
                 p = Path(working_dir) / p
-            return {"ok": True, "output": p.read_text()[:MAX_RESULT]}
+            text = p.read_text()
+            lines = text.splitlines()
+            total = len(lines)
+            offset, limit = _read_offset_limit(action)
+            # Structured continuation metadata (issue #7): totals and a content
+            # hash let the harness audit reads and detect files changing
+            # between windows. Not sent to the model — header stays compact.
+            meta = {"total_lines": total,
+                    "total_bytes": len(text.encode("utf-8", errors="replace")),
+                    "sha256": hashlib.sha256(
+                        text.encode("utf-8", errors="replace")).hexdigest()[:12]}
+            if offset > total:
+                return {"ok": True, "truncated": False,
+                        "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
+                        **meta}
+            window = lines[offset - 1: offset - 1 + limit]
+            body = "\n".join(window)
+            end = offset + len(window) - 1
+            truncated = False
+            header = f"[{p.name}: lines {offset}-{end} of {total}"
+            if len(body) > READ_CHARS:
+                body = body[:READ_CHARS]
+                truncated = True
+                header += f", cut at {READ_CHARS} chars"
+            if end < total:
+                truncated = True
+                header += f"; continue: offset={end + 1}"
+            header += "]"
+            return {"ok": True, "output": f"{header}\n{body}",
+                    "truncated": truncated,
+                    "continuation": end + 1 if end < total else None,
+                    **meta}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "read")}
+    elif act == "search":
+        pattern = action.get("arg", "")
+        if not pattern:
+            return {"ok": False, "output": "search requires non-empty 'arg' (pattern)",
+                    "error_type": "unknown"}
+        try:
+            base = Path(action.get("path") or ".")
+            if not base.is_absolute():
+                base = Path(working_dir) / base
+            if not base.is_dir():
+                return {"ok": False, "output": f"Directory not found: {base.name}",
+                        "error_type": "missing_file"}
+            matches = []
+            for f in _iter_repo_files(base):
+                try:
+                    text = f.read_text(errors="replace")
+                except OSError:
+                    continue
+                if "\0" in text[:2048]:
+                    continue  # skip binary files
+                for lineno, line in enumerate(text.splitlines(), 1):
+                    if pattern in line:
+                        matches.append(f"{f.relative_to(base)}:{lineno}: {line.strip()[:100]}")
+                        if len(matches) >= SEARCH_MAX_MATCHES:
+                            break
+                if len(matches) >= SEARCH_MAX_MATCHES:
+                    break
+            body = "\n".join(matches)
+            truncated = len(matches) >= SEARCH_MAX_MATCHES or len(body) > SEARCH_MAX_CHARS
+            body = body[:SEARCH_MAX_CHARS]
+            header = f"[{len(matches)}{'+' if truncated else ''} matches for '{pattern[:40]}'"
+            if truncated:
+                header += " — narrow the pattern"
+            header += "]"
+            return {"ok": True,
+                    "output": f"{header}\n{body}" if body else header,
+                    "truncated": truncated}
+        except Exception as e:
+            out = str(e)[:MAX_RESULT]
+            return {"ok": False, "output": out, "error_type": classify_error(out, "search")}
+    elif act == "tree":
+        try:
+            base = Path(action.get("arg") or ".")
+            if not base.is_absolute():
+                base = Path(working_dir) / base
+            if not base.is_dir():
+                return {"ok": False, "output": f"Directory not found: {base.name}",
+                        "error_type": "missing_file"}
+            entries = []
+            root_depth = len(base.parts)
+            for dirpath, dirnames, filenames in os.walk(base):
+                depth = len(Path(dirpath).parts) - root_depth
+                dirnames[:] = sorted(
+                    d for d in dirnames
+                    if d not in _REPO_SKIP_DIRS and not d.startswith(".")
+                )
+                if depth >= TREE_MAX_DEPTH:
+                    dirnames[:] = []
+                rel_dir = Path(dirpath).relative_to(base)
+                prefix = "" if str(rel_dir) == "." else f"{rel_dir}/"
+                entries.extend(f"{prefix}{d}/" for d in dirnames)
+                entries.extend(
+                    f"{prefix}{name}" for name in sorted(filenames)
+                    if not name.startswith(".")
+                )
+                if len(entries) >= TREE_MAX_ENTRIES:
+                    entries = entries[:TREE_MAX_ENTRIES]
+                    break
+            body = "\n".join(entries)
+            truncated = len(entries) >= TREE_MAX_ENTRIES or len(body) > TREE_MAX_CHARS
+            body = body[:TREE_MAX_CHARS]
+            header = f"[tree of {base.name}: {len(entries)} entries"
+            if truncated:
+                header += f", capped at {TREE_MAX_ENTRIES}"
+            header += "]"
+            return {"ok": True,
+                    "output": f"{header}\n{body}" if body else header,
+                    "truncated": truncated}
+        except Exception as e:
+            out = str(e)[:MAX_RESULT]
+            return {"ok": False, "output": out, "error_type": classify_error(out, "tree")}
     elif act == "done":
         return {"ok": True, "output": "task_complete"}
     elif act == "fail":
@@ -1190,8 +1426,22 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         "all_steps": [],
         "reasoning_policy": reasoning_policy,
         "goal_context_chars": goal_context_chars,
+        # Selected vs executed accounting (issue #7): the Qwen canary selected
+        # 14 reads but only 2 reached the dispatcher — that gap must be
+        # first-class in run metrics, not reconstructed from logs.
+        "selected_steps": 0,
+        "executed_steps": 0,
+        "skipped_steps": 0,
     }
     history = []
+
+    def _skip_step(task_index, step_num, act, action, reason):
+        """Record a selected-but-not-dispatched action in run metrics + log."""
+        state["skipped_steps"] += 1
+        _run_log({"event": "step_skipped", "task_index": task_index,
+                  "step": step_num, "action": act,
+                  "arg": action.get("arg", "")[:120], "reason": reason})
+
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
@@ -1280,14 +1530,26 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
                         break
                     except (json.JSONDecodeError, KeyError) as e:
-                        log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s)")
-                        state["errors"].append(f"[unknown] LLM parse error on task '{task}': {str(e)[:100]}")
+                        # Typed parse failures (issue #7): the replanner should
+                        # know whether the action envelope was truncated at the
+                        # token budget or simply malformed.
+                        if getattr(e, "response_truncated", False):
+                            etype = "response_truncated"
+                        elif getattr(e, "malformed_action", False):
+                            etype = "malformed_action"
+                        else:
+                            etype = "unknown"
+                        log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s) [{etype}]")
+                        state["errors"].append(f"[{etype}] LLM parse error on task '{task}': {str(e)[:100]}")
+                        _run_log({"event": "step_error", "task_index": i, "step": step,
+                                  "error_type": etype})
                         break
                     # Normalize None → "" for optional string fields (models emit "arg": null)
                     for _k in ("arg", "content", "reasoning", "find", "replace"):
                         if action.get(_k) is None:
                             action[_k] = ""
                     act = action.get("action", "")
+                    state["selected_steps"] += 1
                     log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
                     if act == "done":
@@ -1306,7 +1568,15 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
                             # write: same content = duplicate; edit: same find+replace = duplicate
                             is_dup = False
-                            if act == "write" and prev.get("ok") and prev.get("_content", "") == action.get("content", ""):
+                            if act == "write" and action.get("append"):
+                                # Chunked append is never a no-op — an identical
+                                # consecutive chunk is a stuck loop, not a duplicate.
+                                if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
+                                    log(f"  [{step + 1}] auto-fail (same chunk appended twice to {action.get('arg','')[:40]})")
+                                    state["errors"].append(f"[stuck_loop] write {action.get('arg','')[:60]}: same chunk appended twice")
+                                    _skip_step(i, step, act, action, "stuck_append")
+                                    break
+                            elif act == "write" and prev.get("ok") and not prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
                                 is_dup = True
                             elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
                                 is_dup = True
@@ -1314,10 +1584,12 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             elif act == "edit" and not prev.get("ok") and prev.get("_find", "") == action.get("find", ""):
                                 log(f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg','')[:40]})")
                                 state["errors"].append(f"[stuck_loop] edit {action.get('arg','')[:60]}: same find string failed twice")
+                                _skip_step(i, step, act, action, "stuck_edit")
                                 break
                             if is_dup:
                                 dup_skip_count += 1
                                 log(f"  [{step + 1}] skip (duplicate {act}, same content)")
+                                _skip_step(i, step, act, action, f"duplicate_{act}")
                                 entry = {
                                     "action": act, "arg": action.get("arg", ""),
                                     "ok": True,
@@ -1350,6 +1622,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                             if prev.get("ok"):
                                 log(f"  [{step + 1}] auto-done (duplicate successful shell)")
+                                _skip_step(i, step, act, action, "duplicate_shell_auto_done")
                                 task_done = True
                                 break
                             elif prev.get("error_type") == "timeout":
@@ -1363,36 +1636,59 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             else:
                                 log(f"  [{step + 1}] auto-fail (same shell failed twice)")
                                 state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+                                _skip_step(i, step, act, action, "stuck_shell")
                                 break
                         elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
-                            if prev.get("ok"):
+                            # Offset-aware: navigating to a new range of the same
+                            # file is legitimate, not a duplicate.
+                            prev_key = prev.get("_read_key") or (prev.get("arg", ""), 1)
+                            cur_key = (action.get("arg", ""), _read_offset_limit(action)[0])
+                            if prev_key != cur_key:
+                                pass  # different range — execute normally
+                            elif prev.get("ok"):
                                 dup_skip_count += 1
                                 if dup_skip_count >= 2:
                                     log(f"  [{step + 1}] auto-fail (same read repeated on {action.get('arg','')[:40]})")
                                     state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]}: same file read repeatedly")
+                                    _skip_step(i, step, act, action, "stuck_read")
                                     break
                                 log(f"  [{step + 1}] skip (duplicate read)")
-                                state["last_steps"].append({
+                                _skip_step(i, step, act, action, "duplicate_read")
+                                cont = prev.get("_continuation")
+                                if cont:
+                                    obs = (f"Already read this range. Continue with offset={cont}; "
+                                           f"or search, edit, done, or fail.")
+                                else:
+                                    obs = "Already read. Use previous content; edit, write, shell, done, or fail."
+                                entry = {
                                     "action": "read",
                                     "arg": action.get("arg", ""),
                                     "ok": True,
-                                    "output": "Already read. Use previous content; edit, write, shell, done, or fail."
-                                })
+                                    "output": obs,
+                                    "_read_key": cur_key,
+                                }
+                                if cont:
+                                    entry["_continuation"] = cont
+                                state["last_steps"].append(entry)
                                 continue
-                            log(f"  [{step + 1}] auto-fail (same read failed twice)")
-                            state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]} failed twice")
-                            break
+                            else:
+                                log(f"  [{step + 1}] auto-fail (same read failed twice)")
+                                state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]} failed twice")
+                                _skip_step(i, step, act, action, "stuck_read_failed")
+                                break
 
                     dup_skip_count = 0  # reset on any non-skipped action
+                    state["executed_steps"] += 1
                     result = execute(action, working_dir)
                     ok_str = "OK" if result["ok"] else "FAIL"
                     log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
+                    out_cap = OBSERVE_STATE_CHARS if act in OBSERVE_ACTIONS else 100
                     step_entry = {
                         "action": act,
                         "arg": action.get("arg", ""),
                         "ok": result["ok"],
-                        "output": result["output"][:100]
+                        "output": result["output"][:out_cap]
                     }
                     if not result["ok"] and "error_type" in result:
                         step_entry["error_type"] = result["error_type"]
@@ -1400,17 +1696,34 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         step_entry["_timeout"] = action["timeout"]
                     if act == "write":
                         step_entry["_content"] = action.get("content", "")
+                        if action.get("append"):
+                            step_entry["_append"] = True
                     if act == "edit":
                         step_entry["_find"] = action.get("find", "")
                         step_entry["_replace"] = action.get("replace", "")
+                    if act == "read":
+                        step_entry["_read_key"] = (
+                            action.get("arg", ""), _read_offset_limit(action)[0])
+                        if result.get("continuation"):
+                            step_entry["_continuation"] = result["continuation"]
                     state["last_steps"].append(step_entry)
                     state["all_steps"].append(dict(step_entry))
                     history.append({"event": "step", "task": i, "step": step, "action": action,
                                     "result": {"ok": result["ok"], "output": result["output"][:100]}})
-                    _run_log({"event": "step", "task_index": i, "step": step,
-                              "action": act, "arg": action.get("arg", "")[:120],
-                              "ok": result["ok"], "error_type": result.get("error_type"),
-                              "wall_s": round(time.time() - t_step, 2)})
+                    step_log = {"event": "step", "task_index": i, "step": step,
+                                "action": act, "arg": action.get("arg", "")[:120],
+                                "ok": result["ok"], "error_type": result.get("error_type"),
+                                "wall_s": round(time.time() - t_step, 2)}
+                    if result.get("truncated"):
+                        step_log["truncated"] = True
+                    # Hash-linked read audit: which content, how much of it,
+                    # and where the window ended.
+                    if act == "read" and result.get("sha256"):
+                        step_log["sha256"] = result["sha256"]
+                        step_log["total_lines"] = result.get("total_lines")
+                        step_log["total_bytes"] = result.get("total_bytes")
+                        step_log["continuation"] = result.get("continuation")
+                    _run_log(step_log)
 
                     if not result["ok"]:
                         etype = result.get("error_type", "unknown")
@@ -1596,7 +1909,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             log(f"Output in: {working_dir}")
             _run_log({"event": "run_end", "status": "complete",
                       "replans": replan, "wall_s": round(total_wall, 2),
-                      "completed_tasks": len(state["completed_tasks"])})
+                      "completed_tasks": len(state["completed_tasks"]),
+                      "steps": {"selected": state["selected_steps"],
+                                "executed": state["executed_steps"],
+                                "skipped": state["skipped_steps"]}})
             return {"status": "complete", "state": state, "log": history}
 
     total_wall = time.time() - t_run
@@ -1606,7 +1922,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         log(f"Output in: {working_dir}")
         _run_log({"event": "run_end", "status": "complete_deterministic_after_exhausted",
                   "replans": max_replans, "wall_s": round(total_wall, 2),
-                  "completed_tasks": len(state["completed_tasks"])})
+                  "completed_tasks": len(state["completed_tasks"]),
+                  "steps": {"selected": state["selected_steps"],
+                            "executed": state["executed_steps"],
+                            "skipped": state["skipped_steps"]}})
         return {"status": "complete", "state": state, "log": history}
 
     log(f"Exhausted {max_replans} replan attempts. ({total_wall:.1f}s total)")
@@ -1614,7 +1933,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     log(f"Output in: {working_dir}")
     _run_log({"event": "run_end", "status": "exhausted",
               "replans": max_replans, "wall_s": round(total_wall, 2),
-              "errors": state["errors"][-5:]})
+              "errors": state["errors"][-5:],
+              "steps": {"selected": state["selected_steps"],
+                        "executed": state["executed_steps"],
+                        "skipped": state["skipped_steps"]}})
     return {"status": "exhausted", "state": state, "log": history}
 
 

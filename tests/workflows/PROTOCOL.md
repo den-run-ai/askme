@@ -1,5 +1,25 @@
 # Native workflow protocol — Phase 1
 
+**Protocol revision:** 2 (2026-08-01). Revision 2 changes the AskMe action
+interface used by outcome-bearing runs (issue #7, app-development harness
+findings): ranged `read` windows with continuation metadata plus hash-linked
+totals (`total_lines`/`total_bytes`/`sha256`), bounded `search` and `tree`
+actions, atomic `write`/`edit` with chunked `append` transport,
+observation-action state budgets with truncation flags, typed
+`malformed_action`/`response_truncated` parse failures, selected-vs-executed
+step accounting (`step_skipped` events), and curated replan state (step
+digests instead of raw write payloads). Any FeatureBench or workflow matrix
+recorded under revision 1 must be re-run under this revision before
+comparison; per the rule below, action/budget changes after results require a
+new protocol version.
+
+**FeatureBench protocol numbering:** the FeatureBench canary series (issue #7)
+has consumed protocol versions up to v3 (v3 by the 2026-07-31 Qwen 3.6-27B
+follow-up on `agent/qwen36-featurebench-canary`). The next outcome-bearing
+FeatureBench run must register a frozen **v4** protocol reflecting this
+revision-2 action interface, requalify the gold and harmless controls, and
+rerun the same canary task before any subset expansion.
+
 **Status:** infrastructure and task qualification only. No outcome-bearing
 model call has been made under this protocol. The four-task paired pilot is not
 registered until its remaining fixtures, model route, and randomized schedule
