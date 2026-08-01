@@ -1,0 +1,101 @@
+{
+  "label": "one-task FeatureBench fast adapter canary",
+  "protocol_id": "askme-featurebench-fast-adapter-canary-v2",
+  "started_at": "2026-07-13T17:33:51Z",
+  "completed_at": "2026-07-13T17:43:31Z",
+  "qualification": {
+    "valid": true,
+    "gold_control": {
+      "completed_instances": 1,
+      "resolved_instances": 1,
+      "f2p_pass_rate": 1.0,
+      "error_instances": 0,
+      "wall_time_seconds": 56
+    },
+    "harmless_nonempty_control": {
+      "completed_instances": 1,
+      "patch_successfully_applied": true,
+      "resolved": false,
+      "error_instances": 0,
+      "wall_time_seconds": 56
+    },
+    "excluded_infrastructure_audit": {
+      "environment": "linux/amd64 image under QEMU on an Apple Silicon host",
+      "reason": "The untouched gold patch timed out in 3 of 13 F2P tests and 1 of 387 P2P tests at the benchmark's pinned 10-second per-test limit. The same untouched gold control passed under Docker Rosetta before the model attempt.",
+      "model_responses": 0
+    }
+  },
+  "sources": {
+    "askme_base_revision": "0dd686c42ee0d325195aec3a500eee4c0ec4c8c9",
+    "askme_adapter_code_revision": "9e0937676daf989f14229fa39ef96fd9f88abe26",
+    "askme_execution_revision": "29ba811e3a395b572e2d5b12bdc873dc7730f6ee",
+    "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+    "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+    "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+    "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1"
+  },
+  "cell": {
+    "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+    "split": "fast",
+    "attempts": 1,
+    "reasoning_policy": "gated",
+    "max_planning_attempts": 3,
+    "requested_model": "google/gemma-4-31b-it",
+    "requested_provider": "siliconflow",
+    "provider_fallback": false,
+    "served_models": [
+      "google/gemma-4-31b-it-20260402"
+    ],
+    "served_providers": [
+      "SiliconFlow"
+    ]
+  },
+  "usage": {
+    "responses": 28,
+    "reasoning_responses": 10,
+    "prompt_tokens": 81365,
+    "completion_tokens": 13204,
+    "total_tokens": 94569,
+    "openrouter_cost_usd": 0.01585905,
+    "agent_trajectory_seconds": 501.8
+  },
+  "agent": {
+    "status": "exhausted",
+    "reported_completion": false,
+    "planning_attempts": 3,
+    "executed_actions": {
+      "read": 4,
+      "write": 0,
+      "edit": 0,
+      "shell": 0
+    },
+    "prediction_success": false,
+    "patch_bytes": 0,
+    "observed_failure": "Repeated implementation writes were truncated at the 512-token non-reasoning action limit or returned malformed JSON. Bounded reasoning retries produced either prose, more reads, or another malformed action; the agent then exhausted three planning attempts."
+  },
+  "official_acceptance": {
+    "featurebench_eval_completed": true,
+    "resolved": false,
+    "patch_successfully_applied": false,
+    "empty_patch": true,
+    "error_instances": 0
+  },
+  "audit": {
+    "infrastructure_valid": true,
+    "qualification_valid": true,
+    "policy_compliant": true,
+    "policy_action_decisions": 4,
+    "policy_denials": 0,
+    "api_key_leaks": 0,
+    "strict_served_model_match": true,
+    "retained_artifact_sha256": {
+      "askme-canary-audit.json": "6f3c9b8a4fdf805cfbace52b506a33a3c67b32e0fa61a2331d9e9d911d3ff8db",
+      "deterministic-post-run-audit.json": "2adfc3e84fe4284763f0a04433eb421ddd3847c24846c1b83c962b12af23c712",
+      "askme-result.json": "b6db174c1e5ac61e69c8a04452d35c5377f0cb5294fb5699fb7c300bc95624ba",
+      "output.jsonl": "666935be51920548b3c93b7b693d369cdfd9d558f85a2660eeeb7aa1ab9b96c0",
+      "featurebench-report.json": "6486664c788da6a7dd7b20ed20084c6f9938ef2610e7ddc4d113d4a64bd92673",
+      "joint-outcome.json": "60b7b0a40f1e8e9d85dd86ca83b2bf9ca218838f71eeaa2482978019390b3356"
+    }
+  },
+  "interpretation": "This is one supported negative canary of the frozen AskMe adapter and action protocol on one task. It is not a FeatureBench score, reliability estimate, model-family comparison, model-size result, or causal estimate of the reasoning policy."
+}

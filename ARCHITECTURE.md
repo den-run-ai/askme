@@ -24,7 +24,7 @@ For usage, quickstart, and test commands see [README.md](README.md). For model/s
 │  update state │  ← append step result to state
 └──────┬───────┘
        │
-       ├── all tasks done? → final validation → exit success
+       ├── all tasks done? → conditional fail-open validation → exit success
        └── task failed? → replan (up to MAX_REPLANS)
 ```
 
@@ -188,7 +188,7 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `SHELL_TIMEOUT_LONG` | 120s | Timeout for install/build commands |
 | `SHELL_TIMEOUT_MAX` | 300s | Hard cap for model-specified timeout hint |
 | `PLANNER_MAX_TOKENS` | 768 | Task list budget; shared with thinking on replans |
-| `ALLOW_SYSTEM_INSTALLS` | false | Whether agent may install software |
+| `ALLOW_SYSTEM_INSTALLS` | false | Prompt-visible install policy; not host-level enforcement |
 | `ALLOW_NETWORK` | true | Reserved for future use |
 | Step output | 100 chars | Max output stored per mutating-action step in history |
 | Observation step output | 1500 chars | `OBSERVE_STATE_CHARS` — history budget for `read`/`search`/`tree` results |
@@ -242,8 +242,9 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 
 Active limitations that still shape the design.
 
+- **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json). Chunked `append` writes, ranged reads, and per-action budgets now exist (issue #7, protocol revision 2); requalification under a frozen v4 FeatureBench protocol is pending.
 - **Write content truncation (local Gemma 4 E4B).** The 256-token executor budget can't fit multi-line file content with escapes. The `edit` action is the primary workaround for localized changes; for new large files, chunked `append` writes assemble the file in budget-sized pieces, and a truncated `write`/`edit` payload that fails to parse retries with a `STEP_WRITE_TOKENS` budget.
-- **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; final validation catches any that slip through.
+- **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; conditional validation may catch some that slip through.
 - **Path truncation in long temp paths (local).** The local model reproduces long absolute paths in shell commands and sometimes truncates them. `SYSTEM_STEP` recommends relative paths; the 26B model on OpenRouter handles this correctly.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
 - **`--cache-reuse` requires `--swa-full` for Gemma 4 iSWA.** Fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (build `a702f395`+). Current default: `--swa-full --cache-reuse 256`. Not compatible with `--mmproj`. See [gemma4-setup.md](gemma4-setup.md).

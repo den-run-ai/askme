@@ -18,19 +18,29 @@ The harness ties these trends together.
 
 [Lilian Weng defines a harness](https://lilianweng.github.io/posts/2026-07-04-harness/) as the deployment system around a model: it controls planning, tool use, context, memory, permissions, workflow, and evaluation. Her central design direction is deliberately simple and generic machinery, with a goal-oriented loop that plans, executes, observes or tests, improves, and executes again.
 
-A harness is not one fixed architecture. Current projects choose different system boundaries:
+A harness is not one fixed architecture. AskMe is an experimental coding-agent
+harness: it keeps an explicit plan, asks the model for one structured action per
+turn, executes it, and returns focused evidence. Its model-facing boundary is
+deliberately narrower than two prominent alternatives:
 
-| Approach | Boundary it emphasizes |
-|---|---|
-| [Pi](https://github.com/earendil-works/pi) | A minimal terminal core extended through skills, prompts, extensions, and packages; stronger isolation is supplied separately. |
-| [Oh My Pi](https://github.com/can1357/oh-my-pi) | A batteries-included fork of Pi with hash-anchored edits, IDE tooling, persistent execution workers, memory, and subagents. |
-| [OpenHands](https://github.com/OpenHands/OpenHands) | A composable agent SDK and managed local, cloud, or enterprise runtime. |
-| [Omnigent (Databricks, OSS alpha)](https://github.com/omnigent-ai/omnigent) | Databricks' open-source alpha meta-harness for swapping or composing agents under shared policies, sandboxes, and sessions; distinct from its [managed beta](https://docs.databricks.com/aws/en/omnigent/). |
-| [Databricks' internal evaluation study](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase) | An organizational evaluation and selection layer built from recent human pull requests, isolated runs, sealed Git history, and held-out tests. |
+| Boundary | AskMe | [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) | [OpenHands](https://docs.openhands.dev/sdk/arch/tool-system) |
+|---|---|---|---|
+| Action surface | Six fixed JSON actions; one action per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
+| State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode | Conversation state and append-only event log; optional persistence and configurable condenser |
+| Completion boundary | `done`; conditional fail-open validation; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` signals completion; benchmark evaluation remains a separate harness |
 
-These are overlapping layers, not a maturity ladder or a leaderboard. Omnigent and the internal study share Databricks provenance but occupy separate layers: the former composes agent harnesses, while the latter evaluates and selects them. Databricks did not compare every project in this table: its workload-specific study compared Pi with the native Claude Code or Codex harness for the same model and thinking effort. It reported more than a 2× task-cost difference in some cases at similar quality, with Pi sending about 3× less context per turn. That is a private-codebase case study, not a universal ranking.
+This is a trade-off, not a ranking. AskMe spends more harness structure to reduce
+each turn's decision burden. Pi keeps a minimal, extensible, model-led core.
+OpenHands supplies a richer lifecycle runtime. All three still need independent
+behavioral acceptance. Other projects explore adjacent layers: [Oh My
+Pi](https://github.com/can1357/oh-my-pi) packages more capabilities around pi,
+while [Omnigent](https://github.com/omnigent-ai/omnigent) composes agents behind
+shared policies and sessions. A separate [Databricks private-codebase
+study](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
+illustrates why harness choice itself needs evaluation, but it is not a universal
+ranking of these projects.
 
-That is the right level of abstraction for AskMe. A useful agent trace looks like this:
+A useful AskMe trace looks like this:
 
 | Step | Plan | Agent action | Evidence | Next move |
 |---|---|---|---|---|
@@ -47,13 +57,13 @@ The AskMe loop is most plausible when a workflow decomposes into bounded actions
 
 The published smoke has one additional limit: independent acceptance scored the artifact after the agent stopped. Its failure was not fed back to AskMe for recovery. A stronger operational loop would run a focused acceptance check at tentative completion, return a failure for one bounded correction, and still reserve a separate held-out evaluator for scoring.
 
-## A Working Program Can Still Miss the Workflow
+## An Exit-Zero Command Can Still Miss the Workflow
 
-The most useful result in the hosted smoke was not a compiler error. Qwen3.6-35B-A3B wrote the requested `msg.h` and `main.c`, compiled a working program to `/tmp/test`, ran it successfully, saw `REPLAN_OK`, and reported completion.
+The most useful result in the hosted smoke was not a compiler error. The retained Qwen3.6-35B-A3B action record shows `cc -o /tmp/test main.c && /tmp/test` returning zero, followed by the agent reporting completion. It does not independently preserve that command's stdout or prove the source contents.
 
 The required deliverable was `./main`.
 
-The independent acceptance test therefore failed. Every recorded tool action was successful, yet the workflow contract drifted. This is a more realistic agent failure than a missing include: locally plausible progress did not add up to the requested integration result.
+The independent acceptance test therefore failed. The recorded combined command succeeded, yet the required artifact was absent. This is a more realistic agent failure than a missing include: locally plausible progress did not add up to the requested integration result.
 
 It also clarifies two different roles for feedback:
 
@@ -106,36 +116,48 @@ The result is simple:
 
 - all eight agents reported completion;
 - seven of eight artifacts met the exact acceptance contract;
-- the retained failure was working behavior at the wrong artifact path;
+- the retained failure was an exit-zero compile-and-run command at the wrong artifact path;
 - every trajectory and its provenance are auditable.
 
 That is one harness result, not a model ranking. One unseeded run per cell, non-randomized sequential runs, different dense and MoE architectures, and a fourth model selected after the original matrix cannot establish anything about Gemma versus Qwen, parameter count, active compute, reasoning quality, reliability, or local-Mac performance.
 
 The full eight-cell table, billing reconciliation, routes, prompts, and commands remain in [`evals/README.md`](evals/README.md) and [`evals/draft-results.json`](evals/draft-results.json) for provenance rather than as a leaderboard.
 
-## Test the Real Hypothesis Next
+## What Changes the Answer Next
 
-A useful follow-up should start with four native, syntactically valid workflow tasks and semantic integration failures: for example, a CLI whose configuration precedence or stdout/stderr contract is wrong across several modules. Starting natively keeps a new external-benchmark adapter from dominating the first policy comparison.
+The presentation does not need an unfinished policy study to make its bounded
+claim. The completed smoke already establishes what happened, what the evaluator
+caught, and what remains unsupported. Follow-up work should answer the next
+practical question with the shortest valid path.
 
-The pilot is not registered and has not run. Today, one of four workflows is qualified; the model route and randomized schedule remain pending; zero outcome-bearing model calls have been made.
+First, close the visible AskMe harness gap: treat tentative completion as a
+focused acceptance checkpoint, return a failure for one bounded correction, and
+still reserve an independent held-out evaluator for scoring. The retained
+wrong-path miss is the regression case for that improvement.
 
-Before any outcome-bearing call, the pilot should be predeclared and then registered at an immutable public commit or archive. It should:
+Second, test realistic feature work. [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench)
+is the first external target because it evaluates feature development in
+existing repositories and supports task-level evaluation. The AskMe adapter is
+now implemented and qualified on one pinned public task: the official gold patch
+resolved, a harmless nonempty patch applied but remained unresolved, the audit
+passed, and the official evaluator returned a categorical outcome. The single
+registered model attempt exhausted without emitting a patch, so the task was
+unresolved. That is a successful diagnostic run with a negative task outcome—not
+a FeatureBench score, reliability estimate, or readiness result. Repeating more
+tasks under the same known action bottleneck would add little. A result-bearing
+subset should follow an action-interface fix and its own frozen protocol.
 
-1. freeze the four tasks, prompts, feedback, held-out checks, budgets, gate predicate, and exclusions before any measured run;
-2. compare a system-wide reasoning-off policy with the current composite gated policy under matched conditions;
-3. freeze one model route and repeat each task three times in randomized policy order: 24 runs total;
-4. use held-out acceptance and false completion—reported `complete` plus failed acceptance—over all valid scheduled runs as the two primary outcomes;
-5. report regressions, repeated actions, recovery turns, work redone, local corrections, full replans, latency, and tokens descriptively.
+[Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
+full-web-application reference if task and evaluator access becomes available.
+[ProgramBench](https://github.com/facebookresearch/programbench) remains only a
+later clean-room reconstruction stress test. This is a bounded shortlist, not a
+commitment to run all three.
 
-In plain language, `off` never requests the API's explicit-reasoning mode. `Gated` requests it only at the frozen retry, recovery, replan, and final-check points. The model, workflows, tools, feedback, and budgets stay fixed. Both arms may still reason internally; the experiment changes an AskMe API request, not cognition itself.
-
-At this scale, the pilot could reveal only an obvious difference on these four tasks. A null result would still be informative if the deterministic harness guards, rather than extra reasoning, carried the outcome.
-
-External evaluation is a separate next step and is **not ready to run**. No FeatureBench, Vals, or ProgramBench adapter or result exists in AskMe today. External generalization should answer three distinct questions at most. [FeatureBench-fast](https://github.com/LiberCoders/FeatureBench) is the primary and first adapter target for feature development in existing repositories. [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) is the complementary full-web-application reference: it evaluates running applications through point-and-click user workflows, but its tasks are proprietary and access is still being rolled out, so it is not yet a reproducible AskMe adapter commitment.
-
-The optional third candidate is [ProgramBench](https://github.com/facebookresearch/programbench), which tests the opposite extreme: reconstruct a complete program from an execute-only binary and documentation. Its full 200-task benchmark is far beyond this experiment, and the [current frontier leaderboard](https://programbench.com/) remains near zero on fully resolved tasks. The [public dataset](https://huggingface.co/datasets/programbench/ProgramBench-Tests) currently labels 27 tasks easy, but that tier is a static source-size and dependency proxy rather than evidence that small models can solve them. The first step should therefore be only a pinned [one-task `gron` adapter canary](https://programbench.com/task/tomnomnom__gron.88a6234/), selected for deterministic text I/O—not a model result. Any outcome-bearing subset needs a separate preregistration and the label **AskMe-adapted ProgramBench subset**. Fully resolved tasks remain primary; partial test coverage is diagnostic only. This is a shortlist, not a commitment to run all three.
-
-This pilot can support a conclusion only about the tested policy on the frozen tasks. Model-size or model-family claims require a separate, appropriately powered design.
+The native `off` versus `gated` reasoning-policy study is deferred. It becomes
+useful only if the research question is specifically whether AskMe's explicit
+reasoning request changes recovery under otherwise fixed conditions. It is not
+a prerequisite for this talk, an external-readiness test, or a Qwen-versus-Gemma
+or model-size experiment.
 
 ## The Claim That Survives
 
@@ -143,4 +165,4 @@ Smaller models make more of the model stack controllable. General-purpose and li
 
 The action protocol should be simple and general. Easier interfaces and more general standards can be good; specialized skills should earn their complexity from repeated failure traces. Execution and test results should ground the next decision, reasoning should update the smallest necessary part of the plan, and acceptance should remain tied to real behavior.
 
-**Make the interface easier to use. Keep success grounded in the workflow.**
+**Evaluate the model, harness, task, and evaluator as one system.**

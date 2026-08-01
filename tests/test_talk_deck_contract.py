@@ -10,19 +10,25 @@ SLIDES = TALK / "slides.md"
 SPEC = TALK / "DECK_SPEC.md"
 BLOG = TALK / "blog.md"
 README = TALK / "README.md"
+ROOT_README = ROOT / "README.md"
+SECURITY = ROOT / "SECURITY.md"
 
 
 def _rendered_slide_sources(text):
-    # Marp source begins with one frontmatter block, followed by seven slides.
+    # Marp source begins with one frontmatter block, followed by 7 main + 1 backup.
     parts = re.split(r"(?m)^---\s*$", text)
     return [part for part in parts[2:] if part.strip()]
+
+
+def _single_line(text):
+    return re.sub(r"\s+", " ", text)
 
 
 def test_deck_contract_guards_identity_arc_and_model_rows():
     text = SLIDES.read_text(encoding="utf-8")
     slides = _rendered_slide_sources(text)
 
-    assert len(slides) == 7
+    assert len(slides) == 8
 
     title = slides[0]
     assert "Are Small LLMs Ready for Coding Agents?" in title
@@ -35,7 +41,11 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     bridge_upper = bridge.upper()
     assert "CONTROLLABLE SMALL LLMS" in bridge_upper
     assert "ASKME LOOP" in bridge_upper
-    assert "ACCEPTED FULL WORKFLOW" in bridge_upper
+    assert "EXTERNAL ACCEPTANCE LAYER" in bridge_upper
+    assert "AskMe is an experimental coding-agent harness" in bridge
+    assert "one JSON action" in bridge
+    assert "fixed action vocabulary" in bridge
+    assert "external workflow acceptance" in bridge
     for stale_label in ("Pi", "Oh My Pi", "OpenHands", "Omnigent", "Databricks"):
         assert stale_label not in bridge
     assert "cloud" not in bridge.lower()
@@ -51,36 +61,56 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
         assert model in comparison
     assert "8 / 8" in comparison
     assert "7 / 8" in comparison
+    assert "reported complete" in comparison
+    assert "agent complete" not in comparison
     assert "n=1/cell" in comparison
     assert "descriptive only" in comparison
-    assert "4 hosted model variants × 2 simple checks × 1 unseeded run/cell" in comparison
-    assert "35B total · 3B active" in comparison
+    assert "4 hosted variants × 2 deliberately simple checks × 1 unseeded trajectory per cell" in comparison
+    assert "35B total / 3B active" in comparison
     assert "Supported" in comparison
+    assert "All four reported completion on both checks" in comparison
+    assert "All four completed both checks" not in comparison
     assert "Not a clean model comparison" in comparison
     assert "No Qwen-vs-Gemma, larger-vs-smaller" in comparison
-    for misleading_timing in ("603.6s", "66.5s", "47.9s", "17.7s"):
-        assert misleading_timing not in comparison
+    for trajectory_detail in ("603.6s", "66.5s", "47.9s", "17.7s", "steps", "tok", "replan"):
+        assert trajectory_detail in comparison
+    assert "observed trajectory" in comparison
 
-    pilot = slides[5]
-    assert "Next evidence · two separate steps" in pilot
-    assert "An AskMe setting A/B test—not an external benchmark" in pilot
-    assert "Off:" in pilot
-    assert "Gated:" in pilot
-    assert "Native A/B not ready" in pilot
-    assert "24-run scope" in pilot
-    assert "0 measured runs" in pilot
-    assert "not reliability, model size, or Qwen vs Gemma" in pilot
-    assert "External evaluation is also not ready" in pilot
-    assert "FeatureBench first" in pilot
-    assert "Vals only if access permits" in pilot
+    boundary = slides[5]
+    assert "Two observed harness boundaries" in boundary
+    assert "Feedback works only when actions enter and failures return" in boundary
+    assert "model → valid structured action" in boundary
+    assert "action → execute / test → evidence ↺" in boundary
+    assert "artifact → independent acceptance" in boundary
+    assert "FeatureBench-fast · 1 task · Gemma 4 31B" in boundary
+    assert "4 reads → 0 writes → empty patch → unresolved" in boundary
+    assert "512-token structured-action bottleneck" in boundary
+    assert "External boundary probe—not a score" in boundary
+    assert "Qwen wrong-path result was rejected, but not returned for recovery" in boundary
+    for roadmap_detail in ("reasoning-policy", "24-run", "Vals"):
+        assert roadmap_detail not in boundary
 
     conclusion = slides[6]
     assert "Conclusion + limits" in conclusion
-    assert "Promising—with a tight harness." in conclusion
+    assert "Promising for bounded loops. Feature readiness is still open." in conclusion
     for label in ("Observed", "Supported", "Still open"):
         assert label in conclusion
-    assert "The smoke exercises the measurement path" in conclusion
+    assert "Evaluate the model, harness, and task as one system" in conclusion
+    assert "not a general readiness verdict" in conclusion
     assert "validates this interface" not in conclusion
+
+    backup = slides[7]
+    assert "Backup · harness boundaries" in backup
+    assert "A small model's workload depends on the harness" in backup
+    for harness in ("AskMe", "pi", "OpenHands"):
+        assert harness in backup
+    for dimension in ("Action surface", "State + control", "Completion boundary"):
+        assert dimension in backup
+    assert "Trade-off, not ranking" in backup
+    assert "conditional fail-open validation" in backup
+    assert "optional persistence" in backup
+    assert "finish</code> signals completion" in backup
+    assert "Databricks" not in backup
 
     assert "NanAgent" not in text
 
@@ -94,9 +124,9 @@ def test_deck_contract_guards_notes_and_review_spec():
     )
     assert len(note_blocks) == 7
     assert sum(len(block.split()) for block in note_blocks) == 499
-    assert "FeatureBench adaptation comes later" in text
-    assert "Vals requires access" in text
-    assert "ProgramBench" not in text
+    assert "FeatureBench-fast" in text
+    for benchmark in ("Vals", "ProgramBench"):
+        assert benchmark not in text
     for out_of_scope in (
         "Claw-SWE-Bench",
         "deep-swe",
@@ -107,21 +137,23 @@ def test_deck_contract_guards_notes_and_review_spec():
     ):
         assert out_of_scope not in text
 
-    spec = SPEC.read_text(encoding="utf-8")
+    spec = _single_line(SPEC.read_text(encoding="utf-8"))
     for requirement in (
         "Are Small LLMs Ready for Coding Agents?",
         "Sr Staff Research Scientist at ServiceNow",
         "https://x.com/den-run-ai",
         "Removing the Gemma/Qwen two-variant comparison was a regression",
         "Slide 2 contains no product/vendor taxonomy",
-        "FeatureBench for feature development and Vals Vibe Code Bench",
-        "A one-task `gron` run may qualify the adapter",
+        "experimental coding-agent harness",
+        "A one-task `gron` run may qualify an adapter",
+        "Slide 6 may name the negative one-task FeatureBench-fast canary",
         '"small" is an engineering and deployment class',
-        "This is 24 scheduled runs total",
         "does not validate a causal harness benefit",
-        "AskMe-owned A/B pilot",
-        "Neither has an AskMe adapter",
-        'Avoid "large policy effect."',
+        "Two observed AskMe boundaries",
+        "one feature-scale action that never reached execution",
+        "presentation-first instruction removes the unfinished 24-run",
+        "single registered model canary exhausted without emitting a patch",
+        "one backup slide comparing AskMe, pi, and OpenHands",
     ):
         assert requirement in spec
 
@@ -129,20 +161,23 @@ def test_deck_contract_guards_notes_and_review_spec():
 def test_companion_benchmark_shortlist_stays_bounded():
     blog = BLOG.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
+    blog_prose = _single_line(blog)
+    readme_prose = _single_line(readme)
     companion = "\n".join(
         path.read_text(encoding="utf-8") for path in (BLOG, README, SPEC)
     )
     for benchmark in ("FeatureBench", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in companion
     assert "small is a deployment class, not a strict parameter threshold" in blog
-    assert "one of four workflows is qualified" in blog
-    assert "24 runs total" in blog
-    assert "24 runs per model" not in blog
-    assert "The smoke exercises the measurement path" in readme
-    assert "model-size claim requires a separate predeclared, repeated design" in readme
-    assert "External evaluation is **not ready to run**" in readme
-    assert "No FeatureBench, Vals, or ProgramBench adapter or result" in blog
-    assert "Both arms may still reason internally" in blog
+    assert "two different harness boundaries" in readme_prose
+    assert "model-size claim would require a separate predeclared, repeated design" in readme_prose
+    assert "successful FeatureBench adapter/evaluator qualification" in readme_prose
+    assert "feature-scale interface work is active in" in readme_prose
+    assert "AskMe adapter is now implemented and qualified" in blog_prose
+    assert "successful diagnostic run with a negative task outcome—not a FeatureBench score" in blog_prose
+    assert "exhausted without emitting a patch" in blog_prose
+    assert "reasoning-policy study is deferred" in blog_prose
+    assert "It is not" in blog_prose and "a prerequisite for this talk" in blog_prose
     for stage_or_companion in (SLIDES.read_text(encoding="utf-8"), readme, blog):
         assert "large policy effect" not in stage_or_companion
     for out_of_scope in (
@@ -169,14 +204,24 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "later clean-room stress test; `gron` canary only" in shortlist.group(1)
 
     roadmap = re.search(
-        r"External generalization should answer three distinct questions at "
-        r"most\.(.*?)\n\nThis pilot",
+        r"(?ms)^## What Changes the Answer Next\s+(.*?)^## The Claim That Survives",
         blog,
-        flags=re.DOTALL,
     )
     assert roadmap is not None
+    roadmap_prose = _single_line(roadmap.group(1))
     for benchmark in ("FeatureBench-fast", "Vals Vibe Code Bench", "ProgramBench"):
-        assert benchmark in roadmap.group(1)
-    assert "one-task `gron` adapter canary" in roadmap.group(1)
-    assert "not a model result" in roadmap.group(1)
-    assert "not a commitment to run all three" in roadmap.group(1)
+        assert benchmark in roadmap_prose
+    assert "one pinned public task" in roadmap_prose
+    assert "successful diagnostic run with a negative task outcome—not a FeatureBench score" in roadmap_prose
+    assert "Repeating more tasks under the same known action bottleneck would add little" in roadmap_prose
+    assert "bounded shortlist, not a commitment to run all three" in roadmap_prose
+
+    root_readme = _single_line(ROOT_README.read_text(encoding="utf-8"))
+    security = _single_line(SECURITY.read_text(encoding="utf-8"))
+    assert "conditional, fail-open LLM validator" in root_readme
+    assert "up to three planning attempts" in root_readme
+    assert "Up to 3 replans" not in root_readme
+    assert "Prompt-visible install policy; does not enforce host isolation" in root_readme
+    assert "AskMe is experimental automation, **not a sandbox**" in root_readme
+    assert "not an operating-system sandbox" in security
+    assert "ALLOW_NETWORK" in security and "does not block network access" in security

@@ -1,8 +1,9 @@
 # CLAUDE.md
 
-Guidance for Claude Code and other AI agents working in `agent/`.
+Guidance for Claude Code and other AI agents working in this repository.
 
-IMPORTANT: Review [../AGENTS.md](../AGENTS.md) before beginning any work. It governs contributions to upstream llama.cpp. `agent/` is a private-fork project and falls under the private-fork exemption the policy calls out, but the upstream rules apply in full if `agent/` changes are ever proposed to ggml-org/llama.cpp.
+If this repository is vendored into another project, follow that parent
+project's contribution rules in addition to this file.
 
 ## Orientation
 
@@ -13,6 +14,7 @@ Where to look:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — loop design, state shapes, action model, current constraints
 - [gemma4-setup.md](gemma4-setup.md) — llama-server config, KV cache, model notes
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history and test-run matrices
+- [SECURITY.md](SECURITY.md) — threat boundary and safe-use guidance
 
 ## Commands
 
@@ -25,7 +27,7 @@ python3 askme.py "your request here"
 # Run via OpenRouter
 LLM_BACKEND=openrouter python3 askme.py "your request here"
 
-# Allow software installs (disabled by default)
+# Tell the model that software installs are allowed (prompt policy, not enforcement)
 ALLOW_SYSTEM_INSTALLS=1 python3 askme.py "your request here"
 
 # Override final validation (auto=default, always, 0=disabled)
