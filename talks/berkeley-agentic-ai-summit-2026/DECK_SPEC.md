@@ -2,7 +2,7 @@
 
 **Status:** reviewer-facing source of truth for seven main slides plus one backup
 
-**Last updated:** 2026-07-13
+**Last updated:** 2026-08-01
 
 **Purpose:** prevent narrative and evidence drift between slide revisions
 
@@ -113,6 +113,25 @@ Do not collapse these four levels into a single "the smoke validates" claim.
 - Project and vendor landscapes may remain cited in the companion blog. A backup
   slide may compare the technical model-facing boundaries of AskMe, pi, and
   OpenHands without ranking products or discussing vendor positioning.
+- The 2026-08-01 revision-3 requalification (v6) may appear on slide 6 as the
+  canary's continuation: under the bundled interface changes and a changed
+  serving stack, both cells moved from empty patches to applied but unresolved
+  patches. Gemma 4 31B reached 11/13 F2P (84.62%), with the same two failures
+  as the exploratory one-attempt pi reference; Qwen3.6-27B reached 7/13
+  (53.85%) versus the pi reference's 10/13. Wherever those numbers appear they keep
+  one-task adapter-canary boundary language: not FeatureBench scores, not
+  reliability estimates, not model comparisons. Required caveats travel with
+  any v4/pi comparison: the v6 serving stack (CoreWeave; Gemma bf16, Qwen fp8)
+  differs from the SiliconFlow-fp8 v4/pi records while dated served-model IDs
+  are identical; the issue-15 local-neutrality bar was waived, so no
+  local-neutrality claim is licensed for revision 3; and three frozen Codex P2
+  findings caveat Qwen mechanism-level write-forcing counts. Both agents
+  exhausted without `done`, but their failure modes differed: Gemma rewrote one
+  file 18 times without testing, while Qwen wrote once and returned to
+  observation. The
+  revision-4 counterpart (validate-after-write pressure, rewrite damping, an
+  unvalidated-write replan flag) is future work in progress and is never
+  presented as done.
 
 ## Seven main slides plus one backup
 
@@ -188,6 +207,16 @@ Tie the boundary to the retained observation: the Qwen wrong-path run was
 caught, not repaired. This is a concrete harness limit, not an argument about
 model size or family.
 
+The slide may close with the 2026-08-01 revision-3 requalification strip: under
+the bundled interface changes and a changed serving stack, both canary cells
+produced applied but unresolved patches. Gemma matched the exploratory pi
+reference at 11/13 with the same two failures; Qwen reached 7/13 versus the pi
+reference's 10/13. Both exhausted without `done`, but only Gemma entered the
+18-write, zero-test rewrite loop; Qwen wrote once and returned to observation.
+Keep one-task canary-not-score language on the strip and the serving-stack
+confound, waived local-neutrality bar, and Qwen mechanism caveats in the slide
+footer or companion documents.
+
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
 in issue #2 and the companion material.
@@ -253,6 +282,15 @@ and enterprise positioning off the slide.
   ProgramBench stress test for clean-room reconstruction. FeatureBench remains
   the first executable adapter; Vals is access-dependent, and a one-task
   ProgramBench canary is infrastructure qualification rather than evidence.
+- The 2026-08-01 instruction adds the v6 revision-3 requalification outcome to
+  slide 6 and the conclusion: under the bundled interface changes and a changed
+  serving stack, Gemma matched the exploratory pi reference at 11/13 while Qwen
+  reached 7/13 versus the pi reference's 10/13. This is an observed harness
+  outcome, not causal isolation of transport or write forcing. Numbers stay
+  bounded as one-task adapter canaries; provider names stay in slide footers
+  and companion documents; the
+  revision-4 validate-after-write work is named only as in-progress future
+  work, never as done.
 
 ## Pre-render drift check
 
@@ -282,6 +320,12 @@ and enterprise positioning off the slide.
 - [ ] Vals Vibe Code Bench and ProgramBench remain companion-material only.
 - [ ] A one-task ProgramBench canary is never presented as model evidence.
 - [ ] Companion benchmark scope is capped at those three distinct candidates.
+- [ ] The v6 requalification strip keeps one-task adapter-canary boundary
+      language and never reads as a FeatureBench score.
+- [ ] Any v6 comparison to v4 or the pi ablation carries the serving-stack
+      confound, the waived local-neutrality bar, and the Codex P2 caveats on
+      the slide footer or in companion documents.
+- [ ] Revision-4 validate-after-write work is labeled in progress, not merged.
 - [ ] Backup slide 8 compares AskMe, pi, and OpenHands without a product ranking.
 - [ ] Eight slides render without clipping; the seven main speaker-note blocks
       total 499 words.

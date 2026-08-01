@@ -147,6 +147,31 @@ a FeatureBench score, reliability estimate, or readiness result. Repeating more
 tasks under the same known action bottleneck would add little. A result-bearing
 subset should follow an action-interface fix and its own frozen protocol.
 
+*Update (Aug 1, 2026).* That action-interface fix landed as revision 3—a
+sentinel-framed write transport, backend-aware budgets (4096/8192 on
+OpenRouter), and a write-forcing policy—and the same frozen task was
+requalified under preregistered v6 protocols. Under the bundled interface
+changes and a changed serving stack, both cells moved from empty patches to
+applied but unresolved patches: Gemma 4 31B reached 11/13 F2P (84.62%), with
+the same two failures as the exploratory one-attempt pi reference, and
+Qwen3.6-27B reached 7/13 (53.85%) versus the pi reference's 10/13. This shows
+that harness design was consequential on this task; it does not isolate
+sentinel transport or write forcing from the simultaneous serving changes.
+Both agents exhausted their planning attempts without emitting `done`, but
+their downstream failures differed: Gemma rewrote one file 18 times and ran
+zero tests, while Qwen wrote once and returned to observation. These remain one-task adapter
+canaries, not FeatureBench scores, reliability estimates, or model
+comparisons, and three caveats travel with any v4/pi comparison: the v6 runs
+were served by CoreWeave (Gemma bf16, Qwen fp8) while the v4 and pi-ablation
+records were served by SiliconFlow fp8—a serving-stack confound, with
+identical dated served-model IDs; the issue-15 local-bench neutrality bar was
+waived by the maintainer, so no local-neutrality claim is licensed for
+revision 3; and three frozen Codex P2 findings on write-forcing mechanics
+caveat the Qwen cell's mechanism-level counts. A validate-after-write
+counterpart—acceptance pressure after writes, rewrite damping, an
+unvalidated-write replan flag—is implemented in open PR #21; v7
+requalification is pending.
+
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.
 [ProgramBench](https://github.com/facebookresearch/programbench) remains only a

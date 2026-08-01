@@ -334,21 +334,21 @@ style: |
     border-left: 6px solid var(--blue);
     border-radius: 4px;
     color: #27476f;
-    font-size: 15px;
-    margin-top: 12px;
-    padding: 9px 15px;
+    font-size: 14px;
+    margin-top: 8px;
+    padding: 7px 13px;
   }
   .boundary-grid {
     display: grid;
     gap: 16px;
     grid-template-columns: repeat(3, 1fr);
-    margin-top: 24px;
+    margin-top: 15px;
   }
   .boundary-step {
     background: #fff;
     border: 1px solid var(--line);
     border-radius: 8px;
-    min-height: 205px;
+    min-height: 190px;
     padding: 18px 19px;
     position: relative;
   }
@@ -375,9 +375,9 @@ style: |
     border-left: 6px solid var(--amber);
     border-radius: 4px;
     color: #7a5008;
-    font-size: 19px;
-    margin-top: 18px;
-    padding: 12px 15px;
+    font-size: 17px;
+    margin-top: 12px;
+    padding: 9px 13px;
   }
   .harness-grid {
     display: grid;
@@ -634,16 +634,18 @@ These are one-shot receipts, not rankings.
 
 <div class="boundary-observation"><strong>External boundary probe—not a score:</strong> the FeatureBench canary exposed a 512-token structured-action bottleneck before a patch existed. One task cannot separate model capability from this model–harness interface.</div>
 
-<div class="source">FeatureBench-fast canary: 1 pinned task, not a score · simple smoke: 8 cells · published results retained in the repo</div>
+<div class="external-status"><strong>Requalified Aug 1 · one task, one attempt/model:</strong> under the revision-3 bundle and a changed serving stack, both patches applied but remained unresolved — Gemma 11/13 target tests (same two failures as the exploratory pi run); Qwen 7/13 (pi: 10/13). Gemma rewrote 18 times without testing; Qwen wrote once, then resumed reading; neither emitted <code>done</code>.</div>
+
+<div class="source">One-task canaries, not scores · v6: CoreWeave (Gemma bf16, Qwen fp8); v4/pi: SiliconFlow fp8 · no local-neutrality claim · records: featurebench/results/ + featurebench/pi-ablation/results/</div>
 
 <!--
 Speaker notes (~45s):
-Feedback helps only after a valid action enters the loop. In one qualified FeatureBench
-fast canary, Gemma thirty-one read four times, but proposed writes exceeded the structured
-action budget or were malformed. AskMe produced no write and an empty patch. This is a
-negative task outcome and a useful interface diagnosis, not a benchmark score. At the
-other boundary, independent acceptance rejected Qwen's wrong-path artifact after completion,
-but that failure did not return for recovery.
+Feedback helps only after a valid action enters the loop. In July, Gemma's attempted writes
+overflowed AskMe's structured-action budget, leaving an empty patch. Under the revision-three
+bundle and a changed serving stack, both models produced applying but unresolved patches.
+Gemma matched the exploratory pi run at eleven of thirteen target tests, then rewrote
+eighteen times without testing. Qwen passed seven of thirteen, wrote once, and returned to
+reading. Neither emitted done. Harness changes moved failure downstream.
 -->
 
 ---
@@ -653,9 +655,9 @@ but that failure did not return for recovery.
 # Promising for bounded loops. Feature readiness is still open.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple smoke: 7 / 8 artifacts accepted. Feature canary: 4 reads, 0 writes, empty patch.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>The harness exposed two distinct limits: a wrong deliverable and an action that never reached execution.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Feature/app reliability after fixing the action interface; reasoning impact; Qwen vs Gemma; size, architecture, and local performance.</p></div>
+  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple smoke: 7 / 8 artifacts accepted. On one feature task, revision 3 moved both models from empty to applied but unresolved patches: Gemma 11/13 target tests; Qwen 7/13.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design was consequential on this task. The bundled changes moved failures into execution: Gemma rewrote without testing; Qwen resumed observation after one write.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Reliability beyond one task; clean validation and termination; transport versus serving/configuration effects; reasoning, family, size, architecture, and local performance. Revision 4 is implemented in open PR #21; v7 requalification is pending.</p></div>
 </div>
 
 <p class="tagline">Evaluate the model, harness, and task as one system.</p>
@@ -666,12 +668,12 @@ but that failure did not return for recovery.
 
 <!--
 Speaker notes (~35s):
-The bounded checks are promising, but feature readiness is not demonstrated. Across the
-two experiments, the harness exposed two different limits: one artifact left the loop at
-the wrong path, while one feature-scale write never entered execution. That makes readiness
-a property of the model, harness, task, and evaluator together. We have not established
-feature reliability on these tasks or elsewhere, a reasoning benefit, Qwen versus Gemma, scaling, or local performance.
-Judge progress by delivered behavior.
+The bounded checks are promising, but feature readiness remains unproven. Under revision
+three, both models moved from empty to applied patches, yet neither resolved the task or
+finished cleanly. Gemma rewrote without testing; Qwen wrote once and returned to observation.
+The serving stack also changed, so this shows that harness design matters, not that transport
+alone caused the improvement. Revision four is implemented in open PR #21; matched v7
+requalification remains pending. Judge delivered behavior.
 -->
 
 ---
