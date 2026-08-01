@@ -278,9 +278,14 @@ for gid in gen_ids:
     gen_usage["reasoning"] += data.get("native_tokens_reasoning") or 0
     gen_usage["cost"] += data.get("total_cost") or 0
 
+# A non-200 forward served no tokens, so it cannot violate the pin; pi
+# retries it. The pin holds when every successful call resolved to a
+# generation served by the pinned provider as the exact dated model.
+ok200 = statuses.get("200", 0)
 audit = {
     "calls": calls,
     "statuses": statuses,
+    "failed_forward_calls": calls - ok200,
     "denied_model_requests": denied,
     "dropped_params": sorted(dropped),
     "generations_resolved": len(gen_ids) - len(unresolved),
@@ -289,12 +294,11 @@ audit = {
     "served_providers": sorted(providers),
     "expected_served_model": expected,
     "route_pinned": (
-        calls > 0
+        ok200 > 0
         and not unresolved
-        and len(gen_ids) == calls
+        and len(gen_ids) == ok200
         and served == {expected}
         and providers == {"SiliconFlow"}
-        and set(statuses) == {"200"}
         and denied == 0
     ),
     "generation_usage": gen_usage,
