@@ -16,6 +16,31 @@ The frozen values and outcome contract are also recorded in
 > outcome-bearing run must use a separately registered protocol version with a
 > new adapter revision and updated hashes before the first model response.
 
+## v4 registration (revision-2 action interface)
+
+Protocol v3 was consumed by the 2026-07-31 Qwen 3.6 27B canary. After that
+result, the AskMe action interface changed (issue #7, protocol revision 2 in
+[`../workflows/PROTOCOL.md`](../workflows/PROTOCOL.md)): ranged reads with
+continuation metadata, bounded `search`/`tree`, chunked `append` writes, typed
+`malformed_action`/`response_truncated` failures, and selected-vs-executed
+step accounting. Two v4 protocols are registered for the rerun of the same
+frozen task under that interface, one per model cell:
+
+- [`gemma-31b-canary-protocol-v4.json`](gemma-31b-canary-protocol-v4.json) —
+  `google/gemma-4-31b-it`, expected served `google/gemma-4-31b-it-20260402`
+- [`qwen-27b-canary-protocol-v4.json`](qwen-27b-canary-protocol-v4.json) —
+  `qwen/qwen3.6-27b`, expected served `qwen/qwen3.6-27b-20260422`
+
+Both pin AskMe base `44574fb` (`askme.py` sha256 `bc677b32…`), the unchanged
+hardened adapter/audit hashes, and the same task, dataset revision, image
+digest, budgets, and timeouts as v2/v3. The gold and harmless controls were
+requalified under this interface before any model call; see
+[`results/2026-08-01-v4-control-requalification.json`](results/2026-08-01-v4-control-requalification.json).
+The clean commit containing the v4 protocols is the execution revision to pass
+as `--askme-revision`. The two model attempts remain unrun until triggered
+deliberately; nothing in this section authorizes more than one attempt per
+registered cell.
+
 ## Completed canary outcome
 
 The frozen run completed on 2026-07-13. Both qualification controls behaved as
