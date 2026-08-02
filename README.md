@@ -1,7 +1,7 @@
 # AskMe
 
 [![CI](https://github.com/den-run-ai/askme/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/den-run-ai/askme/actions/workflows/ci.yml?query=branch%3Amain)
-[![Coverage](https://codecov.io/gh/den-run-ai/askme/branch/main/graph/badge.svg)](https://app.codecov.io/gh/den-run-ai/askme)
+[![Coverage](https://codecov.io/gh/den-run-ai/askme/branch/main/graph/badge.svg?precision=2)](https://app.codecov.io/gh/den-run-ai/askme)
 [![LLM Tests](https://github.com/den-run-ai/askme/actions/workflows/llm.yml/badge.svg?branch=main)](https://github.com/den-run-ai/askme/actions/workflows/llm.yml?query=branch%3Amain)
 
 AskMe began with a simple dream: a small open model on my MacBook, through
@@ -134,10 +134,14 @@ server or credential is unavailable. Ordinary test and coverage commands never
 opt into paid model calls. Dated run matrices and suite-size snapshots live in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-The README coverage badge shows the latest `main` percentage and opens the
-detailed Codecov report. The Python 3.14 CI run also writes an exact coverage
-table to the GitHub job summary and stores browsable HTML plus JSON/XML reports
-in the `coverage-python-3.14` artifact for 14 days.
+The README coverage badge shows Codecov's latest `main` percentage to two
+decimal places and opens the detailed report. The Python 3.14 CI run also writes
+coverage.py's exact branch-aware table to the GitHub job summary and stores
+browsable HTML plus JSON/XML reports in the `coverage-python-3.14` artifact for
+14 days. Codecov [counts partially covered lines as
+misses](https://docs.codecov.com/docs/frequently-asked-questions#how-is-coverage-calculated),
+so its badge can differ from coverage.py's execution-opportunity percentage
+that enforces the 90% CI gate.
 
 ### LLM tests in CI
 
