@@ -205,7 +205,8 @@ SYSTEM_PLAN = f"""Planner. Propose tasks for the user request.
 Rules:
 - Prefer 1-3 tasks, max {MAX_TASKS}; each is a complete goal, not one command
 - Short tasks (<15 words) with key details: includes, imports, filenames
-- Relative filenames only. Match state.environment.platform
+- Relative filenames only, except preserve an exact incomplete_write_target
+  supplied in state. Match state.environment.platform
 - Never redo completed_tasks
 - If required tool in missing_tools and allow_system_installs=false: single prerequisite/fail task listing missing tools
 - If allow_system_installs=true: may use package_managers
@@ -249,7 +250,9 @@ Rules:
 - done only when the FULL task description is satisfied
 - fail if same error appears 2+ times
 - Never redo completed_tasks
-- Relative paths. Reasoning max 10 words
+- Relative paths, except use an exact incomplete_write_target supplied in state.
+  Recover it before done; append only when incomplete_write_append_allowed=true.
+  Reasoning max 10 words
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
@@ -728,23 +731,114 @@ def _unresolved_incomplete_writes(steps, working_dir=None):
     return unresolved
 
 
+def _target_recovery_arg(target, working_dir):
+    """Action-ready spelling for a frozen mutation target."""
+    if not _valid_nonempty_str(target):
+        return None
+    # Keep the canonical absolute identity. A relative spelling can silently
+    # retarget if the working-directory path (or one of its parents) is itself
+    # a symlink changed by a shell step during recovery.
+    return target
+
+
+def _incomplete_step_hint(target, step):
+    """Return the display name and actionable target for a partial write."""
+    arg = step.get("arg", "")
+    name = Path(arg).name if arg else "file"
+    recovery_arg = step.get("_recovery_arg")
+    if not _valid_nonempty_str(recovery_arg):
+        recovery_arg = target if _valid_nonempty_str(target) else arg
+    return name, recovery_arg if _valid_nonempty_str(recovery_arg) else name
+
+
+def _pending_empty_hint(target, info):
+    """Return the display name, actionable target, and recovery mode."""
+    if isinstance(info, dict):
+        raw_name = info.get("name", "")
+        append_allowed = info.get("append_allowed", False)
+        recovery_arg = info.get("recovery_arg")
+    else:
+        raw_name = info
+        append_allowed = False
+        recovery_arg = None
+    name = Path(str(raw_name)).name if raw_name else "file"
+    if not _valid_nonempty_str(recovery_arg):
+        recovery_arg = target if _valid_nonempty_str(target) else raw_name
+    if not _valid_nonempty_str(recovery_arg):
+        recovery_arg = name
+    return name, recovery_arg, bool(append_allowed)
+
+
+def _restrictive_pending_empty(pending):
+    """Return the first pending obligation that forbids append recovery."""
+    for target, info in pending.items():
+        if not (isinstance(info, dict)
+                and info.get("append_allowed", False)):
+            return target, info
+    return None
+
+
+def _next_pending_empty(pending):
+    """Choose an actionable obligation, with restrictive overwrites first."""
+    restrictive = _restrictive_pending_empty(pending)
+    if restrictive is not None:
+        return restrictive
+    return next(iter(pending.items()))
+
+
 def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
     """Run-scoped incomplete artifact state for either replanner."""
+    pending = pending_empty_writes or {}
+    restrictive = _restrictive_pending_empty(pending)
+    if restrictive is not None:
+        target, pending_info = restrictive
+        name, recovery_arg, _ = _pending_empty_hint(target, pending_info)
+        return {
+            "incomplete_write": name,
+            "incomplete_write_target": recovery_arg,
+            "incomplete_write_append_allowed": False,
+        }
+
     unresolved = _unresolved_incomplete_writes(all_steps)
     if unresolved:
-        _, last_step = max(unresolved.values(), key=lambda item: item[0])
-        arg = last_step.get("arg", "")
-        return {"incomplete_write": Path(arg).name if arg else True}
+        target, (_, last_step) = max(
+            unresolved.items(), key=lambda item: item[1][0])
+        name, recovery_arg = _incomplete_step_hint(target, last_step)
+        return {
+            "incomplete_write": name,
+            "incomplete_write_target": recovery_arg,
+            "incomplete_write_append_allowed": True,
+        }
 
-    pending = pending_empty_writes or {}
     if pending:
-        pending_info = list(pending.values())[-1]
-        if isinstance(pending_info, dict):
-            name = pending_info.get("name", "")
-        else:
-            name = pending_info
-        return {"incomplete_write": Path(str(name)).name if name else True}
+        # A restrictive overwrite can block recovery of an older permissive
+        # append obligation. Surface it first so following the hint always
+        # makes progress; all completion paths use this same selection.
+        target, pending_info = _next_pending_empty(pending)
+        name, recovery_arg, append_allowed = _pending_empty_hint(
+            target, pending_info)
+        return {
+            "incomplete_write": name,
+            "incomplete_write_target": recovery_arg,
+            "incomplete_write_append_allowed": append_allowed,
+        }
     return None
+
+
+def _pending_append_targets(info):
+    """Normalized referent guards from current and legacy pending records."""
+    if not isinstance(info, dict):
+        return ()
+    targets = []
+    plural = info.get("append_targets", ())
+    if isinstance(plural, (list, tuple, set)):
+        for target in plural:
+            if _valid_nonempty_str(target) and target not in targets:
+                targets.append(target)
+    legacy = info.get("append_target")
+    if _valid_nonempty_str(legacy) and legacy not in targets:
+        targets.append(legacy)
+    return tuple(targets)
 
 
 def _pending_empty_recovery(pending, logical_target, operation_target,
@@ -760,7 +854,7 @@ def _pending_empty_recovery(pending, logical_target, operation_target,
         same_operation = (
             operation_target is not None
             and isinstance(info, dict)
-            and info.get("append_target") == operation_target)
+            and operation_target in _pending_append_targets(info))
         # A pending overwrite is tied to the logical pathname and also blocks
         # physical aliases. A permissive append obligation follows only the
         # referent observed when it was created, so retargeting cannot satisfy it.
@@ -789,7 +883,7 @@ def _clear_pending_empty_writes(pending, logical_target, operation_target,
         for key, info in pending.items():
             if (isinstance(info, dict)
                     and info.get("append_allowed", False)
-                    and info.get("append_target") == operation_target):
+                    and operation_target in _pending_append_targets(info)):
                 keys.add(key)
     for key in keys:
         pending.pop(key, None)
@@ -914,6 +1008,12 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
         "step": f"{step_num+1}/{max_steps}",
         "last_steps": slim_steps,
     }
+    incomplete = _incomplete_write_visibility(
+        state.get("all_steps", []), state.get("pending_empty_writes"))
+    if incomplete:
+        # Keep the recovery identity/mode structured on every executor turn.
+        # Step history is bounded and is reset across a task-local retry.
+        slim.update(incomplete)
     # Include completed tasks so executor knows what's already done
     completed = state.get("completed_tasks", [])
     if completed:
@@ -943,7 +1043,8 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
 SYSTEM_TASK_REPLAN = """You are a task replanner. A single task failed. Given the failed task, errors, and completed tasks, propose a replacement task description.
 Do NOT repeat completed work. The replacement must address the failure.
 Preserve the original task's outcome. If it was to fix, edit, add, compile, run, create, or write something, do NOT replace it with a read/list/inspect-only preparation task.
-Keep the replacement short (under 15 words). Use relative filenames.
+Keep the replacement short (under 15 words). Use relative filenames, except
+preserve an exact incomplete_write_target supplied in state.
 Output ONLY valid JSON. No markdown, no explanation.
 Format: {"task": "replacement task description"}"""
 
@@ -1873,33 +1974,44 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         pending_empty = state.get("pending_empty_writes", {})
                         if unresolved or pending_empty:
                             append_allowed = True
-                            if unresolved:
-                                _, incomplete_step = max(
-                                    unresolved.values(), key=lambda item: item[0])
-                                incomplete_name = Path(
-                                    incomplete_step.get("arg", "") or "file").name
+                            restrictive = _restrictive_pending_empty(
+                                pending_empty)
+                            if restrictive is not None:
+                                incomplete_target, pending_info = restrictive
+                                (incomplete_name, recovery_arg,
+                                 append_allowed) = _pending_empty_hint(
+                                    incomplete_target, pending_info)
+                            elif unresolved:
+                                incomplete_target, (_, incomplete_step) = max(
+                                    unresolved.items(),
+                                    key=lambda item: item[1][0])
+                                incomplete_name, recovery_arg = (
+                                    _incomplete_step_hint(
+                                        incomplete_target, incomplete_step))
                             else:
-                                pending_info = next(iter(pending_empty.values()))
-                                incomplete_name = (pending_info.get("name", "file")
-                                                   if isinstance(pending_info, dict)
-                                                   else pending_info)
-                                append_allowed = (
-                                    pending_info.get("append_allowed", False)
-                                    if isinstance(pending_info, dict) else False)
+                                incomplete_target, pending_info = (
+                                    _next_pending_empty(pending_empty))
+                                (incomplete_name, recovery_arg,
+                                 append_allowed) = _pending_empty_hint(
+                                    incomplete_target, pending_info)
                             if append_allowed:
-                                recovery = ("Resume with append:true, or restart with "
-                                            "a complete append:false write.")
+                                recovery = (
+                                    "Retry that exact target with append:true if it "
+                                    "still identifies the intended file, or restart "
+                                    "it with a complete append:false write.")
                             else:
-                                recovery = ("Resend a shorter write with append:false "
-                                            "before using append:true.")
+                                recovery = (
+                                    "Resend a shorter write to that exact target with "
+                                    "append:false before using append:true.")
                             log(f"  [{step + 1}] skip (done with incomplete write: "
                                 f"{incomplete_name})")
                             _skip_step(i, step, act, action,
                                        "incomplete_write_done")
                             state["last_steps"].append({
                                 "action": "done", "arg": "", "ok": True,
-                                "output": (f"Cannot finish: {incomplete_name} is incomplete. "
-                                           f"{recovery}"),
+                                "output": (
+                                    f"Cannot finish: {incomplete_name} is incomplete "
+                                    f"at {recovery_arg}. {recovery}"),
                             })
                             continue
                         task_done = True
@@ -1958,6 +2070,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 operation_write_target
                                 if action.get("append")
                                 else logical_write_target)
+                            recovery_arg = action.get("arg", "") or "file"
                             if pending_target is not None:
                                 existing = state["pending_empty_writes"].get(
                                     pending_target)
@@ -1966,14 +2079,23 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     append_allowed = (
                                         existing.get("append_allowed", False)
                                         and append_allowed)
+                                append_target = _mutation_target_key({
+                                    "arg": action.get("arg", ""),
+                                    "append": True,
+                                }, working_dir)
+                                append_targets = list(
+                                    _pending_append_targets(existing))
+                                if (append_target is not None
+                                        and append_target not in append_targets):
+                                    append_targets.append(append_target)
+                                recovery_arg = _target_recovery_arg(
+                                    pending_target, working_dir)
                                 state["pending_empty_writes"][pending_target] = {
                                     "name": Path(
                                         action.get("arg", "") or "file").name,
                                     "append_allowed": append_allowed,
-                                    "append_target": _mutation_target_key({
-                                        "arg": action.get("arg", ""),
-                                        "append": True,
-                                    }, working_dir),
+                                    "append_targets": append_targets,
+                                    "recovery_arg": recovery_arg,
                                 }
                             # Nothing was written: the first dispatched chunk
                             # must stay a non-append write (append would land
@@ -1981,11 +2103,14 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             # may append.
                             if action.get("append"):
                                 obs = ("Append truncated before a complete line. "
-                                       "Resend a smaller append:true chunk.")
+                                       "Resend a smaller append:true chunk at the "
+                                       f"exact target {recovery_arg}.")
                             else:
-                                obs = ("Write truncated before a complete line. Resend the "
-                                       "write (no append) with a shorter first chunk, then "
-                                       "continue with append:true chunks.")
+                                obs = (
+                                    "Write truncated before a complete line. Resend the "
+                                    f"write (no append) to the exact target {recovery_arg} "
+                                    "with a shorter first chunk, then continue with "
+                                    "append:true chunks.")
                             state["last_steps"].append({
                                 "action": act, "arg": action.get("arg", ""), "ok": True,
                                 "output": obs})
@@ -2217,10 +2342,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         # The executor is stateless per step: without a resume
                         # anchor the model cannot know where the write stopped.
                         anchor = kept.splitlines()[-1][-80:]
+                        recovery_arg = _target_recovery_arg(
+                            operation_write_target, working_dir)
                         result["output"] += (
                             f" (truncated after {kept.count(chr(10))} lines; "
                             f"last written line: {anchor!r}; continue with "
-                            "append:true starting after that line)")
+                            f"append:true at {recovery_arg} starting after "
+                            "that line)")
                     ok_str = "OK" if result["ok"] else "FAIL"
                     log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
 
@@ -2254,6 +2382,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         target = _mutation_target_key(target_step, working_dir)
                         if target is not None:
                             step_entry["_target"] = target
+                            if act == "write" and truncated_write:
+                                step_entry["_recovery_arg"] = (
+                                    _target_recovery_arg(target, working_dir))
                     if act == "read":
                         step_entry["_read_key"] = (
                             action.get("arg", ""), _read_offset_limit(action)[0])
@@ -2423,18 +2554,24 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     state.get("all_steps", []), working_dir)
                 pending_empty = state.get("pending_empty_writes", {})
                 if unresolved or pending_empty:
-                    if unresolved:
-                        _, incomplete_step = max(
-                            unresolved.values(), key=lambda item: item[0])
-                        incomplete_name = Path(
-                            incomplete_step.get("arg", "") or "file").name
+                    restrictive = _restrictive_pending_empty(pending_empty)
+                    if restrictive is not None:
+                        incomplete_target, pending_info = restrictive
+                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
+                            incomplete_target, pending_info)
+                    elif unresolved:
+                        incomplete_target, (_, incomplete_step) = max(
+                            unresolved.items(), key=lambda item: item[1][0])
+                        incomplete_name, recovery_arg = _incomplete_step_hint(
+                            incomplete_target, incomplete_step)
                     else:
-                        pending_info = next(iter(pending_empty.values()))
-                        incomplete_name = (pending_info.get("name", "file")
-                                           if isinstance(pending_info, dict)
-                                           else pending_info)
+                        incomplete_target, pending_info = _next_pending_empty(
+                            pending_empty)
+                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
+                            incomplete_target, pending_info)
                     state["errors"].append(
-                        f"[incomplete_write] {incomplete_name}: completion refused")
+                        f"[incomplete_write] {incomplete_name} at "
+                        f"{recovery_arg}: completion refused")
                     log(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
 
