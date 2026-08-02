@@ -1112,7 +1112,8 @@ class TestFinalValidation:
         assert ok is True
         assert validate_called[0] is False
 
-    def test_validate_runs_on_replan(self, tmp_path):
+    @patch("askme.replan_task", return_value=None)
+    def test_validate_runs_on_replan(self, mock_replan, tmp_path):
         """replan > 0 → validation runs."""
         responses = [
             # Plan 1: task fails
@@ -1189,7 +1190,7 @@ class TestFinalValidation:
         assert ok is True
 
     def test_validate_recheck_capped_after_recovery(self, tmp_path):
-        """Validation can re-run after recovery evidence, but stops after two tries."""
+        """Two failed validation verdicts leave completion blocked."""
         responses = [
             # Plan 1
             {"tasks": ["build it"]},
@@ -1217,7 +1218,8 @@ class TestFinalValidation:
         with patch("askme.ask_llm", side_effect=mock_ask_llm):
             result = _run_loop("build it", str(tmp_path), max_replans=3)
         assert validate_count[0] == 2
-        assert result["status"] == "complete"
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_recheck_needed"] is True
 
     def test_validate_recheck_requires_new_evidence(self, tmp_path):
         """A validation-failure recovery that only emits done is not revalidated."""
@@ -1240,9 +1242,10 @@ class TestFinalValidation:
             return resp
 
         with patch("askme.ask_llm", side_effect=mock_ask_llm):
-            result = _run_loop("build it", str(tmp_path), max_replans=3)
+            result = _run_loop("build it", str(tmp_path), max_replans=2)
         assert validate_count[0] == 1
-        assert result["status"] == "complete"
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_recheck_needed"] is True
 
     def test_validate_always_mode(self, tmp_path):
         """AGENT_FINAL_VALIDATE=always forces validation on trivial run."""
@@ -1270,7 +1273,8 @@ class TestFinalValidation:
         finally:
             askme.FINAL_VALIDATE = old
 
-    def test_validate_disabled(self, tmp_path):
+    @patch("askme.replan_task", return_value=None)
+    def test_validate_disabled(self, mock_replan, tmp_path):
         """AGENT_FINAL_VALIDATE=0 skips validation."""
         import askme
         old = askme.FINAL_VALIDATE
