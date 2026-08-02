@@ -25,6 +25,19 @@ def _big_file(work_dir, name="big.py", lines=200):
     return p
 
 
+def _symlinked_target_dirs(tmp_path):
+    work = tmp_path / "work"
+    real = tmp_path / "real"
+    work.mkdir()
+    real.mkdir()
+    alias = work / "alias"
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+    return work, real, alias
+
+
 # --- Ranged reads with continuation metadata ---
 
 class TestRangedRead:
@@ -443,6 +456,25 @@ class TestAppendStuckGuard:
         assert result["status"] == "exhausted"
         assert "auto-fail (same chunk appended twice" in out
         # The chunk must not have been applied twice
+        assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_same_chunk_via_path_alias_auto_fails(self, mock_llm, mock_replan,
+                                                  capsys, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["build big.py in chunks"]},
+            {"action": "write", "arg": "big.py", "content": "x = 1\n",
+             "append": True},
+            {"action": "write", "arg": "./big.py", "content": "x = 1\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("build big.py in chunks", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        out = capsys.readouterr().out
+        assert result["status"] == "exhausted"
+        assert "auto-fail (same chunk appended twice" in out
         assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
 
     @patch("askme.replan_task", return_value=None)
@@ -1005,9 +1037,9 @@ class TestTruncatedWriteContinuation:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_reemitted_truncated_write_points_at_append(self, mock_llm,
-                                                        mock_replan, tmp_path):
-        """Retrying the full write after truncation must not read as 'done'."""
+    def test_reemitted_truncated_prefix_is_clean_restart(self, mock_llm,
+                                                         mock_replan, tmp_path):
+        """A complete resend of a retained prefix is dispatched, not 'done'."""
         mock_llm.side_effect = [
             {"tasks": ["create impl.py with the implementation"]},
             {"action": "write", "arg": "impl.py",
@@ -1030,7 +1062,8 @@ class TestTruncatedWriteContinuation:
                                max_steps=6)
         assert result["status"] == "complete"
         assert Path(tmp_path, "impl.py").read_text() == "a\nb\n"
-        assert any("File is incomplete" in o for o in captured)
+        assert result["state"]["executed_steps"] == 3
+        assert not any("Already done" in o for o in captured)
         assert not any("Already done" in o for o in captured)
 
 
@@ -1234,6 +1267,37 @@ class TestWriteForcingPolicy:
                               ["[unknown] stalled"], [], state, "goal")
         msg = m.call_args.args[0][-1]["content"]
         assert '"no_write_executed": true' in msg
+        replan_state = json.loads(msg.split("STATE:\n", 1)[1])
+        assert [s["arg"] for s in replan_state["failed_steps"]] == ["b.py"]
+
+    def test_full_replan_zero_step_reports_no_write(self):
+        state = {
+            "all_steps": [],
+            "task_start_step_count": 0,
+            "current_task": "implement feature in app.py",
+            "errors": ["[unknown] transport failed"],
+        }
+        with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as m:
+            askme.get_plan("implement feature in app.py", state)
+        msg = m.call_args.args[0][-1]["content"]
+        plan_state = json.loads(msg.split("STATE:\n", 1)[1])
+        assert plan_state["no_write_executed"] is True
+        assert "recent_steps" not in plan_state
+
+    def test_task_replan_zero_step_does_not_leak_prior_task(self):
+        state = {
+            "all_steps": [{"action": "write", "arg": "prior.py", "ok": True}],
+            "task_start_step_count": 1,
+        }
+        with patch("askme.ask_llm",
+                   return_value={"task": "create the feature in app.py"}) as m:
+            askme.replan_task("implement feature in app.py",
+                              ["[unknown] transport failed"], [], state, "goal")
+        msg = m.call_args.args[0][-1]["content"]
+        replan_state = json.loads(msg.split("STATE:\n", 1)[1])
+        assert replan_state["no_write_executed"] is True
+        assert "failed_steps" not in replan_state
+        assert "prior.py" not in msg
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
@@ -1268,3 +1332,1581 @@ class TestWriteForcingPolicy:
         assert result["status"] == "complete"
         assert len(plan_msgs) == 1
         assert '"no_write_executed": true' in plan_msgs[0]
+
+
+# --- Validate-after-write policy (revision 4) ---
+
+class TestWriteShapedClassification:
+    def test_mutation_verbs_are_write_shaped(self):
+        assert askme._is_write_shaped("implement bootstrap in algorithms.py")
+        assert askme._is_write_shaped("update the config defaults")
+        assert askme._is_write_shaped("fix the parser bug")
+
+    def test_passive_include_is_not_write_shaped(self):
+        # Codex P2 (PR #16): "include" matched passive phrasing.
+        assert not askme._is_write_shaped("find files that include deprecated.h")
+        assert not askme._is_write_shaped("list modules that include the header")
+
+    def test_leading_observation_verb_wins(self):
+        assert not askme._is_write_shaped("find where to add the import")
+        assert not askme._is_write_shaped("locate the file to update")
+        assert not askme._is_write_shaped("check whether main.c needs a fix")
+
+    def test_empty_task_is_not_write_shaped(self):
+        assert not askme._is_write_shaped("")
+
+
+class TestValidateAfterWrite:
+    def test_truncated_mutation_is_incomplete_even_after_shell(self):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_truncated_write": True},
+            {"action": "shell", "arg": "python app.py", "ok": True},
+        ]
+        assert askme._write_visibility_flag(steps) == {
+            "incomplete_write": "app.py"
+        }
+
+    def test_nonempty_append_visibility_exposes_frozen_recovery_target(self):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_append": True, "_truncated_write": True,
+             "_target": "/real/old.py"},
+        ]
+        assert askme._incomplete_write_visibility(steps) == {
+            "incomplete_write": "app.py",
+            "incomplete_write_target": "/real/old.py",
+            "incomplete_write_append_allowed": True,
+        }
+
+    def test_truncated_overwrite_supersedes_older_complete_write(self):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True},
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_truncated_write": True},
+        ]
+        assert askme._write_visibility_flag(steps) == {
+            "incomplete_write": "app.py"
+        }
+
+    def test_complete_append_after_truncation_needs_validation(self):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_truncated_write": True},
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_append": True},
+        ]
+        assert askme._write_visibility_flag(steps) == {
+            "unvalidated_write": "app.py"
+        }
+        steps.append({"action": "shell", "arg": "pytest", "ok": True})
+        assert askme._write_visibility_flag(steps) is None
+
+    def test_full_and_task_replans_surface_incomplete_write(self):
+        state = {
+            "all_steps": [
+                {"action": "write", "arg": "app.py", "ok": True,
+                 "_truncated_write": True},
+                {"action": "read", "arg": "app.py", "ok": True},
+            ],
+            # The next plan already started a non-write-shaped replacement;
+            # its task-scoped slice excludes the earlier partial artifact.
+            "task_start_step_count": 1,
+            "current_task": "inspect app.py",
+            "errors": ["[unknown] stalled"],
+        }
+        with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as full:
+            askme.get_plan("finish app.py", state)
+        full_msg = full.call_args.args[0][-1]["content"]
+        full_state = json.loads(full_msg.split("STATE:\n", 1)[1])
+        assert full_state["incomplete_write"] == "app.py"
+        assert "unvalidated_write" not in full_state
+        assert "no_write_executed" not in full_state
+
+        with patch("askme.ask_llm",
+                   return_value={"task": "finish app.py"}) as local:
+            askme.replan_task("inspect app.py",
+                              ["[unknown] stalled"], [], state, "goal")
+        local_msg = local.call_args.args[0][-1]["content"]
+        local_state = json.loads(local_msg.split("STATE:\n", 1)[1])
+        assert local_state["incomplete_write"] == "app.py"
+        assert "unvalidated_write" not in local_state
+        assert "no_write_executed" not in local_state
+        assert [step["action"] for step in local_state["failed_steps"]] == ["read"]
+
+    def test_pending_empty_write_is_visible_to_both_replanners(self):
+        state = {
+            "all_steps": [],
+            "pending_empty_writes": {
+                "/internal/normalized/app.py": {
+                    "name": "app.py", "append_allowed": False,
+                }
+            },
+            "task_start_step_count": 0,
+            "current_task": "inspect app.py",
+            "errors": ["[unknown] stalled"],
+        }
+        with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as full:
+            askme.get_plan("finish app.py", state)
+        full_state = json.loads(
+            full.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
+        assert full_state["incomplete_write"] == "app.py"
+        assert (full_state["incomplete_write_target"]
+                == "/internal/normalized/app.py")
+        assert full_state["incomplete_write_append_allowed"] is False
+        assert "no_write_executed" not in full_state
+
+        with patch("askme.ask_llm", return_value={"task": "finish app.py"}) as local:
+            askme.replan_task("inspect app.py", ["[unknown] stalled"], [],
+                              state, "goal")
+        local_state = json.loads(
+            local.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
+        assert local_state["incomplete_write"] == "app.py"
+        assert (local_state["incomplete_write_target"]
+                == "/internal/normalized/app.py")
+        assert local_state["incomplete_write_append_allowed"] is False
+        assert "no_write_executed" not in local_state
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncated_write_replans_as_incomplete(self, mock_llm,
+                                                         mock_replan,
+                                                         tmp_path):
+        plan_msgs = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in app.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line",
+                        "content_truncated": True}
+            if n == 3:
+                return {"action": "fail", "reasoning": "need a new plan"}
+            if n == 4:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("implement feature in app.py", str(tmp_path),
+                           max_replans=2, max_tasks=1, max_steps=3)
+        assert result["status"] == "exhausted"
+        assert len(plan_msgs) == 1
+        plan_state = json.loads(plan_msgs[0].split("STATE:\n", 1)[1])
+        assert plan_state["incomplete_write"] == "app.py"
+        assert "no_write_executed" not in plan_state
+        assert not (tmp_path / "app.py").exists()
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_validate_note_after_two_rewrites(self, mock_llm, mock_replan,
+                                              tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "big.py", "content": "v1\n"}
+            if n == 3:
+                return {"action": "write", "arg": "big.py", "content": "v2\n"}
+            if n == 4:
+                return {"action": "shell", "arg": "echo verified"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("implement feature in big.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert all("Do NOT write the whole file again" not in s
+                   for s in seen[:3])
+        assert "Do NOT write the whole file again" in seen[3]
+        assert "big.py is already written" in seen[3]
+        # A successful shell verification clears the pressure.
+        assert "Do NOT write the whole file again" not in seen[4]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_loop_skip_after_three(self, mock_llm, mock_replan,
+                                           tmp_path):
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n <= 4:
+                return {"action": "write", "arg": "big.py",
+                        "content": f"v{n - 1}\n"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py", "content": "v4\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        # The fourth consecutive full write is damped, not executed.
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "rewrite_loop" in reasons
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_normalizes_alias_paths(self, mock_llm, mock_replan,
+                                                   tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "sub/../big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"action": "write", "arg": "sub/../big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    def test_target_key_resolves_parent_symlinks_but_not_leaf(self, tmp_path):
+        work, real, alias = _symlinked_target_dirs(tmp_path)
+        # The immediate parent and file do not exist yet; strict=False must
+        # still collapse the existing directory alias.
+        alias_key = askme._mutation_target_key(
+            {"arg": "alias/new/app.py"}, str(work))
+        real_key = askme._mutation_target_key(
+            {"arg": str(real / "new" / "app.py")}, str(work))
+        assert alias_key == real_key
+        # Preserve OS traversal order: alias is followed before `..` applies.
+        assert askme._mutation_target_key(
+            {"arg": "alias/../app.py"}, str(work)) == \
+            askme._mutation_target_key(
+                {"arg": str(tmp_path / "app.py")}, str(work))
+
+        referent = real / "referent.py"
+        referent.write_text("real\n")
+        leaf = work / "leaf.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        # Atomic full writes replace the leaf symlink itself, so it is a
+        # different mutation destination from the referent.
+        assert askme._mutation_target_key(
+            {"arg": "leaf.py"}, str(work)) != askme._mutation_target_key(
+                {"arg": str(referent)}, str(work))
+        assert askme._mutation_target_key(
+            {"arg": "leaf.py", "append": True}, str(work)) == \
+            askme._mutation_target_key(
+                {"arg": str(referent), "append": True}, str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_collapses_symlinked_parent_aliases(
+            self, mock_llm, mock_replan, tmp_path):
+        work, real, _ = _symlinked_target_dirs(tmp_path)
+        real_target = str(real / "big.py")
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "alias/big.py", "content": "v1\n"},
+            {"action": "write", "arg": real_target, "content": "v2\n"},
+            {"action": "write", "arg": "alias/big.py", "content": "v3\n"},
+            {"action": "write", "arg": real_target, "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (real / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @pytest.mark.parametrize("truncated_content", [
+        "partial line\nmissing tail",
+        "no complete line",
+    ])
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_complete_symlink_alias_clears_incomplete_write(
+            self, mock_llm, mock_replan, tmp_path, truncated_content):
+        work, real, _ = _symlinked_target_dirs(tmp_path)
+        real_target = str(real / "app.py")
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "alias/app.py",
+             "content": truncated_content, "content_truncated": True},
+            {"action": "write", "arg": real_target, "content": "final\n"},
+            {"action": "done"},
+        ]
+        result = _run_loop("create app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert (real / "app.py").read_text() == "final\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_append_through_leaf_symlink_resolves_partial_referent(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": str(referent),
+             "content": "prefix\nmissing tail", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "tail\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert referent.read_text() == "prefix\ntail\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_blocks_append_through_leaf_alias(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "write", "arg": str(referent), "content": "BAD\n",
+             "append": True},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=5)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert referent.read_text() == "OLD\n"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_pending_overwrite_wins_across_append_aliases(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "write", "arg": "app.py",
+             "content": "still no complete line", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "BAD\n",
+             "append": True},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "write", "arg": str(referent), "content": "TAIL\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert referent.read_text() == "OLD\nTAIL\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events)
+
+    @pytest.mark.parametrize(("first_content", "expected_old"), [
+        ("no complete line", "OLD\nTAIL\n"),
+        ("PART\nmissing tail", "OLD\nPART\nTAIL\n"),
+    ])
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_recovery_prioritizes_restrictive_overwrite_obligation(
+            self, mock_llm, mock_replan, tmp_path, first_content,
+            expected_old):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        old_target.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["replace app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": first_content, "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "write", "arg": "app.py",
+                        "content": "still no complete line",
+                        "content_truncated": True}
+            if llm.n in (4, 6, 8):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            if llm.n == 5:
+                assert f'"incomplete_write_target": "{leaf}"' in prompt
+                assert '"incomplete_write_append_allowed": false' in prompt
+                return {"action": "write", "arg": str(leaf),
+                        "content": "GOOD\n"}
+            assert f'"incomplete_write_target": "{old_target}"' in prompt
+            assert '"incomplete_write_append_allowed": true' in prompt
+            return {"action": "write", "arg": str(old_target),
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("replace app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=7)
+        assert result["status"] == "complete"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert old_target.read_text() == expected_old
+        assert result["state"]["pending_empty_writes"] == {}
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_can_resume_through_physical_alias(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["update app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "write", "arg": str(referent), "content": "NEW\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert referent.read_text() == "OLD\nNEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_obligations_survive_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        recovery_args = {
+            str(old_target): "OLDTAIL\n",
+            str(new_target): "NEWTAIL\n",
+        }
+        surfaced = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n == 4:
+                return {"action": "write", "arg": "app.py",
+                        "content": "still no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n in (5, 7, 9):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            positions = {
+                target: prompt.rfind(f" at {target}. Retry")
+                for target in recovery_args
+            }
+            target = max(positions, key=positions.get)
+            assert positions[target] >= 0
+            surfaced.append(target)
+            return {"action": "write", "arg": target,
+                    "content": recovery_args[target], "append": True}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("update app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=8)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nOLDTAIL\n"
+        assert new_target.read_text() == "NEW\nNEWTAIL\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        assert surfaced == [str(old_target), str(new_target)]
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "incomplete_write_done"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_nonempty_append_recovery_hint_survives_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        expected_target = str(old_target)
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "PART\nmissing tail", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n in (4, 6):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            assert f" at {expected_target}. Retry" in prompt
+            return {"action": "write", "arg": expected_target,
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nPART\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_recovery_target_survives_working_dir_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        old_root = tmp_path / "old-root"
+        new_root = tmp_path / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        old_target = old_root / "app.py"
+        new_target = new_root / "app.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        work_link = tmp_path / "work"
+        try:
+            work_link.symlink_to(old_root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("directory symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_root} {work_link}"}
+            if llm.n in (4, 6):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            assert f'"incomplete_write_target": "{old_target}"' in prompt
+            assert '"incomplete_write_append_allowed": true' in prompt
+            return {"action": "write", "arg": str(old_target),
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work_link),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value="finish app.py")
+    @patch("askme.ask_llm")
+    def test_task_local_retry_keeps_structured_recovery_target(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n == 4:
+                return {"action": "fail", "reasoning": "need retry"}
+            if llm.n == 5:
+                prompt = messages[-1]["content"]
+                assert f'"incomplete_write_target": "{old_target}"' in prompt
+                assert '"incomplete_write_append_allowed": true' in prompt
+                return {"action": "write", "arg": str(old_target),
+                        "content": "TAIL\n", "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert mock_replan.called
+        assert old_target.read_text() == "OLD\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_referent_guards_survive_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "shell", "arg": f"ln -sfn {new_target} app.py"},
+            {"action": "write", "arg": "app.py",
+             "content": "still no complete line", "content_truncated": True},
+            {"action": "write", "arg": str(old_target),
+             "content": "BAD-OLD\n", "append": True},
+            {"action": "write", "arg": str(new_target),
+             "content": "BAD-NEW\n", "append": True},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=7)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\n"
+        assert new_target.read_text() == "NEW\n"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert sum(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events) == 2
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_regular_path_survives_retarget_to_symlink(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        original = work / "app.py"
+        moved = work / "old.py"
+        new_target = real / "new.py"
+        original.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        mock_llm.side_effect = [
+            {"tasks": ["update app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "shell",
+             "arg": f"mv app.py old.py && ln -s {new_target} app.py"},
+            {"action": "write", "arg": "app.py", "content": "TAIL\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("update app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=4)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "exhausted"
+        assert moved.read_text() == "OLD\n"
+        assert new_target.read_text() == "NEW\nTAIL\n"
+        assert result["state"]["pending_empty_writes"]
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "incomplete_write_done"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_ignores_model_internal_target(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n",
+             "_target": "spoof-1"},
+            {"action": "write", "arg": "big.py", "content": "v2\n",
+             "_target": "spoof-2"},
+            {"action": "write", "arg": "big.py", "content": "v3\n",
+             "_target": "spoof-3"},
+            {"action": "write", "arg": "big.py", "content": "v4\n",
+             "_target": "spoof-4"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value="finish big.py")
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_survives_task_local_replan(self, mock_llm,
+                                                       mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"action": "write", "arg": "big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert mock_replan.call_count == 1
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_survives_full_replan(self, mock_llm, mock_replan,
+                                                 tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"tasks": ["finish big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            with patch("askme._validate_completion",
+                       return_value={"valid": True}):
+                result = _run_loop("create big.py", str(tmp_path),
+                                   max_replans=2, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert mock_replan.call_count == 1
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_deterministic_repair_clears_rewrite_streak(self, mock_llm,
+                                                        mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create main.c"]},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v1"); return 0; }\n'},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v2"); return 0; }\n'},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v3"); return 0; }\n'},
+            {"action": "shell", "arg": "cc -o main main.c"},
+            {"action": "write", "arg": "main.c",
+             "content": "int main(void){ return 4; }\n"},
+            {"action": "done"},
+        ]
+        shell_calls = {"count": 0}
+
+        def fake_execute(action, working_dir):
+            if action.get("action") == "shell":
+                shell_calls["count"] += 1
+                if shell_calls["count"] == 1:
+                    return {
+                        "ok": False,
+                        "output": ("main.c:1:13: error: implicit declaration "
+                                   "of function 'printf'"),
+                        "error_type": "compile_error",
+                    }
+                return {"ok": True, "output": "(no output)"}
+            return execute(action, working_dir)
+
+        with patch("askme.execute", side_effect=fake_execute), \
+                patch("askme._validate_completion",
+                      return_value={"valid": True}):
+            result = _run_loop("create main.c", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        assert result["status"] == "complete"
+        assert shell_calls["count"] == 2
+        assert (tmp_path / "main.c").read_text() == \
+            "int main(void){ return 4; }\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_append_chunks_do_not_count_as_rewrites(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["create big.py from chunks"]}
+            if n == 2:
+                return {"action": "write", "arg": "big.py", "content": "a\n"}
+            if n == 3:
+                return {"action": "write", "arg": "big.py", "content": "b\n",
+                        "append": True}
+            if n == 4:
+                return {"action": "write", "arg": "big.py", "content": "c\n",
+                        "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create big.py from chunks", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "a\nb\nc\n"
+        assert all("Do NOT write the whole file again" not in s for s in seen)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_mutation_keeps_write_pressure(self, mock_llm, mock_replan,
+                                                  tmp_path):
+        # Codex P2 (PR #16): a failed edit must not disarm the pressure note.
+        _big_file(str(tmp_path), lines=200)
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["fix big.py bug"]}
+            if n == 2:
+                return {"action": "read", "arg": "big.py"}
+            if n == 3:
+                return {"action": "tree", "arg": "."}
+            if n == 4:
+                return {"action": "search", "arg": "def f1"}
+            if n == 5:
+                return {"action": "edit", "arg": "big.py",
+                        "find": "no such text anywhere", "replace": "x"}
+            if n == 6:
+                return {"action": "write", "arg": "big.py", "content": "ok\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("fix big.py bug", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=10)
+        assert result["status"] == "complete"
+        assert "MUST be write" in seen[4]
+        # Pre-fix, the failed edit incremented commit_executed and the
+        # pressure vanished here.
+        assert "MUST be write" in seen[5]
+        assert "MUST be write" not in seen[6]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_replan_sees_unvalidated_write(self, mock_llm, mock_replan,
+                                           tmp_path):
+        plan_msgs = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in app.py"]}
+            if n == 2:
+                return {"action": "write", "arg": "app.py", "content": "x = 1\n"}
+            if n == 3:
+                return {"action": "fail", "reasoning": "unsure"}
+            if n == 4:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("implement feature in app.py", str(tmp_path),
+                           max_replans=2, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert '"unvalidated_write": "app.py"' in plan_msgs[0]
+        assert "no_write_executed" not in plan_msgs[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_inspection_task_is_not_a_write_stall(self, mock_llm,
+                                                         mock_replan,
+                                                         tmp_path):
+        # Codex P2 (PR #16): "create a.py, then inspect b.py" — a failure in
+        # the inspection task must not flag no_write_executed.
+        plan_msgs = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["create a.py with hello",
+                                  "inspect b.py structure"]}
+            if n == 2:
+                return {"action": "write", "arg": "a.py",
+                        "content": "print('hello')\n"}
+            if n == 3:
+                return {"action": "done"}
+            if n == 4:
+                return {"action": "fail", "reasoning": "b.py is missing"}
+            if n == 5:
+                plan_msgs.append(messages[-1]["content"])
+                return {"tasks": ["finish"]}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("create a.py with hello, then inspect b.py",
+                           str(tmp_path),
+                           max_replans=2, max_tasks=2, max_steps=5)
+        assert result["status"] == "complete"
+        assert len(plan_msgs) == 1
+        assert "no_write_executed" not in plan_msgs[0]
+        assert "unvalidated_write" not in plan_msgs[0]
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_truncated_writes_do_not_advance_rewrite_streak(self, mock_llm,
+                                                            mock_replan,
+                                                            tmp_path):
+        # Codex P1 (PR #21): a partial write from a truncated sentinel block
+        # is not a completed rewrite — neither the validate note nor the
+        # rewrite_loop skip may fire while the file is incomplete.
+        seen = []
+
+        def llm(messages, **kwargs):
+            seen.append(messages[-1]["content"])
+            n = len(seen)
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n in (2, 3, 4):
+                return {"action": "write", "arg": "big.py",
+                        "content": f"try{n} line1\ntry{n} par",
+                        "content_truncated": True}
+            if n == 5:
+                return {"action": "write", "arg": "big.py",
+                        "content": "final\nversion\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        # The clean restart after repeated truncations must execute.
+        assert (tmp_path / "big.py").read_text() == "final\nversion\n"
+        assert all("Do NOT write the whole file again" not in s for s in seen)
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "rewrite_loop" not in reasons
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_truncated_append_clears_armed_rewrite_streak(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n in (2, 3, 4):
+                return {"action": "write", "arg": "big.py",
+                        "content": f"v{n - 1}\n"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py",
+                        "content": "partial\ncut", "append": True,
+                        "content_truncated": True}
+            if n == 6:
+                return {"action": "write", "arg": "big.py",
+                        "content": "final\nversion\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "final\nversion\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "rewrite_loop" not in reasons
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_truncation_clears_armed_rewrite_streak(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n in (2, 3, 4):
+                return {"action": "write", "arg": "big.py",
+                        "content": f"v{n - 1}\n"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py",
+                        "content": "no complete line",
+                        "content_truncated": True}
+            if n == 6:
+                return {"action": "write", "arg": "big.py",
+                        "content": "final\nversion\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "final\nversion\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
+        assert "truncated_write_empty" in reasons
+        assert "rewrite_loop" not in reasons
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_exhaustion_never_accepts_incomplete_write(self, mock_llm,
+                                                       mock_replan,
+                                                       tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "x = 1\nmissing tail",
+             "content_truncated": True},
+            {"action": "shell", "arg": "true"},
+        ]
+        result = _run_loop("fix app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert (tmp_path / "app.py").read_text() == "x = 1\n"
+        assert askme._deterministic_check("fix app.py", result["state"],
+                                          str(tmp_path)) is False
+
+    def test_edit_and_unrelated_write_do_not_clear_incomplete_target(self,
+                                                                     tmp_path):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_truncated_write": True},
+            {"action": "edit", "arg": "app.py", "ok": True},
+            {"action": "write", "arg": "notes.txt", "ok": True},
+            {"action": "shell", "arg": "true", "ok": True},
+        ]
+        assert askme._write_visibility_flag(steps) == {
+            "incomplete_write": "app.py"
+        }
+        state = {"all_steps": steps, "errors": []}
+        assert askme._deterministic_check("fix app.py", state,
+                                          str(tmp_path)) is False
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_done_is_rejected_after_truncated_write(self, mock_llm,
+                                                    mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "partial\nmissing tail",
+             "content_truncated": True},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create app.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=2)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "exhausted"
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "incomplete_write_done"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_done_is_rejected_after_empty_truncation(self, mock_llm,
+                                                     mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert result["state"]["pending_empty_writes"]
+        assert not (tmp_path / "app.py").exists()
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_edit_cannot_clear_empty_truncation(self, mock_llm,
+                                                mock_replan, tmp_path):
+        (tmp_path / "app.py").write_text("OLD\n")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "edit", "arg": "app.py",
+             "find": "OLD", "replace": "CHANGED"},
+            {"action": "done"},
+        ]
+        result = _run_loop("replace app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=3)
+        assert result["status"] == "exhausted"
+        assert result["state"]["pending_empty_writes"]
+        assert (tmp_path / "app.py").read_text() == "CHANGED\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_deterministic_reconciliation_rejects_empty_truncation(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "shell", "arg": "true"},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+        ]
+        result = _run_loop("fix app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert result["state"]["pending_empty_writes"]
+        assert askme._deterministic_check("fix app.py", result["state"],
+                                          str(tmp_path)) is False
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_armed_streak_allows_truncated_overwrite_then_restart(
+            self, mock_llm, mock_replan, tmp_path):
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            n = llm.n
+            if n == 1:
+                return {"tasks": ["implement feature in big.py"]}
+            if n in (2, 3, 4):
+                return {"action": "write", "arg": "big.py",
+                        "content": f"v{n - 1}\n"}
+            if n == 5:
+                return {"action": "write", "arg": "big.py",
+                        "content": "partial\nmissing tail",
+                        "content_truncated": True}
+            if n == 6:
+                return {"action": "write", "arg": "big.py",
+                        "content": "final\nversion\n"}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("implement feature in big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=10)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "final\nversion\n"
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert not any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.ask_llm", return_value={"tasks": []})
+    def test_empty_plan_is_not_completion(self, mock_llm, tmp_path):
+        result = _run_loop("create app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert any("malformed_plan" in error
+                   for error in result["state"]["errors"])
+        assert result["state"]["completed_tasks"] == []
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_validation_requires_new_evidence(self, mock_llm,
+                                                     mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "write", "arg": "app.py", "content": "x = 1\n"},
+            {"action": "done"},
+            {"valid": False, "reason": "tests not run", "missing": []},
+            {"tasks": ["finish app.py"]},
+            {"action": "done"},
+        ]
+        with patch.object(askme, "FINAL_VALIDATE", "always"):
+            result = _run_loop("fix app.py", str(tmp_path),
+                               max_replans=2, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_recheck_needed"] is True
+        assert any("requires new write, edit, or shell evidence" in error
+                   for error in result["state"]["errors"])
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_rejects_append_to_stale_file(
+            self, mock_llm, mock_replan, tmp_path):
+        (tmp_path / "app.py").write_text("OLD\n")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "append": True,
+             "content": "NEW\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "exhausted"
+        assert (tmp_path / "app.py").read_text() == "OLD\n"
+        assert "append:false" in result["state"]["last_steps"][-1]["output"]
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_recovers_via_partial_then_append(
+            self, mock_llm, mock_replan, tmp_path):
+        (tmp_path / "app.py").write_text("OLD\n")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "write", "arg": "app.py",
+             "content": "NEW\nmissing tail", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "append": True,
+             "content": "TAIL\n"},
+            {"action": "done"},
+        ]
+        result = _run_loop("replace app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert (tmp_path / "app.py").read_text() == "NEW\nTAIL\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(tmp_path))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_truncated_prefix_matching_prior_write_is_dispatched(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py", "content": "prefix\n"},
+            {"action": "write", "arg": "app.py",
+             "content": "prefix\nmissing tail", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "append": True,
+             "content": "tail\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create app.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=4)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "app.py").read_text() == "prefix\ntail\n"
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert not any(e.get("reason") == "duplicate_write" for e in events)
+        assert sum(e.get("truncated_write") is True for e in events) == 1
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_complete_restart_matching_truncated_prefix_is_dispatched(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "complete\n", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "complete\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create app.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "app.py").read_text() == "complete\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(tmp_path))
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert not any(e.get("reason") == "duplicate_write" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_failed_action_is_not_new_validation_evidence(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "write", "arg": "app.py", "content": "x = 1\n"},
+            {"action": "done"},
+            {"valid": False, "reason": "tests not run", "missing": []},
+            {"tasks": ["repair app.py"]},
+            {"action": "edit", "arg": "app.py",
+             "find": "not present", "replace": "x = 2"},
+            {"action": "done"},
+        ]
+        with patch.object(askme, "FINAL_VALIDATE", "always"):
+            result = _run_loop("fix app.py", str(tmp_path),
+                               max_replans=2, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_attempts"] == 1
+        assert result["state"]["validation_recheck_needed"] is True
+        assert askme._has_new_validation_evidence(result["state"]) is False
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_duplicate_shell_auto_done_cannot_hide_incomplete_write(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "partial\nmissing tail", "content_truncated": True},
+            {"action": "shell", "arg": "true"},
+            {"action": "shell", "arg": "true"},
+        ]
+        result = _run_loop("create app.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=3)
+        assert result["status"] == "exhausted"
+        assert result["state"]["completed_tasks"] == []
+        assert any("incomplete_write" in error
+                   for error in result["state"]["errors"])
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_exhaustion_reconciliation_cannot_bypass_failed_validation(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "shell", "arg": "true"},
+            {"action": "write", "arg": "app.py", "content": "x = 1\n"},
+            {"action": "done"},
+            {"valid": False, "reason": "needs verification", "missing": []},
+            {"tasks": ["verify app.py"]},
+            {"action": "shell", "arg": "true"},
+            {"action": "tree", "arg": "."},
+            {"action": "read", "arg": "app.py"},
+        ]
+        with patch.object(askme, "FINAL_VALIDATE", "always"):
+            result = _run_loop("fix app.py", str(tmp_path),
+                               max_replans=2, max_tasks=1, max_steps=3)
+        assert askme._deterministic_check("fix app.py", result["state"],
+                                          str(tmp_path)) is True
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_recheck_needed"] is True
+
+    @pytest.mark.parametrize("invalid_verdict", [None, "true"])
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_invalid_validation_recheck_cannot_erase_known_failure(
+            self, mock_llm, mock_replan, tmp_path, invalid_verdict):
+        mock_llm.side_effect = [
+            {"tasks": ["fix app.py"]},
+            {"action": "write", "arg": "app.py", "content": "x = 1\n"},
+            {"action": "done"},
+            {"valid": False, "reason": "needs repair", "missing": []},
+            {"tasks": ["repair app.py"]},
+            {"action": "edit", "arg": "app.py",
+             "find": "1", "replace": "2"},
+            {"action": "done"},
+            {"valid": invalid_verdict},
+        ]
+        with patch.object(askme, "FINAL_VALIDATE", "always"):
+            result = _run_loop("fix app.py", str(tmp_path),
+                               max_replans=2, max_tasks=1, max_steps=2)
+        assert result["status"] == "exhausted"
+        assert result["state"]["validation_attempts"] == 2
+        assert result["state"]["validation_recheck_needed"] is True

@@ -87,14 +87,13 @@ class TestRunLoop:
 
     @patch("askme.ask_llm")
     def test_empty_plan(self, mock_llm, capsys):
-        """Plan with no tasks completes immediately."""
-        mock_llm.side_effect = [
-            {"tasks": []},
-        ]
+        """An empty task list violates the planner contract and exhausts."""
+        mock_llm.side_effect = [{"tasks": []}] * 3
         result = run("do nothing")
         out = capsys.readouterr().out
-        assert "All tasks complete" in out
-        assert result is True
+        assert "Planner contract error" in out
+        assert "Exhausted" in out
+        assert result is False
 
     @patch("askme.ask_llm")
     def test_working_dir_isolation(self, mock_llm, capsys, tmp_path):

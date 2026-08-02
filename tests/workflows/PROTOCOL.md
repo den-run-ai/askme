@@ -1,6 +1,28 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 3 (2026-08-01). Revision 3 changes the AskMe action
+**Protocol revision:** 4 (2026-08-02). Revision 4 adds the validate-after-write
+executor policy (from the v6 canary's commit-without-validate rewrite loop):
+verification pressure after repeated same-target full writes, `rewrite_loop`
+damping skips that persist across task-local and full-replan boundaries,
+`unvalidated_write` and `incomplete_write` replan flags, and
+the three post-merge Codex P2 fixes to the revision-3 write-forcing mechanics
+(success-only commit counting, failed-task-scoped intent classification,
+passive-phrasing
+exemptions in the write-task regex). `no_write_executed`,
+`unvalidated_write`, and task-local `failed_steps` are task-scoped even when
+the failed task dispatched zero actions. Incomplete artifacts are run-scoped,
+including zero-byte pending truncations; `incomplete_write_target` carries the
+frozen, action-ready canonical recovery path when a symlink is later retargeted,
+while `incomplete_write_append_allowed` says whether append recovery is safe;
+the exact target is the sole exception to the executor's relative-path rule, and
+empty-overwrite retries retain every observed append referent guard. Unresolved
+truncated writes block
+`done` and deterministic
+reconciliation, empty task lists are invalid plans, and a failed final
+validation requires new successful mutation/shell evidence before rechecking.
+Any outcome-bearing run under revision 4
+requires a newly registered **v7** canary protocol; the recorded v6 outcomes
+remain revision-3 results. Revision 3 (2026-08-01) changed the AskMe action
 interface used by outcome-bearing runs (issue #15, from the v4 canary and pi
 ablation findings): sentinel-framed `write` content transport
 (`<<<CONTENT`/`CONTENT>>>` after the action JSON — no JSON-string escaping,
