@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 AGENT_DIR = Path(__file__).parent.parent
+PYTEST_DIAGNOSTIC_STREAM_CHARS = 2000
 
 SUITES = {
     "easy": {
@@ -136,6 +137,27 @@ def run_single_test(
     wall = time.time() - t0
     passed = result.returncode == 0
     return passed, wall, result.stdout, result.stderr
+
+
+def write_failure_diagnostic(log_dir, test_name, trial, stdout, stderr):
+    """Retain bounded pytest output for a failed synthetic integration trial."""
+
+    def stream_tail(label, content):
+        content = content or ""
+        omitted = max(0, len(content) - PYTEST_DIAGNOSTIC_STREAM_CHARS)
+        note = f" ({omitted} earlier characters omitted)" if omitted else ""
+        tail = content[-PYTEST_DIAGNOSTIC_STREAM_CHARS:].rstrip()
+        return f"{label}{note}:\n{tail or '(empty)'}\n"
+
+    path = log_dir / f"{test_name}_trial{trial}_pytest.txt"
+    path.write_text(
+        "Pytest failure diagnostics (bounded stream tails)\n\n"
+        + stream_tail("stdout", stdout)
+        + "\n"
+        + stream_tail("stderr", stderr),
+        encoding="utf-8",
+    )
+    return path.name
 
 
 def parse_log(log_path):
@@ -430,10 +452,21 @@ def main():
             wall_display = metrics["wall_s"] if metrics else wall
             print(f" {status_str} ({wall_display:.1f}s)", flush=True)
 
-            if not passed and not metrics:
-                print(f"  stderr tail: {stderr[-300:]}" if stderr else "  (no stderr)")
+            pytest_diagnostic = None
+            if not passed:
+                pytest_diagnostic = write_failure_diagnostic(
+                    log_dir, test_name, trial + 1, stdout, stderr
+                )
+                print(f"  pytest diagnostics: {pytest_diagnostic}")
 
-            all_results[test_name].append({"passed": passed, "wall_s": wall, "metrics": metrics})
+            all_results[test_name].append(
+                {
+                    "passed": passed,
+                    "wall_s": wall,
+                    "metrics": metrics,
+                    "pytest_diagnostic": pytest_diagnostic,
+                }
+            )
 
     # Summary
     total_wall = time.time() - t_total
@@ -483,6 +516,7 @@ def main():
             "openrouter_cost": [m["openrouter_cost"] for m in metrics_list],
             "served_models": [m["served_models"] for m in metrics_list],
             "served_providers": [m["served_providers"] for m in metrics_list],
+            "pytest_diagnostics": [r.get("pytest_diagnostic") for r in results],
         }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)

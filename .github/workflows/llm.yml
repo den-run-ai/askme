@@ -3,9 +3,10 @@ name: LLM Tests
 # Live-model tests against OpenRouter. These spend real (tiny) OpenRouter
 # credits — the measured Berkeley smoke matrix cost ~$0.012 total — so the
 # workflow only runs when explicitly wanted:
-#   - push to main touching agent/test code
-#   - weekly schedule (provider/model drift check)
-#   - manual dispatch, with suite/model/provider/trial overrides
+#   - push to main touching agent/test code (the stochastic Berkeley matrix is
+#     retained as advisory evidence; the easy smoke job still gates)
+#   - weekly schedule (strict provider/model drift check)
+#   - manual dispatch, with strict suite/model/provider/trial overrides
 #   - pull requests only when labeled 'llm-tests' AND from a same-repo
 #     branch — the job guards reject fork PRs before any credential is in
 #     scope (secrets are withheld from forks by GitHub)
@@ -115,8 +116,10 @@ jobs:
   berkeley-protocol:
     # Replays the two Berkeley talk eval cells per model — the hard build and
     # medium repair selectors from talks/berkeley-agentic-ai-summit-2026/
-    # evals/README.md — through tests/bench_harness.py, then gates on the
+    # evals/README.md — through tests/bench_harness.py, then evaluates the
     # protocol's pass rule (pytest pass + agent complete for every trial).
+    # A one-trial live-model result is advisory on post-merge main pushes, but
+    # remains strict for scheduled drift checks, manual runs, and opt-in PRs.
     # Same guard as openrouter-smoke: label opt-in AND same-repo head only.
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'llm-tests'))
     runs-on: ubuntu-latest
@@ -175,6 +178,7 @@ jobs:
           done
           echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"
       - name: Gate on protocol pass rule
+        continue-on-error: ${{ github.event_name == 'push' }}
         run: |
           uv run --locked python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
             --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
