@@ -1479,6 +1479,158 @@ class TestValidateAfterWrite:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
+    def test_rewrite_streak_normalizes_alias_paths(self, mock_llm, mock_replan,
+                                                   tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "sub/../big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"action": "write", "arg": "sub/../big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_ignores_model_internal_target(self, mock_llm,
+                                                          mock_replan,
+                                                          tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n",
+             "_target": "spoof-1"},
+            {"action": "write", "arg": "big.py", "content": "v2\n",
+             "_target": "spoof-2"},
+            {"action": "write", "arg": "big.py", "content": "v3\n",
+             "_target": "spoof-3"},
+            {"action": "write", "arg": "big.py", "content": "v4\n",
+             "_target": "spoof-4"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value="finish big.py")
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_survives_task_local_replan(self, mock_llm,
+                                                       mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"action": "write", "arg": "big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert mock_replan.call_count == 1
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_survives_full_replan(self, mock_llm, mock_replan,
+                                                 tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v1\n"},
+            {"action": "write", "arg": "big.py", "content": "v2\n"},
+            {"action": "write", "arg": "big.py", "content": "v3\n"},
+            {"tasks": ["finish big.py"]},
+            {"action": "write", "arg": "big.py", "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            with patch("askme._validate_completion",
+                       return_value={"valid": True}):
+                result = _run_loop("create big.py", str(tmp_path),
+                                   max_replans=2, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert mock_replan.call_count == 1
+        assert (tmp_path / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_deterministic_repair_clears_rewrite_streak(self, mock_llm,
+                                                        mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create main.c"]},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v1"); return 0; }\n'},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v2"); return 0; }\n'},
+            {"action": "write", "arg": "main.c",
+             "content": 'int main(void){ printf("v3"); return 0; }\n'},
+            {"action": "shell", "arg": "cc -o main main.c"},
+            {"action": "write", "arg": "main.c",
+             "content": "int main(void){ return 4; }\n"},
+            {"action": "done"},
+        ]
+        shell_calls = {"count": 0}
+
+        def fake_execute(action, working_dir):
+            if action.get("action") == "shell":
+                shell_calls["count"] += 1
+                if shell_calls["count"] == 1:
+                    return {
+                        "ok": False,
+                        "output": ("main.c:1:13: error: implicit declaration "
+                                   "of function 'printf'"),
+                        "error_type": "compile_error",
+                    }
+                return {"ok": True, "output": "(no output)"}
+            return execute(action, working_dir)
+
+        with patch("askme.execute", side_effect=fake_execute), \
+                patch("askme._validate_completion",
+                      return_value={"valid": True}):
+            result = _run_loop("create main.c", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        assert result["status"] == "complete"
+        assert shell_calls["count"] == 2
+        assert (tmp_path / "main.c").read_text() == \
+            "int main(void){ return 4; }\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
     def test_append_chunks_do_not_count_as_rewrites(self, mock_llm,
                                                     mock_replan, tmp_path):
         seen = []
