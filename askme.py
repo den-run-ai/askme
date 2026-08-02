@@ -3082,6 +3082,10 @@ def _run_loop(
                     }
                     if result.get("truncated"):
                         step_log["truncated"] = True
+                    # Bounded discovery is only auditable when the record says
+                    # why it stopped (issue #42): keep the compact cap reasons.
+                    if result.get("truncation_reasons"):
+                        step_log["truncation_reasons"] = result["truncation_reasons"]
                     if truncated_write:
                         step_log["truncated_write"] = True
                     # Hash-linked read audit: which content, how much of it,
