@@ -6,73 +6,14 @@ Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
 
 ## Quick Start
 
-```bash
-# All AskMe commands below assume you are in this repository's root.
-
-# 1. Start llama-server from a separate llama.cpp checkout
-cd /path/to/llama.cpp
-mkdir -p /tmp/llama-cache
-./build/bin/llama-server \
-  -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
-  -ngl 99 --ctx-size 16384 --flash-attn on \
-  --cache-type-k q4_0 --cache-type-v q4_0 \
-  --swa-full --cache-reuse 256 \
-  -np 1 --slot-save-path /tmp/llama-cache \
-  --port 8080
-
-# 2. In another terminal, run the agent from the AskMe checkout
-cd /path/to/askme
-python3 askme.py "create a hello world program in C and compile it"
-
-# Or via OpenRouter (set OPENROUTER_API_KEY in .env)
-LLM_BACKEND=openrouter python3 askme.py "your task here"
-```
-
-## Coding Task Quick Tutorial
-
-This example uses the repository's qualified configuration-precedence
-workflow: a small Python CLI with a real semantic bug, visible tests, and
-held-out acceptance checks. It exercises a typical coding-agent loop — inspect
-an existing project, reproduce a failure, edit code, and run focused tests.
+With Python, `requests`, and a [local model](docs/gemma4-setup.md) ready, run
+AskMe from this repository on a project you can safely edit:
 
 ```bash
-# 1. Work on a disposable copy of the intentionally broken project.
-askme_root="$PWD"
-tutorial_dir="$(mktemp -d)"
-cp -R tests/workflows/config_precedence/seed/. "$tutorial_dir/"
-
-# The compatibility checks pass, while the focused bug check fails.
-python3 "$tutorial_dir/tests/check_regression.py" -v
-! python3 "$tutorial_dir/tests/check_feedback.py" -v
-
-# 2. Ask the agent to diagnose, fix, and test the project in place.
-python3 "$askme_root/askme.py" --working-dir "$tutorial_dir" \
-  "Fix config_cli.py so timeout precedence is CLI --timeout > ASKME_TIMEOUT > JSON config > default 30. Invalid timeout values must print exactly 'error: timeout must be a positive integer' to stderr and exit 2. Preserve JSON output and --name behavior. Run the public tests."
-
-# 3. Treat the agent's completion claim as provisional: verify it yourself.
-python3 "$tutorial_dir/tests/check_regression.py" -v
-python3 "$tutorial_dir/tests/check_feedback.py" -v
-(
-  cd "$tutorial_dir"
-  python3 "$askme_root/tests/workflow_evaluators/config_precedence.py"
-)
-diff -ru "$askme_root/tests/workflows/config_precedence/seed" \
-  "$tutorial_dir" || true
+python3 askme.py --working-dir /path/to/project "Fix the failing tests"
 ```
 
-Both public test files and the held-out evaluator should now pass, and the
-recursive diff should show only the intended implementation edit—test changes
-and extra files are visible too. `--working-dir` changes files in place but does
-not sandbox the agent, which is why the tutorial uses a disposable copy. To use
-OpenRouter, prefix the AskMe command with `LLM_BACKEND=openrouter`.
-
-The same scenario is continuously qualified against protected public tests,
-an independent alternative implementation, and a held-out evaluator:
-
-```bash
-python3 -m pytest \
-  tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
-```
+For OpenRouter or other options, see [configuration](docs/configuration.md).
 
 ## How It Works
 
