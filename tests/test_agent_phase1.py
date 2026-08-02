@@ -1,26 +1,19 @@
 """Offline tests for the Phase 1 evaluation-policy and CLI plumbing."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+from _test_support import mock_response_raw
 
 import askme
-
-
-def _response(content):
-    response = MagicMock()
-    response.status_code = 200
-    response.json.return_value = {
-        "choices": [{"message": {"content": content}}],
-    }
-    return response
 
 
 class TestReasoningPolicy:
     def test_off_suppresses_explicit_and_retry_reasoning_and_logs_decisions(self, tmp_path):
         log_path = tmp_path / "run.jsonl"
         responses = [
-            _response("not json"),
-            _response('{"valid": true}'),
+            mock_response_raw("not json"),
+            mock_response_raw('{"valid": true}'),
         ]
         with (
             patch.object(askme, "LLM_BACKEND", "openrouter"),
@@ -54,8 +47,8 @@ class TestReasoningPolicy:
 
     def test_off_suppresses_automatic_json_retry_reasoning(self):
         responses = [
-            _response("not json"),
-            _response('{"ok": true}'),
+            mock_response_raw("not json"),
+            mock_response_raw('{"ok": true}'),
         ]
         with (
             patch.object(askme, "LLM_BACKEND", "openrouter"),

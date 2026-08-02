@@ -4,10 +4,11 @@ the ask_llm retry loop, whose policy behavior stays pinned by the existing
 TestAskLlm/TestThinkingRetry/TestLLMTransport/TestTieredRetryContract suites."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests as req_lib
+from _test_support import mock_http_response
 
 import askme
 from askme import (
@@ -182,24 +183,20 @@ class TestBuildLlmRequest:
 # --- One-shot transport (classification only, injected HTTP callable) ---
 
 
-def _resp(status=200, body=None, text=""):
-    resp = MagicMock()
-    resp.status_code = status
-    resp.text = text
-    if body is None:
-        resp.json.side_effect = ValueError("not json")
-    else:
-        resp.json.return_value = body
-    return resp
-
-
 class TestLlmHttpAttempt:
+    def test_json_null_and_missing_body_are_distinct(self):
+        assert mock_http_response(json_body=None).json() is None
+        with pytest.raises(ValueError, match="not json"):
+            mock_http_response().json()
+        with pytest.raises(AttributeError):
+            setattr(mock_http_response(), "unexpected", True)
+
     def test_success_passes_through_request_shape(self):
         calls = {}
 
         def fake_post(url, json=None, headers=None, timeout=None):
             calls.update(url=url, json=json, headers=headers, timeout=timeout)
-            return _resp(body={"choices": []})
+            return mock_http_response(json_body={"choices": []})
 
         rj, failure = _llm_http_attempt({"b": 1}, {"h": 2}, 42, post=fake_post)
         assert failure is None
@@ -226,7 +223,8 @@ class TestLlmHttpAttempt:
 
     @pytest.mark.parametrize("status", [429, 500, 502, 503])
     def test_retryable_statuses(self, status):
-        rj, failure = _llm_http_attempt({}, {}, 1, post=lambda *a, **k: _resp(status=status))
+        response = mock_http_response(status_code=status)
+        rj, failure = _llm_http_attempt({}, {}, 1, post=lambda *a, **k: response)
         assert rj is None
         assert failure == {
             "kind": "http_retryable",
@@ -238,14 +236,20 @@ class TestLlmHttpAttempt:
     def test_client_error_is_fatal_with_bounded_excerpt(self):
         long_body = "x" * 300
         _, failure = _llm_http_attempt(
-            {}, {}, 1, post=lambda *a, **k: _resp(status=404, text=long_body)
+            {},
+            {},
+            1,
+            post=lambda *a, **k: mock_http_response(status_code=404, text=long_body),
         )
         assert failure["kind"] == "http_fatal"
         assert failure["detail"] == "HTTP 404: " + "x" * 200
 
     def test_non_json_success_body(self):
         _, failure = _llm_http_attempt(
-            {}, {}, 1, post=lambda *a, **k: _resp(status=200, text="<html>Bad Gateway</html>")
+            {},
+            {},
+            1,
+            post=lambda *a, **k: mock_http_response(text="<html>Bad Gateway</html>"),
         )
         assert failure["kind"] == "non_json"
         assert failure["detail"] == "<html>Bad Gateway</html>"
@@ -253,7 +257,7 @@ class TestLlmHttpAttempt:
 
     @patch("askme.requests.post")
     def test_default_post_is_module_requests(self, mock_post):
-        mock_post.return_value = _resp(body={"ok": 1})
+        mock_post.return_value = mock_http_response(json_body={"ok": 1})
         rj, failure = _llm_http_attempt({"b": 1}, {"h": 2}, 7)
         assert (rj, failure) == ({"ok": 1}, None)
         assert mock_post.call_args[0][0] == askme.API
