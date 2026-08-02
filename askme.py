@@ -148,10 +148,29 @@ MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 # canary spent all 27 executed steps on tree/read and never selected a write.
 WRITE_PRESSURE_OBSERVATIONS = 3  # observation steps before the executor must commit
 OBSERVE_TAIL_RESERVE = 3         # final steps per attempt reserved for commitment
+# Validate-after-write policy (revision 4): on a write-shaped task, repeated
+# whole-file rewrites of the same target may not consume the step budget —
+# the 2026-08-01 v6 Gemma canary rewrote one file 18 times without ever
+# verifying it or emitting done.
+REWRITE_PRESSURE_WRITES = 2  # same-target full writes before the executor must verify
+REWRITE_SKIP_WRITES = 3      # same-target full writes after which further rewrites are skipped
+# "include" dropped (Codex P2, PR #16): it matched passive phrasing like
+# "files that include deprecated.h" and misclassified observation tasks.
 _WRITE_TASK_RE = re.compile(
-    r"\b(implement|write|create|patch|add|fix|edit|update|replace|insert|include)\b",
+    r"\b(implement|write|create|patch|add|fix|edit|update|replace|insert)\b",
     re.I,
 )
+# A leading observation verb marks inspection intent even when a mutation
+# verb appears later ("find where to add the import").
+_OBSERVE_TASK_RE = re.compile(
+    r"^\s*(find|search|locate|inspect|read|list|review|explore|examine|look|check|show)\b",
+    re.I,
+)
+
+
+def _is_write_shaped(task):
+    return (bool(task) and bool(_WRITE_TASK_RE.search(task))
+            and not _OBSERVE_TASK_RE.match(task))
 
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
@@ -664,6 +683,70 @@ def _step_digest(steps, count=6):
     return digest
 
 
+def _mutation_target_key(step, working_dir=None):
+    """Stable internal target identity for write/edit transition tracking."""
+    target = step.get("_target")
+    if _valid_nonempty_str(target):
+        return target
+    arg = step.get("arg", "")
+    if not _valid_nonempty_str(arg):
+        return None
+    if working_dir is not None:
+        return os.path.normcase(os.path.abspath(
+            os.fspath(_step_path(arg, working_dir))))
+    return os.path.normcase(os.path.normpath(arg))
+
+
+def _unresolved_incomplete_writes(steps, working_dir=None):
+    """Latest unresolved truncated writes, keyed by normalized target.
+
+    Only a later complete write/append to the same target resolves truncation;
+    an edit cannot reconstruct the suffix that never arrived.
+    """
+    unresolved = {}
+    for idx, step in enumerate(steps):
+        if step.get("action") != "write" or not step.get("ok"):
+            continue
+        target = _mutation_target_key(step, working_dir)
+        if target is None:
+            continue
+        if step.get("_truncated_write"):
+            unresolved[target] = (idx, step)
+        else:
+            unresolved.pop(target, None)
+    return unresolved
+
+
+def _write_visibility_flag(task_steps):
+    """Replanner visibility for a failed write-shaped task (issue #15 / rev 4).
+
+    Returns {"no_write_executed": True} when the task never landed a write,
+    {"incomplete_write": <basename>} while any target has an unresolved
+    truncated partial write, and
+    {"unvalidated_write": <basename>} when it wrote but never verified after
+    the last successful write — the v6 Gemma replans restated the task while
+    an applied-but-unresolved artifact sat on disk — or None.
+    """
+    ok_mutations = [idx for idx, s in enumerate(task_steps)
+                    if s.get("action") in ("write", "edit") and s.get("ok")]
+    if not ok_mutations:
+        return {"no_write_executed": True}
+    unresolved = _unresolved_incomplete_writes(task_steps)
+    if unresolved:
+        # Incomplete state wins over unrelated later mutations and shells.
+        _, last_step = max(unresolved.values(), key=lambda item: item[0])
+        arg = last_step.get("arg", "")
+        return {"incomplete_write": Path(arg).name if arg else True}
+    last_mutation = ok_mutations[-1]
+    last_step = task_steps[last_mutation]
+    arg = last_step.get("arg", "")
+    validated = any(s.get("action") == "shell" and s.get("ok")
+                    for s in task_steps[last_mutation + 1:])
+    if validated:
+        return None
+    return {"unvalidated_write": Path(arg).name if arg else True}
+
+
 def get_plan(user_prompt, state):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
@@ -678,14 +761,17 @@ def get_plan(user_prompt, state):
     recent = _step_digest(state.get("all_steps", []))
     if recent:
         plan_state["recent_steps"] = recent
-        # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
-        # replans restated the failed task text; make "no write happened yet"
-        # the visible problem instead. Scoped to the failed task's steps.
-        task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
-        if _WRITE_TASK_RE.search(user_prompt) and not any(
-                s.get("action") in ("write", "edit") and s.get("ok")
-                for s in task_steps):
-            plan_state["no_write_executed"] = True
+    # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
+    # replans restated the failed task text; make the actual write state
+    # visible instead. Compute this independently of recent_steps so a task
+    # that fails before dispatch still reports no_write_executed. Scope to
+    # the failed task, and classify from that task itself (Codex P2, PR #16).
+    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
+    current_task = state.get("current_task", "")
+    if _is_write_shaped(current_task):
+        flag = _write_visibility_flag(task_steps)
+        if flag:
+            plan_state.update(flag)
     if "environment" not in plan_state:
         plan_state["environment"] = {}
     if "policy" not in plan_state:
@@ -717,7 +803,7 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
              reasoning_policy=DEFAULT_REASONING_POLICY,
              reasoning_trigger="executor",
              goal_context_chars=GOAL_CONTEXT_CHARS,
-             write_pressure=False):
+             write_pressure=False, validate_pressure=None):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -755,6 +841,10 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
     if write_pressure:
         user_msg += ("\nNOTE: several observation steps done but no write yet. "
                      "Next action MUST be write, edit, or shell — or fail with a one-line reason.")
+    if validate_pressure:
+        user_msg += (f"\nNOTE: {validate_pressure} is already written. Do NOT write the whole "
+                     "file again. Next action MUST be shell (verify it), edit (targeted fix), "
+                     "or done.")
     return ask_llm([
         {"role": "system", "content": SYSTEM_STEP},
         {"role": "user", "content": user_msg}
@@ -851,14 +941,17 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     }
     # Stateful replanning: the mini-planner sees what the executor actually did
     # on the failed task (actions + outcomes), not just typed error strings.
-    failed_steps = _step_digest(state.get("all_steps", []), count=3)
+    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
+    failed_steps = _step_digest(task_steps, count=3)
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
-        task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
-        if _WRITE_TASK_RE.search(failed_task) and not any(
-                s.get("action") in ("write", "edit") and s.get("ok")
-                for s in task_steps):
-            replan_state["no_write_executed"] = True
+    # A task can fail before dispatching a step, and failed_steps must never
+    # leak actions from an earlier task. Visibility therefore uses the scoped
+    # slice even when it is empty.
+    if _is_write_shaped(failed_task):
+        flag = _write_visibility_flag(task_steps)
+        if flag:
+            replan_state.update(flag)
     env = state.get("environment", {})
     if env.get("missing_tools"):
         replan_state["missing_tools"] = env["missing_tools"]
@@ -933,6 +1026,14 @@ def _step_path(arg, working_dir):
 def _deterministic_check(user_prompt, state, working_dir):
     """Conservative completion check. Returns True, False, or None."""
     all_steps = state.get("all_steps", [])
+    if state.get("pending_empty_writes"):
+        return False
+
+    # A truncated write is an incomplete artifact, not successful completion
+    # evidence. Unrelated edits/shells cannot hide it; only a later complete
+    # write/append to the same normalized target resolves it.
+    if _unresolved_incomplete_writes(all_steps, working_dir):
+        return False
 
     # Successful writes should leave non-empty files.
     for s in all_steps:
@@ -1005,7 +1106,8 @@ def _validate_completion(user_prompt, state, working_dir):
         ], max_tokens=768, think=True, think_level="high", max_retries=0,
            reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
            reasoning_trigger="final_validator")
-        if isinstance(result, dict) and "valid" in result:
+        if (isinstance(result, dict)
+                and isinstance(result.get("valid"), bool)):
             return result
         log(f"  Validation returned unexpected format: {result}")
         return None
@@ -1020,7 +1122,7 @@ def _validate_completion(user_prompt, state, working_dir):
 def _has_new_validation_evidence(state):
     start = state.get("validated_step_count", 0)
     return any(
-        s.get("action") in ("write", "edit", "shell")
+        s.get("action") in ("write", "edit", "shell") and s.get("ok")
         for s in state.get("all_steps", [])[start:]
     )
 
@@ -1509,6 +1611,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         "validated_step_count": 0,
         "completed_step_groups": [],
         "all_steps": [],
+        # Empty sentinel truncations dispatch no mutation, but a following
+        # `done` must not treat the failed write attempt as completion.
+        "pending_empty_writes": {},
         "task_start_step_count": 0,
         "reasoning_policy": reasoning_policy,
         "goal_context_chars": goal_context_chars,
@@ -1565,8 +1670,18 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             _run_log({"event": "plan_error", "replan": replan, "error": str(e)[:200],
                       "wall_s": round(time.time() - t_plan, 2)})
             continue  # consumes a plan attempt
+        raw_tasks = plan.get("tasks")
+        tasks = raw_tasks[:max_tasks] if isinstance(raw_tasks, list) else []
+        if not tasks or any(not _valid_nonempty_str(task) for task in tasks):
+            error = "[malformed_plan] planner returned no valid tasks"
+            state["errors"].append(error)
+            log(f"  Planner contract error: {error}")
+            history.append({"event": "plan_error", "replan": replan,
+                            "error": error})
+            _run_log({"event": "plan_error", "replan": replan,
+                      "error": error, "wall_s": round(time.time() - t_plan, 2)})
+            continue
         state["errors"] = []  # reset errors each replan; planner already saw them
-        tasks = plan.get("tasks", [])[:max_tasks]
         plan_wall = time.time() - t_plan
         log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         history.append({"event": "plan", "replan": replan, "tasks": tasks})
@@ -1601,7 +1716,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 observe_executed = 0
                 commit_executed = 0
                 observe_blocked = 0
-                task_wants_write = bool(_WRITE_TASK_RE.search(task))
+                last_write_target = None
+                consecutive_target_writes = 0
+                task_wants_write = _is_write_shaped(task)
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
                 if completed_repair:
                     log(f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})")
@@ -1620,6 +1737,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             write_pressure=(
                                 task_wants_write and commit_executed == 0
                                 and observe_executed >= WRITE_PRESSURE_OBSERVATIONS),
+                            validate_pressure=(
+                                Path(str(last_write_target)).name
+                                if task_wants_write and last_write_target is not None
+                                and consecutive_target_writes >= REWRITE_PRESSURE_WRITES
+                                else None),
                         )
                     except LLMTransportError as e:
                         log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
@@ -1649,6 +1771,40 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
                     if act == "done":
+                        unresolved = _unresolved_incomplete_writes(
+                            state.get("all_steps", []), working_dir)
+                        pending_empty = state.get("pending_empty_writes", {})
+                        if unresolved or pending_empty:
+                            append_allowed = True
+                            if unresolved:
+                                _, incomplete_step = max(
+                                    unresolved.values(), key=lambda item: item[0])
+                                incomplete_name = Path(
+                                    incomplete_step.get("arg", "") or "file").name
+                            else:
+                                pending_info = next(iter(pending_empty.values()))
+                                incomplete_name = (pending_info.get("name", "file")
+                                                   if isinstance(pending_info, dict)
+                                                   else pending_info)
+                                append_allowed = (
+                                    pending_info.get("append_allowed", False)
+                                    if isinstance(pending_info, dict) else False)
+                            if append_allowed:
+                                recovery = ("Resume with append:true, or restart with "
+                                            "a complete append:false write.")
+                            else:
+                                recovery = ("Resend a shorter write with append:false "
+                                            "before using append:true.")
+                            log(f"  [{step + 1}] skip (done with incomplete write: "
+                                f"{incomplete_name})")
+                            _skip_step(i, step, act, action,
+                                       "incomplete_write_done")
+                            state["last_steps"].append({
+                                "action": "done", "arg": "", "ok": True,
+                                "output": (f"Cannot finish: {incomplete_name} is incomplete. "
+                                           f"{recovery}"),
+                            })
+                            continue
                         task_done = True
                         break
                     if act == "fail":
@@ -1661,12 +1817,52 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     # complete lines that arrived and steer the model to finish
                     # the file with chunked append instead of failing the step.
                     truncated_write = act == "write" and action.pop("content_truncated", False)
+                    write_target = (_mutation_target_key(
+                        {"arg": action.get("arg", "")}, working_dir)
+                        if act == "write" else None)
+                    pending_recovery = state["pending_empty_writes"].get(
+                        write_target) if write_target is not None else None
+                    if (act == "write" and action.get("append")
+                            and pending_recovery
+                            and not pending_recovery.get("append_allowed", False)):
+                        log(f"  [{step + 1}] skip (append before first replacement "
+                            "chunk landed)")
+                        _skip_step(i, step, act, action,
+                                   "append_after_empty_overwrite")
+                        state["last_steps"].append({
+                            "action": act, "arg": action.get("arg", ""),
+                            "ok": True,
+                            "output": ("The replacement's first chunk wrote no bytes. "
+                                       "Resend a shorter write with append:false before "
+                                       "using append:true."),
+                        })
+                        continue
                     if truncated_write:
                         kept = action.get("content", "")
                         kept = kept[: kept.rfind("\n") + 1]
                         if not kept:
                             log(f"  [{step + 1}] skip (write truncated before a complete line)")
                             _skip_step(i, step, act, action, "truncated_write_empty")
+                            # The recovery instruction asks for a clean resend;
+                            # disarm rewrite damping before that resend even
+                            # though this empty partial attempt wrote no bytes.
+                            last_write_target = None
+                            consecutive_target_writes = 0
+                            pending_target = _mutation_target_key(
+                                {"arg": action.get("arg", "")}, working_dir)
+                            if pending_target is not None:
+                                existing = state["pending_empty_writes"].get(
+                                    pending_target)
+                                append_allowed = bool(action.get("append"))
+                                if isinstance(existing, dict):
+                                    append_allowed = (
+                                        existing.get("append_allowed", False)
+                                        and append_allowed)
+                                state["pending_empty_writes"][pending_target] = {
+                                    "name": Path(
+                                        action.get("arg", "") or "file").name,
+                                    "append_allowed": append_allowed,
+                                }
                             # Nothing was written: the first dispatched chunk
                             # must stay a non-append write (append would land
                             # on a stale existing file), only later chunks
@@ -1703,6 +1899,29 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason."})
                         continue
 
+                    # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES
+                    # successful full writes of the same target with no
+                    # intervening successful shell/edit, further full rewrites
+                    # are skipped — verify, edit, or finish instead.
+                    if (act == "write" and not action.get("append")
+                            and not truncated_write
+                            and task_wants_write and last_write_target is not None
+                            and consecutive_target_writes >= REWRITE_SKIP_WRITES
+                            and _step_path(action.get("arg", ""), working_dir)
+                            == last_write_target):
+                        dup_skip_count += 1
+                        log(f"  [{step + 1}] skip (rewrite loop: "
+                            f"{action.get('arg', '')[:40]} already written "
+                            f"{consecutive_target_writes}x)")
+                        _skip_step(i, step, act, action, "rewrite_loop")
+                        state["last_steps"].append({
+                            "action": act, "arg": action.get("arg", ""), "ok": True,
+                            "output": (f"Already written {consecutive_target_writes} times. "
+                                       "Do NOT write it again — verify with shell, make a "
+                                       "targeted edit, or emit done."),
+                        })
+                        continue
+
                     # Duplicate action guard — per-action-type loop detection
                     last = state["last_steps"][-1:] if state["last_steps"] else []
                     if last and last[0]["action"] == act:
@@ -1718,7 +1937,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     state["errors"].append(f"[stuck_loop] write {action.get('arg','')[:60]}: same chunk appended twice")
                                     _skip_step(i, step, act, action, "stuck_append")
                                     break
-                            elif act == "write" and prev.get("ok") and not prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
+                            elif (act == "write" and not truncated_write
+                                  and prev.get("ok") and not prev.get("_append")
+                                  and prev.get("_content", "") == action.get("content", "")):
                                 is_dup = True
                             elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
                                 is_dup = True
@@ -1830,9 +2051,40 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     state["executed_steps"] += 1
                     if act in OBSERVE_ACTIONS:
                         observe_executed += 1
-                    else:
-                        commit_executed += 1
                     result = execute(action, working_dir)
+                    if result["ok"] and act == "write":
+                        completed_target = _mutation_target_key(
+                            {"arg": action.get("arg", "")}, working_dir)
+                        if completed_target is not None:
+                            state["pending_empty_writes"].pop(
+                                completed_target, None)
+                    if act not in OBSERVE_ACTIONS and result["ok"]:
+                        # Counted only on success (Codex P2, PR #16): a failed
+                        # mutation must not disarm write pressure or the
+                        # observation tail reserve.
+                        commit_executed += 1
+                    if act == "write" and result["ok"]:
+                        if truncated_write:
+                            # A partial (truncated) write is not a completed
+                            # rewrite (Codex P1, PR #21): the file is
+                            # incomplete, and the recovery path may
+                            # legitimately append to it or restart the write.
+                            # Reset for truncated append chunks too; otherwise
+                            # an armed streak can block the clean restart.
+                            last_write_target = None
+                            consecutive_target_writes = 0
+                        elif not action.get("append"):
+                            target = _step_path(action.get("arg", ""), working_dir)
+                            if target == last_write_target:
+                                consecutive_target_writes += 1
+                            else:
+                                last_write_target = target
+                                consecutive_target_writes = 1
+                    elif act in ("shell", "edit") and result["ok"]:
+                        # Verification or a targeted fix breaks the rewrite
+                        # streak; observations do not (the v6 Gemma loop
+                        # interleaved tree/read between rewrites).
+                        consecutive_target_writes = 0
                     if truncated_write and result["ok"]:
                         # The executor is stateless per step: without a resume
                         # anchor the model cannot know where the write stopped.
@@ -1867,6 +2119,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     if act == "edit":
                         step_entry["_find"] = action.get("find", "")
                         step_entry["_replace"] = action.get("replace", "")
+                    if act in ("write", "edit"):
+                        target = _mutation_target_key(
+                            {"arg": action.get("arg", "")}, working_dir)
+                        if target is not None:
+                            step_entry["_target"] = target
                     if act == "read":
                         step_entry["_read_key"] = (
                             action.get("arg", ""), _read_offset_limit(action)[0])
@@ -2028,6 +2285,26 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 break
 
             if task_done:
+                unresolved = _unresolved_incomplete_writes(
+                    state.get("all_steps", []), working_dir)
+                pending_empty = state.get("pending_empty_writes", {})
+                if unresolved or pending_empty:
+                    if unresolved:
+                        _, incomplete_step = max(
+                            unresolved.values(), key=lambda item: item[0])
+                        incomplete_name = Path(
+                            incomplete_step.get("arg", "") or "file").name
+                    else:
+                        pending_info = next(iter(pending_empty.values()))
+                        incomplete_name = (pending_info.get("name", "file")
+                                           if isinstance(pending_info, dict)
+                                           else pending_info)
+                    state["errors"].append(
+                        f"[incomplete_write] {incomplete_name}: completion refused")
+                    log(f"  Task completion refused: {incomplete_name} is incomplete")
+                    task_done = False
+
+            if task_done:
                 state["completed_tasks"].append(task)
                 state["completed_step_groups"].append(task_steps)
                 log(f"  Task complete. ({time.time()-t_task:.1f}s)")
@@ -2067,11 +2344,30 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                               "deterministic": bool(vresult.get("deterministic"))})
                     all_done = False
                     continue  # replan
+                elif vresult is None and recheck_validation:
+                    # A first optional validator failure remains fail-open, but
+                    # once validation explicitly failed, an unavailable second
+                    # verdict cannot erase that known failure.
+                    log("  Validation recheck produced no verdict; failure remains pending.")
+                    _run_log({"event": "validation", "valid": None,
+                              "reason": "recheck produced no verdict",
+                              "deterministic": False})
                 else:
                     state["validation_recheck_needed"] = False
                     log(f"  Validation passed.")
                     _run_log({"event": "validation", "valid": True,
                               "deterministic": bool(vresult and vresult.get("deterministic"))})
+            if state.get("validation_recheck_needed"):
+                if state.get("validation_attempts", 0) >= 2:
+                    reason = "validation remains failed after the maximum checks"
+                else:
+                    reason = ("completion after failed validation requires new "
+                              "write, edit, or shell evidence")
+                state["errors"].append(f"[validation_failed] {reason}")
+                log(f"  Completion refused: {reason}")
+                _run_log({"event": "validation_pending", "reason": reason})
+                all_done = False
+                continue
             total_wall = time.time() - t_run
             log(f"All tasks complete. ({total_wall:.1f}s total)")
             log(f"Output in: {working_dir}")
@@ -2085,7 +2381,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
     total_wall = time.time() - t_run
     deterministic = _deterministic_check(user_prompt, state, working_dir)
-    if deterministic is True:
+    if deterministic is True and not state.get("validation_recheck_needed"):
         log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
         log(f"Output in: {working_dir}")
         _run_log({"event": "run_end", "status": "complete_deterministic_after_exhausted",
