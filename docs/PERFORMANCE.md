@@ -8,6 +8,15 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## Revision-4 Focused Test Snapshot — 2026-08-02
+
+`python -m pytest tests/test_agent_actions.py -q` completed locally with
+**122 passed**. This deterministic, mocked suite covers the revision-4
+rewrite-damping and write-lifecycle changes, including empty and nonempty
+truncation recovery, stale-file append prevention, task-scoped replanning,
+completion gates, and evidence-gated validation rechecks. No live model or
+provider was used; this is mechanism coverage, not an outcome benchmark.
+
 ## Test Suite Snapshot — 2026-07-13
 
 `pytest -q` completed with **367 passed and 27 skipped**. Backend-dependent
@@ -453,46 +462,44 @@ Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and loca
 
 ## FeatureBench v6 Canary Observations (2026-08-01, revision-3 interface, CoreWeave)
 
-Requalification of the frozen cell under the revision-3 action interface
-(issue #17; protocols v5 registered then re-pinned to CoreWeave as v6 before
-any model call). Both cells produced **nonempty, cleanly applying patches**
-(v4: both empty). Both agents exhausted planning attempts without `done`.
+The frozen cell was run once per model under the revision-3 action interface
+(issue #17; protocols v5 registered, then re-pinned to CoreWeave as v6 before
+any model call). Both attempts produced nonempty, cleanly applying patches and
+both exhausted planning attempts without `done`; neither ran the delivered
+tests. The earlier v4 and exploratory pi runs used a different serving stack,
+so their outcomes are context rather than controlled causal baselines.
 
-| Cell | v4 | v6 | pi ceiling |
+| Cell | v4 context | v6 result | Exploratory pi reference |
 |---|---|---|---|
-| Gemma 4 31B | empty patch, 16/33 `length` | applied, **11/13 F2P (84.62%)**, 56/56 `stop`, 21.5 min, $0.032 | 11/13 (84.62%) — identical failing tests |
-| Qwen3.6 27B | empty patch, 0 writes/27 steps | applied, 7/13 F2P (53.85%), 1 write/33 steps, 103 s, $0.090 | 10/13 (76.92%) |
+| Gemma 4 31B | empty patch, 16/33 `length` | applied but unresolved, **11/13 F2P (84.62%)**, 56/56 `stop`, 21.5 min, $0.032 | 11/13 (84.62%), same failing tests |
+| Qwen3.6 27B | empty patch, 0 writes/27 steps | applied but unresolved, 7/13 F2P (53.85%), 1 write/33 steps, 103 s, $0.090 | 10/13 (76.92%) |
 
-1. **Gemma: the transport was the whole story for patch quality.** Zero
-   truncation under the sentinel transport + 4096/8192 budgets (v4: 16/33
-   `length` finishes); v6 lands exactly on the pi ceiling with the same two
-   failing tests. The failure mode inverted into a **commit-without-validate
-   rewrite loop**: 18 successful whole-file writes, zero test runs, no
-   `done`, three planning attempts exhausted with a working implementation on
-   disk. Write-forcing addresses "never writes"; nothing yet addresses "never
-   stops rewriting".
-2. **Qwen: write-forcing broke the observation stall** — one write selected
-   and executed (v4: zero), patch applied at 53.85% F2P vs the 76.92%
-   ceiling. Trajectory remained observation-dominant (23/33 reads, 8
-   duplicate-read skips). Residual gap belongs to the loop/model: a single
-   uniterated write, no test execution. The three registration-time Codex P2
-   caveats on write-forcing mechanics apply to mechanism-level counts.
-3. **Empty-action envelopes**: Gemma burned 7 steps on `action: ""` parse
-   artifacts (pi's native tool_calls: 0 malformed calls in 12). Quantifies
-   the cost of the JSON action protocol vs native tool calling (deferred,
-   issue #15).
-4. **Audit-tool provider hardcode (infrastructure bug)**: `canary_audit.py`
-   required SiliconFlow literally instead of the protocol's pinned provider,
-   flagging the flawless CoreWeave route as `invalid_infrastructure`. Fixed
-   in the results PR; corrected audits on retained artifacts:
-   `valid_infrastructure_policy_compliant`, 0 violations, both cells.
-5. **Transport-error resilience**: one OpenRouter `ReadTimeout` during a host
-   network change was absorbed by the typed transport-error retry (thinking
-   escalation), costing one call — the run continued and qualified.
-6. Caveats: CoreWeave serving stack (Gemma bf16) vs SiliconFlow fp8 for
-   v4/pi comparisons (recorded in the v6 amendment); the issue-15 local
-   neutrality bar was waived by the maintainer (recorded in the v5
-   requalification record).
+1. **Gemma commit-without-validate loop.** The attempt had no truncated model
+   responses, but rewrote the same implementation file 18 times, ran zero
+   tests, emitted no `done`, and exhausted three planning attempts. Revision 4
+   directly guards that observed trajectory with verification pressure,
+   rewrite damping, and explicit incomplete-write state; it does not establish
+   an outcome improvement.
+2. **Qwen observation-dominant trajectory.** One write was selected and
+   executed; 23/33 executed actions were reads and eight additional reads were
+   skipped as duplicates. The resulting patch remained unresolved at 7/13
+   target tests. Because revision 3 bundled transport, budgets, and write
+   pressure, this single run does not isolate which mechanism changed behavior.
+3. **Empty-action envelopes.** Gemma consumed seven steps on `action: ""`
+   parse artifacts. This records overhead in this trajectory; comparison with
+   another agent's native tool calls is not a controlled protocol comparison.
+4. **Audit-tool provider hardcode.** `canary_audit.py` required SiliconFlow
+   literally instead of the protocol's pinned provider, initially marking the
+   CoreWeave route invalid. The results change fixed the hardcode; retained
+   artifacts then audited as `valid_infrastructure_policy_compliant` with zero
+   policy violations in both cells.
+5. **Transport-error recovery.** One OpenRouter `ReadTimeout` during a host
+   network change was absorbed by the typed retry and the run continued. This
+   is one observed recovery, not a reliability estimate.
+6. **Interpretation limits.** CoreWeave served Gemma bf16 while earlier
+   references used SiliconFlow fp8, and the issue-15 local neutrality bar was
+   waived by the maintainer. A registered, matched-provider v7 run is required
+   before making revision-4 outcome claims.
 
 ## FeatureBench v4 Canary Observations (2026-08-01)
 
