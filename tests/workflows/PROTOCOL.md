@@ -3,7 +3,8 @@
 **Protocol revision:** 4 (2026-08-02). Revision 4 adds the validate-after-write
 executor policy (from the v6 canary's commit-without-validate rewrite loop):
 verification pressure after repeated same-target full writes, `rewrite_loop`
-damping skips, `unvalidated_write` and `incomplete_write` replan flags, and
+damping skips that persist across task-local and full-replan boundaries,
+`unvalidated_write` and `incomplete_write` replan flags, and
 the three post-merge Codex P2 fixes to the revision-3 write-forcing mechanics
 (success-only commit counting, failed-task-scoped intent classification,
 passive-phrasing
