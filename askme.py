@@ -405,6 +405,233 @@ def _split_content_block(text):
 _WRITE_ATTEMPT_RE = re.compile(r'"action"\s*:\s*"(?:write|edit)"')
 
 
+# LLM client seams (issue #37): reasoning decision, request build, one-shot
+# transport, and pure reply decode are independent, individually testable
+# steps. ask_llm() below remains the compatibility facade that owns retry
+# policy, backoff, and typed errors. Backend settings are read at call time
+# so per-test patching of module globals keeps working.
+
+
+def _reasoning_decision(attempt, think, think_level, reasoning_policy, reasoning_trigger):
+    """Per-attempt reasoning escalation: (requested_level, effective_level, trigger).
+
+    E03 contract: an explicit think_level pins every attempt; think=True
+    escalates medium -> high, then drops to the strict no-thinking contract on
+    the final auto-retry (more thinking doesn't fix truncation/format errors);
+    otherwise attempt 1 gets the one reasoning-assisted JSON-contract retry.
+    Policy "off" suppresses the effective level entirely — for always-on
+    reasoners the OpenRouter baseline effort still applies downstream."""
+    if think_level:
+        gated = think_level
+        requested = think_level
+    elif think:
+        requested = "adaptive"
+        gated = None if attempt >= 2 else ("high" if attempt >= 1 else "medium")
+    elif attempt == 1:
+        gated = "medium"
+        requested = "medium"
+    else:
+        gated = None
+        requested = None
+    trigger = "json_retry" if attempt == 1 and not think and not think_level else reasoning_trigger
+    effective = gated if reasoning_policy == "gated" else None
+    return requested, effective, trigger
+
+
+def _build_llm_request(messages, budget, effective_think_level, strict):
+    """Build one backend-specific request: (body, headers, sent_effort).
+
+    `strict` appends the E03 strict-JSON contract as a final user turn after
+    backend shaping. Never mutates the caller's message list."""
+    body = {"model": MODEL, "messages": messages, "temperature": 0.1, "max_tokens": budget}
+    sent_effort = effective_think_level
+    if LLM_BACKEND == "openrouter":
+        if OPENROUTER_PROVIDER:
+            body["provider"] = {
+                "order": [OPENROUTER_PROVIDER],
+                "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+                "require_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+            }
+        # Always-on reasoners: the baseline effort applies to every call —
+        # strict E03 retries included, since the model cannot stop
+        # reasoning and "no thinking" can only mean the baseline.
+        sent_effort = _merge_effort(effective_think_level)
+        if sent_effort:
+            body["reasoning"] = {
+                "enabled": True,
+                "effort": sent_effort,
+            }
+            body["max_tokens"] = max(budget, _EFFORT_TOKEN_FLOOR[sent_effort])
+        else:
+            # Some models reason by default. Keep the harness policy model-independent.
+            body["reasoning"] = {"enabled": False}
+    elif effective_think_level:
+        # Local llama-server: prepend <|think|> to system prompt, bump max_tokens
+        msgs = list(messages)
+        if msgs and msgs[0]["role"] == "system":
+            msgs[0] = dict(msgs[0])
+            msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
+        body["messages"] = msgs
+        body["max_tokens"] = max(budget, 768 if effective_think_level == "high" else 512)
+    if strict:
+        msgs = list(body["messages"])
+        msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
+        body["messages"] = msgs
+    headers = {"Content-Type": "application/json"}
+    if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
+        headers["X-OpenRouter-Metadata"] = "enabled"
+    return body, headers, sent_effort
+
+
+def _llm_http_attempt(body, headers, timeout, post=None):
+    """One HTTP attempt against the configured chat-completions endpoint.
+
+    Pure transport: returns (response_json, None) on success, or
+    (None, failure) where failure = {"kind", "detail", "error", "status"}
+    classifies the outcome for the caller's retry policy. Kinds:
+    "transport" (connection/timeout), "http_retryable" (429/5xx),
+    "http_fatal" (other 4xx), "non_json" (unparseable success body)."""
+    if post is None:
+        post = requests.post
+    try:
+        resp = post(API, json=body, headers=headers, timeout=timeout)
+    except (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.RequestException,
+    ) as e:
+        return None, {
+            "kind": "transport",
+            "detail": f"{type(e).__name__}: {e}",
+            "error": e,
+            "status": None,
+        }
+    sc = resp.status_code
+    if sc == 429 or sc >= 500:
+        return None, {"kind": "http_retryable", "detail": f"HTTP {sc}", "error": None, "status": sc}
+    if 400 <= sc < 500:
+        return None, {
+            "kind": "http_fatal",
+            "detail": f"HTTP {sc}: {resp.text[:200]}",
+            "error": None,
+            "status": sc,
+        }
+    try:
+        return resp.json(), None
+    except ValueError as e:
+        return None, {"kind": "non_json", "detail": resp.text[:100], "error": e, "status": sc}
+
+
+def _extract_message_text(rj):
+    """Message text with the OpenRouter empty-content reasoning fallback
+    (models may put JSON in reasoning when the token budget is tight)."""
+    msg = rj["choices"][0]["message"]
+    text = msg.get("content") or ""
+    if not text.strip():
+        reasoning = msg.get("reasoning_content") or ""
+        if not reasoning:
+            r = msg.get("reasoning", "")
+            reasoning = r.get("content", "") if isinstance(r, dict) else (r or "")
+        text = reasoning
+    return text
+
+
+def _decode_action_reply(text, finish_reason):
+    """Pure decode of one model reply into a contract-valid dict.
+
+    Owns reasoning/fence stripping, sentinel content extraction, JSON
+    extraction/repair, and action-contract validation. Returns
+    (obj, cleaned_text, repaired). Raises json.JSONDecodeError carrying a
+    .cleaned_text attribute when no valid object can be recovered; retry
+    policy and typed classification stay with the caller."""
+    # The strip chain below removes a trailing newline; remember it so a
+    # truncated sentinel block can keep its last complete line.
+    ends_with_newline = text.endswith("\n")
+    # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
+    # Strip <|channel>...<channel|> blocks (local llama-server thinking format)
+    text = re.sub(r"<\|channel\>.*?<channel\|>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"<\|channel\>.*", "", text, flags=re.DOTALL).strip()
+    # Strip markdown code fences if present
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    # Sentinel content block (issue #15): content rides outside the JSON.
+    text, block, block_closed = _split_content_block(text)
+    # Try to extract JSON object from anywhere in the text
+    if not text.startswith("{") and "{" in text:
+        text = text[text.index("{") :]
+
+    def _attach_block(obj):
+        if block is not None and isinstance(obj, dict):
+            content = block
+            if not block_closed and finish_reason == "length":
+                obj["content_truncated"] = True
+                # The cutoff landed on a line boundary: the last line is
+                # complete, not partial — restore the stripped newline so
+                # the run loop's partial-line trim keeps it.
+                if ends_with_newline:
+                    content += "\n"
+            obj["content"] = content
+        return obj
+
+    try:
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise json.JSONDecodeError(
+                "Expected JSON object, got " + type(parsed).__name__, text, 0
+            )
+        return _accept_or_raise(_attach_block(parsed), text), text, False
+    except json.JSONDecodeError as parse_err:
+        # E03: attempt mechanical repair before burning a retry
+        repaired = _repair_json(text)
+        if repaired is not None:
+            try:
+                return _accept_or_raise(_attach_block(repaired), text), text, True
+            except json.JSONDecodeError:
+                pass
+        setattr(parse_err, "cleaned_text", text)
+        raise
+
+
+def _log_llm_usage(rj, sent_effort, attempt, finish_reason):
+    """Console + JSONL usage/route telemetry for one decoded HTTP success."""
+    usage = rj.get("usage", {})
+    if not usage:
+        return
+    metadata = rj.get("openrouter_metadata") or {}
+    route = metadata.get("endpoints", {})
+    available = route.get("available", []) if isinstance(route, dict) else []
+    selected = next(
+        (
+            endpoint
+            for endpoint in available
+            if isinstance(endpoint, dict) and endpoint.get("selected")
+        ),
+        {},
+    )
+    tok_msg = f"  tokens: prompt={usage.get('prompt_tokens', 0)} completion={usage.get('completion_tokens', 0)} total={usage.get('total_tokens', 0)}"
+    if sent_effort:
+        tok_msg += f" thinking={sent_effort}"
+    log(tok_msg)
+    _run_log(
+        {
+            "event": "tokens",
+            "prompt": usage.get("prompt_tokens", 0),
+            "completion": usage.get("completion_tokens", 0),
+            "total": usage.get("total_tokens", 0),
+            "openrouter_cost": usage.get("cost", 0),
+            "model": selected.get("model") or rj.get("model", MODEL),
+            "provider": selected.get("provider") or rj.get("provider", ""),
+            "route_attempt": selected.get("attempt"),
+            "thinking": sent_effort,
+            "finish_reason": finish_reason,
+            "attempt": attempt,
+        }
+    )
+
+
 def ask_llm(
     messages,
     max_tokens=256,
@@ -416,36 +643,19 @@ def ask_llm(
     reasoning_policy=DEFAULT_REASONING_POLICY,
     reasoning_trigger="unspecified",
 ):
+    """Call the configured backend and decode one plan/action/validator reply.
+
+    Compatibility facade over the client seams above: this loop owns only
+    retry/backoff policy, the parse-retry budget escalation, and the typed
+    errors callers rely on (LLMTransportError, KeyError for API-error bodies,
+    json.JSONDecodeError with malformed_action/response_truncated)."""
     if reasoning_policy not in REASONING_POLICIES:
         raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
     budget = max_tokens
     for attempt in range(max_retries + 1):
-        # Determine thinking level: explicit think_level overrides auto-escalation.
-        # E03: on final auto-retry (attempt 2), disable thinking and use strict
-        # contract instead — more thinking doesn't fix truncation/format errors.
-        # Explicit think_level from callers (e.g. validation) is respected by
-        # gated policy; off suppresses every explicit and retry-time request.
-        if think_level:
-            gated_think_level = think_level
-            requested_level = think_level
-        elif think:
-            requested_level = "adaptive"
-            if attempt >= 2:
-                gated_think_level = None
-            else:
-                gated_think_level = "high" if attempt >= 1 else "medium"
-        elif attempt == 1:
-            # Existing JSON-contract recovery: one reasoning-assisted retry.
-            gated_think_level = "medium"
-            requested_level = "medium"
-        else:
-            gated_think_level = None
-            requested_level = None
-
-        effective_trigger = (
-            "json_retry" if attempt == 1 and not think and not think_level else reasoning_trigger
+        requested_level, effective_think_level, effective_trigger = _reasoning_decision(
+            attempt, think, think_level, reasoning_policy, reasoning_trigger
         )
-        effective_think_level = gated_think_level if reasoning_policy == "gated" else None
         _run_log(
             {
                 "event": "reasoning_decision",
@@ -460,86 +670,37 @@ def ask_llm(
             }
         )
 
-        body = {
-            "model": MODEL,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": budget,
-        }
-        sent_effort = effective_think_level
-        if LLM_BACKEND == "openrouter":
-            if OPENROUTER_PROVIDER:
-                body["provider"] = {
-                    "order": [OPENROUTER_PROVIDER],
-                    "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
-                    "require_parameters": OPENROUTER_REQUIRE_PARAMETERS,
-                }
-            # Always-on reasoners: the baseline effort applies to every call —
-            # strict E03 retries included, since the model cannot stop
-            # reasoning and "no thinking" can only mean the baseline.
-            sent_effort = _merge_effort(effective_think_level)
-            if sent_effort:
-                body["reasoning"] = {
-                    "enabled": True,
-                    "effort": sent_effort,
-                }
-                body["max_tokens"] = max(budget, _EFFORT_TOKEN_FLOOR[sent_effort])
-            else:
-                # Some models reason by default. Keep the harness policy model-independent.
-                body["reasoning"] = {"enabled": False}
-        elif effective_think_level:
-            # Local llama-server: prepend <|think|> to system prompt, bump max_tokens
-            msgs = list(messages)
-            if msgs and msgs[0]["role"] == "system":
-                msgs[0] = dict(msgs[0])
-                msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
-            body["messages"] = msgs
-            body["max_tokens"] = max(budget, 768 if effective_think_level == "high" else 512)
-
-        # E03: strict contract on final auto-retry — suppress reasoning leaks
-        if attempt >= 2 and not think_level:
-            msgs = list(body["messages"])
-            msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
-            body["messages"] = msgs
-
-        headers = {"Content-Type": "application/json"}
-        if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
-            headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
-            headers["X-OpenRouter-Metadata"] = "enabled"
-        # Transport-level error handling with retry + backoff
-        try:
-            resp = requests.post(API, json=body, headers=headers, timeout=timeout or LLM_TIMEOUT)
-        except (
-            requests.exceptions.ConnectionError,
-            requests.exceptions.Timeout,
-            requests.exceptions.RequestException,
-        ) as e:
-            log(f"  Transport error: {type(e).__name__}: {e}")
+        # E03 strict contract on the final auto-retry — suppress reasoning leaks
+        body, headers, sent_effort = _build_llm_request(
+            messages, budget, effective_think_level, strict=attempt >= 2 and not think_level
+        )
+        # One transport attempt; retry/backoff policy is enacted here.
+        rj, failure = _llm_http_attempt(body, headers, timeout or LLM_TIMEOUT)
+        if failure is not None:
+            kind = failure["kind"]
+            if kind == "http_fatal":
+                # Client errors fail fast: retrying an auth/request-shape bug wastes budget.
+                raise LLMTransportError(failure["detail"])
+            if kind == "transport":
+                log(f"  Transport error: {failure['detail']}")
+            elif kind == "http_retryable":
+                log(f"  HTTP {failure['status']}, retrying...")
+            else:  # non_json: proxy/gateway glitch returned an unparseable body
+                log(f"  Non-JSON response body: {failure['detail']}")
             if attempt < max_retries:
                 time.sleep(1 if attempt == 0 else 3)
                 continue
+            if kind == "transport":
+                raise LLMTransportError(
+                    f"Transport failed after {max_retries + 1} attempts: {failure['error']}"
+                ) from failure["error"]
+            if kind == "http_retryable":
+                raise LLMTransportError(
+                    f"HTTP {failure['status']} after {max_retries + 1} attempts"
+                )
             raise LLMTransportError(
-                f"Transport failed after {max_retries + 1} attempts: {e}"
-            ) from e
-        # HTTP status checks — fail-fast on client errors, retry on server/overload
-        sc = resp.status_code
-        if sc == 429 or sc >= 500:
-            log(f"  HTTP {sc}, retrying...")
-            if attempt < max_retries:
-                time.sleep(1 if attempt == 0 else 3)
-                continue
-            raise LLMTransportError(f"HTTP {sc} after {max_retries + 1} attempts")
-        if 400 <= sc < 500:
-            raise LLMTransportError(f"HTTP {sc}: {resp.text[:200]}")
-        # Parse JSON body — retry on non-JSON responses (proxy/gateway glitch)
-        try:
-            rj = resp.json()
-        except ValueError as e:
-            log(f"  Non-JSON response body: {resp.text[:100]}")
-            if attempt < max_retries:
-                time.sleep(1 if attempt == 0 else 3)
-                continue
-            raise LLMTransportError(f"Non-JSON response after {max_retries + 1} attempts") from e
+                f"Non-JSON response after {max_retries + 1} attempts"
+            ) from failure["error"]
         # Handle API error responses (JSON body with "error" key)
         if "error" in rj:
             log(
@@ -548,117 +709,35 @@ def ask_llm(
             if attempt < max_retries:
                 continue
             raise KeyError(f"API error: {rj['error']}")
-        # Log token usage if available
-        usage = rj.get("usage", {})
         finish_reason = (rj.get("choices") or [{}])[0].get("finish_reason", "")
-        if usage:
-            metadata = rj.get("openrouter_metadata") or {}
-            route = metadata.get("endpoints", {})
-            available = route.get("available", []) if isinstance(route, dict) else []
-            selected = next(
-                (
-                    endpoint
-                    for endpoint in available
-                    if isinstance(endpoint, dict) and endpoint.get("selected")
-                ),
-                {},
-            )
-            tok_msg = f"  tokens: prompt={usage.get('prompt_tokens', 0)} completion={usage.get('completion_tokens', 0)} total={usage.get('total_tokens', 0)}"
-            if sent_effort:
-                tok_msg += f" thinking={sent_effort}"
-            log(tok_msg)
-            _run_log(
-                {
-                    "event": "tokens",
-                    "prompt": usage.get("prompt_tokens", 0),
-                    "completion": usage.get("completion_tokens", 0),
-                    "total": usage.get("total_tokens", 0),
-                    "openrouter_cost": usage.get("cost", 0),
-                    "model": selected.get("model") or rj.get("model", MODEL),
-                    "provider": selected.get("provider") or rj.get("provider", ""),
-                    "route_attempt": selected.get("attempt"),
-                    "thinking": sent_effort,
-                    "finish_reason": finish_reason,
-                    "attempt": attempt,
-                }
-            )
+        _log_llm_usage(rj, sent_effort, attempt, finish_reason)
         if finish_reason == "length":
             log("  output hit token budget (finish_reason=length)")
-        msg = rj["choices"][0]["message"]
-        text = msg.get("content") or ""
-        # OpenRouter reasoning: if content is null/empty, try reasoning_content
-        # (model may put JSON in reasoning when token budget is tight)
-        if not text.strip():
-            reasoning = msg.get("reasoning_content") or ""
-            if not reasoning:
-                r = msg.get("reasoning", "")
-                reasoning = r.get("content", "") if isinstance(r, dict) else (r or "")
-            text = reasoning
+        text = _extract_message_text(rj)
         if raw:
             return text
-        # The strip chain below removes a trailing newline; remember it so a
-        # truncated sentinel block can keep its last complete line.
-        ends_with_newline = text.endswith("\n")
-        # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-        text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
-        # Strip <|channel>...<channel|> blocks (local llama-server thinking format)
-        text = re.sub(r"<\|channel\>.*?<channel\|>", "", text, flags=re.DOTALL).strip()
-        text = re.sub(r"<\|channel\>.*", "", text, flags=re.DOTALL).strip()
-        # Strip markdown code fences if present
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        # Sentinel content block (issue #15): content rides outside the JSON.
-        text, block, block_closed = _split_content_block(text)
-        # Try to extract JSON object from anywhere in the text
-        if not text.startswith("{") and "{" in text:
-            text = text[text.index("{") :]
-
-        def _attach_block(obj):
-            if block is not None and isinstance(obj, dict):
-                content = block
-                if not block_closed and finish_reason == "length":
-                    obj["content_truncated"] = True
-                    # The cutoff landed on a line boundary: the last line is
-                    # complete, not partial — restore the stripped newline so
-                    # the run loop's partial-line trim keeps it.
-                    if ends_with_newline:
-                        content += "\n"
-                obj["content"] = content
-            return obj
-
         try:
-            parsed = json.loads(text)
-            if not isinstance(parsed, dict):
-                raise json.JSONDecodeError(
-                    "Expected JSON object, got " + type(parsed).__name__, text, 0
-                )
-            return _accept_or_raise(_attach_block(parsed), text)
+            obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
         except json.JSONDecodeError as parse_err:
-            # E03: attempt mechanical repair before burning a retry
-            repaired = _repair_json(text)
-            if repaired is not None:
-                try:
-                    accepted = _accept_or_raise(_attach_block(repaired), text)
-                    log(f"  JSON repaired on attempt {attempt}")
-                    return accepted
-                except json.JSONDecodeError:
-                    pass
+            cleaned = getattr(parse_err, "cleaned_text", "")
             if attempt < max_retries:
                 # Action-specific budget: a truncated write/edit payload needs
                 # room for content, not more reasoning.
-                if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(text):
+                if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(cleaned):
                     budget = STEP_WRITE_TOKENS
                     log(f"  write/edit payload budget -> {budget}")
                 think_str = f" thinking={sent_effort}" if sent_effort else ""
-                log(f"  [retry {attempt + 1}]{think_str} JSON parse failed, raw: {text[:120]}")
-            else:
-                # Typed classification for the caller (issue #7): output that
-                # hit the token budget is a transport failure of the action
-                # envelope, not model noise — the recovery differs.
-                setattr(parse_err, "malformed_action", True)
-                setattr(parse_err, "response_truncated", finish_reason == "length")
-                raise
+                log(f"  [retry {attempt + 1}]{think_str} JSON parse failed, raw: {cleaned[:120]}")
+                continue
+            # Typed classification for the caller (issue #7): output that
+            # hit the token budget is a transport failure of the action
+            # envelope, not model noise — the recovery differs.
+            setattr(parse_err, "malformed_action", True)
+            setattr(parse_err, "response_truncated", finish_reason == "length")
+            raise
+        if repaired:
+            log(f"  JSON repaired on attempt {attempt}")
+        return obj
 
 
 _KNOWN_ERROR_TYPES = {
