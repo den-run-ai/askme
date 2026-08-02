@@ -6,27 +6,14 @@ Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
 
 ## Quick Start
 
+Start `llama-server` on port 8080, then run AskMe from this repository:
+
 ```bash
-# All AskMe commands below assume you are in this repository's root.
-
-# 1. Start llama-server from a separate llama.cpp checkout
-cd /path/to/llama.cpp
-mkdir -p /tmp/llama-cache
-./build/bin/llama-server \
-  -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
-  -ngl 99 --ctx-size 16384 --flash-attn on \
-  --cache-type-k q4_0 --cache-type-v q4_0 \
-  --swa-full --cache-reuse 256 \
-  -np 1 --slot-save-path /tmp/llama-cache \
-  --port 8080
-
-# 2. In another terminal, run the agent from the AskMe checkout
-cd /path/to/askme
 python3 askme.py "create a hello world program in C and compile it"
-
-# Or via OpenRouter (set OPENROUTER_API_KEY in .env)
-LLM_BACKEND=openrouter python3 askme.py "your task here"
 ```
+
+See [model setup](docs/gemma4-setup.md) or
+[configuration](docs/configuration.md) for other backends and options.
 
 ## How It Works
 
