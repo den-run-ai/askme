@@ -6,7 +6,8 @@ continuation (issue #30): exact UTF-8 source pages preserve line terminators,
 source returns an action-ready cursor bound to the read target's content hash.
 Initial `offset`/`limit` remain 1-based line selectors; continuation actions
 must echo `cursor`, the normalized `limit`, and `sha256`, and a source change
-rejects the stale cursor. Duplicate-read identity includes the complete line
+rejects the stale cursor. Cursors at or beyond EOF are invalid because emitted
+continuations always point to unread content. Duplicate-read identity includes the complete line
 range or cursor/limit/hash. Bounded `search` and `tree` remain discovery
 summaries rather than resumable streams, but now expose every bounded
 cap/snippet omission plus read/traversal errors and pack only complete records
