@@ -11,7 +11,12 @@ passive-phrasing
 exemptions in the write-task regex). `no_write_executed`,
 `unvalidated_write`, and task-local `failed_steps` are task-scoped even when
 the failed task dispatched zero actions. Incomplete artifacts are run-scoped,
-including zero-byte pending truncations. Unresolved truncated writes block
+including zero-byte pending truncations; `incomplete_write_target` carries the
+frozen, action-ready canonical recovery path when a symlink is later retargeted,
+while `incomplete_write_append_allowed` says whether append recovery is safe;
+the exact target is the sole exception to the executor's relative-path rule, and
+empty-overwrite retries retain every observed append referent guard. Unresolved
+truncated writes block
 `done` and deterministic
 reconciliation, empty task lists are invalid plans, and a failed final
 validation requires new successful mutation/shell evidence before rechecking.
