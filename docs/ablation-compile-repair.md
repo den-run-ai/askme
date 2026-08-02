@@ -46,6 +46,30 @@ Offline qualification of both arms (no model calls) already exists:
 `test_flag_disables_repair_before_any_mutation` and
 `test_flag_off_arm_surfaces_the_compile_error_unrepaired`.
 
+## Execution discipline (binding on every paid trial)
+
+- **Fresh process per trial.** `COMPILE_REPAIR_ENABLED` is resolved from the
+  environment at import time, so a long-lived process ignores later `env`
+  changes. Each trial launches a new `python3 askme.py` process with the
+  arm's environment set explicitly; arms must never share a process.
+- **Provenance verification.** Before a trial counts, the runner checks that
+  its `run_start` JSONL event's `compile_repair` matches the intended arm.
+  A mismatch invalidates the trial, is retained as typed evidence, and the
+  trial is re-run in a fresh process — it must not be relabeled.
+- **Counterbalanced order.** Trials run in alternating blocks that also
+  alternate the starting arm (ABBA BAAB …, or an equivalent predeclared
+  schedule) rather than a fixed ABAB sequence, so provider drift and
+  time-of-day effects cannot align with one arm.
+- **Infrastructure and evaluator failures are predeclared, not judged
+  post hoc.** A trial that fails for infrastructure reasons (transport
+  errors exhausting retries, provider outage, runner crash, evaluator
+  crash) is excluded from both arms' acceptance denominators, retained as
+  distinct evidence, and replaced by a fresh trial in the same schedule
+  slot. An evaluator failure on a control halts the run for
+  requalification. Agent-side outcomes — exhaustion, timeouts inside
+  budget, malformed actions, wrong artifacts, false completion — are
+  ordinary negative results and stay in the denominators.
+
 ## Task family and controls
 
 - **Primary tasks:** a C-header task set — `.c` sources using `printf`/string
