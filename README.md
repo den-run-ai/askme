@@ -6,14 +6,14 @@ Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
 
 ## Quick Start
 
-Start `llama-server` on port 8080, then run AskMe from this repository:
+With Python, `requests`, and a [local model](docs/gemma4-setup.md) ready, run
+AskMe from this repository on a project you can safely edit:
 
 ```bash
-python3 askme.py "create a hello world program in C and compile it"
+python3 askme.py --working-dir /path/to/project "Fix the failing tests"
 ```
 
-See [model setup](docs/gemma4-setup.md) or
-[configuration](docs/configuration.md) for other backends and options.
+For OpenRouter or other options, see [configuration](docs/configuration.md).
 
 ## How It Works
 
