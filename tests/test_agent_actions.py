@@ -1742,11 +1742,13 @@ class TestValidateAfterWrite:
             {"action": "write", "arg": "app.py",
              "content": "no complete line", "append": True,
              "content_truncated": True},
-            {"action": "write", "arg": str(referent),
+            {"action": "write", "arg": "app.py",
              "content": "still no complete line", "content_truncated": True},
             {"action": "write", "arg": "app.py", "content": "BAD\n",
              "append": True},
-            {"action": "write", "arg": str(referent), "content": "GOOD\n"},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "write", "arg": str(referent), "content": "TAIL\n",
+             "append": True},
             {"action": "done"},
         ]
         log_path = tmp_path / "run.jsonl"
@@ -1758,7 +1760,9 @@ class TestValidateAfterWrite:
         finally:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
-        assert referent.read_text() == "GOOD\n"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert referent.read_text() == "OLD\nTAIL\n"
         assert result["state"]["pending_empty_writes"] == {}
         events = [json.loads(l) for l in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "append_after_empty_overwrite"
@@ -1793,6 +1797,96 @@ class TestValidateAfterWrite:
         assert result["status"] == "complete"
         assert referent.read_text() == "OLD\nNEW\n"
         assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_obligations_survive_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["update app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "shell",
+             "arg": f"ln -sfn {new_target} app.py"},
+            {"action": "write", "arg": "app.py",
+             "content": "still no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "NEWTAIL\n",
+             "append": True},
+            {"action": "done"},
+            {"action": "write", "arg": str(old_target),
+             "content": "OLDTAIL\n", "append": True},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("update app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=7)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nOLDTAIL\n"
+        assert new_target.read_text() == "NEW\nNEWTAIL\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "incomplete_write_done"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_regular_path_survives_retarget_to_symlink(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        original = work / "app.py"
+        moved = work / "old.py"
+        new_target = real / "new.py"
+        original.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        mock_llm.side_effect = [
+            {"tasks": ["update app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "shell",
+             "arg": f"mv app.py old.py && ln -s {new_target} app.py"},
+            {"action": "write", "arg": "app.py", "content": "TAIL\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("update app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=4)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "exhausted"
+        assert moved.read_text() == "OLD\n"
+        assert new_target.read_text() == "NEW\nTAIL\n"
+        assert result["state"]["pending_empty_writes"]
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "incomplete_write_done"
+                   for e in events)
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
