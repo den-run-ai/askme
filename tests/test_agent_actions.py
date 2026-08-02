@@ -193,6 +193,19 @@ class TestRangedRead:
         assert result["ok"] is False
         assert result["error_type"] == "invalid_read_cursor"
 
+    @pytest.mark.parametrize("cursor", [3, 4])
+    def test_cursor_at_or_beyond_eof_is_rejected(self, work_dir, cursor):
+        Path(work_dir, "data.txt").write_text("abc")
+        result = execute({
+            "action": "read", "arg": "data.txt", "cursor": cursor,
+            "limit": 60,
+            "sha256": hashlib.sha256(b"abc").hexdigest()[:12],
+        }, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "invalid_read_cursor"
+        assert result["content"] == ""
+        assert result["continuation"] is None
+
     def test_small_file_read_fully(self, work_dir):
         Path(work_dir, "small.txt").write_text("a\nb\nc\n")
         result = execute({"action": "read", "arg": "small.txt"}, work_dir)
