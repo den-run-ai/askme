@@ -12,14 +12,14 @@ from talks/berkeley-agentic-ai-summit-2026/evals/, so this module pins:
 
 Offline only — no LLM or network involved.
 """
+
 import json
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS = (ROOT / "talks" / "berkeley-agentic-ai-summit-2026"
-           / "evals" / "draft-results.json")
+RESULTS = ROOT / "talks" / "berkeley-agentic-ai-summit-2026" / "evals" / "draft-results.json"
 LLM_WORKFLOW = ROOT / ".github" / "workflows" / "llm.yml"
 INTEGRATION_TESTS = ROOT / "tests" / "test_agent_integration.py"
 
@@ -38,6 +38,7 @@ def _selector(task):
 
 
 # --- protocol <-> suite <-> CI linkage ---
+
 
 def test_protocol_selectors_exist_in_pytest_suite(results):
     text = INTEGRATION_TESTS.read_text(encoding="utf-8")
@@ -60,16 +61,21 @@ def test_ci_workflow_replays_protocol_selectors(results):
 
 # --- draft-results.json internal consistency ---
 
+
 def test_cell_statuses_follow_the_predeclared_pass_rule(results):
     """Pass rule: pytest pass AND agent_complete AND deterministic
     acceptance pass (study.pass_rule)."""
     for cell in results["cells"]:
         outcomes = cell["outcomes"]
-        expected = ("pass" if (
-            outcomes["pytest"] == "pass"
-            and outcomes["agent_complete"]
-            and outcomes["deterministic_postcondition"]["status"] == "pass"
-        ) else "fail")
+        expected = (
+            "pass"
+            if (
+                outcomes["pytest"] == "pass"
+                and outcomes["agent_complete"]
+                and outcomes["deterministic_postcondition"]["status"] == "pass"
+            )
+            else "fail"
+        )
         assert outcomes["cell_status"] == expected, cell["id"]
 
 
@@ -92,25 +98,32 @@ def test_overall_totals_match_cell_sums(results):
         return sum(c["metrics"][key] for c in cells)
 
     assert totals["agent_wall_s"] == pytest.approx(metric_sum("agent_wall_s"), abs=1e-6)
-    for key in ("steps", "failed_steps", "full_replans", "local_replans",
-                "thinking_retry_responses", "usage_bearing_responses",
-                "prompt_tokens", "completion_tokens", "total_tokens"):
+    for key in (
+        "steps",
+        "failed_steps",
+        "full_replans",
+        "local_replans",
+        "thinking_retry_responses",
+        "usage_bearing_responses",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+    ):
         assert totals[key] == metric_sum(key), key
-    assert totals["billed_credits"] == pytest.approx(
-        metric_sum("billed_credits"), abs=1e-9)
+    assert totals["billed_credits"] == pytest.approx(metric_sum("billed_credits"), abs=1e-9)
 
 
 def test_per_cell_token_totals_are_consistent(results):
     for cell in results["cells"]:
         metrics = cell["metrics"]
         assert metrics["total_tokens"] == (
-            metrics["prompt_tokens"] + metrics["completion_tokens"]), cell["id"]
+            metrics["prompt_tokens"] + metrics["completion_tokens"]
+        ), cell["id"]
 
 
 def test_model_totals_match_their_cells(results):
     for model_total in results["model_totals"]:
-        model_cells = [c for c in results["cells"]
-                       if c["model_id"] == model_total["model_id"]]
+        model_cells = [c for c in results["cells"] if c["model_id"] == model_total["model_id"]]
         assert len(model_cells) == 2, model_total["model_id"]
         statuses = [c["outcomes"]["cell_status"] for c in model_cells]
         assert model_total["cell_statuses"]["pass"] == statuses.count("pass")
@@ -119,15 +132,22 @@ def test_model_totals_match_their_cells(results):
         def metric_sum(key):
             return sum(c["metrics"][key] for c in model_cells)
 
-        assert model_total["agent_wall_s"] == pytest.approx(
-            metric_sum("agent_wall_s"), abs=1e-6)
-        for key in ("steps", "failed_steps", "full_replans", "local_replans",
-                    "thinking_retry_responses", "usage_bearing_responses",
-                    "prompt_tokens", "completion_tokens", "total_tokens"):
-            assert model_total[key] == metric_sum(key), (
-                model_total["model_id"], key)
+        assert model_total["agent_wall_s"] == pytest.approx(metric_sum("agent_wall_s"), abs=1e-6)
+        for key in (
+            "steps",
+            "failed_steps",
+            "full_replans",
+            "local_replans",
+            "thinking_retry_responses",
+            "usage_bearing_responses",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ):
+            assert model_total[key] == metric_sum(key), (model_total["model_id"], key)
         assert model_total["billed_credits"] == pytest.approx(
-            metric_sum("billed_credits"), abs=1e-9)
+            metric_sum("billed_credits"), abs=1e-9
+        )
 
 
 def test_billing_reconciliation_matches_cells(results):
@@ -137,25 +157,21 @@ def test_billing_reconciliation_matches_cells(results):
     assert combined["matches"] is True
     assert combined["sum_of_response_costs"] == pytest.approx(billed, abs=1e-9)
     assert combined["api_key_usage_delta"] == pytest.approx(
-        combined["api_key_usage_after"] - combined["api_key_usage_before"],
-        abs=1e-9)
+        combined["api_key_usage_after"] - combined["api_key_usage_before"], abs=1e-9
+    )
     for segment in reconciliation["segments"]:
         assert segment["matches"] is True
         assert segment["api_key_usage_delta"] == pytest.approx(
-            segment["api_key_usage_after"] - segment["api_key_usage_before"],
-            abs=1e-9)
-    segment_sum = sum(s["sum_of_response_costs"]
-                      for s in reconciliation["segments"])
-    assert segment_sum == pytest.approx(
-        combined["sum_of_response_costs"], abs=1e-9)
+            segment["api_key_usage_after"] - segment["api_key_usage_before"], abs=1e-9
+        )
+    segment_sum = sum(s["sum_of_response_costs"] for s in reconciliation["segments"])
+    assert segment_sum == pytest.approx(combined["sum_of_response_costs"], abs=1e-9)
 
 
 def test_extension_cells_are_declared(results):
     extensions = {e["id"]: e for e in results["study"]["extensions"]}
-    extension_cells = {c["id"] for c in results["cells"]
-                       if c.get("extension_id")}
-    declared = {cell_id for e in extensions.values()
-                for cell_id in e["added_cells"]}
+    extension_cells = {c["id"] for c in results["cells"] if c.get("extension_id")}
+    declared = {cell_id for e in extensions.values() for cell_id in e["added_cells"]}
     assert extension_cells == declared
     for cell in results["cells"]:
         if cell.get("extension_id"):

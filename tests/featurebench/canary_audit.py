@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-
 DEFAULT_PROTOCOL = Path(__file__).with_name("canary-protocol.json")
 DEFAULT_ASKME_SOURCE = Path(__file__).resolve().parents[2] / "askme.py"
 POLICY_LOG_NAME = "askme-policy.jsonl"
@@ -46,9 +45,7 @@ class _Audit:
     def fail(self, code: str, message: str) -> None:
         # Defense in depth: no diagnostic may echo the credential being sought.
         if self.secret:
-            message = message.replace(
-                self.secret.decode("utf-8", errors="ignore"), "<redacted>"
-            )
+            message = message.replace(self.secret.decode("utf-8", errors="ignore"), "<redacted>")
         self.violations.append({"code": code, "message": message})
 
     def artifact(self, label: str, path: Path) -> None:
@@ -134,18 +131,14 @@ def _contains_bytes(path: Path, needle: bytes) -> bool:
             overlap = candidate[-keep:] if keep else b""
 
 
-def _as_mapping(
-    audit: _Audit, value: Any, label: str
-) -> Optional[Mapping[str, Any]]:
+def _as_mapping(audit: _Audit, value: Any, label: str) -> Optional[Mapping[str, Any]]:
     if not isinstance(value, dict):
         audit.fail(f"{label}_type", f"{label} must contain a JSON object")
         return None
     return value
 
 
-def _expect_equal(
-    audit: _Audit, code: str, label: str, observed: Any, expected: Any
-) -> None:
+def _expect_equal(audit: _Audit, code: str, label: str, observed: Any, expected: Any) -> None:
     if observed != expected:
         audit.fail(code, f"{label} did not match the frozen value")
 
@@ -181,11 +174,7 @@ def _audit_endpoint_catalog_preflight(
         audit.run_dir / ENDPOINT_CATALOG_PREFLIGHT_NAME,
         "endpoint_catalog_preflight",
     )
-    record = (
-        _as_mapping(audit, raw, "endpoint_catalog_preflight")
-        if raw is not None
-        else None
-    )
+    record = _as_mapping(audit, raw, "endpoint_catalog_preflight") if raw is not None else None
     if record is None:
         return
 
@@ -237,9 +226,7 @@ def _audit_endpoint_catalog_preflight(
         )
 
     matches = record.get("matches")
-    if not isinstance(matches, list) or not all(
-        isinstance(match, dict) for match in matches
-    ):
+    if not isinstance(matches, list) or not all(isinstance(match, dict) for match in matches):
         audit.fail(
             "endpoint_catalog_preflight_matches",
             "endpoint-catalog matches must be a list of objects",
@@ -269,9 +256,7 @@ def _audit_endpoint_catalog_preflight(
             )
 
 
-def _protocol_expectations(
-    audit: _Audit, protocol: Mapping[str, Any]
-) -> Optional[dict[str, Any]]:
+def _protocol_expectations(audit: _Audit, protocol: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     try:
         cell = protocol["agent_cell"]
         sources = protocol["sources"]
@@ -285,9 +270,7 @@ def _protocol_expectations(
                 "max_planning_attempts": limits["max_planning_attempts_total"],
                 "max_tasks_per_plan": limits["max_tasks_per_plan"],
                 "max_steps_per_task_attempt": limits["max_steps_per_task_attempt"],
-                "max_task_local_replans": limits[
-                    "max_task_local_replans_per_task"
-                ],
+                "max_task_local_replans": limits["max_task_local_replans_per_task"],
                 "max_task_attempts": limits["max_task_attempts_per_task"],
             }
             timeouts = cell["timeouts"]
@@ -344,10 +327,7 @@ def _protocol_expectations(
         audit.fail("protocol_reasoning_policy", "canary protocol must freeze gated policy")
     if not isinstance(expected["prompt_chars"], int) or expected["prompt_chars"] < 1:
         audit.fail("protocol_prompt_chars", "protocol prompt character count is invalid")
-    if (
-        not isinstance(expected["prompt_sha256"], str)
-        or len(expected["prompt_sha256"]) != 64
-    ):
+    if not isinstance(expected["prompt_sha256"], str) or len(expected["prompt_sha256"]) != 64:
         audit.fail("protocol_prompt_hash", "protocol prompt SHA-256 is invalid")
     if not isinstance(expected["adapter_code_revision"], str):
         audit.fail("protocol_adapter_revision", "protocol adapter code revision is missing")
@@ -357,8 +337,7 @@ def _protocol_expectations(
     ):
         audit.fail("protocol_source_hash", "protocol AskMe source SHA-256 is invalid")
     if set(expected["code_files"]) != REQUIRED_CODE_FILES or not all(
-        isinstance(value, str) and len(value) == 64
-        for value in expected["code_files"].values()
+        isinstance(value, str) and len(value) == 64 for value in expected["code_files"].values()
     ):
         audit.fail(
             "protocol_code_files",
@@ -372,9 +351,7 @@ def _protocol_expectations(
             "protocol_served_models",
             "protocol expected served model IDs must be non-empty strings",
         )
-    elif len(set(expected["protocol_served_models"])) != len(
-        expected["protocol_served_models"]
-    ):
+    elif len(set(expected["protocol_served_models"])) != len(expected["protocol_served_models"]):
         audit.fail(
             "protocol_served_models",
             "protocol expected served model IDs must not contain duplicates",
@@ -448,7 +425,9 @@ def _audit_integrity(
             audit.fail("prompt_invalid", f"preserved prompt is not exact UTF-8: {error}")
 
     manifest_raw = audit.read_json(manifest_path, "adapter_manifest")
-    manifest = _as_mapping(audit, manifest_raw, "adapter_manifest") if manifest_raw is not None else None
+    manifest = (
+        _as_mapping(audit, manifest_raw, "adapter_manifest") if manifest_raw is not None else None
+    )
     result_raw = audit.read_json(result_path, "agent_result")
     result = _as_mapping(audit, result_raw, "agent_result") if result_raw is not None else None
     run_log = audit.read_jsonl(run_log_path, "run_log")
@@ -728,19 +707,14 @@ def _audit_run_log(
                 f"token event {index} used an unapproved served model",
             )
         provider = event.get("provider")
-        if (
-            not isinstance(provider, str)
-            or provider.casefold() != expected["provider"].casefold()
-        ):
+        if not isinstance(provider, str) or provider.casefold() != expected["provider"].casefold():
             audit.fail(
                 "token_served_provider",
                 f"token event {index} was not served by the pinned provider "
                 f"{expected['provider']!r}",
             )
 
-    decisions = [
-        event for event in events if event.get("event") == "reasoning_decision"
-    ]
+    decisions = [event for event in events if event.get("event") == "reasoning_decision"]
     if not decisions:
         audit.fail(
             "reasoning_decisions_missing",
@@ -764,9 +738,7 @@ def _audit_run_log(
             continue
         if not isinstance(event.get("ok"), bool):
             audit.fail("run_action_shape", "run-log step outcome must be boolean")
-        if event.get("error_type") is not None and not isinstance(
-            event.get("error_type"), str
-        ):
+        if event.get("error_type") is not None and not isinstance(event.get("error_type"), str):
             audit.fail("run_action_shape", "run-log step error_type must be a string or null")
         actions.append(
             {
@@ -792,12 +764,8 @@ def _classify_terminal_timeout(
     expected_reason = "launcher received signal 15"
     state = agent_result.get("state")
     errors = state.get("errors") if isinstance(state, dict) else None
-    terminals = [
-        event for event in policy_events if event.get("event") == "launcher_terminal"
-    ]
-    launcher_ends = [
-        event for event in policy_events if event.get("event") == "launcher_end"
-    ]
+    terminals = [event for event in policy_events if event.get("event") == "launcher_terminal"]
+    launcher_ends = [event for event in policy_events if event.get("event") == "launcher_end"]
     exact = (
         reason == expected_reason
         and isinstance(errors, list)
@@ -874,9 +842,7 @@ def _audit_policy_log(
                 "policy_decision_sequence",
                 f"policy action decision {index} has a non-contiguous sequence",
             )
-        if not isinstance(event.get("action"), str) or not isinstance(
-            event.get("arg"), str
-        ):
+        if not isinstance(event.get("action"), str) or not isinstance(event.get("arg"), str):
             audit.fail(
                 "policy_action_shape",
                 f"policy action decision {index} needs string action and arg fields",
@@ -925,9 +891,7 @@ def _audit_policy_log(
             "policy_result_count",
             "policy action results do not cover every policy decision",
         )
-    for index, (decision, action) in enumerate(
-        zip(completed_decisions, run_actions), 1
-    ):
+    for index, (decision, action) in enumerate(zip(completed_decisions, run_actions), 1):
         if decision.get("action") != action.get("action"):
             audit.fail(
                 "policy_action_mismatch",
@@ -1114,11 +1078,7 @@ def audit_canary(
         return result
 
     protocol_raw = audit.read_json(protocol_path, "protocol")
-    protocol = (
-        _as_mapping(audit, protocol_raw, "protocol")
-        if protocol_raw is not None
-        else None
-    )
+    protocol = _as_mapping(audit, protocol_raw, "protocol") if protocol_raw is not None else None
     expected = _protocol_expectations(audit, protocol) if protocol is not None else None
     if expected is None:
         _scan_for_secret(audit)
@@ -1160,17 +1120,10 @@ def audit_canary(
 
     provenance_raw = audit.read_json(run_dir / "askme-canary.json", "run_provenance")
     provenance = (
-        _as_mapping(audit, provenance_raw, "run_provenance")
-        if provenance_raw is not None
-        else None
+        _as_mapping(audit, provenance_raw, "run_provenance") if provenance_raw is not None else None
     )
 
-    attempt_dir = (
-        run_dir
-        / "run_outputs"
-        / expected["task_id"]
-        / f"attempt-{expected['attempt']}"
-    )
+    attempt_dir = run_dir / "run_outputs" / expected["task_id"] / f"attempt-{expected['attempt']}"
     audit.artifact("attempt_dir", attempt_dir)
     if attempt_dir.is_symlink() or not attempt_dir.is_dir():
         audit.fail("attempt_dir_missing", "canonical task attempt directory is missing")
@@ -1185,9 +1138,7 @@ def audit_canary(
         code_root,
     )
     result["agent_status"] = agent_status
-    result["agent_completion"] = (
-        agent_status in AGENT_COMPLETE_STATUSES if agent_status else None
-    )
+    result["agent_completion"] = agent_status in AGENT_COMPLETE_STATUSES if agent_status else None
     result["integrity"] = hashes
     if (
         prediction is not None
@@ -1239,12 +1190,8 @@ def audit_canary(
         except (OSError, UnicodeError):
             pass
 
-    run_actions, token_events = _audit_run_log(
-        audit, events, prompt, expected, allowed_models
-    )
-    policy = _audit_policy_log(
-        audit, attempt_dir, run_actions, hashes, agent_result
-    )
+    run_actions, token_events = _audit_run_log(audit, events, prompt, expected, allowed_models)
+    policy = _audit_policy_log(audit, attempt_dir, run_actions, hashes, agent_result)
     result["timed_out"] = policy["timed_out"]
     result["policy_compliant"] = policy["compliant"]
     result["policy_denials"] = policy["denials"]
@@ -1254,21 +1201,19 @@ def audit_canary(
 
     served_models = sorted(
         {
-            event.get("model")
+            observed_model
             for event in token_events
-            if isinstance(event.get("model"), str)
+            if isinstance((observed_model := event.get("model")), str)
         }
     )
     served_providers = sorted(
         {
-            event.get("provider")
+            observed_provider
             for event in token_events
-            if isinstance(event.get("provider"), str)
+            if isinstance((observed_provider := event.get("provider")), str)
         }
     )
-    result["route"].update(
-        {"served_models": served_models, "served_providers": served_providers}
-    )
+    result["route"].update({"served_models": served_models, "served_providers": served_providers})
     result["counts"] = {
         "predictions": prediction_count,
         "token_events": len(token_events),

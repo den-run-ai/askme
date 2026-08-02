@@ -5,15 +5,9 @@ from pathlib import Path
 
 from workflow_eval import evaluate_workflow
 
-
 TESTS_ROOT = Path(__file__).parent
 MANIFEST = TESTS_ROOT / "workflows" / "config_precedence" / "manifest.json"
-ALTERNATIVE = (
-    TESTS_ROOT
-    / "workflow_alternatives"
-    / "config_precedence"
-    / "config_cli.py"
-)
+ALTERNATIVE = TESTS_ROOT / "workflow_alternatives" / "config_precedence" / "config_cli.py"
 
 
 def test_independent_config_precedence_alternative_passes_all_checks(tmp_path):

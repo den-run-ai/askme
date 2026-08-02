@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-
 DEFAULT_TIMEOUT = 30
 TIMEOUT_ERROR = "error: timeout must be a positive integer"
 MISSING = object()

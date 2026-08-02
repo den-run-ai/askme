@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex, hashlib, bisect
+
+import argparse
+import bisect
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
+from typing import Any
+
+import requests
 
 
 def log(msg):
@@ -19,6 +34,7 @@ def _load_env():
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
+
 
 _load_env()
 
@@ -48,23 +64,20 @@ _EFFORT_TOKEN_FLOOR = {"low": 1024, "medium": 1536, "high": 2048}
 def _parse_reasoning_effort(raw):
     effort = (raw or "").strip().lower()
     if effort and effort not in _EFFORT_RANK:
-        raise ValueError(
-            "OPENROUTER_REASONING_EFFORT must be low, medium, or high (or unset)"
-        )
+        raise ValueError("OPENROUTER_REASONING_EFFORT must be low, medium, or high (or unset)")
     return effort
 
 
-OPENROUTER_REASONING_EFFORT = _parse_reasoning_effort(
-    os.environ.get("OPENROUTER_REASONING_EFFORT"))
+OPENROUTER_REASONING_EFFORT = _parse_reasoning_effort(os.environ.get("OPENROUTER_REASONING_EFFORT"))
 
 
 def _merge_effort(think_level):
     """Effort to request from OpenRouter: the gated level, raised to the
     baseline. Falsy result means request reasoning disabled (hybrid contract)."""
     if OPENROUTER_REASONING_EFFORT and think_level:
-        return max(OPENROUTER_REASONING_EFFORT, think_level,
-                   key=_EFFORT_RANK.__getitem__)
+        return max(OPENROUTER_REASONING_EFFORT, think_level, key=_EFFORT_RANK.__getitem__)
     return OPENROUTER_REASONING_EFFORT or think_level
+
 
 CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
 
@@ -90,14 +103,21 @@ def _warm_cache():
     if not CACHE_WORKAROUND or LLM_BACKEND != "local":
         return
     try:
-        requests.post(f"{_BASE_URL}/v1/chat/completions", json={
-            "model": MODEL,
-            "messages": [{"role": "system", "content": SYSTEM_PLAN},
-                         {"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-        }, timeout=60)
-        resp = requests.post(f"{_BASE_URL}/slots/0?action=save",
-                             json={"filename": _CACHE_SLOT}, timeout=10)
+        requests.post(
+            f"{_BASE_URL}/v1/chat/completions",
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PLAN},
+                    {"role": "user", "content": "hi"},
+                ],
+                "max_tokens": 1,
+            },
+            timeout=60,
+        )
+        resp = requests.post(
+            f"{_BASE_URL}/slots/0?action=save", json={"filename": _CACHE_SLOT}, timeout=10
+        )
         if resp.status_code == 200 and resp.json().get("n_saved", 0) > 0:
             _cache_warmed = True
             log(f"Cache warm: saved {resp.json()['n_saved']} tokens")
@@ -113,8 +133,9 @@ def _restore_cache():
     if not _cache_warmed:
         return
     try:
-        requests.post(f"{_BASE_URL}/slots/0?action=restore",
-                      json={"filename": _CACHE_SLOT}, timeout=10)
+        requests.post(
+            f"{_BASE_URL}/slots/0?action=restore", json={"filename": _CACHE_SLOT}, timeout=10
+        )
     except Exception:
         pass
 
@@ -126,9 +147,10 @@ PROBE_PKG_MANAGERS = ["brew", "apt-get", "dnf", "pacman", "apk"]
 def preflight_probe(working_dir="."):
     """Deterministic environment probe. Returns structured dict for planner state."""
     import platform
-    env = {
+
+    env: dict[str, Any] = {
         "platform": platform.system().lower(),  # "darwin", "linux", "windows"
-        "arch": platform.machine(),              # "arm64", "x86_64"
+        "arch": platform.machine(),  # "arm64", "x86_64"
         "working_dir": str(Path(working_dir).resolve()),
     }
     # Available tools (fixed allowlist, no prompt inference)
@@ -167,6 +189,7 @@ def get_policy():
 
 class LLMTransportError(Exception):
     """Raised when all LLM request retries are exhausted."""
+
     pass
 
 
@@ -183,13 +206,13 @@ MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 # observation may not consume the whole step budget — the 2026-08-01 Qwen
 # canary spent all 27 executed steps on tree/read and never selected a write.
 WRITE_PRESSURE_OBSERVATIONS = 3  # observation steps before the executor must commit
-OBSERVE_TAIL_RESERVE = 3         # final steps per attempt reserved for commitment
+OBSERVE_TAIL_RESERVE = 3  # final steps per attempt reserved for commitment
 # Validate-after-write policy (revision 4): on a write-shaped task, repeated
 # whole-file rewrites of the same target may not consume the step budget —
 # the 2026-08-01 v6 Gemma canary rewrote one file 18 times without ever
 # verifying it or emitting done.
 REWRITE_PRESSURE_WRITES = 2  # same-target full writes before the executor must verify
-REWRITE_SKIP_WRITES = 3      # same-target full writes after which further rewrites are skipped
+REWRITE_SKIP_WRITES = 3  # same-target full writes after which further rewrites are skipped
 # "include" dropped (Codex P2, PR #16): it matched passive phrasing like
 # "files that include deprecated.h" and misclassified observation tasks.
 _WRITE_TASK_RE = re.compile(
@@ -205,21 +228,21 @@ _OBSERVE_TASK_RE = re.compile(
 
 
 def _is_write_shaped(task):
-    return (bool(task) and bool(_WRITE_TASK_RE.search(task))
-            and not _OBSERVE_TASK_RE.match(task))
+    return bool(task) and bool(_WRITE_TASK_RE.search(task)) and not _OBSERVE_TASK_RE.match(task)
+
 
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
 # stay navigable without blowing up executor state.
-READ_LINES = 60           # max lines per read window
-READ_CHARS = 1200         # max Unicode code points per read page
-READ_LIMIT_MAX = 200      # hard cap on model-specified read limit
-SEARCH_MAX_MATCHES = 15   # bounded literal search results
-SEARCH_MAX_CHARS = 1500   # bounded search output
-SEARCH_MAX_FILES = 500    # bounded search scan
-TREE_MAX_ENTRIES = 60     # bounded repository-tree listing
-TREE_MAX_CHARS = 1500     # bounded tree output
-TREE_MAX_DEPTH = 3        # bounded tree walk depth
+READ_LINES = 60  # max lines per read window
+READ_CHARS = 1200  # max Unicode code points per read page
+READ_LIMIT_MAX = 200  # hard cap on model-specified read limit
+SEARCH_MAX_MATCHES = 15  # bounded literal search results
+SEARCH_MAX_CHARS = 1500  # bounded search output
+SEARCH_MAX_FILES = 500  # bounded search scan
+TREE_MAX_ENTRIES = 60  # bounded repository-tree listing
+TREE_MAX_CHARS = 1500  # bounded tree output
+TREE_MAX_DEPTH = 3  # bounded tree walk depth
 OBSERVE_ACTIONS = frozenset({"read", "search", "tree"})
 OBSERVE_STATE_CHARS = 1500  # executor-state budget for observation step output
 # Backend-aware output budgets (issue #15): small caps are a wall-clock
@@ -233,9 +256,7 @@ PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail
 REASONING_POLICIES = ("gated", "off")
 DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
 if DEFAULT_REASONING_POLICY not in REASONING_POLICIES:
-    raise ValueError(
-        f"AGENT_REASONING_POLICY must be one of {', '.join(REASONING_POLICIES)}"
-    )
+    raise ValueError(f"AGENT_REASONING_POLICY must be one of {', '.join(REASONING_POLICIES)}")
 
 SYSTEM_PLAN = f"""Planner. Propose tasks for the user request.
 Rules:
@@ -278,8 +299,12 @@ def _run_log(event):
             f.write(json.dumps(event, default=str) + "\n")
     except Exception:
         pass
+
+
 _VALIDATE_KEYWORDS = re.compile(
-    r'\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b', re.I)
+    r"\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b",
+    re.I,
+)
 
 SYSTEM_STEP = """Executor. ONE action per turn as JSON. Output ONLY valid JSON. No markdown, no explanation.
 Rules:
@@ -316,9 +341,9 @@ def _repair_json(text):
         return None
     # Strip trailing prose after a complete JSON object (model commentary after })
     # Find the last } and discard everything after it
-    last_brace = text.rfind('}')
+    last_brace = text.rfind("}")
     if last_brace >= 0 and last_brace < len(text) - 1:
-        candidate = text[:last_brace + 1]
+        candidate = text[: last_brace + 1]
         try:
             obj = json.loads(candidate)
             if isinstance(obj, dict):
@@ -326,15 +351,15 @@ def _repair_json(text):
         except json.JSONDecodeError:
             pass  # fall through to other repairs
     # Strip trailing incomplete key-value pair (truncation mid-field)
-    text = re.sub(r',\s*"[^"]*$', '', text)
+    text = re.sub(r',\s*"[^"]*$', "", text)
     # Strip trailing incomplete value after a key (e.g. "key": "val...)
-    text = re.sub(r',\s*"[^"]*":\s*"?[^"}\]]*$', '', text)
+    text = re.sub(r',\s*"[^"]*":\s*"?[^"}\]]*$', "", text)
     # Strip trailing commas before close
-    text = re.sub(r',\s*}', '}', text)
+    text = re.sub(r",\s*}", "}", text)
     # Close missing braces
-    opens = text.count('{') - text.count('}')
+    opens = text.count("{") - text.count("}")
     if opens > 0:
-        text = text + '}' * opens
+        text = text + "}" * opens
     elif opens < 0:
         return None
     try:
@@ -359,9 +384,11 @@ def _validate_action_contract(obj):
             _valid_nonempty_str(content) or isinstance(content, (dict, list))
         )
     if action == "edit":
-        return (_valid_nonempty_str(obj.get("arg"))
-                and _valid_nonempty_str(obj.get("find"))
-                and "replace" in obj)
+        return (
+            _valid_nonempty_str(obj.get("arg"))
+            and _valid_nonempty_str(obj.get("find"))
+            and "replace" in obj
+        )
     if action == "read":
         if not _valid_nonempty_str(obj.get("arg")):
             return False
@@ -387,7 +414,9 @@ def _accept_or_raise(obj, text):
     raise json.JSONDecodeError("Incomplete action JSON", text, 0)
 
 
-_STRICT_JSON_SUFFIX = "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
+_STRICT_JSON_SUFFIX = (
+    "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
+)
 
 # Sentinel-framed content transport (issue #15): implementation-scale write
 # content travels between sentinel lines after the action JSON instead of
@@ -417,22 +446,28 @@ def _split_content_block(text):
     header = "\n".join(lines[:open_idx])
     for j in range(len(lines) - 1, open_idx, -1):
         if lines[j].rstrip() == CONTENT_CLOSE:
-            return header, "\n".join(lines[open_idx + 1:j]), True
-    return header, "\n".join(lines[open_idx + 1:]), False
+            return header, "\n".join(lines[open_idx + 1 : j]), True
+    return header, "\n".join(lines[open_idx + 1 :]), False
+
 
 # Truncated write/edit payloads are the most common large-output parse failure;
 # detect the attempted action so the retry gets a payload-sized budget.
 _WRITE_ATTEMPT_RE = re.compile(r'"action"\s*:\s*"(?:write|edit)"')
 
 
-def ask_llm(messages, max_tokens=256, think=False, think_level=None,
-            max_retries=MAX_LLM_RETRIES, raw=False, timeout=None,
-            reasoning_policy=DEFAULT_REASONING_POLICY,
-            reasoning_trigger="unspecified"):
+def ask_llm(
+    messages,
+    max_tokens=256,
+    think=False,
+    think_level=None,
+    max_retries=MAX_LLM_RETRIES,
+    raw=False,
+    timeout=None,
+    reasoning_policy=DEFAULT_REASONING_POLICY,
+    reasoning_trigger="unspecified",
+):
     if reasoning_policy not in REASONING_POLICIES:
-        raise ValueError(
-            f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}"
-        )
+        raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
     budget = max_tokens
     for attempt in range(max_retries + 1):
         # Determine thinking level: explicit think_level overrides auto-escalation.
@@ -458,23 +493,22 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             requested_level = None
 
         effective_trigger = (
-            "json_retry"
-            if attempt == 1 and not think and not think_level
-            else reasoning_trigger
+            "json_retry" if attempt == 1 and not think and not think_level else reasoning_trigger
         )
-        effective_think_level = (
-            gated_think_level if reasoning_policy == "gated" else None
+        effective_think_level = gated_think_level if reasoning_policy == "gated" else None
+        _run_log(
+            {
+                "event": "reasoning_decision",
+                "requested_policy": reasoning_policy,
+                "requested_trigger": effective_trigger,
+                "requested_level": requested_level,
+                "effective_level": effective_think_level,
+                "baseline_effort": (OPENROUTER_REASONING_EFFORT or None)
+                if LLM_BACKEND == "openrouter"
+                else None,
+                "attempt": attempt,
+            }
         )
-        _run_log({
-            "event": "reasoning_decision",
-            "requested_policy": reasoning_policy,
-            "requested_trigger": effective_trigger,
-            "requested_level": requested_level,
-            "effective_level": effective_think_level,
-            "baseline_effort": (OPENROUTER_REASONING_EFFORT or None)
-                if LLM_BACKEND == "openrouter" else None,
-            "attempt": attempt,
-        })
 
         body = {
             "model": MODEL,
@@ -526,13 +560,18 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         # Transport-level error handling with retry + backoff
         try:
             resp = requests.post(API, json=body, headers=headers, timeout=timeout or LLM_TIMEOUT)
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-                requests.exceptions.RequestException) as e:
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.RequestException,
+        ) as e:
             log(f"  Transport error: {type(e).__name__}: {e}")
             if attempt < max_retries:
                 time.sleep(1 if attempt == 0 else 3)
                 continue
-            raise LLMTransportError(f"Transport failed after {max_retries + 1} attempts: {e}") from e
+            raise LLMTransportError(
+                f"Transport failed after {max_retries + 1} attempts: {e}"
+            ) from e
         # HTTP status checks — fail-fast on client errors, retry on server/overload
         sc = resp.status_code
         if sc == 429 or sc >= 500:
@@ -554,7 +593,9 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             raise LLMTransportError(f"Non-JSON response after {max_retries + 1} attempts") from e
         # Handle API error responses (JSON body with "error" key)
         if "error" in rj:
-            log(f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}")
+            log(
+                f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}"
+            )
             if attempt < max_retries:
                 continue
             raise KeyError(f"API error: {rj['error']}")
@@ -566,27 +607,32 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             route = metadata.get("endpoints", {})
             available = route.get("available", []) if isinstance(route, dict) else []
             selected = next(
-                (endpoint for endpoint in available
-                 if isinstance(endpoint, dict) and endpoint.get("selected")),
+                (
+                    endpoint
+                    for endpoint in available
+                    if isinstance(endpoint, dict) and endpoint.get("selected")
+                ),
                 {},
             )
-            tok_msg = f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}"
+            tok_msg = f"  tokens: prompt={usage.get('prompt_tokens', 0)} completion={usage.get('completion_tokens', 0)} total={usage.get('total_tokens', 0)}"
             if sent_effort:
                 tok_msg += f" thinking={sent_effort}"
             log(tok_msg)
-            _run_log({
-                "event": "tokens",
-                "prompt": usage.get("prompt_tokens", 0),
-                "completion": usage.get("completion_tokens", 0),
-                "total": usage.get("total_tokens", 0),
-                "openrouter_cost": usage.get("cost", 0),
-                "model": selected.get("model") or rj.get("model", MODEL),
-                "provider": selected.get("provider") or rj.get("provider", ""),
-                "route_attempt": selected.get("attempt"),
-                "thinking": sent_effort,
-                "finish_reason": finish_reason,
-                "attempt": attempt,
-            })
+            _run_log(
+                {
+                    "event": "tokens",
+                    "prompt": usage.get("prompt_tokens", 0),
+                    "completion": usage.get("completion_tokens", 0),
+                    "total": usage.get("total_tokens", 0),
+                    "openrouter_cost": usage.get("cost", 0),
+                    "model": selected.get("model") or rj.get("model", MODEL),
+                    "provider": selected.get("provider") or rj.get("provider", ""),
+                    "route_attempt": selected.get("attempt"),
+                    "thinking": sent_effort,
+                    "finish_reason": finish_reason,
+                    "attempt": attempt,
+                }
+            )
         if finish_reason == "length":
             log("  output hit token budget (finish_reason=length)")
         msg = rj["choices"][0]["message"]
@@ -617,7 +663,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         text, block, block_closed = _split_content_block(text)
         # Try to extract JSON object from anywhere in the text
         if not text.startswith("{") and "{" in text:
-            text = text[text.index("{"):]
+            text = text[text.index("{") :]
 
         def _attach_block(obj):
             if block is not None and isinstance(obj, dict):
@@ -635,7 +681,9 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
         try:
             parsed = json.loads(text)
             if not isinstance(parsed, dict):
-                raise json.JSONDecodeError("Expected JSON object, got " + type(parsed).__name__, text, 0)
+                raise json.JSONDecodeError(
+                    "Expected JSON object, got " + type(parsed).__name__, text, 0
+                )
             return _accept_or_raise(_attach_block(parsed), text)
         except json.JSONDecodeError as parse_err:
             # E03: attempt mechanical repair before burning a retry
@@ -654,30 +702,50 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                     budget = STEP_WRITE_TOKENS
                     log(f"  write/edit payload budget -> {budget}")
                 think_str = f" thinking={sent_effort}" if sent_effort else ""
-                log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
+                log(f"  [retry {attempt + 1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
                 # Typed classification for the caller (issue #7): output that
                 # hit the token budget is a transport failure of the action
                 # envelope, not model noise — the recovery differs.
-                parse_err.malformed_action = True
-                parse_err.response_truncated = finish_reason == "length"
+                setattr(parse_err, "malformed_action", True)
+                setattr(parse_err, "response_truncated", finish_reason == "length")
                 raise
 
 
-_KNOWN_ERROR_TYPES = {"timeout", "missing_tool", "permission_denied", "missing_file",
-                      "compile_error", "edit_failed", "stuck_loop", "unknown",
-                      "malformed_action", "response_truncated",
-                      "invalid_read_cursor", "invalid_read_limit",
-                      "read_cursor_hash_required", "stale_read_cursor"}
+_KNOWN_ERROR_TYPES = {
+    "timeout",
+    "missing_tool",
+    "permission_denied",
+    "missing_file",
+    "compile_error",
+    "edit_failed",
+    "stuck_loop",
+    "unknown",
+    "malformed_action",
+    "response_truncated",
+    "invalid_read_cursor",
+    "invalid_read_limit",
+    "read_cursor_hash_required",
+    "stale_read_cursor",
+}
 
 # E05: Error types where thinking escalation is counterproductive.
 # These are structural failures — the scaffold knows what went wrong and the model
 # needs different information or parameters, not deeper reasoning.
 # Semantic failures (compile_error, unknown) keep thinking escalation.
-_NO_THINK_ERRORS = frozenset({"edit_failed", "missing_file", "timeout",
-                              "missing_tool", "permission_denied",
-                              "invalid_read_cursor", "invalid_read_limit",
-                              "read_cursor_hash_required", "stale_read_cursor"})
+_NO_THINK_ERRORS = frozenset(
+    {
+        "edit_failed",
+        "missing_file",
+        "timeout",
+        "missing_tool",
+        "permission_denied",
+        "invalid_read_cursor",
+        "invalid_read_limit",
+        "read_cursor_hash_required",
+        "stale_read_cursor",
+    }
+)
 
 # E06: Short recovery hints injected into step output after typed failures.
 # Tells the model what to do next without needing thinking tokens to rediscover it.
@@ -699,7 +767,7 @@ def _extract_error_type(err):
         if bracket_end > 1:
             candidate = err[1:bracket_end]
             if candidate in _KNOWN_ERROR_TYPES:
-                return candidate, err[bracket_end + 2:]  # strip "[type] " prefix
+                return candidate, err[bracket_end + 2 :]  # strip "[type] " prefix
     # Fallback: heuristic classification
     err_lower = err.lower()
     if "timeout" in err_lower:
@@ -722,7 +790,7 @@ def summarize_errors(errors):
     Preserves [type] prefixes from classify_error, groups by type, deduplicates."""
     if not errors:
         return []
-    summarized = {}
+    summarized: dict[str, list[str]] = {}
     for err in errors:
         etype, msg = _extract_error_type(err)
         if etype not in summarized:
@@ -741,12 +809,14 @@ def _step_digest(steps, count=6):
     """Compact digest of recent executed steps for planning (never file contents)."""
     digest = []
     for s in steps[-count:]:
-        digest.append({
-            "action": s.get("action"),
-            "arg": (s.get("arg") or "")[-120:],
-            "ok": s.get("ok"),
-            "output": (s.get("output") or "")[:80],
-        })
+        digest.append(
+            {
+                "action": s.get("action"),
+                "arg": (s.get("arg") or "")[-120:],
+                "ok": s.get("ok"),
+                "output": (s.get("output") or "")[:80],
+            }
+        )
     return digest
 
 
@@ -836,8 +906,7 @@ def _pending_empty_hint(target, info):
 def _restrictive_pending_empty(pending):
     """Return the first pending obligation that forbids append recovery."""
     for target, info in pending.items():
-        if not (isinstance(info, dict)
-                and info.get("append_allowed", False)):
+        if not (isinstance(info, dict) and info.get("append_allowed", False)):
             return target, info
     return None
 
@@ -865,8 +934,7 @@ def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
 
     unresolved = _unresolved_incomplete_writes(all_steps)
     if unresolved:
-        target, (_, last_step) = max(
-            unresolved.items(), key=lambda item: item[1][0])
+        target, (_, last_step) = max(unresolved.items(), key=lambda item: item[1][0])
         name, recovery_arg = _incomplete_step_hint(target, last_step)
         return {
             "incomplete_write": name,
@@ -879,8 +947,7 @@ def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
         # append obligation. Surface it first so following the hint always
         # makes progress; all completion paths use this same selection.
         target, pending_info = _next_pending_empty(pending)
-        name, recovery_arg, append_allowed = _pending_empty_hint(
-            target, pending_info)
+        name, recovery_arg, append_allowed = _pending_empty_hint(target, pending_info)
         return {
             "incomplete_write": name,
             "incomplete_write_target": recovery_arg,
@@ -905,20 +972,19 @@ def _pending_append_targets(info):
     return tuple(targets)
 
 
-def _pending_empty_recovery(pending, logical_target, operation_target,
-                            is_append):
+def _pending_empty_recovery(pending, logical_target, operation_target, is_append):
     """Find a pending zero-byte recovery by pathname or append referent."""
     recovery = pending.get(logical_target) if logical_target is not None else None
     if not is_append:
         return recovery
     matches = []
     for key, info in pending.items():
-        append_allowed = (isinstance(info, dict)
-                          and info.get("append_allowed", False))
+        append_allowed = isinstance(info, dict) and info.get("append_allowed", False)
         same_operation = (
             operation_target is not None
             and isinstance(info, dict)
-            and operation_target in _pending_append_targets(info))
+            and operation_target in _pending_append_targets(info)
+        )
         # A pending overwrite is tied to the logical pathname and also blocks
         # physical aliases. A permissive append obligation follows only the
         # referent observed when it was created, so retargeting cannot satisfy it.
@@ -930,24 +996,23 @@ def _pending_empty_recovery(pending, logical_target, operation_target,
     # referent. A pending overwrite always wins over a permissive append.
     return {
         "append_allowed": all(
-            isinstance(info, dict)
-            and info.get("append_allowed", False)
-            for info in matches
+            isinstance(info, dict) and info.get("append_allowed", False) for info in matches
         )
     }
 
 
-def _clear_pending_empty_writes(pending, logical_target, operation_target,
-                                is_append):
+def _clear_pending_empty_writes(pending, logical_target, operation_target, is_append):
     """Clear zero-byte obligations satisfied by a successful write."""
     keys = set()
     if not is_append and logical_target is not None:
         keys.add(logical_target)
     if operation_target is not None:
         for key, info in pending.items():
-            if (isinstance(info, dict)
-                    and info.get("append_allowed", False)
-                    and operation_target in _pending_append_targets(info)):
+            if (
+                isinstance(info, dict)
+                and info.get("append_allowed", False)
+                and operation_target in _pending_append_targets(info)
+            ):
                 keys.add(key)
     for key in keys:
         pending.pop(key, None)
@@ -963,8 +1028,11 @@ def _write_visibility_flag(task_steps):
     the last successful write — the v6 Gemma replans restated the task while
     an applied-but-unresolved artifact sat on disk — or None.
     """
-    ok_mutations = [idx for idx, s in enumerate(task_steps)
-                    if s.get("action") in ("write", "edit") and s.get("ok")]
+    ok_mutations = [
+        idx
+        for idx, s in enumerate(task_steps)
+        if s.get("action") in ("write", "edit") and s.get("ok")
+    ]
     if not ok_mutations:
         return {"no_write_executed": True}
     unresolved = _unresolved_incomplete_writes(task_steps)
@@ -976,8 +1044,9 @@ def _write_visibility_flag(task_steps):
     last_mutation = ok_mutations[-1]
     last_step = task_steps[last_mutation]
     arg = last_step.get("arg", "")
-    validated = any(s.get("action") == "shell" and s.get("ok")
-                    for s in task_steps[last_mutation + 1:])
+    validated = any(
+        s.get("action") == "shell" and s.get("ok") for s in task_steps[last_mutation + 1 :]
+    )
     if validated:
         return None
     return {"unvalidated_write": Path(arg).name if arg else True}
@@ -1002,10 +1071,11 @@ def get_plan(user_prompt, state):
     # visible instead. Incomplete artifacts are run-scoped completion blockers;
     # no_write/unvalidated progress remains scoped to, and classified from,
     # the failed task itself (Codex P2, PR #16).
-    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
+    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0) :]
     current_task = state.get("current_task", "")
     incomplete = _incomplete_write_visibility(
-        state.get("all_steps", []), state.get("pending_empty_writes"))
+        state.get("all_steps", []), state.get("pending_empty_writes")
+    )
     if incomplete:
         plan_state.update(incomplete)
     elif _is_write_shaped(current_task):
@@ -1029,13 +1099,20 @@ def get_plan(user_prompt, state):
         or plan_state.get("errors")
         or plan_state.get("completed_tasks")
     )
-    return ask_llm([
-        {"role": "system", "content": SYSTEM_PLAN},
-        {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
-    ], max_tokens=PLANNER_MAX_TOKENS, think=is_replan,
-       timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
-       reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
-       reasoning_trigger="planner_replan" if is_replan else "initial_plan")
+    return ask_llm(
+        [
+            {"role": "system", "content": SYSTEM_PLAN},
+            {
+                "role": "user",
+                "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}",
+            },
+        ],
+        max_tokens=PLANNER_MAX_TOKENS,
+        think=is_replan,
+        timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
+        reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+        reasoning_trigger="planner_replan" if is_replan else "initial_plan",
+    )
 
 
 MAX_INPUT = 300  # max chars per non-goal field sent to executor
@@ -1044,11 +1121,19 @@ if GOAL_CONTEXT_CHARS < 1:
     raise ValueError("AGENT_GOAL_CONTEXT_CHARS must be a positive integer")
 
 
-def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
-             reasoning_policy=DEFAULT_REASONING_POLICY,
-             reasoning_trigger="executor",
-             goal_context_chars=GOAL_CONTEXT_CHARS,
-             write_pressure=False, validate_pressure=None):
+def get_step(
+    task,
+    state,
+    goal="",
+    step_num=0,
+    max_steps=MAX_STEPS,
+    think=False,
+    reasoning_policy=DEFAULT_REASONING_POLICY,
+    reasoning_trigger="executor",
+    goal_context_chars=GOAL_CONTEXT_CHARS,
+    write_pressure=False,
+    validate_pressure=None,
+):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
     slim_steps = []
@@ -1062,18 +1147,23 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
         # Observation actions (read/search/tree) carry the content the model
         # navigates by; they get a larger output budget than mutating actions.
         out_cap = OBSERVE_STATE_CHARS if s["action"] in OBSERVE_ACTIONS else MAX_INPUT
-        slim_steps.append({
-            "action": s["action"], "arg": arg,
-            "ok": s["ok"], "output": s.get("output", "")[:out_cap]
-        })
+        slim_steps.append(
+            {
+                "action": s["action"],
+                "arg": arg,
+                "ok": s["ok"],
+                "output": s.get("output", "")[:out_cap],
+            }
+        )
     slim = {
         "task": state.get("current_task", task)[:MAX_INPUT],
         "task_index": state.get("task_index", ""),
-        "step": f"{step_num+1}/{max_steps}",
+        "step": f"{step_num + 1}/{max_steps}",
         "last_steps": slim_steps,
     }
     incomplete = _incomplete_write_visibility(
-        state.get("all_steps", []), state.get("pending_empty_writes"))
+        state.get("all_steps", []), state.get("pending_empty_writes")
+    )
     if incomplete:
         # Keep the recovery identity/mode structured on every executor turn.
         # Step history is bounded and is reset across a task-local retry.
@@ -1090,18 +1180,23 @@ def get_step(task, state, goal="", step_num=0, max_steps=MAX_STEPS, think=False,
     goal_line = f"GOAL:\n{goal[:goal_context_chars]}\n\n" if goal else ""
     user_msg = f"{goal_line}TASK:\n{task[:MAX_INPUT]}\n\nSTATE:\n{json.dumps(slim)}"
     if write_pressure:
-        user_msg += ("\nNOTE: several observation steps done but no write yet. "
-                     "Next action MUST be write, edit, or shell — or fail with a one-line reason.")
+        user_msg += (
+            "\nNOTE: several observation steps done but no write yet. "
+            "Next action MUST be write, edit, or shell — or fail with a one-line reason."
+        )
     if validate_pressure:
-        user_msg += (f"\nNOTE: {validate_pressure} is already written. Do NOT write the whole "
-                     "file again. Next action MUST be shell (verify it), edit (targeted fix), "
-                     "or done.")
-    return ask_llm([
-        {"role": "system", "content": SYSTEM_STEP},
-        {"role": "user", "content": user_msg}
-    ], max_tokens=STEP_TOKENS, think=think,
-       reasoning_policy=reasoning_policy,
-       reasoning_trigger=reasoning_trigger)
+        user_msg += (
+            f"\nNOTE: {validate_pressure} is already written. Do NOT write the whole "
+            "file again. Next action MUST be shell (verify it), edit (targeted fix), "
+            "or done."
+        )
+    return ask_llm(
+        [{"role": "system", "content": SYSTEM_STEP}, {"role": "user", "content": user_msg}],
+        max_tokens=STEP_TOKENS,
+        think=think,
+        reasoning_policy=reasoning_policy,
+        reasoning_trigger=reasoning_trigger,
+    )
 
 
 SYSTEM_TASK_REPLAN = """You are a task replanner. A single task failed. Given the failed task, errors, and completed tasks, propose a replacement task description.
@@ -1121,11 +1216,29 @@ _ACTION_TASK_RE = re.compile(
     r"\b(fix|edit|add|insert|include|compile|build|run|create|write|update|replace|execute|remove)\b",
     re.I,
 )
-_LOW_VALUE_TASK_WORDS = frozenset({
-    "a", "an", "and", "again", "code", "correct", "file", "for", "in",
-    "of", "rebuild", "recompile", "rerun", "run", "the", "then", "to",
-    "using", "with",
-})
+_LOW_VALUE_TASK_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "again",
+        "code",
+        "correct",
+        "file",
+        "for",
+        "in",
+        "of",
+        "rebuild",
+        "recompile",
+        "rerun",
+        "run",
+        "the",
+        "then",
+        "to",
+        "using",
+        "with",
+    }
+)
 
 
 def _task_keywords(text):
@@ -1180,8 +1293,9 @@ def _is_passive_replacement(original, replacement):
     )
 
 
-def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
-                goal_context_chars=GOAL_CONTEXT_CHARS):
+def replan_task(
+    failed_task, errors, completed_tasks, state, user_prompt, goal_context_chars=GOAL_CONTEXT_CHARS
+):
     """Mini-planner: generate a replacement for one failed task.
     Returns replacement task string, or None if replan fails."""
     global _last_task_replan_reject_reason
@@ -1193,7 +1307,7 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     }
     # Stateful replanning: the mini-planner sees what the executor actually did
     # on the failed task (actions + outcomes), not just typed error strings.
-    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
+    task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0) :]
     failed_steps = _step_digest(task_steps, count=3)
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
@@ -1201,7 +1315,8 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     # the slice is empty. Incomplete artifacts are checked run-wide because
     # they remain a completion blocker across replacement-task boundaries.
     incomplete = _incomplete_write_visibility(
-        state.get("all_steps", []), state.get("pending_empty_writes"))
+        state.get("all_steps", []), state.get("pending_empty_writes")
+    )
     if incomplete:
         replan_state.update(incomplete)
     elif _is_write_shaped(failed_task):
@@ -1213,12 +1328,20 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
         replan_state["missing_tools"] = env["missing_tools"]
     replan_state["policy"] = state.get("policy", get_policy())
     try:
-        result = ask_llm([
-            {"role": "system", "content": SYSTEM_TASK_REPLAN},
-            {"role": "user", "content": f"GOAL:\n{user_prompt[:goal_context_chars]}\n\nSTATE:\n{json.dumps(replan_state)}"}
-        ], max_tokens=TASK_REPLAN_MAX_TOKENS, think=False, max_retries=0,
-           reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
-           reasoning_trigger="task_local_replan")
+        result = ask_llm(
+            [
+                {"role": "system", "content": SYSTEM_TASK_REPLAN},
+                {
+                    "role": "user",
+                    "content": f"GOAL:\n{user_prompt[:goal_context_chars]}\n\nSTATE:\n{json.dumps(replan_state)}",
+                },
+            ],
+            max_tokens=TASK_REPLAN_MAX_TOKENS,
+            think=False,
+            max_retries=0,
+            reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+            reasoning_trigger="task_local_replan",
+        )
         task = result.get("task", "")
         if not task or not isinstance(task, str):
             _last_task_replan_reject_reason = "empty"
@@ -1304,15 +1427,14 @@ def _deterministic_check(user_prompt, state, working_dir):
             except OSError:
                 return False
 
-    shell_steps = [(i, s) for i, s in enumerate(all_steps)
-                   if s.get("action") == "shell"]
+    shell_steps = [(i, s) for i, s in enumerate(all_steps) if s.get("action") == "shell"]
     if _VALIDATE_KEYWORDS.search(user_prompt) and shell_steps:
         last_shell_idx, last_shell = shell_steps[-1]
         if not last_shell.get("ok"):
             return False
         later_mutation = any(
             s.get("action") in ("write", "edit") and s.get("ok")
-            for s in all_steps[last_shell_idx + 1:]
+            for s in all_steps[last_shell_idx + 1 :]
         )
         if not later_mutation and not state.get("errors"):
             return True
@@ -1338,7 +1460,7 @@ def _validate_completion(user_prompt, state, working_dir):
     # Build evidence: per-task step summaries (action + basename + output snippet, ≤5 per task)
     evidence_lines = []
     for i, task in enumerate(completed):
-        evidence_lines.append(f"Task {i+1}: {task}")
+        evidence_lines.append(f"Task {i + 1}: {task}")
         if i < len(step_groups):
             for s in step_groups[i][:5]:
                 arg = s.get("arg", "")
@@ -1352,18 +1474,22 @@ def _validate_completion(user_prompt, state, working_dir):
         files = sorted(os.listdir(working_dir))[:50]
     except Exception:
         files = []
-    user_msg = (f"GOAL:\n{user_prompt}\n\n"
-                f"COMPLETED TASKS AND EVIDENCE:\n{evidence}\n\n"
-                f"FILES IN WORKING DIRECTORY:\n{json.dumps(files)}")
+    user_msg = (
+        f"GOAL:\n{user_prompt}\n\n"
+        f"COMPLETED TASKS AND EVIDENCE:\n{evidence}\n\n"
+        f"FILES IN WORKING DIRECTORY:\n{json.dumps(files)}"
+    )
     try:
-        result = ask_llm([
-            {"role": "system", "content": SYSTEM_VALIDATE},
-            {"role": "user", "content": user_msg}
-        ], max_tokens=768, think=True, think_level="high", max_retries=0,
-           reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
-           reasoning_trigger="final_validator")
-        if (isinstance(result, dict)
-                and isinstance(result.get("valid"), bool)):
+        result = ask_llm(
+            [{"role": "system", "content": SYSTEM_VALIDATE}, {"role": "user", "content": user_msg}],
+            max_tokens=768,
+            think=True,
+            think_level="high",
+            max_retries=0,
+            reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
+            reasoning_trigger="final_validator",
+        )
+        if isinstance(result, dict) and isinstance(result.get("valid"), bool):
             return result
         log(f"  Validation returned unexpected format: {result}")
         return None
@@ -1383,10 +1509,24 @@ def _has_new_validation_evidence(state):
     )
 
 
-_COMPILER_EXES = frozenset({
-    "cc", "gcc", "g++", "clang", "clang++", "c++", "rustc", "javac",
-    "make", "cmake", "cargo", "go", "tsc", "swiftc",
-})
+_COMPILER_EXES = frozenset(
+    {
+        "cc",
+        "gcc",
+        "g++",
+        "clang",
+        "clang++",
+        "c++",
+        "rustc",
+        "javac",
+        "make",
+        "cmake",
+        "cargo",
+        "go",
+        "tsc",
+        "swiftc",
+    }
+)
 
 
 def _is_compiler_command(cmd):
@@ -1427,24 +1567,23 @@ def classify_error(output, action="shell", cmd=""):
 
 
 _EXPECTED_FAILURE_POS_RE = re.compile(
-    r'\b(observe|confirm|verify|check)\b.*\b(fail|error|bug|broken)\b'
-    r'|\b(will fail|should fail|expect.*(fail|error)|initial failure|read the error)\b',
+    r"\b(observe|confirm|verify|check)\b.*\b(fail|error|bug|broken)\b"
+    r"|\b(will fail|should fail|expect.*(fail|error)|initial failure|read the error)\b",
     re.I,
 )
 _EXPECTED_FAILURE_NEG_RE = re.compile(
-    r'\b(no|not|without)\s+(fail|failure|error|bug|crash|broken)\b'
-    r'|\b(error|failure|bug)\b.{0,20}\b(fixed|resolved|gone)\b'
-    r'|\b(fix|repair|resolve)\b.*\b(error|failure|bug)\b',
+    r"\b(no|not|without)\s+(fail|failure|error|bug|crash|broken)\b"
+    r"|\b(error|failure|bug)\b.{0,20}\b(fixed|resolved|gone)\b"
+    r"|\b(fix|repair|resolve)\b.*\b(error|failure|bug)\b",
     re.I,
 )
 
 
 def _expects_failure(task):
-    return bool(_EXPECTED_FAILURE_POS_RE.search(task)
-                and not _EXPECTED_FAILURE_NEG_RE.search(task))
+    return bool(_EXPECTED_FAILURE_POS_RE.search(task) and not _EXPECTED_FAILURE_NEG_RE.search(task))
 
 
-_COMPILE_REPAIR_PATTERNS = [
+_COMPILE_REPAIR_PATTERNS: list[dict[str, Any]] = [
     {
         "diagnostic_re": re.compile(
             r"implicit declaration of function '(printf|puts|fprintf|scanf)'|"
@@ -1492,7 +1631,7 @@ def _resolve_existing_candidates(paths, working_dir):
 def _compile_repair_candidates(error_output, cmd, working_dir):
     """Return source-file candidates in safest priority order."""
     diagnostic_paths = re.findall(
-        r'([A-Za-z0-9_./-]+\.(?:c|h)):\d+(?::\d+)?:',
+        r"([A-Za-z0-9_./-]+\.(?:c|h)):\d+(?::\d+)?:",
         error_output,
     )
     diagnostic_candidates = _resolve_existing_candidates(diagnostic_paths, working_dir)
@@ -1528,7 +1667,8 @@ def _try_compile_repair(error_output, working_dir, cmd):
         if not pattern["diagnostic_re"].search(error_output):
             continue
         candidates = [
-            f for f in _compile_repair_candidates(error_output, cmd, working_dir)
+            f
+            for f in _compile_repair_candidates(error_output, cmd, working_dir)
             if pattern["file_pattern"].search(f.name)
         ]
         if len(candidates) != 1:
@@ -1552,11 +1692,16 @@ def _try_compile_repair(error_output, working_dir, cmd):
 def _task_satisfied_by_deterministic_repair(task, state):
     """Return repair step if a planned edit task was already done deterministically."""
     task_lower = task.lower()
-    if "include" not in task_lower or not re.search(r"\b(add|insert|edit|include|fix)\b", task_lower):
+    if "include" not in task_lower or not re.search(
+        r"\b(add|insert|edit|include|fix)\b", task_lower
+    ):
         return None
     requested_include = None
     for include in ("#include <stdio.h>", "#include <string.h>"):
-        if include.lower() in task_lower or include.split("<", 1)[1].rstrip(">").lower() in task_lower:
+        if (
+            include.lower() in task_lower
+            or include.split("<", 1)[1].rstrip(">").lower() in task_lower
+        ):
             requested_include = include
             break
     if not requested_include:
@@ -1577,13 +1722,20 @@ def _task_satisfied_by_deterministic_repair(task, state):
 
 # Command patterns that need longer timeouts
 _LONG_TIMEOUT_PATTERNS = [
-    "install", "update", "upgrade",  # package managers
-    "cmake", "make", "cargo build", "go build",  # build tools
-    "npm install", "pip install", "brew ",  # specific installers
+    "install",
+    "update",
+    "upgrade",  # package managers
+    "cmake",
+    "make",
+    "cargo build",
+    "go build",  # build tools
+    "npm install",
+    "pip install",
+    "brew ",  # specific installers
 ]
-SHELL_TIMEOUT = 30       # default
+SHELL_TIMEOUT = 30  # default
 SHELL_TIMEOUT_LONG = 120  # for install/build commands
-SHELL_TIMEOUT_MAX = 300   # hard cap for model-specified timeout
+SHELL_TIMEOUT_MAX = 300  # hard cap for model-specified timeout
 
 
 def _get_shell_timeout(cmd, hint=None):
@@ -1606,10 +1758,20 @@ def _atomic_write_text(path, content):
 
 
 # VCS / dependency / build directories excluded from search and tree walks.
-_REPO_SKIP_DIRS = frozenset({
-    ".git", ".hg", ".svn", "node_modules", "__pycache__",
-    ".venv", "venv", "target", "dist", "build",
-})
+_REPO_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "target",
+        "dist",
+        "build",
+    }
+)
 
 
 def _iter_repo_files(root, max_files=SEARCH_MAX_FILES, on_error=None):
@@ -1617,8 +1779,7 @@ def _iter_repo_files(root, max_files=SEARCH_MAX_FILES, on_error=None):
     count = 0
     for dirpath, dirnames, filenames in os.walk(root, onerror=on_error):
         dirnames[:] = sorted(
-            d for d in dirnames
-            if d not in _REPO_SKIP_DIRS and not d.startswith(".")
+            d for d in dirnames if d not in _REPO_SKIP_DIRS and not d.startswith(".")
         )
         for name in sorted(filenames):
             if name.startswith("."):
@@ -1631,6 +1792,7 @@ def _iter_repo_files(root, max_files=SEARCH_MAX_FILES, on_error=None):
 
 def _pack_observation_lines(make_header, records, reasons, max_chars):
     """Pack complete discovery records, including the header, within a cap."""
+
     def pack(active_reasons):
         header = make_header(active_reasons)
         kept = []
@@ -1705,14 +1867,18 @@ def _read_key(action):
     try:
         cursor = _read_cursor(action)
     except ValueError:
-        return (arg, "invalid_cursor", repr(action.get("cursor")),
-                action.get("sha256") or "")
+        return (arg, "invalid_cursor", repr(action.get("cursor")), action.get("sha256") or "")
     if cursor is not None:
         try:
             limit = _read_continuation_limit(action)
         except ValueError:
-            return (arg, "invalid_cursor_limit", cursor,
-                    repr(action.get("limit")), action.get("sha256") or "")
+            return (
+                arg,
+                "invalid_cursor_limit",
+                cursor,
+                repr(action.get("limit")),
+                action.get("sha256") or "",
+            )
         return (arg, "cursor", cursor, limit, action.get("sha256") or "")
     offset, limit = _read_offset_limit(action)
     return (arg, "lines", offset, limit)
@@ -1721,9 +1887,11 @@ def _read_key(action):
 def _read_continuation_hint(continuation):
     """Render an action-ready continuation for the executor prompt."""
     if isinstance(continuation, dict):
-        return (f"cursor={continuation['cursor']}, "
-                f"limit={continuation['limit']}, "
-                f"sha256={continuation['sha256']}")
+        return (
+            f"cursor={continuation['cursor']}, "
+            f"limit={continuation['limit']}, "
+            f"sha256={continuation['sha256']}"
+        )
     # Compatibility with run state created by the revision-2 line contract.
     return f"offset={continuation}"
 
@@ -1734,8 +1902,12 @@ def execute(action, working_dir="."):
         try:
             timeout = _get_shell_timeout(action["arg"], action.get("timeout"))
             r = subprocess.run(
-                action["arg"], shell=True, capture_output=True,
-                text=True, timeout=timeout, cwd=working_dir
+                action["arg"],
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=working_dir,
             )
             out = r.stdout[:MAX_RESULT] + r.stderr[-MAX_RESULT:]
             result = {"ok": r.returncode == 0, "output": out.strip() or "(no output)"}
@@ -1763,8 +1935,10 @@ def execute(action, working_dir="."):
                     f.write(content)
                 size = p.stat().st_size
                 verb = "Appended to" if existed else "Wrote"
-                return {"ok": True,
-                        "output": f"{verb} {p.name} (+{len(content)} chars, total {size})"}
+                return {
+                    "ok": True,
+                    "output": f"{verb} {p.name} (+{len(content)} chars, total {size})",
+                }
             _atomic_write_text(p, content)
             return {"ok": True, "output": f"Wrote {p.name}"}
         except Exception as e:
@@ -1776,22 +1950,33 @@ def execute(action, working_dir="."):
             if not p.is_absolute():
                 p = Path(working_dir) / p
             if not p.exists():
-                return {"ok": False, "output": f"File not found: {p.name}",
-                        "error_type": "missing_file"}
+                return {
+                    "ok": False,
+                    "output": f"File not found: {p.name}",
+                    "error_type": "missing_file",
+                }
             text = p.read_text()
             find = action.get("find", "")
             replace = action.get("replace", "")
             if not find:
-                return {"ok": False, "output": "edit requires non-empty 'find'",
-                        "error_type": "edit_failed"}
+                return {
+                    "ok": False,
+                    "output": "edit requires non-empty 'find'",
+                    "error_type": "edit_failed",
+                }
             count = text.count(find)
             if count == 0:
-                return {"ok": False, "output": f"No match for find string in {p.name}",
-                        "error_type": "edit_failed"}
+                return {
+                    "ok": False,
+                    "output": f"No match for find string in {p.name}",
+                    "error_type": "edit_failed",
+                }
             if count > 1:
-                return {"ok": False,
-                        "output": f"Ambiguous: find string matches {count} times in {p.name}",
-                        "error_type": "edit_failed"}
+                return {
+                    "ok": False,
+                    "output": f"Ambiguous: find string matches {count} times in {p.name}",
+                    "error_type": "edit_failed",
+                }
             _atomic_write_text(p, text.replace(find, replace, 1))
             return {"ok": True, "output": f"Edited {p.name}"}
         except Exception as e:
@@ -1810,52 +1995,89 @@ def execute(action, working_dir="."):
             # Hash the exact bytes whose decoded text is paged. Continuation
             # cursors count Python Unicode code points, not UTF-8 bytes or
             # grapheme clusters, and are valid only for this source hash.
-            meta = {"total_lines": total,
-                    "total_bytes": len(raw),
-                    "total_chars": len(text),
-                    "sha256": hashlib.sha256(raw).hexdigest()[:12]}
+            meta = {
+                "total_lines": total,
+                "total_bytes": len(raw),
+                "total_chars": len(text),
+                "sha256": hashlib.sha256(raw).hexdigest()[:12],
+            }
             try:
                 cursor = _read_cursor(action)
             except ValueError:
-                return {"ok": False, "truncated": False, "content": "",
-                        "continuation": None,
-                        "output": (f"[{p.name}: read cursor must be a "
-                                   "non-negative integer]"),
-                        "error_type": "invalid_read_cursor", **meta}
+                return {
+                    "ok": False,
+                    "truncated": False,
+                    "content": "",
+                    "continuation": None,
+                    "output": (f"[{p.name}: read cursor must be a non-negative integer]"),
+                    "error_type": "invalid_read_cursor",
+                    **meta,
+                }
             if cursor is not None:
                 try:
                     limit = _read_continuation_limit(action)
                 except ValueError:
-                    return {"ok": False, "truncated": False, "content": "",
-                            "continuation": None,
-                            "output": (f"[{p.name}: read continuation limit "
-                                       f"must be an integer from 1 to "
-                                       f"{READ_LIMIT_MAX}]"),
-                            "error_type": "invalid_read_limit", **meta}
+                    return {
+                        "ok": False,
+                        "truncated": False,
+                        "content": "",
+                        "continuation": None,
+                        "output": (
+                            f"[{p.name}: read continuation limit "
+                            f"must be an integer from 1 to "
+                            f"{READ_LIMIT_MAX}]"
+                        ),
+                        "error_type": "invalid_read_limit",
+                        **meta,
+                    }
             expected_hash = action.get("sha256")
             if cursor is not None and not expected_hash:
-                return {"ok": False, "truncated": False, "content": "",
-                        "continuation": None,
-                        "output": (f"[{p.name}: read cursor requires the source "
-                                   "sha256 from its continuation]"),
-                        "error_type": "read_cursor_hash_required", **meta}
+                return {
+                    "ok": False,
+                    "truncated": False,
+                    "content": "",
+                    "continuation": None,
+                    "output": (
+                        f"[{p.name}: read cursor requires the source sha256 from its continuation]"
+                    ),
+                    "error_type": "read_cursor_hash_required",
+                    **meta,
+                }
             if cursor is not None and expected_hash and expected_hash != meta["sha256"]:
-                return {"ok": False, "truncated": False, "content": "",
-                        "continuation": None,
-                        "output": (f"[{p.name}: stale read cursor; source changed "
-                                   f"({expected_hash} -> {meta['sha256']})]"),
-                        "error_type": "stale_read_cursor", **meta}
+                return {
+                    "ok": False,
+                    "truncated": False,
+                    "content": "",
+                    "continuation": None,
+                    "output": (
+                        f"[{p.name}: stale read cursor; source changed "
+                        f"({expected_hash} -> {meta['sha256']})]"
+                    ),
+                    "error_type": "stale_read_cursor",
+                    **meta,
+                }
             if cursor is None and offset > total:
-                return {"ok": True, "truncated": False,
-                        "content": "", "continuation": None,
-                        "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
-                        **meta}
+                return {
+                    "ok": True,
+                    "truncated": False,
+                    "content": "",
+                    "continuation": None,
+                    "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
+                    **meta,
+                }
             if cursor is not None and cursor >= len(text):
-                return {"ok": False, "truncated": False,
-                        "content": "", "continuation": None,
-                        "output": (f"[{p.name}: read cursor {cursor} must point "
-                                   f"before end of file ({len(text)} chars)]"),
-                        "error_type": "invalid_read_cursor", **meta}
+                return {
+                    "ok": False,
+                    "truncated": False,
+                    "content": "",
+                    "continuation": None,
+                    "output": (
+                        f"[{p.name}: read cursor {cursor} must point "
+                        f"before end of file ({len(text)} chars)]"
+                    ),
+                    "error_type": "invalid_read_cursor",
+                    **meta,
+                }
 
             starts = []
             pos = 0
@@ -1869,8 +2091,7 @@ def execute(action, working_dir="."):
                 start = cursor
                 start_line_index = max(0, bisect.bisect_right(starts, start) - 1)
             window_end_index = min(total, start_line_index + limit)
-            window_end = (starts[window_end_index]
-                          if window_end_index < total else len(text))
+            window_end = starts[window_end_index] if window_end_index < total else len(text)
             page_cap = READ_CHARS
             while True:
                 page_end = min(start + page_cap, window_end)
@@ -1882,19 +2103,22 @@ def execute(action, working_dir="."):
                 end = last_line_index + 1
                 continuation = None
                 if page_end < len(text):
-                    next_line_index = max(
-                        0, bisect.bisect_right(starts, page_end) - 1)
-                    continuation = {"cursor": page_end,
-                                    "offset": next_line_index + 1,
-                                    "limit": limit,
-                                    "sha256": meta["sha256"]}
+                    next_line_index = max(0, bisect.bisect_right(starts, page_end) - 1)
+                    continuation = {
+                        "cursor": page_end,
+                        "offset": next_line_index + 1,
+                        "limit": limit,
+                        "sha256": meta["sha256"],
+                    }
                 header = f"[{p.name}: lines {start_line_index + 1}-{end} of {total}"
                 if page_end < window_end:
                     header += f", cut at {len(body)} chars"
                 if continuation:
-                    header += (f"; continue: cursor={continuation['cursor']}, "
-                               f"limit={continuation['limit']}, "
-                               f"sha256={continuation['sha256']}")
+                    header += (
+                        f"; continue: cursor={continuation['cursor']}, "
+                        f"limit={continuation['limit']}, "
+                        f"sha256={continuation['sha256']}"
+                    )
                 header += "]"
                 output = f"{header}\n{body}"
                 overflow = len(output) - OBSERVE_STATE_CHARS
@@ -1902,29 +2126,37 @@ def execute(action, working_dir="."):
                     break
                 page_cap = max(1, page_cap - overflow)
             truncated = continuation is not None
-            return {"ok": True, "output": output,
-                    "truncated": truncated,
-                    "content": body,
-                    "continuation": continuation,
-                    **meta}
+            return {
+                "ok": True,
+                "output": output,
+                "truncated": truncated,
+                "content": body,
+                "continuation": continuation,
+                **meta,
+            }
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "read")}
     elif act == "search":
         pattern = action.get("arg", "")
         if not pattern:
-            return {"ok": False, "output": "search requires non-empty 'arg' (pattern)",
-                    "error_type": "unknown"}
+            return {
+                "ok": False,
+                "output": "search requires non-empty 'arg' (pattern)",
+                "error_type": "unknown",
+            }
         try:
             base = Path(action.get("path") or ".")
             if not base.is_absolute():
                 base = Path(working_dir) / base
             if not base.is_dir():
-                return {"ok": False, "output": f"Directory not found: {base.name}",
-                        "error_type": "missing_file"}
-            walk_errors = []
-            files = list(_iter_repo_files(
-                base, SEARCH_MAX_FILES + 1, on_error=walk_errors.append))
+                return {
+                    "ok": False,
+                    "output": f"Directory not found: {base.name}",
+                    "error_type": "missing_file",
+                }
+            walk_errors: list[OSError] = []
+            files = list(_iter_repo_files(base, SEARCH_MAX_FILES + 1, on_error=walk_errors.append))
             file_limited = len(files) > SEARCH_MAX_FILES
             matches = []
             snippets_limited = False
@@ -1963,23 +2195,28 @@ def execute(action, working_dir="."):
                 reasons.append("walk_errors")
 
             def search_header(active_reasons):
-                marker = ("+" if any(r in active_reasons
-                                     for r in ("matches", "files", "chars"))
-                          else "")
+                marker = (
+                    "+" if any(r in active_reasons for r in ("matches", "files", "chars")) else ""
+                )
                 header = f"[{len(shown)}{marker} matches for '{pattern[:40]}'"
                 if active_reasons:
-                    header += (" — incomplete: " + ", ".join(active_reasons)
-                               + "; narrow the pattern/path or read the file")
+                    header += (
+                        " — incomplete: "
+                        + ", ".join(active_reasons)
+                        + "; narrow the pattern/path or read the file"
+                    )
                 return header + "]"
 
             output, reasons = _pack_observation_lines(
-                search_header, shown, reasons,
-                min(SEARCH_MAX_CHARS, OBSERVE_STATE_CHARS))
+                search_header, shown, reasons, min(SEARCH_MAX_CHARS, OBSERVE_STATE_CHARS)
+            )
             truncated = bool(reasons)
-            return {"ok": True,
-                    "output": output,
-                    "truncated": truncated,
-                    "truncation_reasons": reasons}
+            return {
+                "ok": True,
+                "output": output,
+                "truncated": truncated,
+                "truncation_reasons": reasons,
+            }
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "search")}
@@ -1989,18 +2226,19 @@ def execute(action, working_dir="."):
             if not base.is_absolute():
                 base = Path(working_dir) / base
             if not base.is_dir():
-                return {"ok": False, "output": f"Directory not found: {base.name}",
-                        "error_type": "missing_file"}
-            entries = []
+                return {
+                    "ok": False,
+                    "output": f"Directory not found: {base.name}",
+                    "error_type": "missing_file",
+                }
+            entries: list[str] = []
             depth_limited = False
             walk_errors = []
             root_depth = len(base.parts)
-            for dirpath, dirnames, filenames in os.walk(
-                    base, onerror=walk_errors.append):
+            for dirpath, dirnames, filenames in os.walk(base, onerror=walk_errors.append):
                 depth = len(Path(dirpath).parts) - root_depth
                 dirnames[:] = sorted(
-                    d for d in dirnames
-                    if d not in _REPO_SKIP_DIRS and not d.startswith(".")
+                    d for d in dirnames if d not in _REPO_SKIP_DIRS and not d.startswith(".")
                 )
                 if depth >= TREE_MAX_DEPTH:
                     if dirnames:
@@ -2010,8 +2248,7 @@ def execute(action, working_dir="."):
                 prefix = "" if str(rel_dir) == "." else f"{rel_dir}/"
                 entries.extend(f"{prefix}{d}/" for d in dirnames)
                 entries.extend(
-                    f"{prefix}{name}" for name in sorted(filenames)
-                    if not name.startswith(".")
+                    f"{prefix}{name}" for name in sorted(filenames) if not name.startswith(".")
                 )
                 if len(entries) > TREE_MAX_ENTRIES:
                     break
@@ -2030,18 +2267,19 @@ def execute(action, working_dir="."):
                 if "entries" in active_reasons:
                     header += f", capped at {TREE_MAX_ENTRIES}"
                 if active_reasons:
-                    header += (" — incomplete: " + ", ".join(active_reasons)
-                               + "; narrow the path")
+                    header += " — incomplete: " + ", ".join(active_reasons) + "; narrow the path"
                 return header + "]"
 
             output, reasons = _pack_observation_lines(
-                tree_header, shown, reasons,
-                min(TREE_MAX_CHARS, OBSERVE_STATE_CHARS))
+                tree_header, shown, reasons, min(TREE_MAX_CHARS, OBSERVE_STATE_CHARS)
+            )
             truncated = bool(reasons)
-            return {"ok": True,
-                    "output": output,
-                    "truncated": truncated,
-                    "truncation_reasons": reasons}
+            return {
+                "ok": True,
+                "output": output,
+                "truncated": truncated,
+                "truncation_reasons": reasons,
+            }
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "tree")}
@@ -2052,10 +2290,15 @@ def execute(action, working_dir="."):
     return {"ok": False, "output": f"unknown action: {act}"}
 
 
-def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
-              max_tasks=MAX_TASKS, max_steps=MAX_STEPS,
-              reasoning_policy=DEFAULT_REASONING_POLICY,
-              goal_context_chars=GOAL_CONTEXT_CHARS):
+def _run_loop(
+    user_prompt,
+    working_dir,
+    max_replans=MAX_REPLANS,
+    max_tasks=MAX_TASKS,
+    max_steps=MAX_STEPS,
+    reasoning_policy=DEFAULT_REASONING_POLICY,
+    goal_context_chars=GOAL_CONTEXT_CHARS,
+):
     """Core agent loop. Returns structured result dict.
 
     Used by run() (public API, returns bool) and by integration test harness
@@ -2063,9 +2306,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     preflight, policy, null normalization, error reset, timeout retry, etc.
     """
     if reasoning_policy not in REASONING_POLICIES:
-        raise ValueError(
-            f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}"
-        )
+        raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
     if goal_context_chars < 1:
         raise ValueError("goal_context_chars must be a positive integer")
     # Freeze the executor/replanner view once so all policy arms receive the same
@@ -2098,23 +2339,40 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     def _skip_step(task_index, step_num, act, action, reason):
         """Record a selected-but-not-dispatched action in run metrics + log."""
         state["skipped_steps"] += 1
-        _run_log({"event": "step_skipped", "task_index": task_index,
-                  "step": step_num, "action": act,
-                  "arg": action.get("arg", "")[:120], "reason": reason})
+        _run_log(
+            {
+                "event": "step_skipped",
+                "task_index": task_index,
+                "step": step_num,
+                "action": act,
+                "arg": action.get("arg", "")[:120],
+                "reason": reason,
+            }
+        )
 
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
     log(f"Working directory: {working_dir}")
-    _run_log({"event": "run_start", "prompt": user_prompt, "working_dir": working_dir,
-              "backend": LLM_BACKEND, "model": MODEL,
-              "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
-              "reasoning_effort": OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else "",
-              "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
-              "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
-              "reasoning_policy": reasoning_policy,
-              "limits": {"max_replans": max_replans, "max_tasks": max_tasks,
-                         "max_steps": max_steps,
-                         "goal_context_chars": goal_context_chars}})
+    _run_log(
+        {
+            "event": "run_start",
+            "prompt": user_prompt,
+            "working_dir": working_dir,
+            "backend": LLM_BACKEND,
+            "model": MODEL,
+            "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
+            "reasoning_effort": OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else "",
+            "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+            "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+            "reasoning_policy": reasoning_policy,
+            "limits": {
+                "max_replans": max_replans,
+                "max_tasks": max_tasks,
+                "max_steps": max_steps,
+                "goal_context_chars": goal_context_chars,
+            },
+        }
+    )
     # Preflight: probe environment and set policy
     env = preflight_probe(working_dir)
     state["environment"] = env
@@ -2145,8 +2403,14 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             log(f"  Planner transport error: {e}")
             state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
             history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
-            _run_log({"event": "plan_error", "replan": replan, "error": str(e)[:200],
-                      "wall_s": round(time.time() - t_plan, 2)})
+            _run_log(
+                {
+                    "event": "plan_error",
+                    "replan": replan,
+                    "error": str(e)[:200],
+                    "wall_s": round(time.time() - t_plan, 2),
+                }
+            )
             continue  # consumes a plan attempt
         raw_tasks = plan.get("tasks")
         tasks = raw_tasks[:max_tasks] if isinstance(raw_tasks, list) else []
@@ -2154,17 +2418,21 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             error = "[malformed_plan] planner returned no valid tasks"
             state["errors"].append(error)
             log(f"  Planner contract error: {error}")
-            history.append({"event": "plan_error", "replan": replan,
-                            "error": error})
-            _run_log({"event": "plan_error", "replan": replan,
-                      "error": error, "wall_s": round(time.time() - t_plan, 2)})
+            history.append({"event": "plan_error", "replan": replan, "error": error})
+            _run_log(
+                {
+                    "event": "plan_error",
+                    "replan": replan,
+                    "error": error,
+                    "wall_s": round(time.time() - t_plan, 2),
+                }
+            )
             continue
         state["errors"] = []  # reset errors each replan; planner already saw them
         plan_wall = time.time() - t_plan
         log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         history.append({"event": "plan", "replan": replan, "tasks": tasks})
-        _run_log({"event": "plan", "replan": replan, "tasks": tasks,
-                  "wall_s": round(plan_wall, 2)})
+        _run_log({"event": "plan", "replan": replan, "tasks": tasks, "wall_s": round(plan_wall, 2)})
 
         all_done = True
         for i, task in enumerate(tasks):
@@ -2197,7 +2465,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 task_wants_write = _is_write_shaped(task)
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
                 if completed_repair:
-                    log(f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})")
+                    log(
+                        f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})"
+                    )
                     task_steps.append(completed_repair)
                     task_done = True
                     break
@@ -2205,23 +2475,34 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     t_step = time.time()
                     try:
                         action = get_step(
-                            task, state, goal=goal_context, step_num=step,
-                            max_steps=max_steps, think=use_think,
+                            task,
+                            state,
+                            goal=goal_context,
+                            step_num=step,
+                            max_steps=max_steps,
+                            think=use_think,
                             reasoning_policy=reasoning_policy,
                             reasoning_trigger=reasoning_trigger,
                             goal_context_chars=goal_context_chars,
                             write_pressure=(
-                                task_wants_write and commit_executed == 0
-                                and observe_executed >= WRITE_PRESSURE_OBSERVATIONS),
+                                task_wants_write
+                                and commit_executed == 0
+                                and observe_executed >= WRITE_PRESSURE_OBSERVATIONS
+                            ),
                             validate_pressure=(
                                 Path(str(last_write_target)).name
                                 if last_write_target is not None
                                 and consecutive_target_writes >= REWRITE_PRESSURE_WRITES
-                                else None),
+                                else None
+                            ),
                         )
                     except LLMTransportError as e:
-                        log(f"  [{step + 1}] LLM transport error ({time.time()-t_step:.1f}s): {e}")
-                        state["errors"].append(f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}")
+                        log(
+                            f"  [{step + 1}] LLM transport error ({time.time() - t_step:.1f}s): {e}"
+                        )
+                        state["errors"].append(
+                            f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}"
+                        )
                         break
                     except (json.JSONDecodeError, KeyError) as e:
                         # Typed parse failures (issue #7): the replanner should
@@ -2233,10 +2514,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             etype = "malformed_action"
                         else:
                             etype = "unknown"
-                        log(f"  [{step + 1}] LLM parse error ({time.time()-t_step:.1f}s) [{etype}]")
-                        state["errors"].append(f"[{etype}] LLM parse error on task '{task}': {str(e)[:100]}")
-                        _run_log({"event": "step_error", "task_index": i, "step": step,
-                                  "error_type": etype})
+                        log(
+                            f"  [{step + 1}] LLM parse error ({time.time() - t_step:.1f}s) [{etype}]"
+                        )
+                        state["errors"].append(
+                            f"[{etype}] LLM parse error on task '{task}': {str(e)[:100]}"
+                        )
+                        _run_log(
+                            {
+                                "event": "step_error",
+                                "task_index": i,
+                                "step": step,
+                                "error_type": etype,
+                            }
+                        )
                         break
                     # Normalize None → "" for optional string fields (models emit "arg": null)
                     for _k in ("arg", "content", "reasoning", "find", "replace"):
@@ -2248,55 +2539,62 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
                     if act == "done":
                         unresolved = _unresolved_incomplete_writes(
-                            state.get("all_steps", []), working_dir)
+                            state.get("all_steps", []), working_dir
+                        )
                         pending_empty = state.get("pending_empty_writes", {})
                         if unresolved or pending_empty:
                             append_allowed = True
-                            restrictive = _restrictive_pending_empty(
-                                pending_empty)
+                            restrictive = _restrictive_pending_empty(pending_empty)
                             if restrictive is not None:
                                 incomplete_target, pending_info = restrictive
-                                (incomplete_name, recovery_arg,
-                                 append_allowed) = _pending_empty_hint(
-                                    incomplete_target, pending_info)
+                                (incomplete_name, recovery_arg, append_allowed) = (
+                                    _pending_empty_hint(incomplete_target, pending_info)
+                                )
                             elif unresolved:
                                 incomplete_target, (_, incomplete_step) = max(
-                                    unresolved.items(),
-                                    key=lambda item: item[1][0])
-                                incomplete_name, recovery_arg = (
-                                    _incomplete_step_hint(
-                                        incomplete_target, incomplete_step))
+                                    unresolved.items(), key=lambda item: item[1][0]
+                                )
+                                incomplete_name, recovery_arg = _incomplete_step_hint(
+                                    incomplete_target, incomplete_step
+                                )
                             else:
-                                incomplete_target, pending_info = (
-                                    _next_pending_empty(pending_empty))
-                                (incomplete_name, recovery_arg,
-                                 append_allowed) = _pending_empty_hint(
-                                    incomplete_target, pending_info)
+                                incomplete_target, pending_info = _next_pending_empty(pending_empty)
+                                (incomplete_name, recovery_arg, append_allowed) = (
+                                    _pending_empty_hint(incomplete_target, pending_info)
+                                )
                             if append_allowed:
                                 recovery = (
                                     "Retry that exact target with append:true if it "
                                     "still identifies the intended file, or restart "
-                                    "it with a complete append:false write.")
+                                    "it with a complete append:false write."
+                                )
                             else:
                                 recovery = (
                                     "Resend a shorter write to that exact target with "
-                                    "append:false before using append:true.")
-                            log(f"  [{step + 1}] skip (done with incomplete write: "
-                                f"{incomplete_name})")
-                            _skip_step(i, step, act, action,
-                                       "incomplete_write_done")
-                            state["last_steps"].append({
-                                "action": "done", "arg": "", "ok": True,
-                                "output": (
-                                    f"Cannot finish: {incomplete_name} is incomplete "
-                                    f"at {recovery_arg}. {recovery}"),
-                            })
+                                    "append:false before using append:true."
+                                )
+                            log(
+                                f"  [{step + 1}] skip (done with incomplete write: "
+                                f"{incomplete_name})"
+                            )
+                            _skip_step(i, step, act, action, "incomplete_write_done")
+                            state["last_steps"].append(
+                                {
+                                    "action": "done",
+                                    "arg": "",
+                                    "ok": True,
+                                    "output": (
+                                        f"Cannot finish: {incomplete_name} is incomplete "
+                                        f"at {recovery_arg}. {recovery}"
+                                    ),
+                                }
+                            )
                             continue
                         task_done = True
                         break
                     if act == "fail":
                         reason = action.get("reasoning", "no reason")
-                        log(f"  FAIL ({time.time()-t_step:.1f}s): {reason}")
+                        log(f"  FAIL ({time.time() - t_step:.1f}s): {reason}")
                         state["errors"].append(f"Task '{task}': {reason}")
                         break
 
@@ -2304,30 +2602,48 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     # complete lines that arrived and steer the model to finish
                     # the file with chunked append instead of failing the step.
                     truncated_write = act == "write" and action.pop("content_truncated", False)
-                    logical_write_target = (_mutation_target_key(
-                        {"arg": action.get("arg", "")}, working_dir)
-                        if act == "write" else None)
-                    operation_write_target = (_mutation_target_key({
-                        "arg": action.get("arg", ""),
-                        "append": bool(action.get("append")),
-                    }, working_dir) if act == "write" else None)
+                    logical_write_target = (
+                        _mutation_target_key({"arg": action.get("arg", "")}, working_dir)
+                        if act == "write"
+                        else None
+                    )
+                    operation_write_target = (
+                        _mutation_target_key(
+                            {
+                                "arg": action.get("arg", ""),
+                                "append": bool(action.get("append")),
+                            },
+                            working_dir,
+                        )
+                        if act == "write"
+                        else None
+                    )
                     pending_recovery = _pending_empty_recovery(
-                        state["pending_empty_writes"], logical_write_target,
-                        operation_write_target, bool(action.get("append")))
-                    if (act == "write" and action.get("append")
-                            and pending_recovery
-                            and not pending_recovery.get("append_allowed", False)):
-                        log(f"  [{step + 1}] skip (append before first replacement "
-                            "chunk landed)")
-                        _skip_step(i, step, act, action,
-                                   "append_after_empty_overwrite")
-                        state["last_steps"].append({
-                            "action": act, "arg": action.get("arg", ""),
-                            "ok": True,
-                            "output": ("The replacement's first chunk wrote no bytes. "
-                                       "Resend a shorter write with append:false before "
-                                       "using append:true."),
-                        })
+                        state["pending_empty_writes"],
+                        logical_write_target,
+                        operation_write_target,
+                        bool(action.get("append")),
+                    )
+                    if (
+                        act == "write"
+                        and action.get("append")
+                        and pending_recovery
+                        and not pending_recovery.get("append_allowed", False)
+                    ):
+                        log(f"  [{step + 1}] skip (append before first replacement chunk landed)")
+                        _skip_step(i, step, act, action, "append_after_empty_overwrite")
+                        state["last_steps"].append(
+                            {
+                                "action": act,
+                                "arg": action.get("arg", ""),
+                                "ok": True,
+                                "output": (
+                                    "The replacement's first chunk wrote no bytes. "
+                                    "Resend a shorter write with append:false before "
+                                    "using append:true."
+                                ),
+                            }
+                        )
                         continue
                     if truncated_write:
                         kept = action.get("content", "")
@@ -2347,30 +2663,32 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             pending_target = (
                                 operation_write_target
                                 if action.get("append")
-                                else logical_write_target)
+                                else logical_write_target
+                            )
                             recovery_arg = action.get("arg", "") or "file"
                             if pending_target is not None:
-                                existing = state["pending_empty_writes"].get(
-                                    pending_target)
+                                existing = state["pending_empty_writes"].get(pending_target)
                                 append_allowed = bool(action.get("append"))
                                 if isinstance(existing, dict):
                                     append_allowed = (
-                                        existing.get("append_allowed", False)
-                                        and append_allowed)
-                                append_target = _mutation_target_key({
-                                    "arg": action.get("arg", ""),
-                                    "append": True,
-                                }, working_dir)
-                                append_targets = list(
-                                    _pending_append_targets(existing))
-                                if (append_target is not None
-                                        and append_target not in append_targets):
+                                        existing.get("append_allowed", False) and append_allowed
+                                    )
+                                append_target = _mutation_target_key(
+                                    {
+                                        "arg": action.get("arg", ""),
+                                        "append": True,
+                                    },
+                                    working_dir,
+                                )
+                                append_targets = list(_pending_append_targets(existing))
+                                if (
+                                    append_target is not None
+                                    and append_target not in append_targets
+                                ):
                                     append_targets.append(append_target)
-                                recovery_arg = _target_recovery_arg(
-                                    pending_target, working_dir)
+                                recovery_arg = _target_recovery_arg(pending_target, working_dir)
                                 state["pending_empty_writes"][pending_target] = {
-                                    "name": Path(
-                                        action.get("arg", "") or "file").name,
+                                    "name": Path(action.get("arg", "") or "file").name,
                                     "append_allowed": append_allowed,
                                     "append_targets": append_targets,
                                     "recovery_arg": recovery_arg,
@@ -2380,62 +2698,93 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             # on a stale existing file), only later chunks
                             # may append.
                             if action.get("append"):
-                                obs = ("Append truncated before a complete line. "
-                                       "Resend a smaller append:true chunk at the "
-                                       f"exact target {recovery_arg}.")
+                                obs = (
+                                    "Append truncated before a complete line. "
+                                    "Resend a smaller append:true chunk at the "
+                                    f"exact target {recovery_arg}."
+                                )
                             else:
                                 obs = (
                                     "Write truncated before a complete line. Resend the "
                                     f"write (no append) to the exact target {recovery_arg} "
                                     "with a shorter first chunk, then continue with "
-                                    "append:true chunks.")
-                            state["last_steps"].append({
-                                "action": act, "arg": action.get("arg", ""), "ok": True,
-                                "output": obs})
+                                    "append:true chunks."
+                                )
+                            state["last_steps"].append(
+                                {
+                                    "action": act,
+                                    "arg": action.get("arg", ""),
+                                    "ok": True,
+                                    "output": obs,
+                                }
+                            )
                             continue
                         action["content"] = kept
 
                     # Write-forcing tail reserve (issue #15): on a write-shaped
                     # task the final steps are reserved for committing actions.
-                    if (act in OBSERVE_ACTIONS and task_wants_write
-                            and commit_executed == 0
-                            and max_steps - step <= OBSERVE_TAIL_RESERVE):
+                    if (
+                        act in OBSERVE_ACTIONS
+                        and task_wants_write
+                        and commit_executed == 0
+                        and max_steps - step <= OBSERVE_TAIL_RESERVE
+                    ):
                         observe_blocked += 1
                         if observe_blocked >= 2:
-                            log(f"  [{step + 1}] auto-fail (observation steps exhausted without a write)")
+                            log(
+                                f"  [{step + 1}] auto-fail (observation steps exhausted without a write)"
+                            )
                             state["errors"].append(
-                                f"[stuck_loop] {act} {action.get('arg', '')[:60]}: observation steps exhausted without a write")
+                                f"[stuck_loop] {act} {action.get('arg', '')[:60]}: observation steps exhausted without a write"
+                            )
                             _skip_step(i, step, act, action, "observe_tail_exhausted")
                             break
-                        log(f"  [{step + 1}] skip ({act} blocked: remaining steps reserved for write)")
+                        log(
+                            f"  [{step + 1}] skip ({act} blocked: remaining steps reserved for write)"
+                        )
                         _skip_step(i, step, act, action, "observe_tail_reserved")
-                        state["last_steps"].append({
-                            "action": act, "arg": action.get("arg", ""), "ok": True,
-                            "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason."})
+                        state["last_steps"].append(
+                            {
+                                "action": act,
+                                "arg": action.get("arg", ""),
+                                "ok": True,
+                                "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason.",
+                            }
+                        )
                         continue
 
                     # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES
                     # successful full writes of the same target with no
                     # intervening successful shell/edit, further full rewrites
                     # are skipped — verify, edit, or finish instead.
-                    if (act == "write" and not action.get("append")
-                            and not truncated_write
-                            and last_write_target is not None
-                            and consecutive_target_writes >= REWRITE_SKIP_WRITES
-                            and _mutation_target_key(
-                                {"arg": action.get("arg", "")}, working_dir)
-                            == last_write_target):
+                    if (
+                        act == "write"
+                        and not action.get("append")
+                        and not truncated_write
+                        and last_write_target is not None
+                        and consecutive_target_writes >= REWRITE_SKIP_WRITES
+                        and _mutation_target_key({"arg": action.get("arg", "")}, working_dir)
+                        == last_write_target
+                    ):
                         dup_skip_count += 1
-                        log(f"  [{step + 1}] skip (rewrite loop: "
+                        log(
+                            f"  [{step + 1}] skip (rewrite loop: "
                             f"{action.get('arg', '')[:40]} already written "
-                            f"{consecutive_target_writes}x)")
+                            f"{consecutive_target_writes}x)"
+                        )
                         _skip_step(i, step, act, action, "rewrite_loop")
-                        state["last_steps"].append({
-                            "action": act, "arg": action.get("arg", ""), "ok": True,
-                            "output": (f"Already written {consecutive_target_writes} times. "
-                                       "Do NOT write it again — verify with shell, make a "
-                                       "targeted edit, or emit done."),
-                        })
+                        state["last_steps"].append(
+                            {
+                                "action": act,
+                                "arg": action.get("arg", ""),
+                                "ok": True,
+                                "output": (
+                                    f"Already written {consecutive_target_writes} times. "
+                                    "Do NOT write it again — verify with shell, make a "
+                                    "targeted edit, or emit done."
+                                ),
+                            }
+                        )
                         continue
 
                     # Duplicate action guard — per-action-type loop detection
@@ -2449,35 +2798,56 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             }
                             if act == "write" and action.get("append"):
                                 current_target_step["append"] = True
-                            current_target = _mutation_target_key(
-                                current_target_step, working_dir)
+                            current_target = _mutation_target_key(current_target_step, working_dir)
                             same_mutation_target = (
                                 current_target is not None
-                                and _mutation_target_key(prev, working_dir)
-                                == current_target)
+                                and _mutation_target_key(prev, working_dir) == current_target
+                            )
                         if act in ("write", "edit") and same_mutation_target:
                             # write: same content = duplicate; edit: same find+replace = duplicate
                             is_dup = False
                             if act == "write" and action.get("append"):
                                 # Chunked append is never a no-op — an identical
                                 # consecutive chunk is a stuck loop, not a duplicate.
-                                if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
-                                    log(f"  [{step + 1}] auto-fail (same chunk appended twice to {action.get('arg','')[:40]})")
-                                    state["errors"].append(f"[stuck_loop] write {action.get('arg','')[:60]}: same chunk appended twice")
+                                if prev.get("_append") and prev.get("_content", "") == action.get(
+                                    "content", ""
+                                ):
+                                    log(
+                                        f"  [{step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
+                                    )
+                                    state["errors"].append(
+                                        f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
+                                    )
                                     _skip_step(i, step, act, action, "stuck_append")
                                     break
-                            elif (act == "write" and not truncated_write
-                                  and prev.get("ok")
-                                  and not prev.get("_truncated_write")
-                                  and not prev.get("_append")
-                                  and prev.get("_content", "") == action.get("content", "")):
+                            elif (
+                                act == "write"
+                                and not truncated_write
+                                and prev.get("ok")
+                                and not prev.get("_truncated_write")
+                                and not prev.get("_append")
+                                and prev.get("_content", "") == action.get("content", "")
+                            ):
                                 is_dup = True
-                            elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
+                            elif (
+                                act == "edit"
+                                and prev.get("ok")
+                                and prev.get("_find", "") == action.get("find", "")
+                                and prev.get("_replace", "") == action.get("replace", "")
+                            ):
                                 is_dup = True
                             # Consecutive identical failed edit → stuck; bail to replan
-                            elif act == "edit" and not prev.get("ok") and prev.get("_find", "") == action.get("find", ""):
-                                log(f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg','')[:40]})")
-                                state["errors"].append(f"[stuck_loop] edit {action.get('arg','')[:60]}: same find string failed twice")
+                            elif (
+                                act == "edit"
+                                and not prev.get("ok")
+                                and prev.get("_find", "") == action.get("find", "")
+                            ):
+                                log(
+                                    f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
+                                )
+                                state["errors"].append(
+                                    f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
+                                )
                                 _skip_step(i, step, act, action, "stuck_edit")
                                 break
                             if is_dup:
@@ -2485,14 +2855,17 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 log(f"  [{step + 1}] skip (duplicate {act}, same content)")
                                 _skip_step(i, step, act, action, f"duplicate_{act}")
                                 if prev.get("_truncated_write"):
-                                    dup_msg = ("File is incomplete — the earlier write was truncated. "
-                                               "Continue with append:true for the rest.")
+                                    dup_msg = (
+                                        "File is incomplete — the earlier write was truncated. "
+                                        "Continue with append:true for the rest."
+                                    )
                                 else:
                                     dup_msg = "Already done — file unchanged. Move to next action or emit done."
                                 entry = {
-                                    "action": act, "arg": action.get("arg", ""),
+                                    "action": act,
+                                    "arg": action.get("arg", ""),
                                     "ok": True,
-                                    "output": dup_msg
+                                    "output": dup_msg,
                                 }
                                 # Preserve match metadata so guard still detects duplicates on subsequent turns
                                 if act == "write":
@@ -2510,7 +2883,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                         action.get("replace", ""),
                                     )
                                     if edit_key == last_successful_edit:
-                                        log(f"  [{step + 1}] auto-done (edit already succeeded, model re-emitting)")
+                                        log(
+                                            f"  [{step + 1}] auto-done (edit already succeeded, model re-emitting)"
+                                        )
                                         task_done = True
                                         break
                                 # Defer thinking escalation: first duplicate skip gets a
@@ -2529,14 +2904,17 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             elif prev.get("error_type") == "timeout":
                                 # Bump timeout for retry: read actual timeout from previous step,
                                 # not from fresh action (which won't have prior bumps)
-                                prev_timeout = prev.get("_timeout",
-                                                        _get_shell_timeout(action.get("arg", "")))
+                                prev_timeout = prev.get(
+                                    "_timeout", _get_shell_timeout(action.get("arg", ""))
+                                )
                                 bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
                                 action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
                                 log(f"  [{step + 1}] retrying after timeout ({action['timeout']}s)")
                             else:
                                 log(f"  [{step + 1}] auto-fail (same shell failed twice)")
-                                state["errors"].append(f"Stuck: {act} {action.get('arg','')[:60]} failed twice")
+                                state["errors"].append(
+                                    f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
+                                )
                                 _skip_step(i, step, act, action, "stuck_shell")
                                 break
                         elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
@@ -2549,17 +2927,23 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             elif prev.get("ok"):
                                 dup_skip_count += 1
                                 if dup_skip_count >= 2:
-                                    log(f"  [{step + 1}] auto-fail (same read repeated on {action.get('arg','')[:40]})")
-                                    state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]}: same file read repeatedly")
+                                    log(
+                                        f"  [{step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
+                                    )
+                                    state["errors"].append(
+                                        f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
+                                    )
                                     _skip_step(i, step, act, action, "stuck_read")
                                     break
                                 log(f"  [{step + 1}] skip (duplicate read)")
                                 _skip_step(i, step, act, action, "duplicate_read")
                                 cont = prev.get("_continuation")
                                 if cont:
-                                    obs = ("Already read this range. Continue with "
-                                           f"{_read_continuation_hint(cont)}; "
-                                           f"or search, edit, done, or fail.")
+                                    obs = (
+                                        "Already read this range. Continue with "
+                                        f"{_read_continuation_hint(cont)}; "
+                                        f"or search, edit, done, or fail."
+                                    )
                                 else:
                                     obs = "Already read. Use previous content; edit, write, shell, done, or fail."
                                 entry = {
@@ -2575,7 +2959,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 continue
                             else:
                                 log(f"  [{step + 1}] auto-fail (same read failed twice)")
-                                state["errors"].append(f"[stuck_loop] read {action.get('arg','')[:60]} failed twice")
+                                state["errors"].append(
+                                    f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
+                                )
                                 _skip_step(i, step, act, action, "stuck_read_failed")
                                 break
 
@@ -2587,8 +2973,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     if result["ok"] and act == "write":
                         _clear_pending_empty_writes(
                             state["pending_empty_writes"],
-                            logical_write_target, operation_write_target,
-                            bool(action.get("append")))
+                            logical_write_target,
+                            operation_write_target,
+                            bool(action.get("append")),
+                        )
                     if act not in OBSERVE_ACTIONS and result["ok"]:
                         # Counted only on success (Codex P2, PR #16): a failed
                         # mutation must not disarm write pressure or the
@@ -2606,7 +2994,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             consecutive_target_writes = 0
                         elif not action.get("append"):
                             target = _mutation_target_key(
-                                {"arg": action.get("arg", "")}, working_dir)
+                                {"arg": action.get("arg", "")}, working_dir
+                            )
                             if target == last_write_target:
                                 consecutive_target_writes += 1
                             else:
@@ -2621,25 +3010,26 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         # The executor is stateless per step: without a resume
                         # anchor the model cannot know where the write stopped.
                         anchor = kept.splitlines()[-1][-80:]
-                        recovery_arg = _target_recovery_arg(
-                            operation_write_target, working_dir)
+                        recovery_arg = _target_recovery_arg(operation_write_target, working_dir)
                         result["output"] += (
                             f" (truncated after {kept.count(chr(10))} lines; "
                             f"last written line: {anchor!r}; continue with "
                             f"append:true at {recovery_arg} starting after "
-                            "that line)")
+                            "that line)"
+                        )
                     ok_str = "OK" if result["ok"] else "FAIL"
-                    log(f"  -> {ok_str} ({time.time()-t_step:.1f}s): {result['output'][:80]}")
+                    log(f"  -> {ok_str} ({time.time() - t_step:.1f}s): {result['output'][:80]}")
 
                     # Truncated-write outputs carry the resume anchor the next
                     # step navigates by — observation-class budget, not 100.
-                    out_cap = (OBSERVE_STATE_CHARS
-                               if act in OBSERVE_ACTIONS or truncated_write else 100)
+                    out_cap = (
+                        OBSERVE_STATE_CHARS if act in OBSERVE_ACTIONS or truncated_write else 100
+                    )
                     step_entry = {
                         "action": act,
                         "arg": action.get("arg", ""),
                         "ok": result["ok"],
-                        "output": result["output"][:out_cap]
+                        "output": result["output"][:out_cap],
                     }
                     if not result["ok"] and "error_type" in result:
                         step_entry["error_type"] = result["error_type"]
@@ -2662,20 +3052,34 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         if target is not None:
                             step_entry["_target"] = target
                             if act == "write" and truncated_write:
-                                step_entry["_recovery_arg"] = (
-                                    _target_recovery_arg(target, working_dir))
+                                step_entry["_recovery_arg"] = _target_recovery_arg(
+                                    target, working_dir
+                                )
                     if act == "read":
                         step_entry["_read_key"] = _read_key(action)
                         if result.get("continuation"):
                             step_entry["_continuation"] = result["continuation"]
                     state["last_steps"].append(step_entry)
                     state["all_steps"].append(dict(step_entry))
-                    history.append({"event": "step", "task": i, "step": step, "action": action,
-                                    "result": {"ok": result["ok"], "output": result["output"][:100]}})
-                    step_log = {"event": "step", "task_index": i, "step": step,
-                                "action": act, "arg": action.get("arg", "")[:120],
-                                "ok": result["ok"], "error_type": result.get("error_type"),
-                                "wall_s": round(time.time() - t_step, 2)}
+                    history.append(
+                        {
+                            "event": "step",
+                            "task": i,
+                            "step": step,
+                            "action": action,
+                            "result": {"ok": result["ok"], "output": result["output"][:100]},
+                        }
+                    )
+                    step_log = {
+                        "event": "step",
+                        "task_index": i,
+                        "step": step,
+                        "action": act,
+                        "arg": action.get("arg", "")[:120],
+                        "ok": result["ok"],
+                        "error_type": result.get("error_type"),
+                        "wall_s": round(time.time() - t_step, 2),
+                    }
                     if result.get("truncated"):
                         step_log["truncated"] = True
                     if truncated_write:
@@ -2692,8 +3096,11 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
 
                     if not result["ok"]:
                         etype = result.get("error_type", "unknown")
-                        if (act == "shell" and etype in ("compile_error", "unknown")
-                                and _expects_failure(task)):
+                        if (
+                            act == "shell"
+                            and etype in ("compile_error", "unknown")
+                            and _expects_failure(task)
+                        ):
                             log("  Expected failure observed; completing task with evidence")
                             step_entry["expected_failure"] = True
                             state["last_steps"][-1]["expected_failure"] = True
@@ -2722,16 +3129,24 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 state["last_steps"].append(repair_step)
                                 state["all_steps"].append(dict(repair_step))
                                 task_steps.append(repair_step)
-                                history.append({
-                                    "event": "step", "task": i, "step": step,
-                                    "action": repair_step,
-                                    "result": {"ok": True, "output": repair[1]},
-                                    "deterministic_repair": True,
-                                })
-                                _run_log({"event": "deterministic_repair",
-                                          "kind": "compile_include",
-                                          "file": repair[0],
-                                          "description": repair[1]})
+                                history.append(
+                                    {
+                                        "event": "step",
+                                        "task": i,
+                                        "step": step,
+                                        "action": repair_step,
+                                        "result": {"ok": True, "output": repair[1]},
+                                        "deterministic_repair": True,
+                                    }
+                                )
+                                _run_log(
+                                    {
+                                        "event": "deterministic_repair",
+                                        "kind": "compile_include",
+                                        "file": repair[0],
+                                        "description": repair[1],
+                                    }
+                                )
 
                                 retry_result = execute(action, working_dir)
                                 retry_step = {
@@ -2745,24 +3160,36 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     retry_step["error_type"] = retry_result["error_type"]
                                 state["last_steps"].append(retry_step)
                                 state["all_steps"].append(dict(retry_step))
-                                history.append({
-                                    "event": "step", "task": i, "step": step,
-                                    "action": {"action": "shell", "arg": action.get("arg", "")},
-                                    "result": {
+                                history.append(
+                                    {
+                                        "event": "step",
+                                        "task": i,
+                                        "step": step,
+                                        "action": {"action": "shell", "arg": action.get("arg", "")},
+                                        "result": {
+                                            "ok": retry_result["ok"],
+                                            "output": retry_result["output"][:100],
+                                        },
+                                        "deterministic_retry": True,
+                                    }
+                                )
+                                _run_log(
+                                    {
+                                        "event": "step",
+                                        "task_index": i,
+                                        "step": step,
+                                        "action": "shell",
+                                        "arg": action.get("arg", "")[:120],
                                         "ok": retry_result["ok"],
-                                        "output": retry_result["output"][:100],
-                                    },
-                                    "deterministic_retry": True,
-                                })
-                                _run_log({"event": "step", "task_index": i, "step": step,
-                                          "action": "shell",
-                                          "arg": action.get("arg", "")[:120],
-                                          "ok": retry_result["ok"],
-                                          "error_type": retry_result.get("error_type"),
-                                          "deterministic_retry": True,
-                                          "wall_s": round(time.time() - t_step, 2)})
+                                        "error_type": retry_result.get("error_type"),
+                                        "deterministic_retry": True,
+                                        "wall_s": round(time.time() - t_step, 2),
+                                    }
+                                )
                                 if retry_result["ok"]:
-                                    log(f"  -> OK deterministic retry: {retry_result['output'][:80]}")
+                                    log(
+                                        f"  -> OK deterministic retry: {retry_result['output'][:80]}"
+                                    )
                                     task_steps.append(retry_step)
                                     use_think = False
                                     reasoning_trigger = "executor"
@@ -2772,13 +3199,19 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 step_entry = retry_step
                                 etype = result.get("error_type", "unknown")
 
-                        err_output = result['output'][:100]
+                        err_output = result["output"][:100]
                         hint = _RECOVERY_HINTS.get(etype)
                         if hint:
                             err_output = f"{err_output} → {hint}"
-                            state["last_steps"][-1]["output"] = state["last_steps"][-1]["output"][:100] + f" → {hint}"
-                            state["all_steps"][-1]["output"] = state["all_steps"][-1]["output"][:100] + f" → {hint}"
-                        state["errors"].append(f"[{etype}] {act} {action.get('arg','')[:60]}: {err_output}")
+                            state["last_steps"][-1]["output"] = (
+                                state["last_steps"][-1]["output"][:100] + f" → {hint}"
+                            )
+                            state["all_steps"][-1]["output"] = (
+                                state["all_steps"][-1]["output"][:100] + f" → {hint}"
+                            )
+                        state["errors"].append(
+                            f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}"
+                        )
                         use_think = etype not in _NO_THINK_ERRORS
                         reasoning_trigger = f"execution_error:{etype}"
                     else:
@@ -2799,16 +3232,27 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 if task_attempt < MAX_TASK_LOCAL_REPLANS:
                     saved_errors = list(state["errors"])
                     t_lr = time.time()
-                    replacement = replan_task(task, state["errors"],
-                                             state["completed_tasks"], state,
-                                             goal_context,
-                                             goal_context_chars=goal_context_chars)
+                    replacement = replan_task(
+                        task,
+                        state["errors"],
+                        state["completed_tasks"],
+                        state,
+                        goal_context,
+                        goal_context_chars=goal_context_chars,
+                    )
                     lr_wall = time.time() - t_lr
                     if replacement:
                         log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
-                        _run_log({"event": "task_local_replan", "task_index": i,
-                                  "original": task[:120], "replacement": replacement[:120],
-                                  "ok": True, "llm_wall_s": round(lr_wall, 2)})
+                        _run_log(
+                            {
+                                "event": "task_local_replan",
+                                "task_index": i,
+                                "original": task[:120],
+                                "replacement": replacement[:120],
+                                "ok": True,
+                                "llm_wall_s": round(lr_wall, 2),
+                            }
+                        )
                         task = replacement
                         tasks[i] = replacement
                         state["errors"] = []
@@ -2816,10 +3260,17 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     else:
                         reject_reason = _last_task_replan_reject_reason or "unknown"
                         log(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
-                        _run_log({"event": "task_local_replan", "task_index": i,
-                                  "original": task[:120], "replacement": None,
-                                  "ok": False, "llm_wall_s": round(lr_wall, 2),
-                                  "reject_reason": reject_reason})
+                        _run_log(
+                            {
+                                "event": "task_local_replan",
+                                "task_index": i,
+                                "original": task[:120],
+                                "replacement": None,
+                                "ok": False,
+                                "llm_wall_s": round(lr_wall, 2),
+                                "reject_reason": reject_reason,
+                            }
+                        )
                         state["errors"] = saved_errors
                 else:
                     # Replacement attempt also failed — merge original errors back
@@ -2829,42 +3280,57 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 break
 
             if task_done:
-                unresolved = _unresolved_incomplete_writes(
-                    state.get("all_steps", []), working_dir)
+                unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
                 pending_empty = state.get("pending_empty_writes", {})
                 if unresolved or pending_empty:
                     restrictive = _restrictive_pending_empty(pending_empty)
                     if restrictive is not None:
                         incomplete_target, pending_info = restrictive
                         incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info)
+                            incomplete_target, pending_info
+                        )
                     elif unresolved:
                         incomplete_target, (_, incomplete_step) = max(
-                            unresolved.items(), key=lambda item: item[1][0])
+                            unresolved.items(), key=lambda item: item[1][0]
+                        )
                         incomplete_name, recovery_arg = _incomplete_step_hint(
-                            incomplete_target, incomplete_step)
+                            incomplete_target, incomplete_step
+                        )
                     else:
-                        incomplete_target, pending_info = _next_pending_empty(
-                            pending_empty)
+                        incomplete_target, pending_info = _next_pending_empty(pending_empty)
                         incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info)
+                            incomplete_target, pending_info
+                        )
                     state["errors"].append(
                         f"[incomplete_write] {incomplete_name} at "
-                        f"{recovery_arg}: completion refused")
+                        f"{recovery_arg}: completion refused"
+                    )
                     log(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
 
             if task_done:
                 state["completed_tasks"].append(task)
                 state["completed_step_groups"].append(task_steps)
-                log(f"  Task complete. ({time.time()-t_task:.1f}s)")
-                _run_log({"event": "task_complete", "task_index": i, "task": task,
-                          "wall_s": round(time.time() - t_task, 2)})
+                log(f"  Task complete. ({time.time() - t_task:.1f}s)")
+                _run_log(
+                    {
+                        "event": "task_complete",
+                        "task_index": i,
+                        "task": task,
+                        "wall_s": round(time.time() - t_task, 2),
+                    }
+                )
             else:
                 all_done = False
-                log(f"  Task failed, will replan. ({time.time()-t_task:.1f}s)")
-                _run_log({"event": "task_failed", "task_index": i, "task": task,
-                          "wall_s": round(time.time() - t_task, 2)})
+                log(f"  Task failed, will replan. ({time.time() - t_task:.1f}s)")
+                _run_log(
+                    {
+                        "event": "task_failed",
+                        "task_index": i,
+                        "task": task,
+                        "wall_s": round(time.time() - t_task, 2),
+                    }
+                )
                 break
 
         if all_done:
@@ -2889,9 +3355,15 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     state["validation_recheck_needed"] = True
                     state["validated_step_count"] = len(state.get("all_steps", []))
                     log(f"  Validation failed: {reason}")
-                    _run_log({"event": "validation", "valid": False, "reason": reason,
-                              "missing": missing,
-                              "deterministic": bool(vresult.get("deterministic"))})
+                    _run_log(
+                        {
+                            "event": "validation",
+                            "valid": False,
+                            "reason": reason,
+                            "missing": missing,
+                            "deterministic": bool(vresult.get("deterministic")),
+                        }
+                    )
                     all_done = False
                     continue  # replan
                 elif vresult is None and recheck_validation:
@@ -2899,20 +3371,32 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     # once validation explicitly failed, an unavailable second
                     # verdict cannot erase that known failure.
                     log("  Validation recheck produced no verdict; failure remains pending.")
-                    _run_log({"event": "validation", "valid": None,
-                              "reason": "recheck produced no verdict",
-                              "deterministic": False})
+                    _run_log(
+                        {
+                            "event": "validation",
+                            "valid": None,
+                            "reason": "recheck produced no verdict",
+                            "deterministic": False,
+                        }
+                    )
                 else:
                     state["validation_recheck_needed"] = False
-                    log(f"  Validation passed.")
-                    _run_log({"event": "validation", "valid": True,
-                              "deterministic": bool(vresult and vresult.get("deterministic"))})
+                    log("  Validation passed.")
+                    _run_log(
+                        {
+                            "event": "validation",
+                            "valid": True,
+                            "deterministic": bool(vresult and vresult.get("deterministic")),
+                        }
+                    )
             if state.get("validation_recheck_needed"):
                 if state.get("validation_attempts", 0) >= 2:
                     reason = "validation remains failed after the maximum checks"
                 else:
-                    reason = ("completion after failed validation requires new "
-                              "write, edit, or shell evidence")
+                    reason = (
+                        "completion after failed validation requires new "
+                        "write, edit, or shell evidence"
+                    )
                 state["errors"].append(f"[validation_failed] {reason}")
                 log(f"  Completion refused: {reason}")
                 _run_log({"event": "validation_pending", "reason": reason})
@@ -2921,12 +3405,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
             total_wall = time.time() - t_run
             log(f"All tasks complete. ({total_wall:.1f}s total)")
             log(f"Output in: {working_dir}")
-            _run_log({"event": "run_end", "status": "complete",
-                      "replans": replan, "wall_s": round(total_wall, 2),
-                      "completed_tasks": len(state["completed_tasks"]),
-                      "steps": {"selected": state["selected_steps"],
-                                "executed": state["executed_steps"],
-                                "skipped": state["skipped_steps"]}})
+            _run_log(
+                {
+                    "event": "run_end",
+                    "status": "complete",
+                    "replans": replan,
+                    "wall_s": round(total_wall, 2),
+                    "completed_tasks": len(state["completed_tasks"]),
+                    "steps": {
+                        "selected": state["selected_steps"],
+                        "executed": state["executed_steps"],
+                        "skipped": state["skipped_steps"],
+                    },
+                }
+            )
             return {"status": "complete", "state": state, "log": history}
 
     total_wall = time.time() - t_run
@@ -2934,23 +3426,39 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     if deterministic is True and not state.get("validation_recheck_needed"):
         log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
         log(f"Output in: {working_dir}")
-        _run_log({"event": "run_end", "status": "complete_deterministic_after_exhausted",
-                  "replans": max_replans, "wall_s": round(total_wall, 2),
-                  "completed_tasks": len(state["completed_tasks"]),
-                  "steps": {"selected": state["selected_steps"],
-                            "executed": state["executed_steps"],
-                            "skipped": state["skipped_steps"]}})
+        _run_log(
+            {
+                "event": "run_end",
+                "status": "complete_deterministic_after_exhausted",
+                "replans": max_replans,
+                "wall_s": round(total_wall, 2),
+                "completed_tasks": len(state["completed_tasks"]),
+                "steps": {
+                    "selected": state["selected_steps"],
+                    "executed": state["executed_steps"],
+                    "skipped": state["skipped_steps"],
+                },
+            }
+        )
         return {"status": "complete", "state": state, "log": history}
 
     log(f"Exhausted {max_replans} replan attempts. ({total_wall:.1f}s total)")
     log(f"Errors: {state['errors']}")
     log(f"Output in: {working_dir}")
-    _run_log({"event": "run_end", "status": "exhausted",
-              "replans": max_replans, "wall_s": round(total_wall, 2),
-              "errors": state["errors"][-5:],
-              "steps": {"selected": state["selected_steps"],
-                        "executed": state["executed_steps"],
-                        "skipped": state["skipped_steps"]}})
+    _run_log(
+        {
+            "event": "run_end",
+            "status": "exhausted",
+            "replans": max_replans,
+            "wall_s": round(total_wall, 2),
+            "errors": state["errors"][-5:],
+            "steps": {
+                "selected": state["selected_steps"],
+                "executed": state["executed_steps"],
+                "skipped": state["skipped_steps"],
+            },
+        }
+    )
     return {"status": "exhausted", "state": state, "log": history}
 
 
@@ -2983,24 +3491,33 @@ def _main(argv=None):
     parser.add_argument("--working-dir", help="Existing workspace for the agent")
     parser.add_argument("--result-json", help="Write the structured run result here")
     parser.add_argument(
-        "--reasoning-policy", choices=REASONING_POLICIES,
+        "--reasoning-policy",
+        choices=REASONING_POLICIES,
         default=DEFAULT_REASONING_POLICY,
         help="Explicit-reasoning policy (default: %(default)s)",
     )
     parser.add_argument(
-        "--max-replans", type=_positive_int, default=MAX_REPLANS,
+        "--max-replans",
+        type=_positive_int,
+        default=MAX_REPLANS,
         help="Maximum planning attempts, including the initial plan",
     )
     parser.add_argument(
-        "--max-tasks", type=_positive_int, default=MAX_TASKS,
+        "--max-tasks",
+        type=_positive_int,
+        default=MAX_TASKS,
         help="Maximum tasks accepted from each plan",
     )
     parser.add_argument(
-        "--max-steps", type=_positive_int, default=MAX_STEPS,
+        "--max-steps",
+        type=_positive_int,
+        default=MAX_STEPS,
         help="Maximum executor steps per task attempt",
     )
     parser.add_argument(
-        "--goal-context-chars", type=_positive_int, default=GOAL_CONTEXT_CHARS,
+        "--goal-context-chars",
+        type=_positive_int,
+        default=GOAL_CONTEXT_CHARS,
         help="Frozen goal characters available to executor and task replanner",
     )
     args = parser.parse_args(argv)
@@ -3037,9 +3554,7 @@ def _main(argv=None):
     )
     if args.result_json:
         try:
-            Path(args.result_json).write_text(
-                json.dumps(result, indent=2, default=str) + "\n"
-            )
+            Path(args.result_json).write_text(json.dumps(result, indent=2, default=str) + "\n")
         except OSError as e:
             parser.error(f"cannot write --result-json: {e}")
     return 0 if result["status"] == "complete" else 1

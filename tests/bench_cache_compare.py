@@ -10,6 +10,7 @@ Usage:
     # Compare:
     python3 tests/bench_cache_compare.py /tmp/bench_cache_phase5.json /tmp/bench_cache_phase6.json
 """
+
 import json
 import sys
 
@@ -34,10 +35,10 @@ def main():
 
     has_timings = "prompt_n" in a["summary"][0]
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"Cache Benchmark Comparison: {label_a} vs {label_b}")
     print(f"Trials: {a['trials']} vs {b['trials']}, {a['requests_per_trial']} requests each")
-    print(f"{'='*80}\n")
+    print(f"{'=' * 80}\n")
 
     if has_timings:
         hdr = f"{'Request':<10s} | {'prompt_n':>10s} {'prompt_ms':>10s} {'decode t/s':>10s} {'wall_s':>8s} | {'prompt_n':>10s} {'prompt_ms':>10s} {'decode t/s':>10s} {'wall_s':>8s} | {'wall Δ':>8s}"
@@ -62,7 +63,9 @@ def main():
                 f"{delta_str:>8s}"
             )
 
-        print(f"\n{'Total wall (median):':<28s} {total_a:>8.2f}s  vs  {total_b:>8.2f}s  (Δ = {total_b - total_a:+.2f}s, {((total_b/total_a)-1)*100:+.1f}%)")
+        print(
+            f"\n{'Total wall (median):':<28s} {total_a:>8.2f}s  vs  {total_b:>8.2f}s  (Δ = {total_b - total_a:+.2f}s, {((total_b / total_a) - 1) * 100:+.1f}%)"
+        )
     else:
         hdr = f"{'Request':<10s} | {'prompt_tok':>10s} {'wall_s':>8s} | {'prompt_tok':>10s} {'wall_s':>8s} | {'wall Δ':>8s}"
         print(hdr)
@@ -82,11 +85,13 @@ def main():
                 f"{delta:+.3f}s"
             )
 
-        print(f"\n{'Total wall (median):':<28s} {total_a:>8.2f}s  vs  {total_b:>8.2f}s  (Δ = {total_b - total_a:+.2f}s)")
+        print(
+            f"\n{'Total wall (median):':<28s} {total_a:>8.2f}s  vs  {total_b:>8.2f}s  (Δ = {total_b - total_a:+.2f}s)"
+        )
 
     # Cache reuse analysis
     if has_timings:
-        print(f"\n--- Cache Reuse Analysis ---")
+        print("\n--- Cache Reuse Analysis ---")
         for label, summary in [(label_a, a["summary"]), (label_b, b["summary"])]:
             exec_rows = [r for r in summary if r["name"].startswith("step")]
             if len(exec_rows) >= 2:
@@ -95,17 +100,21 @@ def main():
                 avg_rest = sum(rest) / len(rest)
                 if first > 0:
                     saved = (1 - avg_rest / first) * 100
-                    print(f"  {label}: executor prompt_n first={first:.0f} → avg_rest={avg_rest:.0f} ({saved:+.0f}% eval reduction)")
+                    print(
+                        f"  {label}: executor prompt_n first={first:.0f} → avg_rest={avg_rest:.0f} ({saved:+.0f}% eval reduction)"
+                    )
                 else:
                     print(f"  {label}: executor prompt_n first={first:.0f}, rest={rest}")
 
     # Decode speed comparison
     if has_timings:
-        print(f"\n--- Decode Speed ---")
+        print("\n--- Decode Speed ---")
         for label, summary in [(label_a, a["summary"]), (label_b, b["summary"])]:
             speeds = [r.get("decode_tok_s", 0) for r in summary if r.get("decode_tok_s", 0) > 0]
             if speeds:
-                print(f"  {label}: {min(speeds):.1f} – {max(speeds):.1f} tok/s (median {sorted(speeds)[len(speeds)//2]:.1f})")
+                print(
+                    f"  {label}: {min(speeds):.1f} – {max(speeds):.1f} tok/s (median {sorted(speeds)[len(speeds) // 2]:.1f})"
+                )
 
     print()
 

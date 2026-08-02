@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from workflow_eval import (
     ManifestError,
     _askme_agent,
@@ -12,10 +11,9 @@ from workflow_eval import (
     load_manifest,
 )
 
-
 MANIFEST = Path(__file__).parent / "workflows" / "config_precedence" / "manifest.json"
 
-FIXED_IMPLEMENTATION = '''#!/usr/bin/env python3
+FIXED_IMPLEMENTATION = """#!/usr/bin/env python3
 import argparse
 import json
 import os
@@ -63,7 +61,7 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def test_noop_is_rejected_but_public_regressions_pass(tmp_path):
@@ -107,8 +105,9 @@ def test_reference_like_fix_passes_public_and_held_out_checks(tmp_path):
 def test_protected_public_test_tampering_invalidates_run(tmp_path):
     def tampering_agent(_prompt, workspace):
         public_test = workspace / "tests" / "check_regression.py"
-        public_test.write_text(public_test.read_text(encoding="utf-8") + "\n# changed\n",
-                               encoding="utf-8")
+        public_test.write_text(
+            public_test.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8"
+        )
         return {"status": "complete"}
 
     result = evaluate_workflow(
@@ -271,9 +270,7 @@ def test_askme_adapter_runs_cold_child_with_frozen_configuration(tmp_path):
 
         assert Path(option("--working-dir")) == tmp_path
         assert tmp_path.is_dir()
-        assert Path(option("--prompt-file")).read_text(encoding="utf-8") == (
-            "fix configuration"
-        )
+        assert Path(option("--prompt-file")).read_text(encoding="utf-8") == ("fix configuration")
         assert option("--reasoning-policy") == "off"
         assert option("--max-replans") == str(limits["max_replans"])
         assert option("--max-tasks") == str(limits["max_tasks"])
@@ -281,9 +278,7 @@ def test_askme_adapter_runs_cold_child_with_frozen_configuration(tmp_path):
         assert option("--goal-context-chars") == str(limits["goal_context_chars"])
         assert kwargs["timeout"] == limits["agent_timeout_seconds"]
         assert kwargs["env"]["AGENT_REASONING_POLICY"] == "off"
-        assert kwargs["env"]["AGENT_GOAL_CONTEXT_CHARS"] == str(
-            limits["goal_context_chars"]
-        )
+        assert kwargs["env"]["AGENT_GOAL_CONTEXT_CHARS"] == str(limits["goal_context_chars"])
         assert kwargs["env"]["AGENT_FINAL_VALIDATE"] == limits["final_validate"]
         run_log = Path(kwargs["env"]["AGENT_RUN_LOG"])
         assert str(run_log) != "/tmp/parent-agent-run.jsonl"
@@ -375,9 +370,7 @@ def test_askme_adapter_reports_malformed_structured_result(tmp_path):
         Path(_kwargs["env"]["AGENT_RUN_LOG"]).write_text(
             '{"event":"run_start"}\n', encoding="utf-8"
         )
-        return __import__("subprocess").CompletedProcess(
-            command, 0, stdout="partial", stderr=""
-        )
+        return __import__("subprocess").CompletedProcess(command, 0, stdout="partial", stderr="")
 
     with patch("workflow_eval.subprocess.run", side_effect=malformed_child):
         result = _askme_agent(
@@ -420,9 +413,7 @@ def test_askme_adapter_retains_malformed_run_log_evidence(tmp_path):
         Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
             '{"event":"run_start"}\nnot-json\n', encoding="utf-8"
         )
-        return __import__("subprocess").CompletedProcess(
-            command, 0, stdout="", stderr=""
-        )
+        return __import__("subprocess").CompletedProcess(command, 0, stdout="", stderr="")
 
     with patch("workflow_eval.subprocess.run", side_effect=malformed_log_child):
         result = _askme_agent(
@@ -448,13 +439,10 @@ def test_askme_adapter_rejects_reasoning_policy_violation(tmp_path):
         result_path = Path(command[command.index("--result-json") + 1])
         result_path.write_text(json.dumps(expected), encoding="utf-8")
         Path(kwargs["env"]["AGENT_RUN_LOG"]).write_text(
-            '{"event":"reasoning_decision","requested_policy":"off",'
-            '"effective_level":"medium"}\n',
+            '{"event":"reasoning_decision","requested_policy":"off","effective_level":"medium"}\n',
             encoding="utf-8",
         )
-        return __import__("subprocess").CompletedProcess(
-            command, 0, stdout="", stderr=""
-        )
+        return __import__("subprocess").CompletedProcess(command, 0, stdout="", stderr="")
 
     with patch("workflow_eval.subprocess.run", side_effect=noncompliant_child):
         result = _askme_agent(

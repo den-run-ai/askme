@@ -1,4 +1,5 @@
 """Offline tests for the Phase 1 evaluation-policy and CLI plumbing."""
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -15,8 +16,7 @@ def _response(content):
 
 
 class TestReasoningPolicy:
-    def test_off_suppresses_explicit_and_retry_reasoning_and_logs_decisions(
-            self, tmp_path):
+    def test_off_suppresses_explicit_and_retry_reasoning_and_logs_decisions(self, tmp_path):
         log_path = tmp_path / "run.jsonl"
         responses = [
             _response("not json"),
@@ -47,7 +47,8 @@ class TestReasoningPolicy:
         ]
         assert [event["requested_policy"] for event in decisions] == ["off", "off"]
         assert [event["requested_trigger"] for event in decisions] == [
-            "final_validator", "final_validator",
+            "final_validator",
+            "final_validator",
         ]
         assert [event["effective_level"] for event in decisions] == [None, None]
 
@@ -88,9 +89,10 @@ class TestReasoningPolicy:
         assert mock_llm.call_args.kwargs["think"] is True
 
         with patch("askme.ask_llm", return_value={"task": "implement alternative"}) as mock_llm:
-            assert askme.replan_task(
-                "fix behavior", state["errors"], [], state, "goal"
-            ) == "implement alternative"
+            assert (
+                askme.replan_task("fix behavior", state["errors"], [], state, "goal")
+                == "implement alternative"
+            )
         assert mock_llm.call_args.kwargs["reasoning_policy"] == "off"
         assert mock_llm.call_args.kwargs["reasoning_trigger"] == "task_local_replan"
         assert mock_llm.call_args.kwargs["think"] is False
@@ -129,8 +131,12 @@ class TestReasoningPolicy:
             patch.object(askme, "FINAL_VALIDATE", "0"),
         ):
             result = askme._run_loop(
-                "exercise recovery", str(tmp_path), max_replans=1,
-                max_tasks=1, max_steps=3, reasoning_policy="off",
+                "exercise recovery",
+                str(tmp_path),
+                max_replans=1,
+                max_tasks=1,
+                max_steps=3,
+                reasoning_policy="off",
             )
 
         assert result["status"] == "complete"
@@ -149,8 +155,12 @@ class TestReasoningPolicy:
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             result = askme._run_loop(
-                "write data", str(tmp_path), max_replans=1,
-                max_tasks=1, max_steps=4, reasoning_policy="off",
+                "write data",
+                str(tmp_path),
+                max_replans=1,
+                max_tasks=1,
+                max_steps=4,
+                reasoning_policy="off",
             )
 
         assert result["status"] == "complete"
@@ -167,15 +177,19 @@ class TestGoalContext:
         state = {"last_steps": [], "completed_tasks": []}
         with patch("askme.ask_llm", return_value={"action": "done"}) as mock_llm:
             askme.get_step(
-                long_task, state, goal=long_goal, goal_context_chars=420,
-                reasoning_policy="off", reasoning_trigger="executor",
+                long_task,
+                state,
+                goal=long_goal,
+                goal_context_chars=420,
+                reasoning_policy="off",
+                reasoning_trigger="executor",
             )
 
         message = mock_llm.call_args.args[0][1]["content"]
         goal_text = message.split("GOAL:\n", 1)[1].split("\n\nTASK:", 1)[0]
         task_text = message.split("TASK:\n", 1)[1].split("\n\nSTATE:", 1)[0]
         assert goal_text == long_goal[:420]
-        assert task_text == long_task[:askme.MAX_INPUT]
+        assert task_text == long_task[: askme.MAX_INPUT]
 
     def test_run_freezes_goal_context_and_records_budget(self, tmp_path):
         prompt = "0123456789" * 80
@@ -194,8 +208,12 @@ class TestGoalContext:
             patch.object(askme, "GOAL_CONTEXT_CHARS", askme.GOAL_CONTEXT_CHARS),
         ):
             result = askme._run_loop(
-                prompt, str(tmp_path), max_replans=1, max_tasks=1,
-                max_steps=2, goal_context_chars=420,
+                prompt,
+                str(tmp_path),
+                max_replans=1,
+                max_tasks=1,
+                max_steps=2,
+                goal_context_chars=420,
             )
 
         assert result["status"] == "complete"
@@ -211,16 +229,26 @@ class TestPhaseOneCli:
         expected = {"status": "complete", "state": {"ok": True}, "log": []}
 
         with patch("askme._run_loop", return_value=expected) as run_loop:
-            exit_code = askme._main([
-                "--prompt-file", str(prompt_file),
-                "--working-dir", str(tmp_path),
-                "--result-json", str(result_file),
-                "--reasoning-policy", "off",
-                "--max-replans", "2",
-                "--max-tasks", "4",
-                "--max-steps", "6",
-                "--goal-context-chars", "1200",
-            ])
+            exit_code = askme._main(
+                [
+                    "--prompt-file",
+                    str(prompt_file),
+                    "--working-dir",
+                    str(tmp_path),
+                    "--result-json",
+                    str(result_file),
+                    "--reasoning-policy",
+                    "off",
+                    "--max-replans",
+                    "2",
+                    "--max-tasks",
+                    "4",
+                    "--max-steps",
+                    "6",
+                    "--goal-context-chars",
+                    "1200",
+                ]
+            )
 
         assert exit_code == 0
         assert json.loads(result_file.read_text()) == expected

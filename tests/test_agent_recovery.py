@@ -1,19 +1,26 @@
 """Recovery tests: duplicate guard, cache workaround, failure classification,
 error summarization, completion semantics, final validation."""
+
 import json
-import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-import askme
-from askme import (execute, ask_llm, get_plan, get_step, run, _run_loop,
-                   _should_validate, _validate_completion, LLMTransportError)
 from _test_support import mock_response
 
+import askme
+from askme import (
+    LLMTransportError,
+    _run_loop,
+    ask_llm,
+    execute,
+    get_plan,
+    get_step,
+    run,
+)
 
 # --- Duplicate action guard tests ---
+
 
 class TestDuplicateGuard:
     """Verify duplicate action guard prevents loops without blocking legitimate retries."""
@@ -25,7 +32,7 @@ class TestDuplicateGuard:
             {"tasks": ["write data.txt and run it"]},
             {"action": "write", "arg": f, "content": "hello"},
             {"action": "write", "arg": f, "content": "hello"},  # duplicate -- should skip
-            {"action": "shell", "arg": "cat data.txt"},          # post-skip shell step
+            {"action": "shell", "arg": "cat data.txt"},  # post-skip shell step
             {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses):
@@ -40,8 +47,12 @@ class TestDuplicateGuard:
         responses = [
             {"tasks": ["write data.txt"]},
             {"action": "write", "arg": f, "content": "hello"},
-            {"action": "write", "arg": f, "content": "hello"},  # skip 1 -- feedback only, no thinking
-            {"action": "done"},                                   # model sees feedback without thinking
+            {
+                "action": "write",
+                "arg": f,
+                "content": "hello",
+            },  # skip 1 -- feedback only, no thinking
+            {"action": "done"},  # model sees feedback without thinking
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("write data.txt", working_dir=str(tmp_path))
@@ -110,7 +121,11 @@ class TestDuplicateGuard:
         responses = [
             {"tasks": ["compile"]},
             {"action": "shell", "arg": f"cc -o main {src}"},
-            {"action": "write", "arg": str(src), "content": '#include <stdio.h>\nint main(){puts("ok");return 0;}'},
+            {
+                "action": "write",
+                "arg": str(src),
+                "content": '#include <stdio.h>\nint main(){puts("ok");return 0;}',
+            },
             {"action": "shell", "arg": f"cc -o main {src}"},
             {"action": "done"},
         ]
@@ -147,10 +162,18 @@ class TestDuplicateGuard:
         f.write_text('#include "msg.h"\nint main(){return 0;}')
         responses = [
             {"tasks": ["fix include"]},
-            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},
-            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},  # dup - skip
+            {
+                "action": "edit",
+                "arg": str(f),
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },
+            {
+                "action": "edit",
+                "arg": str(f),
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },  # dup - skip
             {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses):
@@ -163,12 +186,24 @@ class TestDuplicateGuard:
         f.write_text('#include "msg.h"\nint main(){return 0;}')
         responses = [
             {"tasks": ["fix include"]},
-            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},
-            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 1
-            {"action": "edit", "arg": str(f), "find": '#include "msg.h"',
-             "replace": '#include <stdio.h>\n#include "msg.h"'},  # skip 2 -- auto-done
+            {
+                "action": "edit",
+                "arg": str(f),
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },
+            {
+                "action": "edit",
+                "arg": str(f),
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },  # skip 1
+            {
+                "action": "edit",
+                "arg": str(f),
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },  # skip 2 -- auto-done
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("fix include", working_dir=str(tmp_path))
@@ -203,8 +238,7 @@ class TestDuplicateGuard:
             {"action": "edit", "arg": str(f), "find": "old", "replace": "newer"},
         ]
         with patch("askme.ask_llm", side_effect=responses):
-            result = _run_loop("edit f.txt", str(tmp_path),
-                               max_replans=1, max_tasks=1, max_steps=2)
+            result = _run_loop("edit f.txt", str(tmp_path), max_replans=1, max_tasks=1, max_steps=2)
         out = capsys.readouterr().out
         assert result["status"] == "exhausted"
         assert "auto-done (edit already succeeded" not in out
@@ -216,9 +250,12 @@ class TestDuplicateGuard:
         responses = [
             {"tasks": ["compile"]},
             {"action": "shell", "arg": f"cc -o main {src}"},
-            {"action": "edit", "arg": str(src),
-             "find": 'int main()',
-             "replace": '#include <stdio.h>\nint main()'},
+            {
+                "action": "edit",
+                "arg": str(src),
+                "find": "int main()",
+                "replace": "#include <stdio.h>\nint main()",
+            },
             {"action": "shell", "arg": f"cc -o main {src}"},
             {"action": "done"},
         ]
@@ -231,19 +268,21 @@ class TestDuplicateGuard:
         src.write_text("int main() { return 0; }")
         responses = [
             {"tasks": ["fix code"]},
-            {"action": "edit", "arg": str(src),
-             "find": "nonexistent text", "replace": "new text"},
-            {"action": "edit", "arg": str(src),
-             "find": "nonexistent text", "replace": "new text"},
+            {"action": "edit", "arg": str(src), "find": "nonexistent text", "replace": "new text"},
+            {"action": "edit", "arg": str(src), "find": "nonexistent text", "replace": "new text"},
             {"action": "done"},  # never reached — auto-fail breaks the task
         ] * 3
         with patch("askme.ask_llm", side_effect=responses):
             result = _run_loop("fix code", str(tmp_path))
         # Only 1 edit step should actually execute (the 2nd triggers auto-fail before execute)
-        edit_steps = [h for h in result["log"]
-                      if h.get("event") == "step"
-                      and h.get("action", {}).get("action") == "edit"]
-        assert len(edit_steps) == 1, f"Expected 1 edit step (auto-fail on 2nd), got {len(edit_steps)}"
+        edit_steps = [
+            h
+            for h in result["log"]
+            if h.get("event") == "step" and h.get("action", {}).get("action") == "edit"
+        ]
+        assert len(edit_steps) == 1, (
+            f"Expected 1 edit step (auto-fail on 2nd), got {len(edit_steps)}"
+        )
 
     def test_content_not_in_slim_state(self):
         """_content field should not appear in messages sent to LLM by get_step()."""
@@ -251,15 +290,22 @@ class TestDuplicateGuard:
             "current_task": "test",
             "task_index": "1/1",
             "last_steps": [
-                {"action": "write", "arg": "f.txt", "ok": True, "output": "Wrote f.txt",
-                 "_content": "should not appear in slim"},
+                {
+                    "action": "write",
+                    "arg": "f.txt",
+                    "ok": True,
+                    "output": "Wrote f.txt",
+                    "_content": "should not appear in slim",
+                },
             ],
             "completed_tasks": [],
         }
         captured = {}
+
         def capture_llm(messages, **kwargs):
             captured["messages"] = messages
             return {"action": "done"}
+
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_step("test task", state, goal="test goal")
         user_msg = captured["messages"][1]["content"]
@@ -271,15 +317,23 @@ class TestDuplicateGuard:
             "current_task": "test",
             "task_index": "1/1",
             "last_steps": [
-                {"action": "edit", "arg": "f.txt", "ok": True, "output": "Edited f.txt",
-                 "_find": "old", "_replace": "new"},
+                {
+                    "action": "edit",
+                    "arg": "f.txt",
+                    "ok": True,
+                    "output": "Edited f.txt",
+                    "_find": "old",
+                    "_replace": "new",
+                },
             ],
             "completed_tasks": [],
         }
         captured = {}
+
         def capture_llm(messages, **kwargs):
             captured["messages"] = messages
             return {"action": "done"}
+
         with patch("askme.ask_llm", side_effect=capture_llm):
             get_step("test task", state, goal="test goal")
         user_msg = captured["messages"][1]["content"]
@@ -289,19 +343,26 @@ class TestDuplicateGuard:
 
 # --- Cache workaround tests ---
 
+
 class TestCacheWorkaround:
     """Test Phase 2 manual slot save/restore workaround for broken --cache-reuse."""
 
     def test_warm_cache_saves_slot(self):
         """_warm_cache() should send a minimal request then save slot 0."""
         import askme
-        old_cw, old_backend, old_warmed = askme.CACHE_WORKAROUND, askme.LLM_BACKEND, askme._cache_warmed
+
+        old_cw, old_backend, old_warmed = (
+            askme.CACHE_WORKAROUND,
+            askme.LLM_BACKEND,
+            askme._cache_warmed,
+        )
         try:
             askme.CACHE_WORKAROUND = True
             askme.LLM_BACKEND = "local"
             askme._cache_warmed = False
 
             calls = []
+
             def fake_post(url, **kwargs):
                 calls.append(url)
                 resp = MagicMock()
@@ -309,9 +370,7 @@ class TestCacheWorkaround:
                 if "action=save" in url:
                     resp.json.return_value = {"n_saved": 150}
                 else:
-                    resp.json.return_value = {
-                        "choices": [{"message": {"content": '{"tasks":[]}'}}]
-                    }
+                    resp.json.return_value = {"choices": [{"message": {"content": '{"tasks":[]}'}}]}
                 return resp
 
             with patch("askme.requests.post", side_effect=fake_post):
@@ -328,6 +387,7 @@ class TestCacheWorkaround:
     def test_warm_cache_noop_when_disabled(self):
         """_warm_cache() should do nothing when CACHE_WORKAROUND is False."""
         import askme
+
         old_cw = askme.CACHE_WORKAROUND
         try:
             askme.CACHE_WORKAROUND = False
@@ -340,6 +400,7 @@ class TestCacheWorkaround:
     def test_warm_cache_noop_for_remote_backend(self):
         """_warm_cache() should do nothing for remote (non-local) backend."""
         import askme
+
         old_cw, old_backend = askme.CACHE_WORKAROUND, askme.LLM_BACKEND
         try:
             askme.CACHE_WORKAROUND = True
@@ -354,7 +415,12 @@ class TestCacheWorkaround:
     def test_warm_cache_failure_is_nonfatal(self):
         """If save fails, _cache_warmed stays False and execution continues."""
         import askme
-        old_cw, old_backend, old_warmed = askme.CACHE_WORKAROUND, askme.LLM_BACKEND, askme._cache_warmed
+
+        old_cw, old_backend, old_warmed = (
+            askme.CACHE_WORKAROUND,
+            askme.LLM_BACKEND,
+            askme._cache_warmed,
+        )
         try:
             askme.CACHE_WORKAROUND = True
             askme.LLM_BACKEND = "local"
@@ -365,9 +431,7 @@ class TestCacheWorkaround:
                     raise ConnectionError("server down")
                 resp = MagicMock()
                 resp.status_code = 200
-                resp.json.return_value = {
-                    "choices": [{"message": {"content": '{"tasks":[]}'}}]
-                }
+                resp.json.return_value = {"choices": [{"message": {"content": '{"tasks":[]}'}}]}
                 return resp
 
             with patch("askme.requests.post", side_effect=fake_post):
@@ -382,6 +446,7 @@ class TestCacheWorkaround:
     def test_restore_called_before_each_llm_request(self):
         """When cache is warmed, _restore_cache() should be called before each ask_llm."""
         import askme
+
         old_warmed = askme._cache_warmed
         try:
             askme._cache_warmed = True
@@ -401,6 +466,7 @@ class TestCacheWorkaround:
     def test_restore_skipped_when_not_warmed(self):
         """_restore_cache() should be a no-op when _cache_warmed is False."""
         import askme
+
         old_warmed = askme._cache_warmed
         try:
             askme._cache_warmed = False
@@ -427,31 +493,38 @@ class TestCacheWorkaround:
 
 # --- Typed failure classification tests ---
 
+
 class TestFailureClassification:
     """Verify error classification into typed categories."""
 
     def test_classify_timeout(self):
         from askme import classify_error
+
         assert classify_error("TIMEOUT") == "timeout"
 
     def test_classify_command_not_found(self):
         from askme import classify_error
+
         assert classify_error("/bin/sh: go: command not found") == "missing_tool"
 
     def test_classify_permission_denied(self):
         from askme import classify_error
+
         assert classify_error("bash: ./script.sh: Permission denied") == "permission_denied"
 
     def test_classify_missing_file(self):
         from askme import classify_error
+
         assert classify_error("cc: error: main.c: No such file or directory") == "missing_file"
 
     def test_classify_compile_error(self):
         from askme import classify_error
+
         assert classify_error("main.c:1:10: error: expected ';'") == "compile_error"
 
     def test_classify_unknown(self):
         from askme import classify_error
+
         assert classify_error("something unexpected happened") == "unknown"
 
     def test_shell_failure_includes_error_type(self, work_dir):
@@ -480,8 +553,10 @@ class TestFailureClassification:
         """Edit with no matching find string should return error_type=edit_failed."""
         p = Path(work_dir) / "test.txt"
         p.write_text("hello world")
-        result = execute({"action": "edit", "arg": "test.txt",
-                          "find": "nonexistent text", "replace": "new"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "test.txt", "find": "nonexistent text", "replace": "new"},
+            work_dir,
+        )
         assert result["ok"] is False
         assert result["error_type"] == "edit_failed"
 
@@ -489,8 +564,9 @@ class TestFailureClassification:
         """Edit with ambiguous match should return error_type=edit_failed."""
         p = Path(work_dir) / "test.txt"
         p.write_text("aaa\naaa\naaa")
-        result = execute({"action": "edit", "arg": "test.txt",
-                          "find": "aaa", "replace": "bbb"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "test.txt", "find": "aaa", "replace": "bbb"}, work_dir
+        )
         assert result["ok"] is False
         assert result["error_type"] == "edit_failed"
 
@@ -498,93 +574,139 @@ class TestFailureClassification:
         """Edit with empty find string should return error_type=edit_failed."""
         p = Path(work_dir) / "test.txt"
         p.write_text("hello")
-        result = execute({"action": "edit", "arg": "test.txt",
-                          "find": "", "replace": "new"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "test.txt", "find": "", "replace": "new"}, work_dir
+        )
         assert result["ok"] is False
         assert result["error_type"] == "edit_failed"
 
 
 # --- E16: Compiler-aware shell error classification ---
 
+
 class TestCompilerAwareClassification:
     """E16: Compiler diagnostics with 'No such file' should be compile_error, not missing_file."""
 
     def test_compiler_header_not_found(self):
         from askme import classify_error
-        assert classify_error(
-            "fatal error: stdio.h: No such file or directory",
-            "shell", cmd="gcc -o main main.c") == "compile_error"
+
+        assert (
+            classify_error(
+                "fatal error: stdio.h: No such file or directory", "shell", cmd="gcc -o main main.c"
+            )
+            == "compile_error"
+        )
 
     def test_compiler_source_not_found(self):
         from askme import classify_error
-        assert classify_error(
-            "cc: error: main.c: No such file or directory",
-            "shell", cmd="cc -o main main.c") == "compile_error"
+
+        assert (
+            classify_error(
+                "cc: error: main.c: No such file or directory", "shell", cmd="cc -o main main.c"
+            )
+            == "compile_error"
+        )
 
     def test_make_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "fatal error: config.h: No such file or directory",
-            "shell", cmd="make") == "compile_error"
+
+        assert (
+            classify_error("fatal error: config.h: No such file or directory", "shell", cmd="make")
+            == "compile_error"
+        )
 
     def test_clang_missing_header(self):
         from askme import classify_error
-        assert classify_error(
-            "fatal error: 'missing.h' file not found",
-            "shell", cmd="/usr/bin/clang -c test.c") == "compile_error"
+
+        assert (
+            classify_error(
+                "fatal error: 'missing.h' file not found", "shell", cmd="/usr/bin/clang -c test.c"
+            )
+            == "compile_error"
+        )
 
     def test_path_prefixed_gcc(self):
         """Path-prefixed compiler should still be detected."""
         from askme import classify_error
-        assert classify_error(
-            "stdio.h: No such file or directory",
-            "shell", cmd="/usr/bin/gcc -o main main.c") == "compile_error"
+
+        assert (
+            classify_error(
+                "stdio.h: No such file or directory", "shell", cmd="/usr/bin/gcc -o main main.c"
+            )
+            == "compile_error"
+        )
 
     def test_non_compiler_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "cat: foo.txt: No such file or directory",
-            "shell", cmd="cat foo.txt") == "missing_file"
+
+        assert (
+            classify_error("cat: foo.txt: No such file or directory", "shell", cmd="cat foo.txt")
+            == "missing_file"
+        )
 
     def test_no_cmd_missing_file(self):
         """Backward compat: no cmd argument preserves missing_file."""
         from askme import classify_error
+
         assert classify_error("No such file or directory", "shell") == "missing_file"
 
     def test_edit_action_unaffected(self):
         """Edit-origin missing file is unaffected by E16."""
         from askme import classify_error
+
         assert classify_error("No such file or directory", "edit") == "missing_file"
 
     def test_cargo_build_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "error: file not found: No such file or directory",
-            "shell", cmd="cargo build") == "compile_error"
+
+        assert (
+            classify_error(
+                "error: file not found: No such file or directory", "shell", cmd="cargo build"
+            )
+            == "compile_error"
+        )
 
     def test_rustc_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "error: no such file: No such file or directory",
-            "shell", cmd="rustc main.rs") == "compile_error"
+
+        assert (
+            classify_error(
+                "error: no such file: No such file or directory", "shell", cmd="rustc main.rs"
+            )
+            == "compile_error"
+        )
 
     def test_go_build_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "stat main.go: No such file or directory",
-            "shell", cmd="go build main.go") == "compile_error"
+
+        assert (
+            classify_error(
+                "stat main.go: No such file or directory", "shell", cmd="go build main.go"
+            )
+            == "compile_error"
+        )
 
     def test_tsc_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "error TS6053: File 'index.ts' not found. No such file or directory",
-            "shell", cmd="tsc index.ts") == "compile_error"
+
+        assert (
+            classify_error(
+                "error TS6053: File 'index.ts' not found. No such file or directory",
+                "shell",
+                cmd="tsc index.ts",
+            )
+            == "compile_error"
+        )
 
     def test_swiftc_missing_file(self):
         from askme import classify_error
-        assert classify_error(
-            "error: no such file or directory: 'main.swift'",
-            "shell", cmd="swiftc main.swift") == "compile_error"
+
+        assert (
+            classify_error(
+                "error: no such file or directory: 'main.swift'", "shell", cmd="swiftc main.swift"
+            )
+            == "compile_error"
+        )
 
     def test_shell_execute_passes_cmd_to_classify(self, work_dir):
         """execute() for shell actions should pass the command to classify_error."""
@@ -596,9 +718,10 @@ class TestCompilerAwareClassification:
     def test_truncated_clang_implicit_function_tail(self):
         """Tail-truncated macOS clang diagnostics should still be compile_error."""
         from askme import classify_error
+
         output = (
             "implicit function declarations [-Wimplicit-function-declaration]\n"
-            "int main() { printf(\"FIXED\\n\"); return 0; }\n"
+            'int main() { printf("FIXED\\n"); return 0; }\n'
             "             ^\n"
             "fix_me.c:1:14: note: include the header <stdio.h> or explicitly provide a declaration for 'printf'\n"
             "1 error generated."
@@ -607,6 +730,7 @@ class TestCompilerAwareClassification:
 
 
 # --- E05/E06: Error-class retry policy and recovery hints ---
+
 
 class TestErrorClassRetryPolicy:
     """E05: Structural failures skip thinking; semantic failures escalate."""
@@ -618,18 +742,22 @@ class TestErrorClassRetryPolicy:
         responses = [
             {"tasks": ["fix the include"]},
             # Step 1: edit with wrong find string → edit_failed
-            {"action": "edit", "arg": "test.c",
-             "find": "wrong text", "replace": "right text"},
+            {"action": "edit", "arg": "test.c", "find": "wrong text", "replace": "right text"},
             # Step 2: read (should NOT have thinking)
             {"action": "read", "arg": "test.c"},
             # Step 3: correct edit
-            {"action": "edit", "arg": "test.c",
-             "find": "#include <stdio.h>", "replace": "#include <stdlib.h>"},
+            {
+                "action": "edit",
+                "arg": "test.c",
+                "find": "#include <stdio.h>",
+                "replace": "#include <stdlib.h>",
+            },
             {"action": "done"},
         ]
         think_values = []
         original_get_step = None
         import askme
+
         original_get_step = askme.get_step
 
         def spy_get_step(*args, **kwargs):
@@ -642,7 +770,9 @@ class TestErrorClassRetryPolicy:
         # Step 1 starts with think=False (no prior failure)
         # Step 2 after edit_failed should have think=False (E05: structural failure)
         assert len(think_values) >= 2
-        assert think_values[1] is False, f"Expected no thinking after edit_failed, got {think_values}"
+        assert think_values[1] is False, (
+            f"Expected no thinking after edit_failed, got {think_values}"
+        )
 
     def test_compile_error_escalates_thinking(self, work_dir):
         """After compile_error, next step SHOULD get thinking escalation."""
@@ -654,8 +784,7 @@ class TestErrorClassRetryPolicy:
             {"action": "shell", "arg": "gcc -o test test.c"},
             # After compile error, model reads and fixes
             {"action": "read", "arg": "test.c"},
-            {"action": "edit", "arg": "test.c",
-             "find": "return }", "replace": "return 0; }"},
+            {"action": "edit", "arg": "test.c", "find": "return }", "replace": "return 0; }"},
             {"action": "done"},
         ]
         think_values = []
@@ -682,8 +811,7 @@ class TestRecoveryHints:
         p.write_text("#include <stdio.h>\nint main() { return 0; }")
         responses = [
             {"tasks": ["fix the code"]},
-            {"action": "edit", "arg": "test.c",
-             "find": "nonexistent", "replace": "replacement"},
+            {"action": "edit", "arg": "test.c", "find": "nonexistent", "replace": "replacement"},
             {"action": "read", "arg": "test.c"},
             {"action": "done"},
         ]
@@ -691,16 +819,14 @@ class TestRecoveryHints:
         original_get_step = askme.get_step
 
         def spy_get_step(task, state, **kwargs):
-            captured_states.append(
-                [s.get("output", "") for s in state.get("last_steps", [])])
+            captured_states.append([s.get("output", "") for s in state.get("last_steps", [])])
             return original_get_step(task, state, **kwargs)
 
         with patch("askme.ask_llm", side_effect=responses):
             with patch("askme.get_step", side_effect=spy_get_step):
                 run("fix the code", working_dir=work_dir)
         has_hint = any(
-            any("Read the file first" in out for out in outputs)
-            for outputs in captured_states
+            any("Read the file first" in out for out in outputs) for outputs in captured_states
         )
         assert has_hint, f"Expected edit_failed hint in step outputs: {captured_states}"
 
@@ -708,17 +834,16 @@ class TestRecoveryHints:
         """After missing_file edit, the step output should contain a recovery hint."""
         responses = [
             {"tasks": ["edit the file"]},
-            {"action": "edit", "arg": "nonexistent.c",
-             "find": "old", "replace": "new"},
+            {"action": "edit", "arg": "nonexistent.c", "find": "old", "replace": "new"},
             {"action": "fail", "reasoning": "file not found"},
         ] * 3
         import askme
+
         captured_states = []
         original_get_step = askme.get_step
 
         def spy_get_step(task, state, **kwargs):
-            captured_states.append(
-                [s.get("output", "") for s in state.get("last_steps", [])])
+            captured_states.append([s.get("output", "") for s in state.get("last_steps", [])])
             return original_get_step(task, state, **kwargs)
 
         with patch("askme.ask_llm", side_effect=responses):
@@ -726,23 +851,25 @@ class TestRecoveryHints:
                 run("edit the file", working_dir=work_dir)
         # Check that at least one captured state has a hint about listing directory
         has_hint = any(
-            any("Check the filename" in out for out in outputs)
-            for outputs in captured_states
+            any("Check the filename" in out for out in outputs) for outputs in captured_states
         )
         assert has_hint, f"Expected missing_file hint in step outputs: {captured_states}"
 
 
 # --- Error summarization tests ---
 
+
 class TestErrorSummarization:
     """Verify error summarization for planner replans."""
 
     def test_summarize_empty(self):
         from askme import summarize_errors
+
         assert summarize_errors([]) == []
 
     def test_summarize_types_errors(self):
         from askme import summarize_errors
+
         errors = [
             "shell go run main.go: /bin/sh: go: command not found",
             "Step failed: shell brew install: TIMEOUT",
@@ -754,6 +881,7 @@ class TestErrorSummarization:
     def test_summarize_preserves_existing_type_prefix(self):
         """Errors already tagged with [type] should preserve their type, not re-classify."""
         from askme import summarize_errors
+
         errors = [
             "[compile_error] shell gcc main.c: main.c:1:10: error: expected ';'",
             "[unknown] shell xyz: something weird",
@@ -761,10 +889,13 @@ class TestErrorSummarization:
         result = summarize_errors(errors)
         assert any("[compile_error]" in e for e in result), f"compile_error lost: {result}"
         assert any("[unknown]" in e for e in result), f"unknown lost: {result}"
-        assert not any(e.startswith("[error]") for e in result), f"type collapsed to [error]: {result}"
+        assert not any(e.startswith("[error]") for e in result), (
+            f"type collapsed to [error]: {result}"
+        )
 
     def test_summarize_deduplicates(self):
         from askme import summarize_errors
+
         errors = [
             "/bin/sh: go: command not found",
             "/bin/sh: go: command not found",
@@ -775,6 +906,7 @@ class TestErrorSummarization:
 
     def test_summarize_caps_per_type(self):
         from askme import summarize_errors
+
         errors = [f"[compile_error] error {i}: something went wrong" for i in range(10)]
         result = summarize_errors(errors)
         assert len(result) <= 3
@@ -783,9 +915,11 @@ class TestErrorSummarization:
     def test_planner_gets_summarized_errors(self):
         """get_plan should pass summarized (typed) errors, not raw strings."""
         captured = {}
+
         def capture_llm(messages, **kwargs):
             captured["user_msg"] = messages[-1]["content"]
             return {"tasks": ["retry"]}
+
         state = {
             "completed_tasks": [],
             "errors": ["[missing_tool] shell go run: /bin/sh: go: command not found"],
@@ -813,40 +947,58 @@ class TestErrorSummarization:
 
 # --- Updated completion semantics tests ---
 
+
 class TestCompletionSemantics:
     """Verify that completion is goal-aware, not step-aware."""
 
     def test_system_step_no_immediate_done_rule(self):
         """SYSTEM_STEP should NOT contain the old 'ok=true => done immediately' rule."""
         from askme import SYSTEM_STEP
+
         assert "SUCCEEDED. Emit" not in SYSTEM_STEP
         assert "ok=true, that action SUCCEEDED" not in SYSTEM_STEP
 
     def test_system_step_has_goal_aware_rule(self):
         """SYSTEM_STEP should require full task satisfaction for done."""
         from askme import SYSTEM_STEP
+
         assert "FULL task description" in SYSTEM_STEP
 
     def test_parse_error_after_success_does_not_auto_complete(self, tmp_path):
         """Parse error after a successful step should fail the task, not auto-complete it."""
         plan_resp = {"tasks": ["write and compile hello.c"]}
         step_ok = {"action": "shell", "arg": "echo hi"}
+
         def step_side_effect(*a, **kw):
             if step_side_effect.call == 0:
                 step_side_effect.call += 1
                 return step_ok
             raise json.JSONDecodeError("bad json", "", 0)
+
         step_side_effect.call = 0
 
-        with patch("askme.get_plan", return_value=plan_resp), \
-             patch("askme.get_step", side_effect=step_side_effect), \
-             patch("askme.execute", return_value={"ok": True, "output": "hi"}), \
-             patch("askme.preflight_probe", return_value={"platform": "test", "arch": "test", "available_tools": [], "missing_tools": [], "package_managers": [], "dir_listing": ""}):
+        with (
+            patch("askme.get_plan", return_value=plan_resp),
+            patch("askme.get_step", side_effect=step_side_effect),
+            patch("askme.execute", return_value={"ok": True, "output": "hi"}),
+            patch(
+                "askme.preflight_probe",
+                return_value={
+                    "platform": "test",
+                    "arch": "test",
+                    "available_tools": [],
+                    "missing_tools": [],
+                    "package_managers": [],
+                    "dir_listing": "",
+                },
+            ),
+        ):
             result = run("write and compile hello.c", working_dir=str(tmp_path))
         assert result is False
 
 
 # --- Final validation tests ---
+
 
 class TestExpectedFailureCompletion:
     """E17: observing an expected failure can complete that task."""
@@ -862,34 +1014,44 @@ class TestExpectedFailureCompletion:
         assert not askme._expects_failure("verify no error")
         assert not askme._expects_failure("verify the error is fixed")
 
-    @patch("askme.execute", return_value={
-        "ok": False, "output": "main.c:1: error: expected failure",
-        "error_type": "compile_error",
-    })
+    @patch(
+        "askme.execute",
+        return_value={
+            "ok": False,
+            "output": "main.c:1: error: expected failure",
+            "error_type": "compile_error",
+        },
+    )
     @patch("askme.ask_llm")
     def test_expected_failure_shell_completes_task(self, mock_llm, mock_execute, tmp_path):
         mock_llm.side_effect = [
             {"tasks": ["compile to observe the initial failure"]},
             {"action": "shell", "arg": "cc main.c"},
         ]
-        result = _run_loop("observe the failure", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=1)
+        result = _run_loop(
+            "observe the failure", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1
+        )
         assert result["status"] == "complete"
         assert result["state"]["completed_step_groups"][0][0]["expected_failure"] is True
 
     @patch("askme.replan_task", return_value=None)
-    @patch("askme.execute", return_value={
-        "ok": False, "output": "main.c:1: error: unexpected",
-        "error_type": "compile_error",
-    })
+    @patch(
+        "askme.execute",
+        return_value={
+            "ok": False,
+            "output": "main.c:1: error: unexpected",
+            "error_type": "compile_error",
+        },
+    )
     @patch("askme.ask_llm")
-    def test_unexpected_shell_failure_still_fails(self, mock_llm, mock_execute, mock_replan, tmp_path):
+    def test_unexpected_shell_failure_still_fails(
+        self, mock_llm, mock_execute, mock_replan, tmp_path
+    ):
         mock_llm.side_effect = [
             {"tasks": ["compile main.c"]},
             {"action": "shell", "arg": "cc main.c"},
         ]
-        result = _run_loop("compile main.c", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=1)
+        result = _run_loop("compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1)
         assert result["status"] == "exhausted"
 
 
@@ -962,8 +1124,7 @@ class TestCompileRepairTemplates:
             },
             {"ok": True, "output": "(no output)"},
         ]
-        result = _run_loop("compile main.c", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=3)
+        result = _run_loop("compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
         assert result["status"] == "complete"
         assert src.read_text().startswith("#include <stdio.h>\n")
         all_steps = result["state"]["all_steps"]
@@ -972,14 +1133,18 @@ class TestCompileRepairTemplates:
 
     @patch("askme.execute")
     @patch("askme.ask_llm")
-    def test_redundant_include_task_auto_completes_after_repair(self, mock_llm, mock_execute, tmp_path, capsys):
+    def test_redundant_include_task_auto_completes_after_repair(
+        self, mock_llm, mock_execute, tmp_path, capsys
+    ):
         src = tmp_path / "fix_me.c"
         src.write_text('int main(){ printf("hi"); return 0; }\n')
         mock_llm.side_effect = [
-            {"tasks": [
-                "Compile fix_me.c",
-                "Edit fix_me.c to add '#include <stdio.h>'",
-            ]},
+            {
+                "tasks": [
+                    "Compile fix_me.c",
+                    "Edit fix_me.c to add '#include <stdio.h>'",
+                ]
+            },
             {"action": "shell", "arg": "cc -o fix_me fix_me.c"},
             {"action": "done"},
         ]
@@ -991,8 +1156,9 @@ class TestCompileRepairTemplates:
             },
             {"ok": True, "output": "(no output)"},
         ]
-        result = _run_loop("compile and fix include", str(tmp_path),
-                           max_replans=1, max_tasks=2, max_steps=3)
+        result = _run_loop(
+            "compile and fix include", str(tmp_path), max_replans=1, max_tasks=2, max_steps=3
+        )
         out = capsys.readouterr().out
         assert result["status"] == "complete"
         assert "auto-done (deterministic repair already satisfied task" in out
@@ -1004,36 +1170,43 @@ class TestDeterministicValidation:
 
     def test_catches_empty_successful_write(self, tmp_path):
         (tmp_path / "cli.py").write_text("")
-        state = {"all_steps": [
-            {"action": "write", "arg": "cli.py", "ok": True, "output": "Wrote cli.py"}
-        ]}
+        state = {
+            "all_steps": [
+                {"action": "write", "arg": "cli.py", "ok": True, "output": "Wrote cli.py"}
+            ]
+        }
         assert askme._deterministic_check("create cli.py", state, str(tmp_path)) is False
 
     def test_ambiguous_without_evidence(self, tmp_path):
-        assert askme._deterministic_check("create something", {"all_steps": []}, str(tmp_path)) is None
+        assert (
+            askme._deterministic_check("create something", {"all_steps": []}, str(tmp_path)) is None
+        )
 
     def test_successful_shell_last_relevant_action_passes(self, tmp_path):
-        state = {"all_steps": [
-            {"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"}
-        ]}
+        state = {
+            "all_steps": [{"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"}]
+        }
         assert askme._deterministic_check("run the program", state, str(tmp_path)) is True
 
     def test_mutation_after_successful_shell_is_inconclusive(self, tmp_path):
-        state = {"all_steps": [
-            {"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"},
-            {"action": "edit", "arg": "app.py", "ok": True, "output": "Edited app.py"},
-        ]}
+        state = {
+            "all_steps": [
+                {"action": "shell", "arg": "python3 app.py", "ok": True, "output": "ok"},
+                {"action": "edit", "arg": "app.py", "ok": True, "output": "Edited app.py"},
+            ]
+        }
         assert askme._deterministic_check("run the program", state, str(tmp_path)) is None
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_exhausted_reconciles_to_complete_on_confident_pass(self, mock_llm, mock_replan, tmp_path):
+    def test_exhausted_reconciles_to_complete_on_confident_pass(
+        self, mock_llm, mock_replan, tmp_path
+    ):
         mock_llm.side_effect = [
             {"tasks": ["run check"]},
             {"action": "shell", "arg": "true"},
         ]
-        result = _run_loop("run check", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=1)
+        result = _run_loop("run check", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1)
         assert result["status"] == "complete"
 
     @patch("askme.replan_task", return_value=None)
@@ -1043,8 +1216,7 @@ class TestDeterministicValidation:
             {"tasks": ["inspect file"]},
             {"action": "read", "arg": "missing.txt"},
         ]
-        result = _run_loop("inspect file", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=1)
+        result = _run_loop("inspect file", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1)
         assert result["status"] == "exhausted"
 
 
@@ -1055,12 +1227,14 @@ class TestFinalValidation:
     def enable_validation(self):
         """Re-enable validation for this test class (conftest disables it globally)."""
         import askme
+
         askme.FINAL_VALIDATE = "auto"
         yield
         # conftest autouse fixture will restore to "0" after
 
-    def _simple_run(self, prompt, tmp_path, validate_response=None, extra_responses=None,
-                    env_vars=None):
+    def _simple_run(
+        self, prompt, tmp_path, validate_response=None, extra_responses=None, env_vars=None
+    ):
         """Helper: run a single-task agent with optional validation mock.
         Returns (result_bool, ask_llm_mock)."""
         responses = [
@@ -1095,6 +1269,7 @@ class TestFinalValidation:
             env_patches = env_vars
 
         import askme
+
         old_validate = askme.FINAL_VALIDATE
         if "AGENT_FINAL_VALIDATE" in env_patches:
             askme.FINAL_VALIDATE = env_patches["AGENT_FINAL_VALIDATE"]
@@ -1153,8 +1328,9 @@ class TestFinalValidation:
 
     def test_validate_passes(self, tmp_path):
         """{"valid":true} → success returned."""
-        ok, _ = self._simple_run("compile and run program", tmp_path,
-                                 validate_response={"valid": True})
+        ok, _ = self._simple_run(
+            "compile and run program", tmp_path, validate_response={"valid": True}
+        )
         assert ok is True
 
     def test_validate_fails_triggers_replan(self, tmp_path):
@@ -1176,8 +1352,7 @@ class TestFinalValidation:
             if messages and "completion validator" in messages[0].get("content", ""):
                 validate_count[0] += 1
                 if validate_count[0] == 1:
-                    return {"valid": False, "reason": "binary not created",
-                            "missing": ["program"]}
+                    return {"valid": False, "reason": "binary not created", "missing": ["program"]}
                 return {"valid": True}
             resp = responses[call_count[0]]
             call_count[0] += 1
@@ -1193,14 +1368,20 @@ class TestFinalValidation:
 
     def test_validate_transport_error_returns_success(self, tmp_path):
         """Transport error → fail-open, return success."""
-        ok, _ = self._simple_run("compile and run program", tmp_path,
-                                 validate_response=LLMTransportError("connection refused"))
+        ok, _ = self._simple_run(
+            "compile and run program",
+            tmp_path,
+            validate_response=LLMTransportError("connection refused"),
+        )
         assert ok is True
 
     def test_validate_parse_error_returns_success(self, tmp_path):
         """Garbage output → fail-open, return success."""
-        ok, _ = self._simple_run("compile and run program", tmp_path,
-                                 validate_response=json.JSONDecodeError("bad", "", 0))
+        ok, _ = self._simple_run(
+            "compile and run program",
+            tmp_path,
+            validate_response=json.JSONDecodeError("bad", "", 0),
+        )
         assert ok is True
 
     def test_validate_recheck_capped_after_recovery(self, tmp_path):
@@ -1264,6 +1445,7 @@ class TestFinalValidation:
     def test_validate_always_mode(self, tmp_path):
         """AGENT_FINAL_VALIDATE=always forces validation on trivial run."""
         import askme
+
         old = askme.FINAL_VALIDATE
         askme.FINAL_VALIDATE = "always"
         try:
@@ -1291,6 +1473,7 @@ class TestFinalValidation:
     def test_validate_disabled(self, mock_replan, tmp_path):
         """AGENT_FINAL_VALIDATE=0 skips validation."""
         import askme
+
         old = askme.FINAL_VALIDATE
         askme.FINAL_VALIDATE = "0"
         try:
@@ -1338,6 +1521,7 @@ class TestFinalValidation:
 
         # Use "always" to force validation on this simple run
         import askme
+
         old = askme.FINAL_VALIDATE
         askme.FINAL_VALIDATE = "always"
         try:
@@ -1371,6 +1555,7 @@ class TestFinalValidation:
             return resp
 
         import askme
+
         old = askme.FINAL_VALIDATE
         askme.FINAL_VALIDATE = "always"
         try:

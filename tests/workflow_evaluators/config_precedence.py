@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path.cwd()
 PROGRAM = ROOT / "config_cli.py"
 EXPECTED_ERROR = "error: timeout must be a positive integer\n"
@@ -48,8 +47,9 @@ def main():
         env_over_config = run_cli(("--config", str(config)), environment_timeout="50")
         check(env_over_config.returncode == 0, "environment-over-config exited nonzero")
         try:
-            check(decoded(env_over_config)["timeout"] == 50,
-                  "environment must override JSON config")
+            check(
+                decoded(env_over_config)["timeout"] == 50, "environment must override JSON config"
+            )
         except (json.JSONDecodeError, KeyError):
             failures.append("environment-over-config output was not valid configuration JSON")
 
@@ -59,8 +59,10 @@ def main():
         )
         check(cli_over_all.returncode == 0, "CLI-over-all exited nonzero")
         try:
-            check(decoded(cli_over_all) == {"name": "worker", "timeout": 60},
-                  "CLI must override environment and config without changing name/output")
+            check(
+                decoded(cli_over_all) == {"name": "worker", "timeout": 60},
+                "CLI must override environment and config without changing name/output",
+            )
         except json.JSONDecodeError:
             failures.append("CLI-over-all output was not valid JSON")
 
@@ -70,11 +72,15 @@ def main():
             ("--config", str(invalid_config), "--timeout", "70"),
             environment_timeout="also-bad",
         )
-        check(ignored_invalid_lower_sources.returncode == 0,
-              "valid CLI value must ignore invalid lower-precedence sources")
+        check(
+            ignored_invalid_lower_sources.returncode == 0,
+            "valid CLI value must ignore invalid lower-precedence sources",
+        )
         try:
-            check(decoded(ignored_invalid_lower_sources)["timeout"] == 70,
-                  "valid CLI value did not win over invalid lower-precedence sources")
+            check(
+                decoded(ignored_invalid_lower_sources)["timeout"] == 70,
+                "valid CLI value did not win over invalid lower-precedence sources",
+            )
         except (json.JSONDecodeError, KeyError):
             failures.append("lower-precedence case output was not valid JSON")
 
@@ -84,8 +90,7 @@ def main():
     ):
         check(completed.returncode == 2, f"{label} must exit 2")
         check(completed.stdout == "", f"{label} must not write stdout")
-        check(completed.stderr == EXPECTED_ERROR,
-              f"{label} must write the exact error to stderr")
+        check(completed.stderr == EXPECTED_ERROR, f"{label} must write the exact error to stderr")
 
     if failures:
         for failure in failures:
