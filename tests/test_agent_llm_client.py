@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 import requests as req_lib
-from _test_support import mock_http_response, mock_response
+from _test_support import mock_http_response, mock_response, mock_response_raw
 
 import askme
 from askme import (
@@ -579,3 +579,79 @@ class TestLLMClientInjection:
         assert url == "http://facade-test/v1"
         assert body["model"] == "facade/model"
         assert headers["Authorization"] == "Bearer fk"
+
+
+class TestWriteRetryBudgetPerClient:
+    """Codex P2 (PR #61): the truncated-write retry budget must follow the
+    client's backend, not the process-wide import-time backend."""
+
+    def test_write_retry_tokens_follow_settings_backend(self):
+        assert _client_settings().write_retry_tokens() == 8192
+        assert _client_settings(backend="local").write_retry_tokens() == 512
+        assert _client_settings(step_write_tokens=1024).write_retry_tokens() == 1024
+        assert LLMSettings.from_env(env={}).write_retry_tokens() == 512
+        assert LLMSettings.from_env(env={"LLM_BACKEND": "openrouter"}).write_retry_tokens() == 8192
+
+    @patch("askme.STEP_WRITE_TOKENS", 777)
+    def test_current_pins_the_patchable_module_budget(self):
+        assert LLMSettings.current().write_retry_tokens() == 777
+
+    def _truncated_then_done(self, bodies):
+        truncated_write = '{"action": "write", "arg": "a.py", "content": "aaaa'
+        replies = [
+            mock_response_raw(truncated_write, finish_reason="length"),
+            mock_response(DONE_REPLY, finish_reason="stop"),
+        ]
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            bodies.append(json)
+            return replies.pop(0)
+
+        return fake_post
+
+    @patch("askme.STEP_WRITE_TOKENS", 512)
+    @patch("askme.LLM_BACKEND", "local")
+    def test_openrouter_client_in_local_process_gets_full_budget(self):
+        bodies = []
+        client = LLMClient(
+            settings=_client_settings(),
+            post=self._truncated_then_done(bodies),
+            log_sink=lambda m: None,
+            event_sink=lambda e: None,
+        )
+        obj = client.ask(
+            [{"role": "user", "content": "hi"}],
+            max_tokens=256,
+            max_retries=1,
+            reasoning_policy="off",
+            reasoning_trigger="seam_test",
+        )
+        assert obj["action"] == "done"
+        assert bodies[0]["max_tokens"] == 256
+        assert bodies[1]["max_tokens"] == 8192
+
+    @patch("askme.STEP_WRITE_TOKENS", 8192)
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_local_client_in_openrouter_process_keeps_local_bound(self):
+        bodies = []
+        client = LLMClient(
+            settings=_client_settings(
+                backend="local",
+                api="http://localhost:1234/v1/chat/completions",
+                api_key="",
+                provider="",
+            ),
+            post=self._truncated_then_done(bodies),
+            log_sink=lambda m: None,
+            event_sink=lambda e: None,
+        )
+        obj = client.ask(
+            [{"role": "user", "content": "hi"}],
+            max_tokens=256,
+            max_retries=1,
+            reasoning_policy="off",
+            reasoning_trigger="seam_test",
+        )
+        assert obj["action"] == "done"
+        assert bodies[0]["max_tokens"] == 256
+        assert bodies[1]["max_tokens"] == 512

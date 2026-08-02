@@ -99,6 +99,16 @@ OPENROUTER_CHAT_API = "https://openrouter.ai/api/v1/chat/completions"
 _OPENROUTER_DEFAULT_MODEL = "google/gemma-4-26b-a4b-it"
 
 
+def _step_write_tokens(backend):
+    """Backend-shaped retry budget for truncated write/edit payloads.
+
+    The 512-token local bound is a wall-clock product constraint at ~7 tok/s;
+    OpenRouter payloads get room for whole files (issue #15). The bound must
+    follow the client's backend, not the process-wide import-time backend
+    (Codex P2, PR #61)."""
+    return 8192 if backend == "openrouter" else 512
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     """Immutable client-local LLM configuration (issue #37).
@@ -120,6 +130,15 @@ class LLMSettings:
     require_parameters: bool
     reasoning_effort: str
     timeout: int
+    # None derives the truncated-write retry budget from `backend`; `current`
+    # pins the module global so patched values keep reaching the facade.
+    step_write_tokens: int | None = None
+
+    def write_retry_tokens(self):
+        """Decode-retry budget for truncated write/edit payloads."""
+        if self.step_write_tokens is not None:
+            return self.step_write_tokens
+        return _step_write_tokens(self.backend)
 
     @classmethod
     def from_env(cls, env=None):
@@ -157,6 +176,7 @@ class LLMSettings:
             require_parameters=OPENROUTER_REQUIRE_PARAMETERS,
             reasoning_effort=OPENROUTER_REASONING_EFFORT,
             timeout=LLM_TIMEOUT,
+            step_write_tokens=STEP_WRITE_TOKENS,
         )
 
 
@@ -291,7 +311,7 @@ def _is_write_shaped(task):
 # Local values are unchanged — the local path keeps chunked append instead.
 STEP_TOKENS = 4096 if LLM_BACKEND == "openrouter" else 256
 # Retry budget when a truncated write/edit payload fails to parse.
-STEP_WRITE_TOKENS = 8192 if LLM_BACKEND == "openrouter" else 512
+STEP_WRITE_TOKENS = _step_write_tokens(LLM_BACKEND)
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
 REASONING_POLICIES = ("gated", "off")
 DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
@@ -846,11 +866,11 @@ class LLMClient:
                 cleaned = getattr(parse_err, "cleaned_text", "")
                 if attempt < max_retries:
                     # Action-specific budget: a truncated write/edit payload
-                    # needs room for content, not more reasoning. The budget
-                    # constant is decode policy, deliberately not a client
-                    # setting.
-                    if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(cleaned):
-                        budget = STEP_WRITE_TOKENS
+                    # needs room for content, not more reasoning. The bound
+                    # follows this client's backend (Codex P2, PR #61).
+                    write_budget = cfg.write_retry_tokens()
+                    if budget < write_budget and _WRITE_ATTEMPT_RE.search(cleaned):
+                        budget = write_budget
                         self._log(f"  write/edit payload budget -> {budget}")
                     think_str = f" thinking={sent_effort}" if sent_effort else ""
                     self._log(
