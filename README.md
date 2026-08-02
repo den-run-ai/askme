@@ -168,4 +168,3 @@ credential is unavailable. Dated run matrices and suite-size snapshots live in
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) — active experiment backlog
 - [docs/SECURITY.md](docs/SECURITY.md) — threat boundary and safe-use guidance
 - [CLAUDE.md](CLAUDE.md) — guidance for AI agents working in this directory
-
