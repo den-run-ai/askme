@@ -49,6 +49,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
 | 15  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
 | 16  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
+| —   | E22 | C-header compile-repair ablation (issue #41)            | 4    | P1       | S      | planned  |
 | 17  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
 | 18  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
 | 19  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
@@ -249,6 +250,26 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Medium. Keep templates narrow and observable; log template application explicitly.
 - **Code.** `askme.py` execute/error-recovery path.
 - **Effort.** M.
+
+### E22 — C-header compile-repair ablation (issue #41)
+
+- **Hypothesis.** The landed E18-style `#include` repair path either measurably
+  raises benchmark-shaped acceptance (retain, converting the rule to emit an
+  ordinary `edit` action through the #36 dispatch path) or it does not (remove
+  the special path). Issue #41 requires the decision be preregistered, not
+  argued post hoc.
+- **Change.** None until the decision lands. `AGENT_COMPILE_REPAIR=0` is the
+  off arm; default `1` preserves current behavior. Offline arm coverage is in
+  `tests/test_agent_recovery.py` (`TestCompileRepairTemplates`).
+- **Protocol.** [ablation-compile-repair.md](ablation-compile-repair.md) —
+  draft until the owner pins revision/model/route and approves OpenRouter
+  spend; no outcome-bearing calls before that registration.
+- **Metric.** Held-out acceptance on the C-header task family per arm, plus
+  steps, replans, and wall time; gold and harmless controls requalified first.
+- **Risk.** Low. The switch is one guarded early return; both arms are
+  offline-tested at the same revision.
+- **Code.** `askme.py` `_try_compile_repair` gate; no controller branches.
+- **Effort.** S (offline prep done; live arms gated on approved spend).
 
 ## Verification
 

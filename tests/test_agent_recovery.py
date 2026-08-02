@@ -928,6 +928,68 @@ class TestCompileRepairTemplates:
         assert repair == ("fix_me.c", "Auto-inserted #include <stdio.h>")
         assert src.read_text().startswith("#include <stdio.h>\n")
 
+    def test_flag_disables_repair_before_any_mutation(self, tmp_path):
+        """AGENT_COMPILE_REPAIR=0 is the ablation off arm (issue #41)."""
+        src = tmp_path / "main.c"
+        original = 'int main(){ printf("hi"); return 0; }\n'
+        src.write_text(original)
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        with patch.object(askme, "COMPILE_REPAIR_ENABLED", False):
+            assert askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c") is None
+        assert src.read_text() == original
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.execute")
+    @patch("askme.ask_llm")
+    def test_flag_off_arm_surfaces_the_compile_error_unrepaired(
+        self, mock_llm, mock_execute, mock_replan, tmp_path
+    ):
+        """With the flag off, no deterministic receipts exist and the failure
+        reaches the model as an ordinary typed compile_error."""
+        src = tmp_path / "main.c"
+        original = 'int main(){ printf("hi"); return 0; }\n'
+        src.write_text(original)
+        mock_llm.side_effect = [
+            {"tasks": ["compile main.c"]},
+            {"action": "shell", "arg": "cc -o main main.c"},
+            {"action": "fail", "reasoning": "compile error persists"},
+        ]
+        mock_execute.return_value = {
+            "ok": False,
+            "output": "main.c:1:13: error: implicit declaration of function 'printf'",
+            "error_type": "compile_error",
+        }
+        log_path = tmp_path / "run.jsonl"
+        with (
+            patch.object(askme, "COMPILE_REPAIR_ENABLED", False),
+            patch.object(askme, "RUN_LOG_PATH", str(log_path)),
+        ):
+            result = _run_loop(
+                "compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3
+            )
+        assert result["status"] == "exhausted"
+        assert src.read_text() == original
+        all_steps = result["state"]["all_steps"]
+        assert not any(s.get("deterministic_repair") for s in all_steps)
+        assert not any(s.get("deterministic_retry") for s in all_steps)
+        assert any(e.startswith("[compile_error]") for e in result["state"]["errors"])
+        # Arm provenance (issue #41): receipts alone cannot identify arm B,
+        # so run_start must record the resolved switch.
+        run_start = json.loads(log_path.read_text().splitlines()[0])
+        assert run_start["event"] == "run_start"
+        assert run_start["compile_repair"] is False
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_run_start_records_the_default_repair_arm(self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [{"tasks": ["say hi"]}, {"action": "done"}]
+        log_path = tmp_path / "run.jsonl"
+        with patch.object(askme, "RUN_LOG_PATH", str(log_path)):
+            result = _run_loop("say hi", str(tmp_path), max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "complete"
+        run_start = json.loads(log_path.read_text().splitlines()[0])
+        assert run_start["compile_repair"] is True
+
     def test_try_compile_repair_skips_existing_include(self, tmp_path):
         src = tmp_path / "main.c"
         src.write_text('#include <stdio.h>\nint main(){ printf("hi"); }\n')
