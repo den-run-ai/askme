@@ -8,9 +8,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from _test_support import mock_response, mock_response_raw
 
 import askme
 from askme import (
@@ -610,24 +611,7 @@ class TestActionContract:
 # --- Truncation detection and write-payload retry budget ---
 
 
-def _length_response(text):
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {
-        "choices": [{"finish_reason": "length", "message": {"content": text}}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-    }
-    return resp
-
-
-def _ok_response(payload):
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {
-        "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(payload)}}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-    }
-    return resp
+_TOKEN_USAGE = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
 
 
 class TestTruncationBudget:
@@ -635,8 +619,12 @@ class TestTruncationBudget:
         # reasoning_policy="off" isolates the payload budget from thinking bumps.
         truncated_write = '{"action": "write", "arg": "a.py", "content": "aaaa'
         responses = [
-            _length_response(truncated_write),
-            _ok_response({"action": "write", "arg": "a.py", "content": "x"}),
+            mock_response_raw(truncated_write, finish_reason="length", usage=_TOKEN_USAGE),
+            mock_response(
+                {"action": "write", "arg": "a.py", "content": "x"},
+                finish_reason="stop",
+                usage=_TOKEN_USAGE,
+            ),
         ]
         with patch("askme.requests.post", side_effect=responses) as mock_post:
             result = askme.ask_llm(
@@ -654,7 +642,10 @@ class TestTruncationBudget:
         # Repair strips the truncated "arg" value, leaving a contract-incomplete
         # shell action — so the retry happens without a payload budget bump.
         truncated_shell = '{"action": "shell", "arg": "gcc main.c -o '
-        responses = [_length_response(truncated_shell), _ok_response({"action": "done"})]
+        responses = [
+            mock_response_raw(truncated_shell, finish_reason="length", usage=_TOKEN_USAGE),
+            mock_response({"action": "done"}, finish_reason="stop", usage=_TOKEN_USAGE),
+        ]
         with patch("askme.requests.post", side_effect=responses) as mock_post:
             askme.ask_llm(
                 [{"role": "user", "content": "hi"}],
@@ -670,7 +661,8 @@ class TestTruncationBudget:
         old = askme.RUN_LOG_PATH
         askme.RUN_LOG_PATH = str(log_path)
         try:
-            with patch("askme.requests.post", return_value=_ok_response({"action": "done"})):
+            response = mock_response({"action": "done"}, finish_reason="stop", usage=_TOKEN_USAGE)
+            with patch("askme.requests.post", return_value=response):
                 askme.ask_llm([{"role": "user", "content": "hi"}], max_retries=0)
         finally:
             askme.RUN_LOG_PATH = old
@@ -936,20 +928,12 @@ class TestReadMetadata:
 # --- Typed parse failures: malformed_action / response_truncated ---
 
 
-def _stop_response(text):
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {
-        "choices": [{"finish_reason": "stop", "message": {"content": text}}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-    }
-    return resp
-
-
 class TestTypedParseFailures:
     def test_truncated_unrepairable_output_is_typed(self):
         # Cut mid-key so mechanical repair cannot rebuild a valid contract.
-        bad = _length_response('{"action": "write", "ar')
+        bad = mock_response_raw(
+            '{"action": "write", "ar', finish_reason="length", usage=_TOKEN_USAGE
+        )
         with patch("askme.requests.post", return_value=bad):
             with pytest.raises(json.JSONDecodeError) as exc:
                 askme.ask_llm(
@@ -959,7 +943,9 @@ class TestTypedParseFailures:
         assert exc.value.response_truncated is True
 
     def test_malformed_stop_output_not_marked_truncated(self):
-        bad = _stop_response("garbage output, no json here")
+        bad = mock_response_raw(
+            "garbage output, no json here", finish_reason="stop", usage=_TOKEN_USAGE
+        )
         with patch("askme.requests.post", return_value=bad):
             with pytest.raises(json.JSONDecodeError) as exc:
                 askme.ask_llm(
@@ -1162,7 +1148,8 @@ class TestSentinelTransport:
             '{"action":"write","arg":"impl.py","reasoning":"impl"}\n'
             "<<<CONTENT\n" + code + "\nCONTENT>>>"
         )
-        with patch("askme.requests.post", return_value=_stop_response(text)):
+        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1172,7 +1159,8 @@ class TestSentinelTransport:
 
     def test_block_overrides_header_content(self):
         text = '{"action":"write","arg":"a.py","content":"stub"}\n<<<CONTENT\nreal\nCONTENT>>>'
-        with patch("askme.requests.post", return_value=_stop_response(text)):
+        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1180,7 +1168,8 @@ class TestSentinelTransport:
 
     def test_unclosed_block_at_length_marks_truncated(self):
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\nline3 par'
-        with patch("askme.requests.post", return_value=_length_response(text)):
+        response = mock_response_raw(text, finish_reason="length", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1191,7 +1180,8 @@ class TestSentinelTransport:
         # A model that forgot the closing sentinel but stopped on its own
         # emitted everything it meant to — accept the content as complete.
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2'
-        with patch("askme.requests.post", return_value=_stop_response(text)):
+        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1203,7 +1193,8 @@ class TestSentinelTransport:
         # proof the last line is complete — it must survive the strip chain
         # so the run loop's partial-line trim does not drop the line.
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\n'
-        with patch("askme.requests.post", return_value=_length_response(text)):
+        response = mock_response_raw(text, finish_reason="length", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1215,7 +1206,8 @@ class TestSentinelTransport:
         # protocol) must not end the block when a real terminator follows.
         code = 'print("demo")\nCONTENT>>>\nprint("after")'
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n' + code + "\nCONTENT>>>"
-        with patch("askme.requests.post", return_value=_stop_response(text)):
+        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1223,7 +1215,8 @@ class TestSentinelTransport:
 
     def test_indented_close_is_content_not_terminator(self):
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nexample:\n    CONTENT>>>'
-        with patch("askme.requests.post", return_value=_stop_response(text)):
+        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
+        with patch("askme.requests.post", return_value=response):
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
             )
@@ -1232,7 +1225,10 @@ class TestSentinelTransport:
     def test_empty_block_at_length_retries_with_payload_budget(self):
         cut = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n'
         good = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nx = 1\nCONTENT>>>'
-        responses = [_length_response(cut), _stop_response(good)]
+        responses = [
+            mock_response_raw(cut, finish_reason="length", usage=_TOKEN_USAGE),
+            mock_response_raw(good, finish_reason="stop", usage=_TOKEN_USAGE),
+        ]
         with patch("askme.requests.post", side_effect=responses) as mock_post:
             result = askme.ask_llm(
                 [{"role": "user", "content": "hi"}],

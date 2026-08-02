@@ -289,7 +289,7 @@ Rules:
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
-Actions: shell, write, edit, read, search, tree, done, fail.
+Actions: __ACTION_NAMES__.
 read: initial pages take "offset"/"limit" (1-based lines); continuation pages must echo
       the output's "cursor", "limit", and "sha256". Cursors count Unicode code points.
 search: literal pattern in "arg", optional "path" (default "."); bounded matches
@@ -301,7 +301,9 @@ write content may follow the JSON between sentinel lines instead of "content":
 raw file lines, no escaping
 CONTENT>>>
 edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
-Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}"""
+Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}""".replace(
+    "__ACTION_NAMES__", ", ".join(ACTION_SPECS)
+)
 
 
 MAX_LLM_RETRIES = 2

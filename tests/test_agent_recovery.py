@@ -418,15 +418,17 @@ class TestFailureClassification:
         assert result["ok"] is False
         assert result["error_type"] == "edit_failed"
 
-    def test_edit_empty_find_returns_edit_failed(self, work_dir):
-        """Edit with empty find string should return error_type=edit_failed."""
+    def test_edit_empty_find_returns_malformed_action(self, work_dir):
+        """Registry dispatch rejects an empty find before the handler
+        (issue #36); the file is untouched."""
         p = Path(work_dir) / "test.txt"
         p.write_text("hello")
         result = execute(
             {"action": "edit", "arg": "test.txt", "find": "", "replace": "new"}, work_dir
         )
         assert result["ok"] is False
-        assert result["error_type"] == "edit_failed"
+        assert result["error_type"] == "malformed_action"
+        assert p.read_text() == "hello"
 
 
 # --- E16: Compiler-aware shell error classification ---

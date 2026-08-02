@@ -2,10 +2,10 @@
 command-aware timeouts, server config."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from _test_support import mock_response
+from _test_support import mock_http_response, mock_response
 from conftest import skip_no_llm
 
 from askme import TASK_REPLAN_MAX_TOKENS, LLMTransportError, get_plan, get_step, replan_task, run
@@ -124,11 +124,9 @@ class TestPlannerReasoning:
     @patch("askme.LLM_BACKEND", "openrouter")
     def test_replan_null_content_with_reasoning(self, mock_post):
         """Replan: reasoning exhausts token budget, content=null -> retry succeeds."""
-        resp_null = MagicMock()
-        resp_null.status_code = 200
-        resp_null.json.return_value = {
-            "choices": [{"message": {"content": None, "reasoning": "planning..."}}]
-        }
+        resp_null = mock_http_response(
+            json_body={"choices": [{"message": {"content": None, "reasoning": "planning..."}}]}
+        )
         mock_post.side_effect = [resp_null, mock_response({"tasks": ["recovered task"]})]
         result = get_plan("test", {"completed_tasks": [], "errors": ["previous failure"]})
         assert "tasks" in result

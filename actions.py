@@ -302,9 +302,13 @@ class ActionResult:
 class ActionSpec:
     """One action's contract: category, required fields, and handler.
 
-    ``requires`` lists fields that must be non-empty strings at decode time;
-    ``contract`` adds per-action checks beyond that. Control actions carry no
-    handler — the run controller resolves them before dispatch.
+    ``requires`` lists fields that must be non-empty strings; it is enforced
+    at decode time and again at dispatch. ``contract`` adds decode-time
+    checks beyond that; ``dispatch_contract`` names the subset of those that
+    dispatch re-enforces before the handler runs (read's continuation syntax
+    is deliberately not in it — the read handler revalidates cursors at
+    runtime with richer typed errors and no side effects). Control actions
+    carry no handler — the run controller resolves them before dispatch.
     """
 
     name: str
@@ -312,6 +316,7 @@ class ActionSpec:
     handler: Callable[["ActionExecutor", dict[str, Any]], ActionResult] | None = None
     requires: tuple[str, ...] = ()
     contract: Callable[[dict[str, Any]], bool] | None = None
+    dispatch_contract: Callable[[dict[str, Any]], bool] | None = None
 
 
 class ActionExecutor:
@@ -337,6 +342,17 @@ class ActionExecutor:
                 False,
                 f"control action '{act}' is resolved by the run controller",
                 "control_action",
+            )
+        # Malformed actions fail before any side effect. The run loop never
+        # reaches this arm — decode enforces the same registry contract — so
+        # this hardens direct execute()/dispatch() callers.
+        if not all(_valid_nonempty_str(action.get(name)) for name in spec.requires) or (
+            spec.dispatch_contract is not None and not spec.dispatch_contract(action)
+        ):
+            return ActionResult(
+                False,
+                f"malformed {act} action: missing or invalid required fields",
+                "malformed_action",
             )
         return spec.handler(self, action)
 
@@ -449,8 +465,6 @@ class ActionExecutor:
             text = p.read_text()
             find = action.get("find", "")
             replace = action.get("replace", "")
-            if not find:
-                return ActionResult(False, "edit requires non-empty 'find'", "edit_failed")
             count = text.count(find)
             if count == 0:
                 return ActionResult(False, f"No match for find string in {p.name}", "edit_failed")
@@ -601,8 +615,6 @@ class ActionExecutor:
 
     def _search(self, action):
         pattern = action.get("arg", "")
-        if not pattern:
-            return ActionResult(False, "search requires non-empty 'arg' (pattern)", "unknown")
         try:
             base = self._resolve(action.get("path") or ".")
             if not base.is_dir():
@@ -731,6 +743,10 @@ def _write_contract(obj):
     return _valid_nonempty_str(content) or isinstance(content, (dict, list))
 
 
+def _edit_contract(obj):
+    return "replace" in obj
+
+
 def _read_contract(obj):
     if "cursor" not in obj:
         return True
@@ -750,14 +766,20 @@ ACTION_SPECS: dict[str, ActionSpec] = {
     for spec in (
         ActionSpec("shell", "mutate", ActionExecutor._shell, requires=("arg",)),
         ActionSpec(
-            "write", "mutate", ActionExecutor._write, requires=("arg",), contract=_write_contract
+            "write",
+            "mutate",
+            ActionExecutor._write,
+            requires=("arg",),
+            contract=_write_contract,
+            dispatch_contract=_write_contract,
         ),
         ActionSpec(
             "edit",
             "mutate",
             ActionExecutor._edit,
             requires=("arg", "find"),
-            contract=lambda obj: "replace" in obj,
+            contract=_edit_contract,
+            dispatch_contract=_edit_contract,
         ),
         ActionSpec(
             "read", "observe", ActionExecutor._read, requires=("arg",), contract=_read_contract

@@ -2,11 +2,11 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests as req_lib
-from _test_support import mock_response, mock_response_raw
+from _test_support import mock_http_response, mock_response, mock_response_raw
 
 from askme import (
     _STRICT_JSON_SUFFIX,
@@ -69,10 +69,13 @@ class TestExecuteWrite:
         assert result["ok"] is True
         assert (Path(work_dir) / "sub" / "test.txt").read_text() == "nested"
 
-    def test_write_empty_content(self, work_dir):
+    def test_write_empty_content_is_malformed(self, work_dir):
+        """A write without content fails at dispatch (issue #36) instead of
+        silently creating an empty file."""
         result = execute({"action": "write", "arg": "empty.txt"}, work_dir)
-        assert result["ok"] is True
-        assert (Path(work_dir) / "empty.txt").read_text() == ""
+        assert result["ok"] is False
+        assert result["error_type"] == "malformed_action"
+        assert not (Path(work_dir) / "empty.txt").exists()
 
     def test_write_bad_path(self, work_dir):
         result = execute({"action": "write", "arg": "/proc/0/impossible", "content": "x"}, work_dir)
@@ -160,10 +163,12 @@ class TestExecuteEdit:
         assert (Path(work_dir) / "sub" / "f.txt").read_text() == "new text"
 
     def test_edit_empty_find(self, work_dir):
+        """Registry dispatch rejects the malformed edit before the handler."""
         Path(work_dir, "f.txt").write_text("content")
         result = execute({"action": "edit", "arg": "f.txt", "find": "", "replace": "x"}, work_dir)
         assert result["ok"] is False
-        assert "non-empty" in result["output"]
+        assert result["error_type"] == "malformed_action"
+        assert (Path(work_dir) / "f.txt").read_text() == "content"
 
     def test_edit_delete_text(self, work_dir):
         """Replace with empty string effectively deletes the matched text."""
@@ -313,9 +318,7 @@ class TestThinkingRetry:
     @patch("askme.requests.post")
     def test_api_error_retries(self, mock_post):
         """API error responses should be retried, not crash on missing 'choices'."""
-        resp_err = MagicMock()
-        resp_err.status_code = 200
-        resp_err.json.return_value = {"error": {"message": "rate limited", "code": 429}}
+        resp_err = mock_http_response(json_body={"error": {"message": "rate limited", "code": 429}})
         mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "done"}
@@ -361,11 +364,9 @@ class TestThinkingRetry:
     @patch("askme.LLM_BACKEND", "openrouter")
     def test_null_content_with_reasoning(self, mock_post):
         """When reasoning exhausts tokens, content may be null — should retry, not crash."""
-        resp_null = MagicMock()
-        resp_null.status_code = 200
-        resp_null.json.return_value = {
-            "choices": [{"message": {"content": None, "reasoning": "thinking..."}}]
-        }
+        resp_null = mock_http_response(
+            json_body={"choices": [{"message": {"content": None, "reasoning": "thinking..."}}]}
+        )
         mock_post.side_effect = [resp_null, mock_response({"action": "done"})]
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "done"}
@@ -374,14 +375,19 @@ class TestThinkingRetry:
     @patch("askme.LLM_BACKEND", "openrouter")
     def test_null_content_recovers_json_from_reasoning(self, mock_post):
         """When content is null but reasoning contains valid JSON, recover it directly."""
-        resp_null = MagicMock()
-        resp_null.status_code = 200
-        resp_null.json.return_value = {
-            "choices": [
-                {"message": {"content": None, "reasoning": '{"action": "shell", "arg": "echo hi"}'}}
-            ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-        }
+        resp_null = mock_http_response(
+            json_body={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "reasoning": '{"action": "shell", "arg": "echo hi"}',
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            }
+        )
         mock_post.return_value = resp_null
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "shell", "arg": "echo hi"}
@@ -590,11 +596,7 @@ class TestLLMTransport:
     @patch("askme.requests.post")
     def test_non_json_body_retry(self, mock_post):
         """200 response with non-JSON body should retry, then raise."""
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.side_effect = ValueError("not json")
-        resp.text = "<html>Bad Gateway</html>"
-        mock_post.return_value = resp
+        mock_post.return_value = mock_http_response(text="<html>Bad Gateway</html>")
         with patch("askme.time.sleep"):
             with pytest.raises(LLMTransportError, match="Non-JSON"):
                 ask_llm([{"role": "user", "content": "test"}])
@@ -604,9 +606,7 @@ class TestLLMTransport:
     @patch("askme.requests.post")
     def test_502_retry_with_backoff(self, mock_post, mock_sleep):
         """502 response should retry with backoff delays."""
-        resp_502 = MagicMock()
-        resp_502.status_code = 502
-        resp_502.text = "Bad Gateway"
+        resp_502 = mock_http_response(status_code=502, text="Bad Gateway")
         mock_post.side_effect = [resp_502, resp_502, resp_502]
         with pytest.raises(LLMTransportError, match="HTTP 502"):
             ask_llm([{"role": "user", "content": "test"}])
@@ -618,10 +618,7 @@ class TestLLMTransport:
     @patch("askme.requests.post")
     def test_401_fail_fast(self, mock_post):
         """401 should raise immediately without retry."""
-        resp = MagicMock()
-        resp.status_code = 401
-        resp.text = "Unauthorized"
-        mock_post.return_value = resp
+        mock_post.return_value = mock_http_response(status_code=401, text="Unauthorized")
         with pytest.raises(LLMTransportError, match="HTTP 401"):
             ask_llm([{"role": "user", "content": "test"}])
         assert mock_post.call_count == 1  # no retry
@@ -667,9 +664,7 @@ class TestLLMTransport:
     @patch("askme.requests.post")
     def test_json_error_key_still_retried(self, mock_post):
         """Existing behavior: JSON body with 'error' key should still retry."""
-        resp_err = MagicMock()
-        resp_err.status_code = 200
-        resp_err.json.return_value = {"error": {"message": "rate limited"}}
+        resp_err = mock_http_response(json_body={"error": {"message": "rate limited"}})
         mock_post.side_effect = [resp_err, mock_response({"action": "done"})]
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result == {"action": "done"}

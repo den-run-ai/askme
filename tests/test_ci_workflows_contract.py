@@ -32,8 +32,9 @@ def test_unit_workflow_gates_quality_compatibility_and_coverage():
     assert "uv run --locked ty check" in text
     assert "mypy" not in text
     assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in text
-    assert "--cov=askme --cov=actions" in text
-    assert "--cov-report=xml" in text
+    assert "--cov=askme" in text
+    assert "--cov=actions" in text
+    assert "--cov-report=xml:coverage.xml" in text
     assert text.count("uv sync --locked") == 2
     assert text.count("astral-sh/setup-uv@") == 2
     assert text.count('version: "0.12.1"') == 2
@@ -51,10 +52,27 @@ def test_unit_workflow_gates_quality_compatibility_and_coverage():
     assert UV_LOCK.is_file()
 
 
+def test_unit_workflow_publishes_coverage_reports():
+    text = UNIT_WORKFLOW.read_text(encoding="utf-8")
+    assert "--cov-report=json:coverage.json" in text
+    assert "--cov-report=html:htmlcov" in text
+    assert "printf '## Coverage\\n\\n'" in text
+    assert '--cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"' in text
+    assert text.count("codecov/codecov-action@") == 1
+    assert "token: ${{ secrets.CODECOV_TOKEN }}" in text
+    assert "files: ./coverage.xml" in text
+    assert "disable_search: true" in text
+    assert "fail_ci_if_error: true" in text
+    assert "github.actor != 'dependabot[bot]'" in text
+    assert "pull_request_target" not in text
+    for report in ("coverage.xml", "coverage.json", "htmlcov/"):
+        assert report in text
+
+
 def test_workflows_pin_third_party_actions():
     for workflow in (UNIT_WORKFLOW, LLM_WORKFLOW):
         text = workflow.read_text(encoding="utf-8")
-        external_actions = re.findall(r"^\s*-\s+uses:\s+([^#\s]+)", text, flags=re.MULTILINE)
+        external_actions = re.findall(r"^\s*(?:-\s+)?uses:\s+([^#\s]+)", text, flags=re.MULTILINE)
         assert external_actions
         for action in external_actions:
             assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", action), action

@@ -4,23 +4,60 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from typing import Any
+
+_NO_JSON = object()
 
 
-def mock_response(content):
-    """Create a mock requests.post response returning content as LLM output."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {"choices": [{"message": {"content": json.dumps(content)}}]}
-    return resp
+class FakeHttpResponse:
+    """Strict requests.Response subset used by deterministic provider tests."""
+
+    __slots__ = ("_json_body", "status_code", "text")
+
+    def __init__(
+        self, *, status_code: int = 200, json_body: Any = _NO_JSON, text: str = ""
+    ) -> None:
+        self.status_code = status_code
+        self._json_body = json_body
+        self.text = text
+
+    def json(self) -> Any:
+        if self._json_body is _NO_JSON:
+            raise ValueError("not json")
+        return self._json_body
 
 
-def mock_response_raw(text):
-    """Create a mock response with raw text (for testing think-tag stripping etc)."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = {"choices": [{"message": {"content": text}}]}
-    return resp
+def mock_http_response(
+    *, status_code: int = 200, json_body: Any = _NO_JSON, text: str = ""
+) -> FakeHttpResponse:
+    """Build a response for JSON, non-JSON, and HTTP-error transport cases."""
+    return FakeHttpResponse(status_code=status_code, json_body=json_body, text=text)
+
+
+def mock_response(
+    content: Any,
+    *,
+    finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
+) -> FakeHttpResponse:
+    """Create a chat-completion response whose content is JSON encoded."""
+    return mock_response_raw(json.dumps(content), finish_reason=finish_reason, usage=usage)
+
+
+def mock_response_raw(
+    text: str,
+    *,
+    finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
+) -> FakeHttpResponse:
+    """Create a chat-completion response with already-encoded model text."""
+    choice: dict[str, Any] = {"message": {"content": text}}
+    if finish_reason is not None:
+        choice["finish_reason"] = finish_reason
+    body: dict[str, Any] = {"choices": [choice]}
+    if usage is not None:
+        body["usage"] = usage
+    return mock_http_response(json_body=body)
 
 
 # --- Integration test limits ---
