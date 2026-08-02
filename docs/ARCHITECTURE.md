@@ -50,7 +50,7 @@ framework. `askme.py` re-exports the action layer's public names, and
 - `execute(action, working_dir)` — compatibility facade over `actions.ActionExecutor`, which dispatches shell/write/edit/read/search/tree through one registry (`ACTION_SPECS`: name, category, decode-time contract, handler) with command-aware timeouts, bounded observation windows, and atomic file writes. Unknown actions fail with typed `unknown_action`; `done`/`fail` are controller decisions and dispatching one is a typed `control_action` error
 - `StepRecorder` / `actions.StepReceipt` — the single record-and-count path: every executed step, deterministic repair/retry receipt, guard skip, and corrective observation flows through one recorder, with explicit projections for model history, structured results, and JSONL
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`
-- `_run_loop(...)` — structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls
+- `_run_loop(...)` — compatibility seam over `_RunController`, the structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls. Run-scoped controller data (the structured state dict, rewrite damping, wall clock, the one recorder) lives on `RunState`; attempt-scoped executor state (write pressure, duplicate/observation counters, thinking escalation) lives on `TaskAttemptState`; `done`/`fail` and one shared completion-blocker gate (`_completion_blocker`) remain controller concerns (issue #31)
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper returning a boolean
 
 **State** is an in-memory dict (no files). Planner and executor see different views.

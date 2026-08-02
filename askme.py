@@ -11,6 +11,8 @@ import shutil
 import sys
 import tempfile
 import time
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -958,6 +960,34 @@ def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
     return None
 
 
+def _completion_blocker(state, working_dir):
+    """Single finish-eligibility gate for incomplete-write obligations (#31).
+
+    Both completion sites — the executor's ``done`` claim and post-task
+    acceptance — must refuse while any truncated or zero-byte write obligation
+    is unresolved, and must steer recovery at the same target the replanner
+    visibility reports. Returns ``(name, recovery_arg, append_allowed)`` for
+    the most actionable obligation, or ``None`` when nothing blocks
+    completion. Selection order matches ``_incomplete_write_visibility``: a
+    restrictive pending overwrite first, then the newest unresolved truncated
+    write, then any remaining pending obligation.
+    """
+    unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
+    pending = state.get("pending_empty_writes", {})
+    if not unresolved and not pending:
+        return None
+    restrictive = _restrictive_pending_empty(pending)
+    if restrictive is not None:
+        target, pending_info = restrictive
+        return _pending_empty_hint(target, pending_info)
+    if unresolved:
+        target, (_, incomplete_step) = max(unresolved.items(), key=lambda item: item[1][0])
+        name, recovery_arg = _incomplete_step_hint(target, incomplete_step)
+        return name, recovery_arg, True
+    target, pending_info = _next_pending_empty(pending)
+    return _pending_empty_hint(target, pending_info)
+
+
 def _pending_append_targets(info):
     """Normalized referent guards from current and legacy pending records."""
     if not isinstance(info, dict):
@@ -1742,108 +1772,244 @@ class StepRecorder:
             steps[-1]["output"] = steps[-1]["output"][:100] + f" → {hint}"
 
 
-def _run_loop(
-    user_prompt,
-    working_dir,
-    max_replans=MAX_REPLANS,
-    max_tasks=MAX_TASKS,
-    max_steps=MAX_STEPS,
-    reasoning_policy=DEFAULT_REASONING_POLICY,
-    goal_context_chars=GOAL_CONTEXT_CHARS,
-):
-    """Core agent loop. Returns structured result dict.
+class _StepFlow(Enum):
+    """Control-flow outcome of a step decision inside one task attempt."""
 
-    Used by run() (public API, returns bool) and by integration test harness
-    (needs rich dict with state + log). All production behavior lives here:
-    preflight, policy, null normalization, error reset, timeout retry, etc.
+    NEXT_STEP = "next_step"  # handled; select the next executor action
+    END_ATTEMPT = "end_attempt"  # attempt over: done, fail, stuck, or error
+
+
+@dataclass
+class TaskAttemptState:
+    """Executor-facing state scoped to one attempt of one task (issue #31).
+
+    A task-local replan constructs a fresh attempt; nothing here survives
+    into the next attempt except what the run-scoped record already holds.
     """
-    if reasoning_policy not in REASONING_POLICIES:
-        raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
-    if goal_context_chars < 1:
-        raise ValueError("goal_context_chars must be a positive integer")
-    # Freeze the executor/replanner view once so all policy arms receive the same
-    # task context even if module configuration changes while a run is active.
-    goal_context = user_prompt[:goal_context_chars]
-    state = {
-        "completed_tasks": [],
-        "errors": [],
-        "validated_once": False,
-        "validation_attempts": 0,
-        "validation_recheck_needed": False,
-        "validated_step_count": 0,
-        "completed_step_groups": [],
-        "all_steps": [],
-        # Empty sentinel truncations dispatch no mutation, but a following
-        # `done` must not treat the failed write attempt as completion.
-        "pending_empty_writes": {},
-        "task_start_step_count": 0,
-        "reasoning_policy": reasoning_policy,
-        "goal_context_chars": goal_context_chars,
-        # Selected vs executed accounting (issue #7): the Qwen canary selected
-        # 14 reads but only 2 reached the dispatcher — that gap must be
-        # first-class in run metrics, not reconstructed from logs.
-        "selected_steps": 0,
-        "executed_steps": 0,
-        "skipped_steps": 0,
-    }
-    history = []
-    recorder = StepRecorder(state, history)
 
-    t_run = time.time()
-    log(f"Prompt: {user_prompt}")
-    log(f"Working directory: {working_dir}")
-    _run_log(
-        {
-            "event": "run_start",
-            "prompt": user_prompt,
-            "working_dir": working_dir,
-            "backend": LLM_BACKEND,
-            "model": MODEL,
-            "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
-            "reasoning_effort": OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else "",
-            "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
-            "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+    task: str
+    wants_write: bool
+    done: bool = False
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    use_think: bool = False
+    reasoning_trigger: str = "executor"
+    dup_skip_count: int = 0
+    last_successful_edit: tuple[str, str, str] | None = None
+    observe_executed: int = 0
+    commit_executed: int = 0
+    observe_blocked: int = 0
+
+    def write_pressure(self):
+        """True once observation spending must yield to a first commit."""
+        return (
+            self.wants_write
+            and self.commit_executed == 0
+            and self.observe_executed >= WRITE_PRESSURE_OBSERVATIONS
+        )
+
+
+@dataclass
+class _StepContext:
+    """Working data for one selected executor action within an attempt."""
+
+    task_index: int
+    step: int
+    started: float
+    action: dict[str, Any]
+    act: str
+    truncated_write: bool = False
+    logical_write_target: str | None = None
+    operation_write_target: str | None = None
+
+
+class RunState:
+    """Typed owner of run-scoped controller data (issue #31).
+
+    ``data`` remains the structured state dict callers receive in the run
+    result and the planner/executor summaries are curated from; the single
+    :class:`StepRecorder` projects receipts into it and ``history``. The
+    rewrite-damping fields live here because they are run-scoped, not
+    attempt-scoped: a task-local retry or full replan must not let the
+    executor restart a same-target full-write streak; only the documented
+    successful shell/edit and truncation paths disarm it.
+    """
+
+    def __init__(self, reasoning_policy, goal_context_chars):
+        self.data: dict[str, Any] = {
+            "completed_tasks": [],
+            "errors": [],
+            "validated_once": False,
+            "validation_attempts": 0,
+            "validation_recheck_needed": False,
+            "validated_step_count": 0,
+            "completed_step_groups": [],
+            "all_steps": [],
+            # Empty sentinel truncations dispatch no mutation, but a following
+            # `done` must not treat the failed write attempt as completion.
+            "pending_empty_writes": {},
+            "task_start_step_count": 0,
             "reasoning_policy": reasoning_policy,
-            # Ablation-arm provenance (issue #41): zero repair receipts cannot
-            # distinguish arm B from an arm-A run that never hit the trigger.
-            "compile_repair": COMPILE_REPAIR_ENABLED,
-            "limits": {
-                "max_replans": max_replans,
-                "max_tasks": max_tasks,
-                "max_steps": max_steps,
-                "goal_context_chars": goal_context_chars,
-            },
+            "goal_context_chars": goal_context_chars,
+            # Selected vs executed accounting (issue #7): the Qwen canary selected
+            # 14 reads but only 2 reached the dispatcher — that gap must be
+            # first-class in run metrics, not reconstructed from logs.
+            "selected_steps": 0,
+            "executed_steps": 0,
+            "skipped_steps": 0,
         }
-    )
-    # Preflight: probe environment and set policy
-    env = preflight_probe(working_dir)
-    state["environment"] = env
-    state["policy"] = get_policy()
-    log(f"Environment: platform={env['platform']} arch={env['arch']}")
-    log(f"Available tools: {env['available_tools']}")
-    if env["missing_tools"]:
-        log(f"Missing tools: {env['missing_tools']}")
-    log(f"Package managers: {env['package_managers']}")
-    log(f"Policy: allow_system_installs={state['policy']['allow_system_installs']}")
+        self.history = []
+        self.recorder = StepRecorder(self.data, self.history)
+        self.started = time.time()
+        self.last_write_target = None
+        self.consecutive_target_writes = 0
 
-    # Rewrite damping is run-scoped, not attempt-scoped. A task-local retry or
-    # full replan must not let the executor restart the same-target full-write
-    # streak; only the documented successful shell/edit and truncation paths
-    # below disarm it.
-    last_write_target = None
-    consecutive_target_writes = 0
+    def elapsed(self):
+        """Wall seconds since the run started."""
+        return time.time() - self.started
 
-    for replan in range(max_replans):
+    def disarm_rewrite_damping(self):
+        """Forget the streak entirely (documented truncation-recovery paths)."""
+        self.last_write_target = None
+        self.consecutive_target_writes = 0
+
+    def break_rewrite_streak(self):
+        """A successful shell/edit ends the streak; observations never do."""
+        self.consecutive_target_writes = 0
+
+    def note_successful_full_write(self, target):
+        """Advance or restart the same-target full-write streak."""
+        if target == self.last_write_target:
+            self.consecutive_target_writes += 1
+        else:
+            self.last_write_target = target
+            self.consecutive_target_writes = 1
+
+    def rewrite_skip_armed(self, target):
+        """True when further full rewrites of ``target`` must be skipped."""
+        return (
+            self.last_write_target is not None
+            and self.consecutive_target_writes >= REWRITE_SKIP_WRITES
+            and target == self.last_write_target
+        )
+
+    def validate_pressure_target(self):
+        """Basename the executor must verify once rewrites repeat, or None."""
+        if (
+            self.last_write_target is not None
+            and self.consecutive_target_writes >= REWRITE_PRESSURE_WRITES
+        ):
+            return Path(str(self.last_write_target)).name
+        return None
+
+
+class _RunController:
+    """Thin coordinator over planning, task attempts, step decisions, and
+    finalization (issue #31).
+
+    Behavior-preserving regrouping of the former monolithic ``_run_loop``:
+    every log line, JSONL event, history entry, error string, counter, and
+    guard decision is unchanged. Run-scoped data lives on :class:`RunState`,
+    attempt-scoped data on :class:`TaskAttemptState`; ``done``/``fail``
+    remain controller concerns, and every dispatch — normal, deterministic
+    repair, and retry — still flows through the one :class:`StepRecorder`.
+    """
+
+    def __init__(
+        self,
+        user_prompt,
+        working_dir,
+        max_replans=MAX_REPLANS,
+        max_tasks=MAX_TASKS,
+        max_steps=MAX_STEPS,
+        reasoning_policy=DEFAULT_REASONING_POLICY,
+        goal_context_chars=GOAL_CONTEXT_CHARS,
+    ):
+        if reasoning_policy not in REASONING_POLICIES:
+            raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
+        if goal_context_chars < 1:
+            raise ValueError("goal_context_chars must be a positive integer")
+        self.user_prompt = user_prompt
+        self.working_dir = working_dir
+        self.max_replans = max_replans
+        self.max_tasks = max_tasks
+        self.max_steps = max_steps
+        self.reasoning_policy = reasoning_policy
+        self.goal_context_chars = goal_context_chars
+        # Freeze the executor/replanner view once so all policy arms receive the same
+        # task context even if module configuration changes while a run is active.
+        self.goal_context = user_prompt[:goal_context_chars]
+        self.run_state = RunState(reasoning_policy, goal_context_chars)
+        self.state = self.run_state.data
+        self.history = self.run_state.history
+        self.recorder = self.run_state.recorder
+
+    def run(self):
+        """Drive planning, task attempts, validation, and finalization."""
+        self._log_run_start()
+        self._preflight()
+        for replan in range(self.max_replans):
+            tasks = self._plan(replan)
+            if tasks is None:
+                continue  # consumes a plan attempt
+            if self._execute_tasks(tasks):
+                result = self._try_finish(replan)
+                if result is not None:
+                    return result
+        return self._finish_after_exhaustion()
+
+    def _log_run_start(self):
+        log(f"Prompt: {self.user_prompt}")
+        log(f"Working directory: {self.working_dir}")
+        _run_log(
+            {
+                "event": "run_start",
+                "prompt": self.user_prompt,
+                "working_dir": self.working_dir,
+                "backend": LLM_BACKEND,
+                "model": MODEL,
+                "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
+                "reasoning_effort": (
+                    OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else ""
+                ),
+                "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
+                "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+                "reasoning_policy": self.reasoning_policy,
+                # Ablation-arm provenance (issue #41): zero repair receipts cannot
+                # distinguish arm B from an arm-A run that never hit the trigger.
+                "compile_repair": COMPILE_REPAIR_ENABLED,
+                "limits": {
+                    "max_replans": self.max_replans,
+                    "max_tasks": self.max_tasks,
+                    "max_steps": self.max_steps,
+                    "goal_context_chars": self.goal_context_chars,
+                },
+            }
+        )
+
+    def _preflight(self):
+        # Preflight: probe environment and set policy
+        env = preflight_probe(self.working_dir)
+        self.state["environment"] = env
+        self.state["policy"] = get_policy()
+        log(f"Environment: platform={env['platform']} arch={env['arch']}")
+        log(f"Available tools: {env['available_tools']}")
+        if env["missing_tools"]:
+            log(f"Missing tools: {env['missing_tools']}")
+        log(f"Package managers: {env['package_managers']}")
+        log(f"Policy: allow_system_installs={self.state['policy']['allow_system_installs']}")
+
+    def _plan(self, replan):
+        """One planning attempt; returns the task list or None on failure."""
         log("=" * 40)
         t_plan = time.time()
-        log(f"Planning (attempt {replan + 1}/{max_replans})...")
-        state["planning_attempt"] = replan
+        log(f"Planning (attempt {replan + 1}/{self.max_replans})...")
+        self.state["planning_attempt"] = replan
         try:
-            plan = get_plan(user_prompt, state)
+            plan = get_plan(self.user_prompt, self.state)
         except LLMTransportError as e:
             log(f"  Planner transport error: {e}")
-            state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
-            history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
+            self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
+            self.history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
             _run_log(
                 {
                     "event": "plan_error",
@@ -1852,14 +2018,14 @@ def _run_loop(
                     "wall_s": round(time.time() - t_plan, 2),
                 }
             )
-            continue  # consumes a plan attempt
+            return None
         raw_tasks = plan.get("tasks")
-        tasks = raw_tasks[:max_tasks] if isinstance(raw_tasks, list) else []
+        tasks = raw_tasks[: self.max_tasks] if isinstance(raw_tasks, list) else []
         if not tasks or any(not _valid_nonempty_str(task) for task in tasks):
             error = "[malformed_plan] planner returned no valid tasks"
-            state["errors"].append(error)
+            self.state["errors"].append(error)
             log(f"  Planner contract error: {error}")
-            history.append({"event": "plan_error", "replan": replan, "error": error})
+            self.history.append({"event": "plan_error", "replan": replan, "error": error})
             _run_log(
                 {
                     "event": "plan_error",
@@ -1868,769 +2034,38 @@ def _run_loop(
                     "wall_s": round(time.time() - t_plan, 2),
                 }
             )
-            continue
-        state["errors"] = []  # reset errors each replan; planner already saw them
+            return None
+        self.state["errors"] = []  # reset errors each replan; planner already saw them
         plan_wall = time.time() - t_plan
         log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
-        history.append({"event": "plan", "replan": replan, "tasks": tasks})
+        self.history.append({"event": "plan", "replan": replan, "tasks": tasks})
         _run_log({"event": "plan", "replan": replan, "tasks": tasks, "wall_s": round(plan_wall, 2)})
+        return tasks
 
+    def _execute_tasks(self, tasks):
+        """Run the plan's tasks in order; True when every task completed."""
         all_done = True
         for i, task in enumerate(tasks):
             # Carry over last step from previous task so executor has cross-task context
-            prev_last = state["last_steps"][-1:] if state.get("last_steps") else []
+            prev_last = self.state["last_steps"][-1:] if self.state.get("last_steps") else []
             t_task = time.time()
             # Scope for no_write_executed: an earlier task's write must not
             # mask a stall in this one.
-            state["task_start_step_count"] = len(state["all_steps"])
-
-            # E11: inner retry loop — try task-local replan before full replan
-            task_done = False
-            saved_errors = []
-            for task_attempt in range(1 + MAX_TASK_LOCAL_REPLANS):
-                state["current_task"] = task
-                state["task_index"] = f"{i + 1}/{len(tasks)}"
-                state["last_steps"] = list(prev_last)
-                log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
-
-                # Reset per-attempt execution state
-                task_done = False
-                task_steps = []
-                use_think = False
-                reasoning_trigger = "executor"
-                dup_skip_count = 0
-                last_successful_edit = None
-                observe_executed = 0
-                commit_executed = 0
-                observe_blocked = 0
-                task_wants_write = _is_write_shaped(task)
-                completed_repair = _task_satisfied_by_deterministic_repair(task, state)
-                if completed_repair:
-                    log(
-                        f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})"
-                    )
-                    task_steps.append(completed_repair)
-                    task_done = True
-                    break
-                for step in range(max_steps):
-                    t_step = time.time()
-                    try:
-                        action = get_step(
-                            task,
-                            state,
-                            goal=goal_context,
-                            step_num=step,
-                            max_steps=max_steps,
-                            think=use_think,
-                            reasoning_policy=reasoning_policy,
-                            reasoning_trigger=reasoning_trigger,
-                            goal_context_chars=goal_context_chars,
-                            write_pressure=(
-                                task_wants_write
-                                and commit_executed == 0
-                                and observe_executed >= WRITE_PRESSURE_OBSERVATIONS
-                            ),
-                            validate_pressure=(
-                                Path(str(last_write_target)).name
-                                if last_write_target is not None
-                                and consecutive_target_writes >= REWRITE_PRESSURE_WRITES
-                                else None
-                            ),
-                        )
-                    except LLMTransportError as e:
-                        log(
-                            f"  [{step + 1}] LLM transport error ({time.time() - t_step:.1f}s): {e}"
-                        )
-                        state["errors"].append(
-                            f"[unknown] LLM transport error on task '{task}': {str(e)[:100]}"
-                        )
-                        break
-                    except (json.JSONDecodeError, KeyError) as e:
-                        # Typed parse failures (issue #7): the replanner should
-                        # know whether the action envelope was truncated at the
-                        # token budget or simply malformed.
-                        if getattr(e, "response_truncated", False):
-                            etype = "response_truncated"
-                        elif getattr(e, "malformed_action", False):
-                            etype = "malformed_action"
-                        else:
-                            etype = "unknown"
-                        log(
-                            f"  [{step + 1}] LLM parse error ({time.time() - t_step:.1f}s) [{etype}]"
-                        )
-                        state["errors"].append(
-                            f"[{etype}] LLM parse error on task '{task}': {str(e)[:100]}"
-                        )
-                        _run_log(
-                            {
-                                "event": "step_error",
-                                "task_index": i,
-                                "step": step,
-                                "error_type": etype,
-                            }
-                        )
-                        break
-                    # Normalize None → "" for optional string fields (models emit "arg": null)
-                    for _k in ("arg", "content", "reasoning", "find", "replace"):
-                        if action.get(_k) is None:
-                            action[_k] = ""
-                    act = action.get("action", "")
-                    recorder.selected()
-                    log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
-
-                    if act == "done":
-                        unresolved = _unresolved_incomplete_writes(
-                            state.get("all_steps", []), working_dir
-                        )
-                        pending_empty = state.get("pending_empty_writes", {})
-                        if unresolved or pending_empty:
-                            append_allowed = True
-                            restrictive = _restrictive_pending_empty(pending_empty)
-                            if restrictive is not None:
-                                incomplete_target, pending_info = restrictive
-                                (incomplete_name, recovery_arg, append_allowed) = (
-                                    _pending_empty_hint(incomplete_target, pending_info)
-                                )
-                            elif unresolved:
-                                incomplete_target, (_, incomplete_step) = max(
-                                    unresolved.items(), key=lambda item: item[1][0]
-                                )
-                                incomplete_name, recovery_arg = _incomplete_step_hint(
-                                    incomplete_target, incomplete_step
-                                )
-                            else:
-                                incomplete_target, pending_info = _next_pending_empty(pending_empty)
-                                (incomplete_name, recovery_arg, append_allowed) = (
-                                    _pending_empty_hint(incomplete_target, pending_info)
-                                )
-                            if append_allowed:
-                                recovery = (
-                                    "Retry that exact target with append:true if it "
-                                    "still identifies the intended file, or restart "
-                                    "it with a complete append:false write."
-                                )
-                            else:
-                                recovery = (
-                                    "Resend a shorter write to that exact target with "
-                                    "append:false before using append:true."
-                                )
-                            log(
-                                f"  [{step + 1}] skip (done with incomplete write: "
-                                f"{incomplete_name})"
-                            )
-                            recorder.skip(i, step, act, action, "incomplete_write_done")
-                            recorder.note(
-                                {
-                                    "action": "done",
-                                    "arg": "",
-                                    "ok": True,
-                                    "output": (
-                                        f"Cannot finish: {incomplete_name} is incomplete "
-                                        f"at {recovery_arg}. {recovery}"
-                                    ),
-                                }
-                            )
-                            continue
-                        task_done = True
-                        break
-                    if act == "fail":
-                        reason = action.get("reasoning", "no reason")
-                        log(f"  FAIL ({time.time() - t_step:.1f}s): {reason}")
-                        state["errors"].append(f"Task '{task}': {reason}")
-                        break
-
-                    # Sentinel transport truncation (issue #15): keep the
-                    # complete lines that arrived and steer the model to finish
-                    # the file with chunked append instead of failing the step.
-                    truncated_write = act == "write" and action.pop("content_truncated", False)
-                    logical_write_target = (
-                        _mutation_target_key({"arg": action.get("arg", "")}, working_dir)
-                        if act == "write"
-                        else None
-                    )
-                    operation_write_target = (
-                        _mutation_target_key(
-                            {
-                                "arg": action.get("arg", ""),
-                                "append": bool(action.get("append")),
-                            },
-                            working_dir,
-                        )
-                        if act == "write"
-                        else None
-                    )
-                    pending_recovery = _pending_empty_recovery(
-                        state["pending_empty_writes"],
-                        logical_write_target,
-                        operation_write_target,
-                        bool(action.get("append")),
-                    )
-                    if (
-                        act == "write"
-                        and action.get("append")
-                        and pending_recovery
-                        and not pending_recovery.get("append_allowed", False)
-                    ):
-                        log(f"  [{step + 1}] skip (append before first replacement chunk landed)")
-                        recorder.skip(i, step, act, action, "append_after_empty_overwrite")
-                        recorder.note(
-                            {
-                                "action": act,
-                                "arg": action.get("arg", ""),
-                                "ok": True,
-                                "output": (
-                                    "The replacement's first chunk wrote no bytes. "
-                                    "Resend a shorter write with append:false before "
-                                    "using append:true."
-                                ),
-                            }
-                        )
-                        continue
-                    if truncated_write:
-                        kept = action.get("content", "")
-                        kept = kept[: kept.rfind("\n") + 1]
-                        if not kept:
-                            log(f"  [{step + 1}] skip (write truncated before a complete line)")
-                            recorder.skip(i, step, act, action, "truncated_write_empty")
-                            # The recovery instruction asks for a clean resend;
-                            # disarm rewrite damping before that resend even
-                            # though this empty partial attempt wrote no bytes.
-                            last_write_target = None
-                            consecutive_target_writes = 0
-                            # Empty append attempts are obligations on the
-                            # referent observed at dispatch time. Key them by
-                            # that operation target so retargeting a leaf
-                            # symlink cannot overwrite an older obligation.
-                            pending_target = (
-                                operation_write_target
-                                if action.get("append")
-                                else logical_write_target
-                            )
-                            recovery_arg = action.get("arg", "") or "file"
-                            if pending_target is not None:
-                                existing = state["pending_empty_writes"].get(pending_target)
-                                append_allowed = bool(action.get("append"))
-                                if isinstance(existing, dict):
-                                    append_allowed = (
-                                        existing.get("append_allowed", False) and append_allowed
-                                    )
-                                append_target = _mutation_target_key(
-                                    {
-                                        "arg": action.get("arg", ""),
-                                        "append": True,
-                                    },
-                                    working_dir,
-                                )
-                                append_targets = list(_pending_append_targets(existing))
-                                if (
-                                    append_target is not None
-                                    and append_target not in append_targets
-                                ):
-                                    append_targets.append(append_target)
-                                recovery_arg = _target_recovery_arg(pending_target, working_dir)
-                                state["pending_empty_writes"][pending_target] = {
-                                    "name": Path(action.get("arg", "") or "file").name,
-                                    "append_allowed": append_allowed,
-                                    "append_targets": append_targets,
-                                    "recovery_arg": recovery_arg,
-                                }
-                            # Nothing was written: the first dispatched chunk
-                            # must stay a non-append write (append would land
-                            # on a stale existing file), only later chunks
-                            # may append.
-                            if action.get("append"):
-                                obs = (
-                                    "Append truncated before a complete line. "
-                                    "Resend a smaller append:true chunk at the "
-                                    f"exact target {recovery_arg}."
-                                )
-                            else:
-                                obs = (
-                                    "Write truncated before a complete line. Resend the "
-                                    f"write (no append) to the exact target {recovery_arg} "
-                                    "with a shorter first chunk, then continue with "
-                                    "append:true chunks."
-                                )
-                            recorder.note(
-                                {
-                                    "action": act,
-                                    "arg": action.get("arg", ""),
-                                    "ok": True,
-                                    "output": obs,
-                                }
-                            )
-                            continue
-                        action["content"] = kept
-
-                    # Write-forcing tail reserve (issue #15): on a write-shaped
-                    # task the final steps are reserved for committing actions.
-                    if (
-                        act in OBSERVE_ACTIONS
-                        and task_wants_write
-                        and commit_executed == 0
-                        and max_steps - step <= OBSERVE_TAIL_RESERVE
-                    ):
-                        observe_blocked += 1
-                        if observe_blocked >= 2:
-                            log(
-                                f"  [{step + 1}] auto-fail (observation steps exhausted without a write)"
-                            )
-                            state["errors"].append(
-                                f"[stuck_loop] {act} {action.get('arg', '')[:60]}: observation steps exhausted without a write"
-                            )
-                            recorder.skip(i, step, act, action, "observe_tail_exhausted")
-                            break
-                        log(
-                            f"  [{step + 1}] skip ({act} blocked: remaining steps reserved for write)"
-                        )
-                        recorder.skip(i, step, act, action, "observe_tail_reserved")
-                        recorder.note(
-                            {
-                                "action": act,
-                                "arg": action.get("arg", ""),
-                                "ok": True,
-                                "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason.",
-                            }
-                        )
-                        continue
-
-                    # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES
-                    # successful full writes of the same target with no
-                    # intervening successful shell/edit, further full rewrites
-                    # are skipped — verify, edit, or finish instead.
-                    if (
-                        act == "write"
-                        and not action.get("append")
-                        and not truncated_write
-                        and last_write_target is not None
-                        and consecutive_target_writes >= REWRITE_SKIP_WRITES
-                        and _mutation_target_key({"arg": action.get("arg", "")}, working_dir)
-                        == last_write_target
-                    ):
-                        dup_skip_count += 1
-                        log(
-                            f"  [{step + 1}] skip (rewrite loop: "
-                            f"{action.get('arg', '')[:40]} already written "
-                            f"{consecutive_target_writes}x)"
-                        )
-                        recorder.skip(i, step, act, action, "rewrite_loop")
-                        recorder.note(
-                            {
-                                "action": act,
-                                "arg": action.get("arg", ""),
-                                "ok": True,
-                                "output": (
-                                    f"Already written {consecutive_target_writes} times. "
-                                    "Do NOT write it again — verify with shell, make a "
-                                    "targeted edit, or emit done."
-                                ),
-                            }
-                        )
-                        continue
-
-                    # Duplicate action guard — per-action-type loop detection
-                    last = state["last_steps"][-1:] if state["last_steps"] else []
-                    if last and last[0]["action"] == act:
-                        prev = last[0]
-                        same_mutation_target = False
-                        if act in ("write", "edit"):
-                            current_target_step = {
-                                "arg": action.get("arg", ""),
-                            }
-                            if act == "write" and action.get("append"):
-                                current_target_step["append"] = True
-                            current_target = _mutation_target_key(current_target_step, working_dir)
-                            same_mutation_target = (
-                                current_target is not None
-                                and _mutation_target_key(prev, working_dir) == current_target
-                            )
-                        if act in ("write", "edit") and same_mutation_target:
-                            # write: same content = duplicate; edit: same find+replace = duplicate
-                            is_dup = False
-                            if act == "write" and action.get("append"):
-                                # Chunked append is never a no-op — an identical
-                                # consecutive chunk is a stuck loop, not a duplicate.
-                                if prev.get("_append") and prev.get("_content", "") == action.get(
-                                    "content", ""
-                                ):
-                                    log(
-                                        f"  [{step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
-                                    )
-                                    state["errors"].append(
-                                        f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
-                                    )
-                                    recorder.skip(i, step, act, action, "stuck_append")
-                                    break
-                            elif (
-                                act == "write"
-                                and not truncated_write
-                                and prev.get("ok")
-                                and not prev.get("_truncated_write")
-                                and not prev.get("_append")
-                                and prev.get("_content", "") == action.get("content", "")
-                            ):
-                                is_dup = True
-                            elif (
-                                act == "edit"
-                                and prev.get("ok")
-                                and prev.get("_find", "") == action.get("find", "")
-                                and prev.get("_replace", "") == action.get("replace", "")
-                            ):
-                                is_dup = True
-                            # Consecutive identical failed edit → stuck; bail to replan
-                            elif (
-                                act == "edit"
-                                and not prev.get("ok")
-                                and prev.get("_find", "") == action.get("find", "")
-                            ):
-                                log(
-                                    f"  [{step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
-                                )
-                                state["errors"].append(
-                                    f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
-                                )
-                                recorder.skip(i, step, act, action, "stuck_edit")
-                                break
-                            if is_dup:
-                                dup_skip_count += 1
-                                log(f"  [{step + 1}] skip (duplicate {act}, same content)")
-                                recorder.skip(i, step, act, action, f"duplicate_{act}")
-                                if prev.get("_truncated_write"):
-                                    dup_msg = (
-                                        "File is incomplete — the earlier write was truncated. "
-                                        "Continue with append:true for the rest."
-                                    )
-                                else:
-                                    dup_msg = "Already done — file unchanged. Move to next action or emit done."
-                                entry = {
-                                    "action": act,
-                                    "arg": action.get("arg", ""),
-                                    "ok": True,
-                                    "output": dup_msg,
-                                }
-                                # Preserve match metadata so guard still detects duplicates on subsequent turns
-                                if act == "write":
-                                    entry["_content"] = action.get("content", "")
-                                    if prev.get("_truncated_write"):
-                                        entry["_truncated_write"] = True
-                                elif act == "edit":
-                                    entry["_find"] = action.get("find", "")
-                                    entry["_replace"] = action.get("replace", "")
-                                recorder.note(entry)
-                                if act == "edit" and last_successful_edit and dup_skip_count >= 2:
-                                    edit_key = (
-                                        action.get("arg", ""),
-                                        action.get("find", ""),
-                                        action.get("replace", ""),
-                                    )
-                                    if edit_key == last_successful_edit:
-                                        log(
-                                            f"  [{step + 1}] auto-done (edit already succeeded, model re-emitting)"
-                                        )
-                                        task_done = True
-                                        break
-                                # Defer thinking escalation: first duplicate skip gets a
-                                # corrective observation only; escalate on 2+ consecutive skips.
-                                # Saves ~10s of thinking time on harmless first-time duplicates.
-                                if dup_skip_count >= 2:
-                                    use_think = True
-                                    reasoning_trigger = "duplicate_action"
-                                continue
-                        elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
-                            if prev.get("ok"):
-                                log(f"  [{step + 1}] auto-done (duplicate successful shell)")
-                                recorder.skip(i, step, act, action, "duplicate_shell_auto_done")
-                                task_done = True
-                                break
-                            elif prev.get("error_type") == "timeout":
-                                # Bump timeout for retry: read actual timeout from previous step,
-                                # not from fresh action (which won't have prior bumps)
-                                prev_timeout = prev.get(
-                                    "_timeout", _get_shell_timeout(action.get("arg", ""))
-                                )
-                                bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
-                                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
-                                log(f"  [{step + 1}] retrying after timeout ({action['timeout']}s)")
-                            else:
-                                log(f"  [{step + 1}] auto-fail (same shell failed twice)")
-                                state["errors"].append(
-                                    f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
-                                )
-                                recorder.skip(i, step, act, action, "stuck_shell")
-                                break
-                        elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
-                            # Range-aware: new line windows and exact cursor
-                            # continuations are legitimate navigation.
-                            prev_key = prev.get("_read_key") or _read_key(prev)
-                            cur_key = _read_key(action)
-                            if prev_key != cur_key:
-                                pass  # different range — execute normally
-                            elif prev.get("ok"):
-                                dup_skip_count += 1
-                                if dup_skip_count >= 2:
-                                    log(
-                                        f"  [{step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
-                                    )
-                                    state["errors"].append(
-                                        f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
-                                    )
-                                    recorder.skip(i, step, act, action, "stuck_read")
-                                    break
-                                log(f"  [{step + 1}] skip (duplicate read)")
-                                recorder.skip(i, step, act, action, "duplicate_read")
-                                cont = prev.get("_continuation")
-                                if cont:
-                                    obs = (
-                                        "Already read this range. Continue with "
-                                        f"{_read_continuation_hint(cont)}; "
-                                        f"or search, edit, done, or fail."
-                                    )
-                                else:
-                                    obs = "Already read. Use previous content; edit, write, shell, done, or fail."
-                                entry = {
-                                    "action": "read",
-                                    "arg": action.get("arg", ""),
-                                    "ok": True,
-                                    "output": obs,
-                                    "_read_key": cur_key,
-                                }
-                                if cont:
-                                    entry["_continuation"] = cont
-                                recorder.note(entry)
-                                continue
-                            else:
-                                log(f"  [{step + 1}] auto-fail (same read failed twice)")
-                                state["errors"].append(
-                                    f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
-                                )
-                                recorder.skip(i, step, act, action, "stuck_read_failed")
-                                break
-
-                    dup_skip_count = 0  # reset on any non-skipped action
-                    recorder.executed()
-                    if act in OBSERVE_ACTIONS:
-                        observe_executed += 1
-                    # Normalize the seam's legacy dict once; controller policy
-                    # below runs on the typed result.
-                    result = ActionResult.from_dict(execute(action, working_dir))
-                    if result.ok and act == "write":
-                        _clear_pending_empty_writes(
-                            state["pending_empty_writes"],
-                            logical_write_target,
-                            operation_write_target,
-                            bool(action.get("append")),
-                        )
-                    if act not in OBSERVE_ACTIONS and result.ok:
-                        # Counted only on success (Codex P2, PR #16): a failed
-                        # mutation must not disarm write pressure or the
-                        # observation tail reserve.
-                        commit_executed += 1
-                    if act == "write" and result.ok:
-                        if truncated_write:
-                            # A partial (truncated) write is not a completed
-                            # rewrite (Codex P1, PR #21): the file is
-                            # incomplete, and the recovery path may
-                            # legitimately append to it or restart the write.
-                            # Reset for truncated append chunks too; otherwise
-                            # an armed streak can block the clean restart.
-                            last_write_target = None
-                            consecutive_target_writes = 0
-                        elif not action.get("append"):
-                            target = _mutation_target_key(
-                                {"arg": action.get("arg", "")}, working_dir
-                            )
-                            if target == last_write_target:
-                                consecutive_target_writes += 1
-                            else:
-                                last_write_target = target
-                                consecutive_target_writes = 1
-                    elif act in ("shell", "edit") and result.ok:
-                        # Verification or a targeted fix breaks the rewrite
-                        # streak; observations do not (the v6 Gemma loop
-                        # interleaved tree/read between rewrites).
-                        consecutive_target_writes = 0
-                    if truncated_write and result.ok:
-                        # The executor is stateless per step: without a resume
-                        # anchor the model cannot know where the write stopped.
-                        anchor = kept.splitlines()[-1][-80:]
-                        recovery_arg = _target_recovery_arg(operation_write_target, working_dir)
-                        result.output += (
-                            f" (truncated after {kept.count(chr(10))} lines; "
-                            f"last written line: {anchor!r}; continue with "
-                            f"append:true at {recovery_arg} starting after "
-                            "that line)"
-                        )
-                    ok_str = "OK" if result.ok else "FAIL"
-                    log(f"  -> {ok_str} ({time.time() - t_step:.1f}s): {result.output[:80]}")
-
-                    step_entry = recorder.record(
-                        StepReceipt.executed(action, result, working_dir, truncated_write),
-                        i,
-                        step,
-                        wall_s=round(time.time() - t_step, 2),
-                    )
-
-                    if not result.ok:
-                        etype = result.error_type or "unknown"
-                        if (
-                            act == "shell"
-                            and etype in ("compile_error", "unknown")
-                            and _expects_failure(task)
-                        ):
-                            log("  Expected failure observed; completing task with evidence")
-                            step_entry["expected_failure"] = True
-                            recorder.annotate_last("expected_failure", True)
-                            task_steps.append(step_entry)
-                            task_done = True
-                            break
-
-                        if act == "shell" and etype == "compile_error":
-                            repair = _try_compile_repair(
-                                result.output, working_dir, action.get("arg", "")
-                            )
-                            if repair:
-                                # The deterministic source edit is a successful
-                                # targeted fix, so it breaks an armed rewrite
-                                # streak just like a model-selected edit.
-                                consecutive_target_writes = 0
-                                log(f"  Deterministic repair: {repair[1]} in {repair[0]}")
-                                # The repair mutated the workspace outside the
-                                # action handlers (the tracked #41 exception);
-                                # its receipt and the scaffold retry still go
-                                # through the one recorder.
-                                task_steps.append(
-                                    recorder.record(
-                                        StepReceipt.deterministic_repair(repair[0], repair[1]),
-                                        i,
-                                        step,
-                                    )
-                                )
-
-                                retry_result = ActionResult.from_dict(execute(action, working_dir))
-                                retry_entry = recorder.record(
-                                    StepReceipt.deterministic_retry(action, retry_result),
-                                    i,
-                                    step,
-                                    wall_s=round(time.time() - t_step, 2),
-                                )
-                                if retry_result.ok:
-                                    log(f"  -> OK deterministic retry: {retry_result.output[:80]}")
-                                    task_steps.append(retry_entry)
-                                    use_think = False
-                                    reasoning_trigger = "executor"
-                                    continue
-                                log(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
-                                result = retry_result
-                                step_entry = retry_entry
-                                etype = result.error_type or "unknown"
-
-                        err_output = result.output[:100]
-                        hint = _RECOVERY_HINTS.get(etype)
-                        if hint:
-                            err_output = f"{err_output} → {hint}"
-                            recorder.append_recovery_hint(hint)
-                        state["errors"].append(
-                            f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}"
-                        )
-                        use_think = etype not in _NO_THINK_ERRORS
-                        reasoning_trigger = f"execution_error:{etype}"
-                    else:
-                        use_think = False
-                        reasoning_trigger = "executor"
-                        task_steps.append(step_entry)
-                        if act == "edit":
-                            last_successful_edit = (
-                                action.get("arg", ""),
-                                action.get("find", ""),
-                                action.get("replace", ""),
-                            )
-
-                if task_done:
-                    break  # break task_attempt loop — success
-
-                # E11: try task-local replan before falling through to full replan
-                if task_attempt < MAX_TASK_LOCAL_REPLANS:
-                    saved_errors = list(state["errors"])
-                    t_lr = time.time()
-                    replacement = replan_task(
-                        task,
-                        state["errors"],
-                        state["completed_tasks"],
-                        state,
-                        goal_context,
-                        goal_context_chars=goal_context_chars,
-                    )
-                    lr_wall = time.time() - t_lr
-                    if replacement:
-                        log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
-                        _run_log(
-                            {
-                                "event": "task_local_replan",
-                                "task_index": i,
-                                "original": task[:120],
-                                "replacement": replacement[:120],
-                                "ok": True,
-                                "llm_wall_s": round(lr_wall, 2),
-                            }
-                        )
-                        task = replacement
-                        tasks[i] = replacement
-                        state["errors"] = []
-                        continue  # retry with replacement
-                    else:
-                        reject_reason = _last_task_replan_reject_reason or "unknown"
-                        log(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
-                        _run_log(
-                            {
-                                "event": "task_local_replan",
-                                "task_index": i,
-                                "original": task[:120],
-                                "replacement": None,
-                                "ok": False,
-                                "llm_wall_s": round(lr_wall, 2),
-                                "reject_reason": reject_reason,
-                            }
-                        )
-                        state["errors"] = saved_errors
-                else:
-                    # Replacement attempt also failed — merge original errors back
-                    # so full replan sees both failure contexts
-                    state["errors"] = saved_errors + state["errors"]
-                # Fall through — task failed, no more local attempts
-                break
-
+            self.state["task_start_step_count"] = len(self.state["all_steps"])
+            task, task_done, task_steps = self._run_task(i, task, tasks, prev_last)
             if task_done:
-                unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
-                pending_empty = state.get("pending_empty_writes", {})
-                if unresolved or pending_empty:
-                    restrictive = _restrictive_pending_empty(pending_empty)
-                    if restrictive is not None:
-                        incomplete_target, pending_info = restrictive
-                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info
-                        )
-                    elif unresolved:
-                        incomplete_target, (_, incomplete_step) = max(
-                            unresolved.items(), key=lambda item: item[1][0]
-                        )
-                        incomplete_name, recovery_arg = _incomplete_step_hint(
-                            incomplete_target, incomplete_step
-                        )
-                    else:
-                        incomplete_target, pending_info = _next_pending_empty(pending_empty)
-                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info
-                        )
-                    state["errors"].append(
+                blocker = _completion_blocker(self.state, self.working_dir)
+                if blocker is not None:
+                    incomplete_name, recovery_arg, _append_allowed = blocker
+                    self.state["errors"].append(
                         f"[incomplete_write] {incomplete_name} at "
                         f"{recovery_arg}: completion refused"
                     )
                     log(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
-
             if task_done:
-                state["completed_tasks"].append(task)
-                state["completed_step_groups"].append(task_steps)
+                self.state["completed_tasks"].append(task)
+                self.state["completed_step_groups"].append(task_steps)
                 log(f"  Task complete. ({time.time() - t_task:.1f}s)")
                 _run_log(
                     {
@@ -2652,134 +2087,865 @@ def _run_loop(
                     }
                 )
                 break
+        return all_done
 
-        if all_done:
-            wants_validation = _should_validate(replan, history, state, user_prompt)
-            first_validation = state.get("validation_attempts", 0) == 0
-            recheck_validation = (
-                state.get("validation_recheck_needed")
-                and state.get("validation_attempts", 0) < 2
-                and _has_new_validation_evidence(state)
+    def _run_task(self, i, task, tasks, prev_last):
+        """Attempt one task with at most MAX_TASK_LOCAL_REPLANS local retries.
+
+        Returns ``(task, done, steps)``; ``task`` is the possibly replaced
+        task text the run record must carry forward.
+        """
+        # E11: inner retry loop — try task-local replan before full replan
+        attempt = TaskAttemptState(task=task, wants_write=_is_write_shaped(task))
+        saved_errors = []
+        for task_attempt in range(1 + MAX_TASK_LOCAL_REPLANS):
+            self.state["current_task"] = task
+            self.state["task_index"] = f"{i + 1}/{len(tasks)}"
+            self.state["last_steps"] = list(prev_last)
+            log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
+
+            # Reset per-attempt execution state (the task may be a replacement)
+            attempt = TaskAttemptState(task=task, wants_write=_is_write_shaped(task))
+            completed_repair = _task_satisfied_by_deterministic_repair(task, self.state)
+            if completed_repair:
+                log(
+                    f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})"
+                )
+                attempt.steps.append(completed_repair)
+                attempt.done = True
+                break
+            self._run_attempt(i, attempt)
+
+            if attempt.done:
+                break  # break task_attempt loop — success
+
+            # E11: try task-local replan before falling through to full replan
+            if task_attempt < MAX_TASK_LOCAL_REPLANS:
+                saved_errors = list(self.state["errors"])
+                t_lr = time.time()
+                replacement = replan_task(
+                    task,
+                    self.state["errors"],
+                    self.state["completed_tasks"],
+                    self.state,
+                    self.goal_context,
+                    goal_context_chars=self.goal_context_chars,
+                )
+                lr_wall = time.time() - t_lr
+                if replacement:
+                    log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
+                    _run_log(
+                        {
+                            "event": "task_local_replan",
+                            "task_index": i,
+                            "original": task[:120],
+                            "replacement": replacement[:120],
+                            "ok": True,
+                            "llm_wall_s": round(lr_wall, 2),
+                        }
+                    )
+                    task = replacement
+                    tasks[i] = replacement
+                    self.state["errors"] = []
+                    continue  # retry with replacement
+                else:
+                    reject_reason = _last_task_replan_reject_reason or "unknown"
+                    log(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
+                    _run_log(
+                        {
+                            "event": "task_local_replan",
+                            "task_index": i,
+                            "original": task[:120],
+                            "replacement": None,
+                            "ok": False,
+                            "llm_wall_s": round(lr_wall, 2),
+                            "reject_reason": reject_reason,
+                        }
+                    )
+                    self.state["errors"] = saved_errors
+            else:
+                # Replacement attempt also failed — merge original errors back
+                # so full replan sees both failure contexts
+                self.state["errors"] = saved_errors + self.state["errors"]
+            # Fall through — task failed, no more local attempts
+            break
+        return task, attempt.done, attempt.steps
+
+    def _run_attempt(self, i, attempt):
+        """One executor pass over the step budget; sets ``attempt.done``."""
+        for step in range(self.max_steps):
+            ctx = self._select_action(i, attempt, step)
+            if ctx is None:
+                return
+            flow = self._decide_step(ctx, attempt)
+            if flow is None:
+                flow = self._execute_step(ctx, attempt)
+            if flow is _StepFlow.END_ATTEMPT:
+                return
+
+    def _select_action(self, i, attempt, step):
+        """Ask the executor for one action; None ends the attempt."""
+        t_step = time.time()
+        try:
+            action = get_step(
+                attempt.task,
+                self.state,
+                goal=self.goal_context,
+                step_num=step,
+                max_steps=self.max_steps,
+                think=attempt.use_think,
+                reasoning_policy=self.reasoning_policy,
+                reasoning_trigger=attempt.reasoning_trigger,
+                goal_context_chars=self.goal_context_chars,
+                write_pressure=attempt.write_pressure(),
+                validate_pressure=self.run_state.validate_pressure_target(),
             )
-            if wants_validation and (first_validation or recheck_validation):
-                state["validated_once"] = True
-                state["validation_attempts"] = state.get("validation_attempts", 0) + 1
-                vresult = _validate_completion(user_prompt, state, working_dir)
-                if vresult and vresult.get("valid") is False:
-                    reason = vresult.get("reason", "validation failed")
-                    missing = vresult.get("missing", [])
-                    error_msg = f"[validation_failed] {reason}"
-                    if missing:
-                        error_msg += f" missing: {', '.join(missing)}"
-                    state["errors"].append(error_msg)
-                    state["validation_recheck_needed"] = True
-                    state["validated_step_count"] = len(state.get("all_steps", []))
-                    log(f"  Validation failed: {reason}")
-                    _run_log(
-                        {
-                            "event": "validation",
-                            "valid": False,
-                            "reason": reason,
-                            "missing": missing,
-                            "deterministic": bool(vresult.get("deterministic")),
-                        }
-                    )
-                    all_done = False
-                    continue  # replan
-                elif vresult is None and recheck_validation:
-                    # A first optional validator failure remains fail-open, but
-                    # once validation explicitly failed, an unavailable second
-                    # verdict cannot erase that known failure.
-                    log("  Validation recheck produced no verdict; failure remains pending.")
-                    _run_log(
-                        {
-                            "event": "validation",
-                            "valid": None,
-                            "reason": "recheck produced no verdict",
-                            "deterministic": False,
-                        }
-                    )
-                else:
-                    state["validation_recheck_needed"] = False
-                    log("  Validation passed.")
-                    _run_log(
-                        {
-                            "event": "validation",
-                            "valid": True,
-                            "deterministic": bool(vresult and vresult.get("deterministic")),
-                        }
-                    )
-            if state.get("validation_recheck_needed"):
-                if state.get("validation_attempts", 0) >= 2:
-                    reason = "validation remains failed after the maximum checks"
-                else:
-                    reason = (
-                        "completion after failed validation requires new "
-                        "write, edit, or shell evidence"
-                    )
-                state["errors"].append(f"[validation_failed] {reason}")
-                log(f"  Completion refused: {reason}")
-                _run_log({"event": "validation_pending", "reason": reason})
-                all_done = False
-                continue
-            total_wall = time.time() - t_run
-            log(f"All tasks complete. ({total_wall:.1f}s total)")
-            log(f"Output in: {working_dir}")
+        except LLMTransportError as e:
+            log(f"  [{step + 1}] LLM transport error ({time.time() - t_step:.1f}s): {e}")
+            self.state["errors"].append(
+                f"[unknown] LLM transport error on task '{attempt.task}': {str(e)[:100]}"
+            )
+            return None
+        except (json.JSONDecodeError, KeyError) as e:
+            # Typed parse failures (issue #7): the replanner should know
+            # whether the action envelope was truncated at the token budget
+            # or simply malformed.
+            if getattr(e, "response_truncated", False):
+                etype = "response_truncated"
+            elif getattr(e, "malformed_action", False):
+                etype = "malformed_action"
+            else:
+                etype = "unknown"
+            log(f"  [{step + 1}] LLM parse error ({time.time() - t_step:.1f}s) [{etype}]")
+            self.state["errors"].append(
+                f"[{etype}] LLM parse error on task '{attempt.task}': {str(e)[:100]}"
+            )
             _run_log(
                 {
-                    "event": "run_end",
-                    "status": "complete",
-                    "replans": replan,
-                    "wall_s": round(total_wall, 2),
-                    "completed_tasks": len(state["completed_tasks"]),
-                    "steps": {
-                        "selected": state["selected_steps"],
-                        "executed": state["executed_steps"],
-                        "skipped": state["skipped_steps"],
-                    },
+                    "event": "step_error",
+                    "task_index": i,
+                    "step": step,
+                    "error_type": etype,
                 }
             )
-            return {"status": "complete", "state": state, "log": history}
+            return None
+        # Normalize None → "" for optional string fields (models emit "arg": null)
+        for _k in ("arg", "content", "reasoning", "find", "replace"):
+            if action.get(_k) is None:
+                action[_k] = ""
+        act = action.get("action", "")
+        self.recorder.selected()
+        log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
+        return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
 
-    total_wall = time.time() - t_run
-    deterministic = _deterministic_check(user_prompt, state, working_dir)
-    if deterministic is True and not state.get("validation_recheck_needed"):
-        log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
-        log(f"Output in: {working_dir}")
+    def _decide_step(self, ctx, attempt):
+        """Run the controller guards; None means dispatch the action."""
+        if ctx.act == "done":
+            return self._handle_done(ctx, attempt)
+        if ctx.act == "fail":
+            reason = ctx.action.get("reasoning", "no reason")
+            log(f"  FAIL ({time.time() - ctx.started:.1f}s): {reason}")
+            self.state["errors"].append(f"Task '{attempt.task}': {reason}")
+            return _StepFlow.END_ATTEMPT
+        flow = self._prepare_write(ctx)
+        if flow is None:
+            flow = self._observe_tail_guard(ctx, attempt)
+        if flow is None:
+            flow = self._rewrite_loop_guard(ctx, attempt)
+        if flow is None:
+            flow = self._duplicate_guard(ctx, attempt)
+        return flow
+
+    def _handle_done(self, ctx, attempt):
+        """Accept ``done`` only while no incomplete-write obligation blocks."""
+        blocker = _completion_blocker(self.state, self.working_dir)
+        if blocker is not None:
+            incomplete_name, recovery_arg, append_allowed = blocker
+            if append_allowed:
+                recovery = (
+                    "Retry that exact target with append:true if it "
+                    "still identifies the intended file, or restart "
+                    "it with a complete append:false write."
+                )
+            else:
+                recovery = (
+                    "Resend a shorter write to that exact target with "
+                    "append:false before using append:true."
+                )
+            log(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
+            self.recorder.skip(
+                ctx.task_index, ctx.step, ctx.act, ctx.action, "incomplete_write_done"
+            )
+            self.recorder.note(
+                {
+                    "action": "done",
+                    "arg": "",
+                    "ok": True,
+                    "output": (
+                        f"Cannot finish: {incomplete_name} is incomplete "
+                        f"at {recovery_arg}. {recovery}"
+                    ),
+                }
+            )
+            return _StepFlow.NEXT_STEP
+        attempt.done = True
+        return _StepFlow.END_ATTEMPT
+
+    def _prepare_write(self, ctx):
+        """Classify write truncation and enforce zero-byte recovery order."""
+        action, act = ctx.action, ctx.act
+        # Sentinel transport truncation (issue #15): keep the complete lines
+        # that arrived and steer the model to finish the file with chunked
+        # append instead of failing the step.
+        ctx.truncated_write = act == "write" and action.pop("content_truncated", False)
+        ctx.logical_write_target = (
+            _mutation_target_key({"arg": action.get("arg", "")}, self.working_dir)
+            if act == "write"
+            else None
+        )
+        ctx.operation_write_target = (
+            _mutation_target_key(
+                {
+                    "arg": action.get("arg", ""),
+                    "append": bool(action.get("append")),
+                },
+                self.working_dir,
+            )
+            if act == "write"
+            else None
+        )
+        pending_recovery = _pending_empty_recovery(
+            self.state["pending_empty_writes"],
+            ctx.logical_write_target,
+            ctx.operation_write_target,
+            bool(action.get("append")),
+        )
+        if (
+            act == "write"
+            and action.get("append")
+            and pending_recovery
+            and not pending_recovery.get("append_allowed", False)
+        ):
+            log(f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)")
+            self.recorder.skip(
+                ctx.task_index, ctx.step, act, action, "append_after_empty_overwrite"
+            )
+            self.recorder.note(
+                {
+                    "action": act,
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": (
+                        "The replacement's first chunk wrote no bytes. "
+                        "Resend a shorter write with append:false before "
+                        "using append:true."
+                    ),
+                }
+            )
+            return _StepFlow.NEXT_STEP
+        if ctx.truncated_write:
+            kept = action.get("content", "")
+            kept = kept[: kept.rfind("\n") + 1]
+            if not kept:
+                log(f"  [{ctx.step + 1}] skip (write truncated before a complete line)")
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "truncated_write_empty")
+                # The recovery instruction asks for a clean resend; disarm
+                # rewrite damping before that resend even though this empty
+                # partial attempt wrote no bytes.
+                self.run_state.disarm_rewrite_damping()
+                # Empty append attempts are obligations on the referent
+                # observed at dispatch time. Key them by that operation
+                # target so retargeting a leaf symlink cannot overwrite an
+                # older obligation.
+                pending_target = (
+                    ctx.operation_write_target if action.get("append") else ctx.logical_write_target
+                )
+                recovery_arg = action.get("arg", "") or "file"
+                if pending_target is not None:
+                    existing = self.state["pending_empty_writes"].get(pending_target)
+                    append_allowed = bool(action.get("append"))
+                    if isinstance(existing, dict):
+                        append_allowed = existing.get("append_allowed", False) and append_allowed
+                    append_target = _mutation_target_key(
+                        {
+                            "arg": action.get("arg", ""),
+                            "append": True,
+                        },
+                        self.working_dir,
+                    )
+                    append_targets = list(_pending_append_targets(existing))
+                    if append_target is not None and append_target not in append_targets:
+                        append_targets.append(append_target)
+                    recovery_arg = _target_recovery_arg(pending_target, self.working_dir)
+                    self.state["pending_empty_writes"][pending_target] = {
+                        "name": Path(action.get("arg", "") or "file").name,
+                        "append_allowed": append_allowed,
+                        "append_targets": append_targets,
+                        "recovery_arg": recovery_arg,
+                    }
+                # Nothing was written: the first dispatched chunk must stay a
+                # non-append write (append would land on a stale existing
+                # file), only later chunks may append.
+                if action.get("append"):
+                    obs = (
+                        "Append truncated before a complete line. "
+                        "Resend a smaller append:true chunk at the "
+                        f"exact target {recovery_arg}."
+                    )
+                else:
+                    obs = (
+                        "Write truncated before a complete line. Resend the "
+                        f"write (no append) to the exact target {recovery_arg} "
+                        "with a shorter first chunk, then continue with "
+                        "append:true chunks."
+                    )
+                self.recorder.note(
+                    {
+                        "action": act,
+                        "arg": action.get("arg", ""),
+                        "ok": True,
+                        "output": obs,
+                    }
+                )
+                return _StepFlow.NEXT_STEP
+            action["content"] = kept
+        return None
+
+    def _observe_tail_guard(self, ctx, attempt):
+        """Reserve the final steps of a write-shaped task for commitment."""
+        # Write-forcing tail reserve (issue #15): on a write-shaped task the
+        # final steps are reserved for committing actions.
+        if not (
+            ctx.act in OBSERVE_ACTIONS
+            and attempt.wants_write
+            and attempt.commit_executed == 0
+            and self.max_steps - ctx.step <= OBSERVE_TAIL_RESERVE
+        ):
+            return None
+        attempt.observe_blocked += 1
+        if attempt.observe_blocked >= 2:
+            log(f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)")
+            self.state["errors"].append(
+                f"[stuck_loop] {ctx.act} {ctx.action.get('arg', '')[:60]}: observation steps exhausted without a write"
+            )
+            self.recorder.skip(
+                ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_exhausted"
+            )
+            return _StepFlow.END_ATTEMPT
+        log(f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)")
+        self.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_reserved")
+        self.recorder.note(
+            {
+                "action": ctx.act,
+                "arg": ctx.action.get("arg", ""),
+                "ok": True,
+                "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason.",
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def _rewrite_loop_guard(self, ctx, attempt):
+        """Skip a same-target full rewrite once the streak is armed."""
+        # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES successful
+        # full writes of the same target with no intervening successful
+        # shell/edit, further full rewrites are skipped — verify, edit, or
+        # finish instead.
+        if not (
+            ctx.act == "write"
+            and not ctx.action.get("append")
+            and not ctx.truncated_write
+            and self.run_state.rewrite_skip_armed(ctx.logical_write_target)
+        ):
+            return None
+        attempt.dup_skip_count += 1
+        log(
+            f"  [{ctx.step + 1}] skip (rewrite loop: "
+            f"{ctx.action.get('arg', '')[:40]} already written "
+            f"{self.run_state.consecutive_target_writes}x)"
+        )
+        self.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "rewrite_loop")
+        self.recorder.note(
+            {
+                "action": ctx.act,
+                "arg": ctx.action.get("arg", ""),
+                "ok": True,
+                "output": (
+                    f"Already written {self.run_state.consecutive_target_writes} times. "
+                    "Do NOT write it again — verify with shell, make a "
+                    "targeted edit, or emit done."
+                ),
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def _duplicate_guard(self, ctx, attempt):
+        """Per-action-type loop detection against the previous step."""
+        action, act = ctx.action, ctx.act
+        last = self.state["last_steps"][-1:] if self.state["last_steps"] else []
+        if not last or last[0]["action"] != act:
+            return None
+        prev = last[0]
+        same_mutation_target = False
+        if act in ("write", "edit"):
+            current_target_step = {
+                "arg": action.get("arg", ""),
+            }
+            if act == "write" and action.get("append"):
+                current_target_step["append"] = True
+            current_target = _mutation_target_key(current_target_step, self.working_dir)
+            same_mutation_target = (
+                current_target is not None
+                and _mutation_target_key(prev, self.working_dir) == current_target
+            )
+        if act in ("write", "edit") and same_mutation_target:
+            # write: same content = duplicate; edit: same find+replace = duplicate
+            is_dup = False
+            if act == "write" and action.get("append"):
+                # Chunked append is never a no-op — an identical consecutive
+                # chunk is a stuck loop, not a duplicate.
+                if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
+                    log(
+                        f"  [{ctx.step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
+                    )
+                    self.state["errors"].append(
+                        f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
+                    )
+                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_append")
+                    return _StepFlow.END_ATTEMPT
+            elif (
+                act == "write"
+                and not ctx.truncated_write
+                and prev.get("ok")
+                and not prev.get("_truncated_write")
+                and not prev.get("_append")
+                and prev.get("_content", "") == action.get("content", "")
+            ):
+                is_dup = True
+            elif (
+                act == "edit"
+                and prev.get("ok")
+                and prev.get("_find", "") == action.get("find", "")
+                and prev.get("_replace", "") == action.get("replace", "")
+            ):
+                is_dup = True
+            # Consecutive identical failed edit → stuck; bail to replan
+            elif (
+                act == "edit"
+                and not prev.get("ok")
+                and prev.get("_find", "") == action.get("find", "")
+            ):
+                log(
+                    f"  [{ctx.step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
+                )
+                self.state["errors"].append(
+                    f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
+                )
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_edit")
+                return _StepFlow.END_ATTEMPT
+            if is_dup:
+                attempt.dup_skip_count += 1
+                log(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
+                if prev.get("_truncated_write"):
+                    dup_msg = (
+                        "File is incomplete — the earlier write was truncated. "
+                        "Continue with append:true for the rest."
+                    )
+                else:
+                    dup_msg = "Already done — file unchanged. Move to next action or emit done."
+                entry = {
+                    "action": act,
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": dup_msg,
+                }
+                # Preserve match metadata so guard still detects duplicates on subsequent turns
+                if act == "write":
+                    entry["_content"] = action.get("content", "")
+                    if prev.get("_truncated_write"):
+                        entry["_truncated_write"] = True
+                elif act == "edit":
+                    entry["_find"] = action.get("find", "")
+                    entry["_replace"] = action.get("replace", "")
+                self.recorder.note(entry)
+                if act == "edit" and attempt.last_successful_edit and attempt.dup_skip_count >= 2:
+                    edit_key = (
+                        action.get("arg", ""),
+                        action.get("find", ""),
+                        action.get("replace", ""),
+                    )
+                    if edit_key == attempt.last_successful_edit:
+                        log(
+                            f"  [{ctx.step + 1}] auto-done (edit already succeeded, model re-emitting)"
+                        )
+                        attempt.done = True
+                        return _StepFlow.END_ATTEMPT
+                # Defer thinking escalation: first duplicate skip gets a
+                # corrective observation only; escalate on 2+ consecutive skips.
+                # Saves ~10s of thinking time on harmless first-time duplicates.
+                if attempt.dup_skip_count >= 2:
+                    attempt.use_think = True
+                    attempt.reasoning_trigger = "duplicate_action"
+                return _StepFlow.NEXT_STEP
+        elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+            if prev.get("ok"):
+                log(f"  [{ctx.step + 1}] auto-done (duplicate successful shell)")
+                self.recorder.skip(
+                    ctx.task_index, ctx.step, act, action, "duplicate_shell_auto_done"
+                )
+                attempt.done = True
+                return _StepFlow.END_ATTEMPT
+            elif prev.get("error_type") == "timeout":
+                # Bump timeout for retry: read actual timeout from previous step,
+                # not from fresh action (which won't have prior bumps)
+                prev_timeout = prev.get("_timeout", _get_shell_timeout(action.get("arg", "")))
+                bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
+                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
+                log(f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)")
+            else:
+                log(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
+                self.state["errors"].append(
+                    f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
+                )
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell")
+                return _StepFlow.END_ATTEMPT
+        elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
+            # Range-aware: new line windows and exact cursor continuations
+            # are legitimate navigation.
+            prev_key = prev.get("_read_key") or _read_key(prev)
+            cur_key = _read_key(action)
+            if prev_key != cur_key:
+                pass  # different range — execute normally
+            elif prev.get("ok"):
+                attempt.dup_skip_count += 1
+                if attempt.dup_skip_count >= 2:
+                    log(
+                        f"  [{ctx.step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
+                    )
+                    self.state["errors"].append(
+                        f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
+                    )
+                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read")
+                    return _StepFlow.END_ATTEMPT
+                log(f"  [{ctx.step + 1}] skip (duplicate read)")
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
+                cont = prev.get("_continuation")
+                if cont:
+                    obs = (
+                        "Already read this range. Continue with "
+                        f"{_read_continuation_hint(cont)}; "
+                        f"or search, edit, done, or fail."
+                    )
+                else:
+                    obs = "Already read. Use previous content; edit, write, shell, done, or fail."
+                entry = {
+                    "action": "read",
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": obs,
+                    "_read_key": cur_key,
+                }
+                if cont:
+                    entry["_continuation"] = cont
+                self.recorder.note(entry)
+                return _StepFlow.NEXT_STEP
+            else:
+                log(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
+                self.state["errors"].append(
+                    f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
+                )
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read_failed")
+                return _StepFlow.END_ATTEMPT
+        return None
+
+    def _execute_step(self, ctx, attempt):
+        """Dispatch through the execute() seam and record the receipt."""
+        action, act = ctx.action, ctx.act
+        attempt.dup_skip_count = 0  # reset on any non-skipped action
+        self.recorder.executed()
+        if act in OBSERVE_ACTIONS:
+            attempt.observe_executed += 1
+        # Normalize the seam's legacy dict once; controller policy below
+        # runs on the typed result.
+        result = ActionResult.from_dict(execute(action, self.working_dir))
+        if result.ok and act == "write":
+            _clear_pending_empty_writes(
+                self.state["pending_empty_writes"],
+                ctx.logical_write_target,
+                ctx.operation_write_target,
+                bool(action.get("append")),
+            )
+        if act not in OBSERVE_ACTIONS and result.ok:
+            # Counted only on success (Codex P2, PR #16): a failed mutation
+            # must not disarm write pressure or the observation tail reserve.
+            attempt.commit_executed += 1
+        if act == "write" and result.ok:
+            if ctx.truncated_write:
+                # A partial (truncated) write is not a completed rewrite
+                # (Codex P1, PR #21): the file is incomplete, and the
+                # recovery path may legitimately append to it or restart the
+                # write. Reset for truncated append chunks too; otherwise an
+                # armed streak can block the clean restart.
+                self.run_state.disarm_rewrite_damping()
+            elif not action.get("append"):
+                self.run_state.note_successful_full_write(ctx.logical_write_target)
+        elif act in ("shell", "edit") and result.ok:
+            # Verification or a targeted fix breaks the rewrite streak;
+            # observations do not (the v6 Gemma loop interleaved tree/read
+            # between rewrites).
+            self.run_state.break_rewrite_streak()
+        if ctx.truncated_write and result.ok:
+            # The executor is stateless per step: without a resume anchor
+            # the model cannot know where the write stopped. The kept
+            # content is exactly what _prepare_write trimmed to the last
+            # complete line.
+            kept = action.get("content", "")
+            anchor = kept.splitlines()[-1][-80:]
+            recovery_arg = _target_recovery_arg(ctx.operation_write_target, self.working_dir)
+            result.output += (
+                f" (truncated after {kept.count(chr(10))} lines; "
+                f"last written line: {anchor!r}; continue with "
+                f"append:true at {recovery_arg} starting after "
+                "that line)"
+            )
+        ok_str = "OK" if result.ok else "FAIL"
+        log(f"  -> {ok_str} ({time.time() - ctx.started:.1f}s): {result.output[:80]}")
+
+        step_entry = self.recorder.record(
+            StepReceipt.executed(action, result, self.working_dir, ctx.truncated_write),
+            ctx.task_index,
+            ctx.step,
+            wall_s=round(time.time() - ctx.started, 2),
+        )
+
+        if not result.ok:
+            return self._recover_failed_step(ctx, attempt, result, step_entry)
+        attempt.use_think = False
+        attempt.reasoning_trigger = "executor"
+        attempt.steps.append(step_entry)
+        if act == "edit":
+            attempt.last_successful_edit = (
+                action.get("arg", ""),
+                action.get("find", ""),
+                action.get("replace", ""),
+            )
+        return None
+
+    def _recover_failed_step(self, ctx, attempt, result, step_entry):
+        """Expected-failure evidence, deterministic repair, or typed error."""
+        action, act = ctx.action, ctx.act
+        etype = result.error_type or "unknown"
+        if (
+            act == "shell"
+            and etype in ("compile_error", "unknown")
+            and _expects_failure(attempt.task)
+        ):
+            log("  Expected failure observed; completing task with evidence")
+            step_entry["expected_failure"] = True
+            self.recorder.annotate_last("expected_failure", True)
+            attempt.steps.append(step_entry)
+            attempt.done = True
+            return _StepFlow.END_ATTEMPT
+
+        if act == "shell" and etype == "compile_error":
+            repair = _try_compile_repair(result.output, self.working_dir, action.get("arg", ""))
+            if repair:
+                # The deterministic source edit is a successful targeted fix,
+                # so it breaks an armed rewrite streak just like a
+                # model-selected edit.
+                self.run_state.break_rewrite_streak()
+                log(f"  Deterministic repair: {repair[1]} in {repair[0]}")
+                # The repair mutated the workspace outside the action
+                # handlers (the tracked #41 exception); its receipt and the
+                # scaffold retry still go through the one recorder.
+                attempt.steps.append(
+                    self.recorder.record(
+                        StepReceipt.deterministic_repair(repair[0], repair[1]),
+                        ctx.task_index,
+                        ctx.step,
+                    )
+                )
+
+                retry_result = ActionResult.from_dict(execute(action, self.working_dir))
+                retry_entry = self.recorder.record(
+                    StepReceipt.deterministic_retry(action, retry_result),
+                    ctx.task_index,
+                    ctx.step,
+                    wall_s=round(time.time() - ctx.started, 2),
+                )
+                if retry_result.ok:
+                    log(f"  -> OK deterministic retry: {retry_result.output[:80]}")
+                    attempt.steps.append(retry_entry)
+                    attempt.use_think = False
+                    attempt.reasoning_trigger = "executor"
+                    return _StepFlow.NEXT_STEP
+                log(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
+                result = retry_result
+                etype = result.error_type or "unknown"
+
+        err_output = result.output[:100]
+        hint = _RECOVERY_HINTS.get(etype)
+        if hint:
+            err_output = f"{err_output} → {hint}"
+            self.recorder.append_recovery_hint(hint)
+        self.state["errors"].append(f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}")
+        attempt.use_think = etype not in _NO_THINK_ERRORS
+        attempt.reasoning_trigger = f"execution_error:{etype}"
+        return None
+
+    def _try_finish(self, replan):
+        """Validate an all-done pass; a result dict ends the run."""
+        wants_validation = _should_validate(replan, self.history, self.state, self.user_prompt)
+        first_validation = self.state.get("validation_attempts", 0) == 0
+        recheck_validation = (
+            self.state.get("validation_recheck_needed")
+            and self.state.get("validation_attempts", 0) < 2
+            and _has_new_validation_evidence(self.state)
+        )
+        if wants_validation and (first_validation or recheck_validation):
+            self.state["validated_once"] = True
+            self.state["validation_attempts"] = self.state.get("validation_attempts", 0) + 1
+            vresult = _validate_completion(self.user_prompt, self.state, self.working_dir)
+            if vresult and vresult.get("valid") is False:
+                reason = vresult.get("reason", "validation failed")
+                missing = vresult.get("missing", [])
+                error_msg = f"[validation_failed] {reason}"
+                if missing:
+                    error_msg += f" missing: {', '.join(missing)}"
+                self.state["errors"].append(error_msg)
+                self.state["validation_recheck_needed"] = True
+                self.state["validated_step_count"] = len(self.state.get("all_steps", []))
+                log(f"  Validation failed: {reason}")
+                _run_log(
+                    {
+                        "event": "validation",
+                        "valid": False,
+                        "reason": reason,
+                        "missing": missing,
+                        "deterministic": bool(vresult.get("deterministic")),
+                    }
+                )
+                return None  # replan
+            elif vresult is None and recheck_validation:
+                # A first optional validator failure remains fail-open, but
+                # once validation explicitly failed, an unavailable second
+                # verdict cannot erase that known failure.
+                log("  Validation recheck produced no verdict; failure remains pending.")
+                _run_log(
+                    {
+                        "event": "validation",
+                        "valid": None,
+                        "reason": "recheck produced no verdict",
+                        "deterministic": False,
+                    }
+                )
+            else:
+                self.state["validation_recheck_needed"] = False
+                log("  Validation passed.")
+                _run_log(
+                    {
+                        "event": "validation",
+                        "valid": True,
+                        "deterministic": bool(vresult and vresult.get("deterministic")),
+                    }
+                )
+        if self.state.get("validation_recheck_needed"):
+            if self.state.get("validation_attempts", 0) >= 2:
+                reason = "validation remains failed after the maximum checks"
+            else:
+                reason = (
+                    "completion after failed validation requires new write, edit, or shell evidence"
+                )
+            self.state["errors"].append(f"[validation_failed] {reason}")
+            log(f"  Completion refused: {reason}")
+            _run_log({"event": "validation_pending", "reason": reason})
+            return None
+        total_wall = self.run_state.elapsed()
+        log(f"All tasks complete. ({total_wall:.1f}s total)")
+        log(f"Output in: {self.working_dir}")
         _run_log(
             {
                 "event": "run_end",
-                "status": "complete_deterministic_after_exhausted",
-                "replans": max_replans,
+                "status": "complete",
+                "replans": replan,
                 "wall_s": round(total_wall, 2),
-                "completed_tasks": len(state["completed_tasks"]),
+                "completed_tasks": len(self.state["completed_tasks"]),
                 "steps": {
-                    "selected": state["selected_steps"],
-                    "executed": state["executed_steps"],
-                    "skipped": state["skipped_steps"],
+                    "selected": self.state["selected_steps"],
+                    "executed": self.state["executed_steps"],
+                    "skipped": self.state["skipped_steps"],
                 },
             }
         )
-        return {"status": "complete", "state": state, "log": history}
+        return {"status": "complete", "state": self.state, "log": self.history}
 
-    log(f"Exhausted {max_replans} replan attempts. ({total_wall:.1f}s total)")
-    log(f"Errors: {state['errors']}")
-    log(f"Output in: {working_dir}")
-    _run_log(
-        {
-            "event": "run_end",
-            "status": "exhausted",
-            "replans": max_replans,
-            "wall_s": round(total_wall, 2),
-            "errors": state["errors"][-5:],
-            "steps": {
-                "selected": state["selected_steps"],
-                "executed": state["executed_steps"],
-                "skipped": state["skipped_steps"],
-            },
-        }
-    )
-    return {"status": "exhausted", "state": state, "log": history}
+    def _finish_after_exhaustion(self):
+        """Deterministic reconciliation, then the exhausted result."""
+        total_wall = self.run_state.elapsed()
+        deterministic = _deterministic_check(self.user_prompt, self.state, self.working_dir)
+        if deterministic is True and not self.state.get("validation_recheck_needed"):
+            log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
+            log(f"Output in: {self.working_dir}")
+            _run_log(
+                {
+                    "event": "run_end",
+                    "status": "complete_deterministic_after_exhausted",
+                    "replans": self.max_replans,
+                    "wall_s": round(total_wall, 2),
+                    "completed_tasks": len(self.state["completed_tasks"]),
+                    "steps": {
+                        "selected": self.state["selected_steps"],
+                        "executed": self.state["executed_steps"],
+                        "skipped": self.state["skipped_steps"],
+                    },
+                }
+            )
+            return {"status": "complete", "state": self.state, "log": self.history}
+
+        log(f"Exhausted {self.max_replans} replan attempts. ({total_wall:.1f}s total)")
+        log(f"Errors: {self.state['errors']}")
+        log(f"Output in: {self.working_dir}")
+        _run_log(
+            {
+                "event": "run_end",
+                "status": "exhausted",
+                "replans": self.max_replans,
+                "wall_s": round(total_wall, 2),
+                "errors": self.state["errors"][-5:],
+                "steps": {
+                    "selected": self.state["selected_steps"],
+                    "executed": self.state["executed_steps"],
+                    "skipped": self.state["skipped_steps"],
+                },
+            }
+        )
+        return {"status": "exhausted", "state": self.state, "log": self.history}
+
+
+def _run_loop(
+    user_prompt,
+    working_dir,
+    max_replans=MAX_REPLANS,
+    max_tasks=MAX_TASKS,
+    max_steps=MAX_STEPS,
+    reasoning_policy=DEFAULT_REASONING_POLICY,
+    goal_context_chars=GOAL_CONTEXT_CHARS,
+):
+    """Core agent loop. Returns structured result dict.
+
+    Used by run() (public API, returns bool) and by integration test harness
+    (needs rich dict with state + log). All production behavior lives in
+    _RunController; this wrapper remains the stable seam callers target.
+    """
+    return _RunController(
+        user_prompt,
+        working_dir,
+        max_replans=max_replans,
+        max_tasks=max_tasks,
+        max_steps=max_steps,
+        reasoning_policy=reasoning_policy,
+        goal_context_chars=goal_context_chars,
+    ).run()
 
 
 def run(user_prompt, working_dir=None):
