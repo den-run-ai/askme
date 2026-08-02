@@ -1,6 +1,21 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 4 (2026-08-02). Revision 4 adds the validate-after-write
+**Protocol revision:** 5 (2026-08-02). Revision 5 repairs ranged-read
+continuation (issue #30): exact UTF-8 source pages preserve line terminators,
+`READ_CHARS` counts Unicode code points, and every successful page with unread
+source returns an action-ready cursor bound to the read target's content hash.
+Initial `offset`/`limit` remain 1-based line selectors; continuation actions
+must echo `cursor`, the normalized `limit`, and `sha256`, and a source change
+rejects the stale cursor. Duplicate-read identity includes the complete line
+range or cursor/limit/hash. Bounded `search` and `tree` remain discovery
+summaries rather than resumable streams, but now expose every bounded
+cap/snippet omission plus read/traversal errors and pack only complete records
+within the total observation budget. No v7 canary protocol has been registered,
+so the next outcome-bearing run remains v7 and must bind revision 5 plus the
+corrected `askme.py` source hash.
+Historical v4/v6 results retain their original interface attribution.
+
+Revision 4 (2026-08-02) adds the validate-after-write
 executor policy (from the v6 canary's commit-without-validate rewrite loop):
 verification pressure after repeated same-target full writes, `rewrite_loop`
 damping skips that persist across task-local and full-replan boundaries,
@@ -20,8 +35,7 @@ truncated writes block
 `done` and deterministic
 reconciliation, empty task lists are invalid plans, and a failed final
 validation requires new successful mutation/shell evidence before rechecking.
-Any outcome-bearing run under revision 4
-requires a newly registered **v7** canary protocol; the recorded v6 outcomes
+No outcome-bearing run was recorded under revision 4; the recorded v6 outcomes
 remain revision-3 results. Revision 3 (2026-08-01) changed the AskMe action
 interface used by outcome-bearing runs (issue #15, from the v4 canary and pi
 ablation findings): sentinel-framed `write` content transport
