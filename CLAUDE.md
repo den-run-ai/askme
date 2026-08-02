@@ -67,10 +67,6 @@ OPENROUTER_API_KEY= python3 -m pytest tests/ -v -k \
 # Common focused deterministic suites
 python3 -m pytest tests/test_agent_actions.py -q
 python3 -m pytest tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
-
-# Offline native-workflow qualification
-python3 tests/workflow_eval.py \
-  tests/workflows/config_precedence/manifest.json --agent noop
 ```
 
 The runtime dependency is `requests`; tests also require `pytest`. There is no
