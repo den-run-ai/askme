@@ -1809,16 +1809,12 @@ def execute(action, working_dir="."):
                         "content": "", "continuation": None,
                         "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
                         **meta}
-            if cursor is not None and cursor > len(text):
-                return {"ok": True, "truncated": False,
+            if cursor is not None and cursor >= len(text):
+                return {"ok": False, "truncated": False,
                         "content": "", "continuation": None,
-                        "output": (f"[{p.name}: cursor {cursor} past end of file "
-                                   f"({len(text)} chars)]"), **meta}
-            if cursor is not None and cursor == len(text):
-                return {"ok": True, "truncated": False,
-                        "content": "", "continuation": None,
-                        "output": f"[{p.name}: cursor {cursor} at end of file]",
-                        **meta}
+                        "output": (f"[{p.name}: read cursor {cursor} must point "
+                                   f"before end of file ({len(text)} chars)]"),
+                        "error_type": "invalid_read_cursor", **meta}
 
             starts = []
             pos = 0
