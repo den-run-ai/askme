@@ -1657,6 +1657,13 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     log(f"Policy: allow_system_installs={state['policy']['allow_system_installs']}")
     _warm_cache()
 
+    # Rewrite damping is run-scoped, not attempt-scoped. A task-local retry or
+    # full replan must not let the executor restart the same-target full-write
+    # streak; only the documented successful shell/edit and truncation paths
+    # below disarm it.
+    last_write_target = None
+    consecutive_target_writes = 0
+
     for replan in range(max_replans):
         log("=" * 40)
         t_plan = time.time()
@@ -1716,8 +1723,6 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                 observe_executed = 0
                 commit_executed = 0
                 observe_blocked = 0
-                last_write_target = None
-                consecutive_target_writes = 0
                 task_wants_write = _is_write_shaped(task)
                 completed_repair = _task_satisfied_by_deterministic_repair(task, state)
                 if completed_repair:
@@ -1739,7 +1744,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 and observe_executed >= WRITE_PRESSURE_OBSERVATIONS),
                             validate_pressure=(
                                 Path(str(last_write_target)).name
-                                if task_wants_write and last_write_target is not None
+                                if last_write_target is not None
                                 and consecutive_target_writes >= REWRITE_PRESSURE_WRITES
                                 else None),
                         )
@@ -1905,9 +1910,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     # are skipped — verify, edit, or finish instead.
                     if (act == "write" and not action.get("append")
                             and not truncated_write
-                            and task_wants_write and last_write_target is not None
+                            and last_write_target is not None
                             and consecutive_target_writes >= REWRITE_SKIP_WRITES
-                            and _step_path(action.get("arg", ""), working_dir)
+                            and _mutation_target_key(
+                                {"arg": action.get("arg", "")}, working_dir)
                             == last_write_target):
                         dup_skip_count += 1
                         log(f"  [{step + 1}] skip (rewrite loop: "
@@ -2076,7 +2082,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             last_write_target = None
                             consecutive_target_writes = 0
                         elif not action.get("append"):
-                            target = _step_path(action.get("arg", ""), working_dir)
+                            target = _mutation_target_key(
+                                {"arg": action.get("arg", "")}, working_dir)
                             if target == last_write_target:
                                 consecutive_target_writes += 1
                             else:
@@ -2169,6 +2176,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 result["output"], working_dir, action.get("arg", "")
                             )
                             if repair:
+                                # The deterministic source edit is a successful
+                                # targeted fix, so it breaks an armed rewrite
+                                # streak just like a model-selected edit.
+                                consecutive_target_writes = 0
                                 repair_step = {
                                     "action": "edit",
                                     "arg": repair[0],
