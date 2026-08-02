@@ -7,7 +7,8 @@ import pytest
 
 from askme import (execute, ask_llm, run, _run_loop, LLMTransportError,
                    LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX,
-                   _validate_action_contract, READ_CHARS)
+                   _validate_action_contract, _parse_reasoning_effort,
+                   READ_CHARS)
 from _test_support import mock_response, mock_response_raw
 
 
@@ -372,6 +373,111 @@ class TestThinkingRetry:
         assert result == {"action": "done"}
         second_body = mock_post.call_args_list[1][1]["json"]
         assert second_body["reasoning"]["effort"] == "high"
+
+
+# --- Baseline reasoning-effort tests (always-on reasoners, e.g. gpt-oss-20b) ---
+
+class TestReasoningEffortBaseline:
+    """OPENROUTER_REASONING_EFFORT pins a floor effort for models whose
+    reasoning cannot be disabled (harmony-format low/medium/high)."""
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "low")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_baseline_sent_on_first_attempt(self, mock_post):
+        """Every call carries the baseline effort instead of enabled=False."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([{"role": "user", "content": "test"}], max_tokens=256)
+        body = mock_post.call_args_list[0][1]["json"]
+        assert body["reasoning"] == {"enabled": True, "effort": "low"}
+        assert body["max_tokens"] == 1024  # low-effort floor over the 256 budget
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "low")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_gated_retry_escalates_above_baseline(self, mock_post):
+        """The JSON-contract retry still raises effort past the baseline."""
+        mock_post.side_effect = [
+            mock_response_raw("not json"),
+            mock_response({"action": "done"}),
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        first = mock_post.call_args_list[0][1]["json"]
+        second = mock_post.call_args_list[1][1]["json"]
+        assert first["reasoning"]["effort"] == "low"
+        assert second["reasoning"]["effort"] == "medium"
+        assert second["max_tokens"] >= 1536
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "high")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_escalation_never_lowers_baseline(self, mock_post):
+        """A medium gated request must not drop a high baseline."""
+        mock_post.side_effect = [
+            mock_response_raw("not json"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([{"role": "user", "content": "test"}])
+        first = mock_post.call_args_list[0][1]["json"]
+        second = mock_post.call_args_list[1][1]["json"]
+        assert first["reasoning"]["effort"] == "high"
+        assert second["reasoning"]["effort"] == "high"
+        assert second["max_tokens"] >= 2048
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "low")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_policy_off_pins_baseline_without_escalation(self, mock_post):
+        """`off` suppresses harness escalation but the model still reasons —
+        the request pins it to exactly the baseline on every attempt."""
+        mock_post.side_effect = [
+            mock_response_raw("not json"),
+            mock_response({"action": "done"}),
+        ]
+        ask_llm([{"role": "user", "content": "test"}], reasoning_policy="off")
+        for call in mock_post.call_args_list:
+            assert call[1]["json"]["reasoning"] == {"enabled": True, "effort": "low"}
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "low")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_strict_final_retry_keeps_baseline(self, mock_post):
+        """E03 strict retry disables *extra* reasoning; an always-on model
+        still gets the baseline effort alongside the strict contract."""
+        mock_post.side_effect = [
+            mock_response_raw("bad"),
+            mock_response_raw("still bad"),
+            mock_response({"action": "done"}),
+        ]
+        result = ask_llm([{"role": "user", "content": "test"}])
+        assert result == {"action": "done"}
+        third = mock_post.call_args_list[2][1]["json"]
+        assert third["reasoning"] == {"enabled": True, "effort": "low"}
+        assert third["messages"][-1]["content"] == _STRICT_JSON_SUFFIX
+
+    @patch("askme.OPENROUTER_REASONING_EFFORT", "low")
+    @patch("askme.requests.post")
+    @patch("askme.LLM_BACKEND", "local")
+    def test_local_backend_ignores_baseline(self, mock_post):
+        """The knob is OpenRouter-only; the local request stays untouched."""
+        mock_post.return_value = mock_response({"action": "done"})
+        ask_llm([
+            {"role": "system", "content": "You are a helper."},
+            {"role": "user", "content": "test"},
+        ], max_tokens=256)
+        body = mock_post.call_args_list[0][1]["json"]
+        assert "reasoning" not in body
+        assert not body["messages"][0]["content"].startswith("<|think|>")
+        assert body["max_tokens"] == 256
+
+    def test_parse_reasoning_effort_normalizes_and_validates(self):
+        assert _parse_reasoning_effort(None) == ""
+        assert _parse_reasoning_effort("") == ""
+        assert _parse_reasoning_effort(" LOW ") == "low"
+        assert _parse_reasoning_effort("high") == "high"
+        with pytest.raises(ValueError):
+            _parse_reasoning_effort("banana")
 
 
 # --- Null arg normalization tests ---

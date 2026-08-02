@@ -30,6 +30,42 @@ OPENROUTER_PROVIDER = os.environ.get("OPENROUTER_PROVIDER", "Parasail").strip()
 OPENROUTER_ALLOW_FALLBACKS = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "1") == "1"
 OPENROUTER_REQUIRE_PARAMETERS = os.environ.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1"
 
+# Baseline explicit-reasoning effort for always-on reasoning models
+# (e.g. openai/gpt-oss-20b). Harmony-format models expose low/medium/high
+# effort but no off switch, so the reasoning-disabled request contract below
+# would leave their effort at the provider default on every call. When set,
+# every OpenRouter request carries at least this effort; gated escalation can
+# raise it but never lower it, and AGENT_REASONING_POLICY=off pins calls to
+# exactly this level. Leave unset for hybrid models like Gemma 4, where
+# reasoning stays off unless the harness asks.
+_EFFORT_RANK = {"low": 0, "medium": 1, "high": 2}
+# Reasoning tokens count against max_tokens with Parasail-class providers,
+# despite OpenRouter docs claiming they're separate. Floor the budget per
+# requested effort to compensate (medium/high keep the pre-existing bumps).
+_EFFORT_TOKEN_FLOOR = {"low": 1024, "medium": 1536, "high": 2048}
+
+
+def _parse_reasoning_effort(raw):
+    effort = (raw or "").strip().lower()
+    if effort and effort not in _EFFORT_RANK:
+        raise ValueError(
+            "OPENROUTER_REASONING_EFFORT must be low, medium, or high (or unset)"
+        )
+    return effort
+
+
+OPENROUTER_REASONING_EFFORT = _parse_reasoning_effort(
+    os.environ.get("OPENROUTER_REASONING_EFFORT"))
+
+
+def _merge_effort(think_level):
+    """Effort to request from OpenRouter: the gated level, raised to the
+    baseline. Falsy result means request reasoning disabled (hybrid contract)."""
+    if OPENROUTER_REASONING_EFFORT and think_level:
+        return max(OPENROUTER_REASONING_EFFORT, think_level,
+                   key=_EFFORT_RANK.__getitem__)
+    return OPENROUTER_REASONING_EFFORT or think_level
+
 CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
 
 # Execution policy — controls what the agent is allowed to do
@@ -420,6 +456,8 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             "requested_trigger": effective_trigger,
             "requested_level": requested_level,
             "effective_level": effective_think_level,
+            "baseline_effort": (OPENROUTER_REASONING_EFFORT or None)
+                if LLM_BACKEND == "openrouter" else None,
             "attempt": attempt,
         })
 
@@ -429,6 +467,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
             "temperature": 0.1,
             "max_tokens": budget,
         }
+        sent_effort = effective_think_level
         if LLM_BACKEND == "openrouter":
             if OPENROUTER_PROVIDER:
                 body["provider"] = {
@@ -436,14 +475,16 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                     "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
                     "require_parameters": OPENROUTER_REQUIRE_PARAMETERS,
                 }
-            if effective_think_level:
+            # Always-on reasoners: the baseline effort applies to every call —
+            # strict E03 retries included, since the model cannot stop
+            # reasoning and "no thinking" can only mean the baseline.
+            sent_effort = _merge_effort(effective_think_level)
+            if sent_effort:
                 body["reasoning"] = {
                     "enabled": True,
-                    "effort": effective_think_level,
+                    "effort": sent_effort,
                 }
-                # Reasoning tokens count against max_tokens with Parasail provider,
-                # despite OpenRouter docs claiming they're separate. Bump to compensate.
-                body["max_tokens"] = max(budget, 2048 if effective_think_level == "high" else 1536)
+                body["max_tokens"] = max(budget, _EFFORT_TOKEN_FLOOR[sent_effort])
             else:
                 # Some models reason by default. Keep the harness policy model-independent.
                 body["reasoning"] = {"enabled": False}
@@ -515,8 +556,8 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 {},
             )
             tok_msg = f"  tokens: prompt={usage.get('prompt_tokens',0)} completion={usage.get('completion_tokens',0)} total={usage.get('total_tokens',0)}"
-            if effective_think_level:
-                tok_msg += f" thinking={effective_think_level}"
+            if sent_effort:
+                tok_msg += f" thinking={sent_effort}"
             log(tok_msg)
             _run_log({
                 "event": "tokens",
@@ -527,7 +568,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 "model": selected.get("model") or rj.get("model", MODEL),
                 "provider": selected.get("provider") or rj.get("provider", ""),
                 "route_attempt": selected.get("attempt"),
-                "thinking": effective_think_level,
+                "thinking": sent_effort,
                 "finish_reason": finish_reason,
                 "attempt": attempt,
             })
@@ -597,7 +638,7 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(text):
                     budget = STEP_WRITE_TOKENS
                     log(f"  write/edit payload budget -> {budget}")
-                think_str = f" thinking={effective_think_level}" if effective_think_level else ""
+                think_str = f" thinking={sent_effort}" if sent_effort else ""
                 log(f"  [retry {attempt+1}]{think_str} JSON parse failed, raw: {text[:120]}")
             else:
                 # Typed classification for the caller (issue #7): output that
@@ -1831,6 +1872,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
     _run_log({"event": "run_start", "prompt": user_prompt, "working_dir": working_dir,
               "backend": LLM_BACKEND, "model": MODEL,
               "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
+              "reasoning_effort": OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else "",
               "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
               "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
               "reasoning_policy": reasoning_policy,

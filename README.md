@@ -84,6 +84,7 @@ The everyday knobs:
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
 
 Advanced configuration — OpenRouter model/provider routing, reasoning policy,
+baseline reasoning effort for always-on reasoners (e.g. `openai/gpt-oss-20b`),
 run logging, context budgets, and the automation/evaluation CLI — lives in
 [docs/configuration.md](docs/configuration.md).
 

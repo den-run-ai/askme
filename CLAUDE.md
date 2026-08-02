@@ -28,6 +28,10 @@ python3 askme.py "your request here"
 # Run via OpenRouter
 LLM_BACKEND=openrouter python3 askme.py "your request here"
 
+# Run via OpenRouter on an always-on reasoner with a pinned baseline effort
+LLM_BACKEND=openrouter OPENROUTER_MODEL=openai/gpt-oss-20b \
+OPENROUTER_REASONING_EFFORT=low python3 askme.py "your request here"
+
 # Tell the model that software installs are allowed (prompt policy, not enforcement)
 ALLOW_SYSTEM_INSTALLS=1 python3 askme.py "your request here"
 
@@ -53,6 +57,8 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"
 # Multi-trial benchmark harness (median + range across N trials)
 python3 tests/bench_harness.py                                    # 3 trials, easy, local
 python3 tests/bench_harness.py --suite medium --backend openrouter # 3 trials, medium, openrouter
+python3 tests/bench_harness.py --backend openrouter \
+  --model openai/gpt-oss-20b --reasoning-effort low               # effort-pinned cell (E21)
 python3 tests/bench_harness.py --list                             # show available tests
 
 # CI gate over bench summaries (offline; used by .github/workflows/llm.yml)
