@@ -28,24 +28,6 @@ python3 askme.py "create a hello world program in C and compile it"
 LLM_BACKEND=openrouter python3 askme.py "your task here"
 ```
 
-## Coding Task Quick Tutorial
-
-From a fresh AskMe checkout, try fixing a small Python bug using the backend
-configured in Quick Start. The first command works on a copy, so the checked-in
-example stays untouched.
-
-```bash
-cp -R tests/workflows/config_precedence/seed coding-tutorial
-python3 -B -m unittest discover -s coding-tutorial/tests -p 'check_*.py' -v
-python3 askme.py --working-dir coding-tutorial "Fix config_cli.py: use CLI --timeout, then ASKME_TIMEOUT, JSON, and 30. Invalid values must show the existing error and exit 2. Keep current output; do not edit tests; run them."
-python3 -B -m unittest discover -s coding-tutorial/tests -p 'check_*.py' -v
-diff -ru tests/workflows/config_precedence/seed coding-tutorial
-```
-
-The first run reports one failure; the second should pass all four tests, and
-the diff should show only `config_cli.py`. Review that diff before keeping
-anything—AskMe runs commands with your permissions and is not a sandbox.
-
 ## How It Works
 
 ```mermaid
