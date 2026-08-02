@@ -1,4 +1,4 @@
-"""Deterministic tests for the app-development action surface (issue #7).
+"""Deterministic tests for the app-development action surface (issues #7, #30).
 
 No LLM calls: these pin the navigable read window, bounded search/tree,
 chunked-write transport, truncation detection, and curated replan state.
@@ -14,8 +14,8 @@ import pytest
 import askme
 from askme import (execute, _run_loop, _validate_action_contract,
                    READ_CHARS, READ_LIMIT_MAX,
-                   SEARCH_MAX_MATCHES, SEARCH_MAX_CHARS,
-                   TREE_MAX_ENTRIES, TREE_MAX_CHARS,
+                   SEARCH_MAX_MATCHES, SEARCH_MAX_FILES,
+                   TREE_MAX_ENTRIES,
                    OBSERVE_STATE_CHARS, STEP_WRITE_TOKENS)
 
 
@@ -23,6 +23,21 @@ def _big_file(work_dir, name="big.py", lines=200):
     p = Path(work_dir, name)
     p.write_text("".join(f"def f{i}(): return {i}\n" for i in range(lines)))
     return p
+
+
+def _walk_read(work_dir, name, **initial):
+    """Follow action-ready continuations and return exact content plus pages."""
+    action = {"action": "read", "arg": name, **initial}
+    pages = []
+    while True:
+        result = execute(action, work_dir)
+        assert result["ok"] is True
+        pages.append(result)
+        continuation = result["continuation"]
+        if continuation is None:
+            return "".join(page["content"] for page in pages), pages
+        action = {"action": "read", "arg": name, **continuation}
+        assert len(pages) < 100, "continuation walk is not converging"
 
 
 def _symlinked_target_dirs(tmp_path):
@@ -48,24 +63,17 @@ class TestRangedRead:
         assert result["output"].startswith("[big.py: lines 1-")
         assert " of 200" in result["output"]
         assert result["truncated"] is True
-        assert result["continuation"] > 1
-        assert f"continue: offset={result['continuation']}" in result["output"]
+        assert result["continuation"]["cursor"] == READ_CHARS
+        assert "continue: cursor=1200" in result["output"]
+        assert result["continuation"]["sha256"] == result["sha256"]
 
     def test_continuation_navigation_covers_whole_file(self, work_dir):
-        """Walking continuation offsets must tile the whole file contiguously."""
-        _big_file(work_dir, lines=200)
-        offset = 1
-        windows = 0
-        while True:
-            r = execute({"action": "read", "arg": "big.py", "offset": offset}, work_dir)
-            assert r["ok"] is True
-            assert r["output"].startswith(f"[big.py: lines {offset}-")
-            windows += 1
-            assert windows < 20, "continuation walk is not converging"
-            if not r["continuation"]:
-                assert f"-200 of 200" in r["output"].splitlines()[0]
-                break
-            offset = r["continuation"]
+        """Walking continuation cursors must tile the whole file contiguously."""
+        p = _big_file(work_dir, lines=200)
+        reconstructed, pages = _walk_read(work_dir, "big.py")
+        assert reconstructed == p.read_text()
+        assert len(pages) > 1
+        assert pages[-1]["continuation"] is None
 
     def test_last_window_has_no_continuation(self, work_dir):
         _big_file(work_dir, lines=200)
@@ -85,12 +93,15 @@ class TestRangedRead:
         _big_file(work_dir)
         result = execute({"action": "read", "arg": "big.py", "limit": 10}, work_dir)
         assert "lines 1-10 of 200" in result["output"]
-        assert result["continuation"] == 11
+        assert result["continuation"]["offset"] == 11
+        assert result["continuation"]["limit"] == 10
 
     def test_limit_capped(self, work_dir):
-        _big_file(work_dir, lines=READ_LIMIT_MAX + 50)
-        result = execute({"action": "read", "arg": "big.py", "limit": 99999}, work_dir)
+        Path(work_dir, "short.txt").write_text("x\n" * (READ_LIMIT_MAX + 50))
+        result = execute({"action": "read", "arg": "short.txt", "limit": 99999}, work_dir)
         assert f"lines 1-{READ_LIMIT_MAX}" in result["output"]
+        assert result["continuation"]["offset"] == READ_LIMIT_MAX + 1
+        assert result["continuation"]["limit"] == READ_LIMIT_MAX
 
     def test_invalid_offset_and_limit_clamped(self, work_dir):
         _big_file(work_dir)
@@ -100,12 +111,100 @@ class TestRangedRead:
             assert result["ok"] is True
             assert result["output"].startswith("[big.py: lines 1-")
 
-    def test_char_cut_on_long_lines(self, work_dir):
-        Path(work_dir, "long.txt").write_text("x" * (READ_CHARS * 2))
-        result = execute({"action": "read", "arg": "long.txt"}, work_dir)
-        assert result["truncated"] is True
-        assert f"cut at {READ_CHARS} chars" in result["output"]
-        assert len(result["output"]) <= READ_CHARS + 120
+    def test_long_single_line_reconstructs_exactly(self, work_dir):
+        text = "x" * (READ_CHARS * 2 + 17)
+        Path(work_dir, "long.txt").write_text(text)
+        reconstructed, pages = _walk_read(work_dir, "long.txt")
+        assert reconstructed == text
+        assert len(pages) == 3
+        assert pages[0]["continuation"]["cursor"] == READ_CHARS
+        assert all(len(page["content"]) <= READ_CHARS for page in pages)
+        assert f"cut at {READ_CHARS} chars" in pages[0]["output"]
+
+    def test_wide_multiline_pages_reconstruct_to_eof(self, work_dir):
+        text = "".join(f"line {i:03}: {'x' * 40}\n" for i in range(180))
+        Path(work_dir, "wide.txt").write_text(text)
+        reconstructed, pages = _walk_read(work_dir, "wide.txt")
+        assert reconstructed == text
+        assert len(pages) >= 3
+        assert pages[-1]["continuation"] is None
+        cursors = [p["continuation"]["cursor"] for p in pages[:-1]]
+        assert cursors == sorted(set(cursors))
+
+    def test_nondefault_limit_is_preserved_through_reconstruction(self,
+                                                                  work_dir):
+        lines = [f"line {i}\n" for i in range(25)]
+        text = "".join(lines)
+        Path(work_dir, "limited.txt").write_text(text)
+        reconstructed, pages = _walk_read(work_dir, "limited.txt",
+                                          offset=3, limit=1)
+        assert reconstructed == "".join(lines[2:])
+        assert len(pages) == 23
+        assert all(page["continuation"]["limit"] == 1
+                   for page in pages[:-1])
+
+    def test_unicode_cursor_counts_code_points_and_preserves_newlines(self, work_dir):
+        text = ("🙂é漢" * 500) + "\r\n" + ("é🙂" * 700) + "\r\ntail🙂\r\n"
+        raw = text.encode("utf-8")
+        Path(work_dir, "unicode.txt").write_bytes(raw)
+        reconstructed, pages = _walk_read(work_dir, "unicode.txt")
+        assert reconstructed == text
+        assert reconstructed.encode("utf-8") == raw
+        assert pages[0]["continuation"]["cursor"] == READ_CHARS
+        assert pages[0]["total_chars"] == len(text)
+        assert pages[0]["total_bytes"] == len(raw)
+        assert pages[0]["continuation"]["cursor"] != len(
+            pages[0]["content"].encode("utf-8"))
+
+    def test_stale_hash_rejects_continuation(self, work_dir):
+        Path(work_dir, "changing.txt").write_text("x" * (READ_CHARS + 10))
+        first = execute({"action": "read", "arg": "changing.txt"}, work_dir)
+        Path(work_dir, "changing.txt").write_text("y" * (READ_CHARS + 10))
+        result = execute({"action": "read", "arg": "changing.txt",
+                          **first["continuation"]}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "stale_read_cursor"
+
+    def test_cursor_requires_source_hash(self, work_dir):
+        Path(work_dir, "data.txt").write_text("abc")
+        result = execute({"action": "read", "arg": "data.txt", "cursor": 1,
+                          "limit": 60}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "read_cursor_hash_required"
+
+    @pytest.mark.parametrize("limit", [None, 0, READ_LIMIT_MAX + 1,
+                                        True, 1.5, "1.0"])
+    def test_cursor_requires_valid_continuation_limit(self, work_dir, limit):
+        Path(work_dir, "data.txt").write_text("abc")
+        action = {"action": "read", "arg": "data.txt", "cursor": 1,
+                  "sha256": hashlib.sha256(b"abc").hexdigest()[:12]}
+        if limit is not None:
+            action["limit"] = limit
+        result = execute(action, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "invalid_read_limit"
+
+    @pytest.mark.parametrize("cursor", [None, "", "oops", -1,
+                                         True, 1.9, "1.0"])
+    def test_invalid_cursor_is_rejected(self, work_dir, cursor):
+        Path(work_dir, "data.txt").write_text("abc")
+        result = execute({"action": "read", "arg": "data.txt",
+                          "cursor": cursor, "sha256": "deadbeef"}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "invalid_read_cursor"
+
+    @pytest.mark.parametrize("cursor", [3, 4])
+    def test_cursor_at_or_beyond_eof_is_rejected(self, work_dir, cursor):
+        Path(work_dir, "data.txt").write_text("abc")
+        result = execute({
+            "action": "read", "arg": "data.txt", "cursor": cursor,
+            "limit": 60,
+            "sha256": hashlib.sha256(b"abc").hexdigest()[:12],
+        }, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "invalid_read_cursor"
+        assert result["content"] == ""
+        assert result["continuation"] is None
 
     def test_small_file_read_fully(self, work_dir):
         Path(work_dir, "small.txt").write_text("a\nb\nc\n")
@@ -113,7 +212,8 @@ class TestRangedRead:
         assert result["ok"] is True
         assert result["truncated"] is False
         assert result["continuation"] is None
-        assert result["output"].endswith("a\nb\nc")
+        assert result["content"] == "a\nb\nc\n"
+        assert result["output"].endswith("a\nb\nc\n")
 
     def test_empty_file(self, work_dir):
         Path(work_dir, "empty.txt").write_text("")
@@ -126,6 +226,15 @@ class TestRangedRead:
         _big_file(work_dir)
         result = execute({"action": "read", "arg": "big.py"}, work_dir)
         assert len(result["output"]) <= OBSERVE_STATE_CHARS
+
+    def test_long_filename_pages_fit_history_without_data_loss(self, work_dir):
+        name = "n" * 240 + ".txt"
+        text = "x" * (READ_CHARS * 2)
+        Path(work_dir, name).write_text(text)
+        reconstructed, pages = _walk_read(work_dir, name)
+        assert reconstructed == text
+        assert all(len(page["output"]) <= OBSERVE_STATE_CHARS for page in pages)
+        assert pages[0]["continuation"]["cursor"] < READ_CHARS
 
 
 # --- Bounded search ---
@@ -143,11 +252,56 @@ class TestSearchAction:
             "".join(f"hit line {i}\n" for i in range(SEARCH_MAX_MATCHES * 2)))
         result = execute({"action": "search", "arg": "hit line"}, work_dir)
         assert result["truncated"] is True
-        assert "narrow the pattern" in result["output"]
-        assert len(result["output"]) <= SEARCH_MAX_CHARS + 120
+        assert "narrow the pattern/path" in result["output"]
+        assert "matches" in result["truncation_reasons"]
+        assert len(result["output"]) <= OBSERVE_STATE_CHARS
         body_lines = [l for l in result["output"].splitlines()
                       if l.startswith("many.txt:")]
         assert len(body_lines) == SEARCH_MAX_MATCHES
+
+    def test_exact_match_cap_is_complete(self, work_dir):
+        Path(work_dir, "exact.txt").write_text(
+            "".join(f"needle {i}\n" for i in range(SEARCH_MAX_MATCHES)))
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert result["truncated"] is False
+        assert result["truncation_reasons"] == []
+
+    def test_long_match_snippet_is_marked_incomplete(self, work_dir):
+        Path(work_dir, "long.txt").write_text("needle " + "x" * 500 + "\n")
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert result["truncated"] is True
+        assert "snippets" in result["truncation_reasons"]
+        assert "…" in result["output"]
+
+    def test_file_scan_cap_is_marked_incomplete(self, work_dir):
+        for i in range(SEARCH_MAX_FILES + 1):
+            content = "needle\n" if i == SEARCH_MAX_FILES else "hay\n"
+            Path(work_dir, f"f{i:03}.txt").write_text(content)
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert result["truncated"] is True
+        assert "files" in result["truncation_reasons"]
+        assert "[0+ matches" in result["output"]
+
+    def test_search_packs_only_complete_records(self, work_dir):
+        for i in range(SEARCH_MAX_MATCHES):
+            Path(work_dir, f"{'p' * 80}{i:02}.txt").write_text(
+                f"needle {'x' * 90}\n")
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert len(result["output"]) <= OBSERVE_STATE_CHARS
+        assert "chars" in result["truncation_reasons"]
+        for line in result["output"].splitlines()[1:]:
+            assert line.endswith("x" * 90)
+
+    def test_near_boundary_record_is_not_dropped_by_reason_reserve(self,
+                                                                   work_dir):
+        for i in range(7):
+            Path(work_dir, f"{'n' * 100}{i}.txt").write_text(
+                f"needle {'x' * 90}\n")
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert result["truncated"] is False
+        assert result["truncation_reasons"] == []
+        assert len(result["output"].splitlines()[1:]) == 7
+        assert len(result["output"]) <= OBSERVE_STATE_CHARS
 
     def test_skips_vcs_deps_and_hidden(self, work_dir):
         for d in (".git", "node_modules", "__pycache__"):
@@ -167,6 +321,16 @@ class TestSearchAction:
         Path(work_dir, "bin.dat").write_bytes(b"needle\x00binary")
         result = execute({"action": "search", "arg": "needle"}, work_dir)
         assert "[0 matches" in result["output"]
+
+    def test_unreadable_candidate_is_marked_incomplete(self, work_dir):
+        broken = Path(work_dir, "broken.txt")
+        try:
+            broken.symlink_to(Path(work_dir, "missing.txt"))
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        result = execute({"action": "search", "arg": "needle"}, work_dir)
+        assert result["truncated"] is True
+        assert "unreadable" in result["truncation_reasons"]
 
     def test_path_field_scopes_search(self, work_dir):
         sub = Path(work_dir, "pkg")
@@ -224,7 +388,15 @@ class TestTreeAction:
         result = execute({"action": "tree", "arg": "."}, work_dir)
         assert result["truncated"] is True
         assert f"capped at {TREE_MAX_ENTRIES}" in result["output"]
-        assert len(result["output"]) <= TREE_MAX_CHARS + 120
+        assert "entries" in result["truncation_reasons"]
+        assert len(result["output"]) <= OBSERVE_STATE_CHARS
+
+    def test_exact_entry_cap_is_complete(self, work_dir):
+        for i in range(TREE_MAX_ENTRIES):
+            Path(work_dir, f"f{i:03}.txt").write_text("x")
+        result = execute({"action": "tree", "arg": "."}, work_dir)
+        assert result["truncated"] is False
+        assert result["truncation_reasons"] == []
 
     def test_depth_cap(self, work_dir):
         deep = Path(work_dir)
@@ -236,6 +408,21 @@ class TestTreeAction:
         assert "a/b/c/" in result["output"]
         assert "a/b/c/d/" not in result["output"]
         assert "too_deep.txt" not in result["output"]
+        assert result["truncated"] is True
+        assert "depth" in result["truncation_reasons"]
+
+    def test_tree_packs_only_complete_paths(self, work_dir):
+        names = []
+        for i in range(20):
+            name = f"{'n' * 120}{i:02}.txt"
+            names.append(name)
+            Path(work_dir, name).write_text("x")
+        result = execute({"action": "tree", "arg": "."}, work_dir)
+        assert len(result["output"]) <= OBSERVE_STATE_CHARS
+        assert "chars" in result["truncation_reasons"]
+        shown = result["output"].splitlines()[1:]
+        assert shown
+        assert all(line in names for line in shown)
 
     def test_missing_directory(self, work_dir):
         result = execute({"action": "tree", "arg": "nope/"}, work_dir)
@@ -247,6 +434,17 @@ class TestTreeAction:
         result = execute({"action": "tree"}, work_dir)
         assert result["ok"] is True
         assert "here.txt" in result["output"]
+
+    def test_walk_error_is_marked_incomplete(self, work_dir):
+        def failing_walk(root, onerror=None):
+            if onerror:
+                onerror(PermissionError("denied"))
+            return iter(())
+
+        with patch("askme.os.walk", side_effect=failing_walk):
+            result = execute({"action": "tree", "arg": "."}, work_dir)
+        assert result["truncated"] is True
+        assert "walk_errors" in result["truncation_reasons"]
 
 
 # --- Chunked-write transport and atomic writes ---
@@ -313,6 +511,36 @@ class TestActionContract:
         assert _validate_action_contract(
             {"action": "read", "arg": "f.py", "offset": 10, "limit": 20}) is True
         assert _validate_action_contract({"action": "read", "offset": 10}) is False
+
+    def test_read_cursor_contract_requires_valid_cursor_and_hash(self):
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": 10,
+             "limit": 60, "sha256": "abc123"}) is True
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": "10",
+             "limit": "60", "sha256": "abc123"}) is True
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": "oops",
+             "limit": 60, "sha256": "abc123"}) is False
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": -1,
+             "limit": 60, "sha256": "abc123"}) is False
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": True,
+             "limit": 60, "sha256": "abc123"}) is False
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": 1.9,
+             "limit": 60, "sha256": "abc123"}) is False
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": 10,
+             "limit": 60}) is False
+        assert _validate_action_contract(
+            {"action": "read", "arg": "f.py", "cursor": 10,
+             "sha256": "abc123"}) is False
+        for invalid_limit in (0, READ_LIMIT_MAX + 1, True, 1.5, "1.0"):
+            assert _validate_action_contract(
+                {"action": "read", "arg": "f.py", "cursor": 10,
+                 "limit": invalid_limit, "sha256": "abc123"}) is False
 
     def test_write_append_still_requires_content(self):
         assert _validate_action_contract(
@@ -409,8 +637,24 @@ class TestReadDupGuardOffsets:
         assert "skip (duplicate read)" not in out
         reads = [s for s in result["state"]["all_steps"] if s["action"] == "read"]
         assert len(reads) == 2
-        assert reads[0]["_read_key"] == ("big.py", 1)
-        assert reads[1]["_read_key"] == ("big.py", 61)
+        assert reads[0]["_read_key"] == ("big.py", "lines", 1, 60)
+        assert reads[1]["_read_key"] == ("big.py", "lines", 61, 60)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_different_limits_are_not_duplicates(self, mock_llm, mock_replan,
+                                                  capsys, tmp_path):
+        _big_file(str(tmp_path), lines=200)
+        mock_llm.side_effect = [
+            {"tasks": ["inspect big.py"]},
+            {"action": "read", "arg": "big.py", "offset": 1, "limit": 5},
+            {"action": "read", "arg": "big.py", "offset": 1, "limit": 10},
+            {"action": "done"},
+        ]
+        result = _run_loop("inspect big.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert "skip (duplicate read)" not in capsys.readouterr().out
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
@@ -437,7 +681,46 @@ class TestReadDupGuardOffsets:
         out = capsys.readouterr().out
         assert result["status"] == "complete"
         assert "skip (duplicate read)" in out
-        assert any("Continue with offset=61" in o for o in captured)
+        assert any("Continue with cursor=1200, limit=60, sha256=" in o
+                   for o in captured)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_cursor_pages_in_same_line_are_not_duplicates(self, mock_llm,
+                                                           mock_replan,
+                                                           capsys, tmp_path):
+        Path(tmp_path, "long.txt").write_text("x" * (READ_CHARS * 3))
+        first = execute({"action": "read", "arg": "long.txt"}, tmp_path)
+        continuation = first["continuation"]
+        mock_llm.side_effect = [
+            {"tasks": ["inspect long.txt"]},
+            {"action": "read", "arg": "long.txt"},
+            {"action": "read", "arg": "long.txt", **continuation},
+            {"action": "done"},
+        ]
+        result = _run_loop("inspect long.txt", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert "skip (duplicate read)" not in capsys.readouterr().out
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_cursor_reads_with_different_limits_are_not_duplicates(
+            self, mock_llm, mock_replan, capsys, tmp_path):
+        p = _big_file(str(tmp_path), lines=200)
+        source_hash = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+        mock_llm.side_effect = [
+            {"tasks": ["inspect big.py"]},
+            {"action": "read", "arg": "big.py", "cursor": 0,
+             "limit": 1, "sha256": source_hash},
+            {"action": "read", "arg": "big.py", "cursor": 0,
+             "limit": 10, "sha256": source_hash},
+            {"action": "done"},
+        ]
+        result = _run_loop("inspect big.py", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert "skip (duplicate read)" not in capsys.readouterr().out
 
 
 class TestAppendStuckGuard:
@@ -540,6 +823,7 @@ class TestReadMetadata:
         r = execute({"action": "read", "arg": "big.py"}, work_dir)
         assert r["total_lines"] == 100
         assert r["total_bytes"] == len(text.encode())
+        assert r["total_chars"] == len(text)
         assert r["sha256"] == hashlib.sha256(text.encode()).hexdigest()[:12]
 
     def test_hash_stable_across_windows(self, work_dir):
@@ -586,7 +870,8 @@ class TestReadMetadata:
         assert reads
         assert reads[0]["sha256"]
         assert reads[0]["total_lines"] == 200
-        assert reads[0]["continuation"] == 61
+        assert reads[0]["total_chars"] > READ_CHARS
+        assert reads[0]["continuation"]["cursor"] == READ_CHARS
 
 
 # --- Typed parse failures: malformed_action / response_truncated ---
@@ -640,6 +925,18 @@ class TestTypedParseFailures:
     def test_extract_error_type_knows_new_types(self):
         assert askme._extract_error_type("[malformed_action] x")[0] == "malformed_action"
         assert askme._extract_error_type("[response_truncated] x")[0] == "response_truncated"
+
+    @pytest.mark.parametrize("error_type", [
+        "invalid_read_cursor", "invalid_read_limit",
+        "read_cursor_hash_required", "stale_read_cursor",
+    ])
+    def test_read_cursor_errors_survive_summary_without_thinking(self,
+                                                                 error_type):
+        error = f"[{error_type}] read app.py: bad continuation"
+        assert askme._extract_error_type(error)[0] == error_type
+        assert askme.summarize_errors([error])[0].startswith(f"[{error_type}]")
+        assert error_type in askme._NO_THINK_ERRORS
+        assert error_type in askme._RECOVERY_HINTS
 
 
 # --- Selected vs executed step accounting (step_skipped) ---

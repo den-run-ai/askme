@@ -93,6 +93,8 @@ class TestExecuteRead:
         assert result["truncated"] is True
         assert result["output"].startswith("[big.txt: lines 1-1 of 1")
         assert len(result["output"]) <= READ_CHARS + 120  # window + header
+        assert result["content"] == "x" * READ_CHARS
+        assert result["continuation"]["cursor"] == READ_CHARS
 
 
 class TestExecuteEdit:
