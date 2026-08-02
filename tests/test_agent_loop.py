@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from askme import MAX_STEP_HISTORY, _run_loop, execute, run
+from askme import MAX_STEP_HISTORY, SEARCH_MAX_MATCHES, _run_loop, execute, run
 
 # --- Full agent loop tests ---
 
@@ -361,6 +361,54 @@ class TestRunLogSink:
         assert events[-1]["status"] == "complete"
         # Every event carries a timestamp
         assert all("ts" in e for e in events)
+
+    @patch("askme.ask_llm")
+    def test_run_log_step_carries_discovery_truncation_reasons(self, mock_llm, tmp_path, work_dir):
+        """Discovery cap reasons reach JSONL and subsequent executor context (issue #42)."""
+        import askme
+
+        Path(work_dir, "notes.txt").write_text(
+            "".join(f"hit line {i}\n" for i in range(SEARCH_MAX_MATCHES * 2))
+        )
+        deep = Path(work_dir)
+        for part in ("a", "b", "c", "d", "e"):
+            deep = deep / part
+            deep.mkdir()
+        (deep / "too_deep.txt").write_text("x")
+        responses = [
+            {"tasks": ["survey hit lines", "map the layout"]},
+            {"action": "search", "arg": "hit line", "reasoning": "scan"},
+            {"action": "search", "arg": "hit line 29", "reasoning": "narrow"},
+            {"action": "done", "reasoning": "done"},
+            {"action": "tree", "arg": ".", "reasoning": "map"},
+            {"action": "done", "reasoning": "done"},
+        ]
+        llm_calls = []
+
+        def scripted_llm(messages, **_kwargs):
+            llm_calls.append(messages)
+            return responses[len(llm_calls) - 1]
+
+        mock_llm.side_effect = scripted_llm
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            askme.run("survey the workspace", work_dir)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert len(llm_calls) == len(responses)
+        assert "incomplete: matches" in llm_calls[2][-1]["content"]
+        assert "incomplete: depth" in llm_calls[5][-1]["content"]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        capped_search, exact_search, tree_step = [e for e in events if e["event"] == "step"]
+        assert capped_search["truncated"] is True
+        assert capped_search["truncation_reasons"] == ["matches"]
+        # A complete observation must not grow either truncation key.
+        assert "truncated" not in exact_search
+        assert "truncation_reasons" not in exact_search
+        assert tree_step["truncated"] is True
+        assert tree_step["truncation_reasons"] == ["depth"]
 
     @patch("askme.ask_llm")
     def test_run_log_disabled_when_env_unset(self, mock_llm, tmp_path, work_dir):
