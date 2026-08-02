@@ -30,9 +30,12 @@ For usage, quickstart, and test commands see [README.md](../README.md). For mode
 
 A deterministic `preflight_probe()` runs once before the first plan: platform, arch, available/missing tools, package managers, working-dir listing. The structured result plus execution policy is fed into planner state.
 
-## Core File
+## Core Files
 
-`agent/askme.py` is self-contained — no seed files, no framework.
+`askme.py` (CLI, LLM client, controller loop, recording) and `actions.py`
+(action registry, handlers, typed results/receipts) — no seed files, no
+framework. `askme.py` re-exports the action layer's public names, and
+`execute()` stays its compatibility facade.
 
 **Key functions:**
 - `preflight_probe(working_dir)` — environment probe (platform, arch, tools, package managers, dir listing)
@@ -44,7 +47,8 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 - `replan_task(failed_task, errors, completed_tasks, state, user_prompt)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (`max_tokens=96`, no retries). Returns string or None. Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
 - `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
-- `execute(action, working_dir)` — runs shell/write/edit/read/search/tree/done/fail with command-aware timeouts, bounded observation windows, and atomic file writes
+- `execute(action, working_dir)` — compatibility facade over `actions.ActionExecutor`, which dispatches shell/write/edit/read/search/tree through one registry (`ACTION_SPECS`: name, category, decode-time contract, handler) with command-aware timeouts, bounded observation windows, and atomic file writes. Unknown actions fail with typed `unknown_action`; `done`/`fail` are controller decisions and dispatching one is a typed `control_action` error
+- `StepRecorder` / `actions.StepReceipt` — the single record-and-count path: every executed step, deterministic repair/retry receipt, guard skip, and corrective observation flows through one recorder, with explicit projections for model history, structured results, and JSONL
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`
 - `_run_loop(...)` — structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper returning a boolean

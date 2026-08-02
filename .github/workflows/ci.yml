@@ -33,9 +33,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
       - name: Lint
-        run: uv run --locked ruff check askme.py tests
+        run: uv run --locked ruff check askme.py actions.py tests
       - name: Format
-        run: uv run --locked ruff format --check askme.py tests
+        run: uv run --locked ruff format --check askme.py actions.py tests
       - name: Type check
         run: uv run --locked ty check
 
@@ -67,7 +67,7 @@ jobs:
         run: uv run --locked pytest tests/ -v
       - name: Run tests with branch coverage
         if: matrix.python-version == '3.14'
-        run: uv run --locked pytest tests/ -v --cov=askme --cov-report=term-missing --cov-report=xml
+        run: uv run --locked pytest tests/ -v --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml
       - name: Upload coverage report
         if: always() && matrix.python-version == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

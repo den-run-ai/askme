@@ -13,8 +13,9 @@ rules in addition to this file.
 
 AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
-entry point remains `python3 askme.py`; the runtime is currently concentrated in
-`askme.py`, but that is not a reason to keep enlarging its longest functions.
+entry point remains `python3 askme.py`; the runtime is split between `askme.py`
+(CLI, LLM client, controller loop, recording) and `actions.py` (action registry,
+handlers, typed results/receipts), and its longest functions should keep shrinking.
 Preserve the simple CLI and compatibility surfaces while following the cohesive,
 behavior-preserving extraction work tracked in the issue roadmap below.
 
@@ -37,8 +38,12 @@ Start with:
 
 ## Repository map
 
-- `askme.py` — CLI, provider calls, planner/executor loop, action dispatch, recovery,
-  validation, structured results, and the compatibility `run(...) -> bool` API
+- `askme.py` — CLI, provider calls, planner/executor loop, controller-owned
+  `done`/`fail`, step recording, recovery, validation, structured results, and the
+  compatibility `run(...) -> bool` and `execute(...)` APIs
+- `actions.py` — action registry (`ACTION_SPECS`), the six handlers behind
+  `ActionExecutor`, workspace-path/output policies, error classification, and the
+  typed `ActionResult`/`StepReceipt` structures
 - `tests/test_agent_*.py` — deterministic unit and action/controller regression tests
 - `tests/test_agent_integration.py` — local and OpenRouter integration suites
 - `tests/workflow_eval.py`, `tests/test_workflow_*.py`, `tests/workflows/` — native
@@ -65,13 +70,13 @@ uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failin
 uv sync --locked
 
 # Static checks and deterministic handoff gate; live-model tests skip by default
-uv run --locked ruff check askme.py tests
-uv run --locked ruff format --check askme.py tests
+uv run --locked ruff check askme.py actions.py tests
+uv run --locked ruff format --check askme.py actions.py tests
 uv run --locked ty check
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml
+uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml
 
 # Common focused deterministic suites
 uv run --locked pytest tests/test_agent_actions.py -q
