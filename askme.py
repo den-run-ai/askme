@@ -79,8 +79,6 @@ def _merge_effort(think_level):
     return OPENROUTER_REASONING_EFFORT or think_level
 
 
-CACHE_WORKAROUND = os.environ.get("CACHE_WORKAROUND", "0") == "1"
-
 # Execution policy — controls what the agent is allowed to do
 ALLOW_SYSTEM_INSTALLS = os.environ.get("ALLOW_SYSTEM_INSTALLS", "0") == "1"
 ALLOW_NETWORK = os.environ.get("ALLOW_NETWORK", "1") == "1"
@@ -91,54 +89,6 @@ if LLM_BACKEND == "openrouter":
 else:
     API = os.environ.get("LLM_API_URL", "http://localhost:8080/v1/chat/completions")
     MODEL = os.environ.get("LLM_MODEL", "gemma-4-e4b")
-_BASE_URL = API.rsplit("/v1/", 1)[0] if "/v1/" in API else "http://localhost:8080"
-_CACHE_SLOT = "agent-system-prompt"
-_cache_warmed = False
-
-
-def _warm_cache():
-    """Pre-process system prompt and save KV state for reuse.
-    Called once at start of run(). Non-fatal — falls back to no caching."""
-    global _cache_warmed
-    if not CACHE_WORKAROUND or LLM_BACKEND != "local":
-        return
-    try:
-        requests.post(
-            f"{_BASE_URL}/v1/chat/completions",
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PLAN},
-                    {"role": "user", "content": "hi"},
-                ],
-                "max_tokens": 1,
-            },
-            timeout=60,
-        )
-        resp = requests.post(
-            f"{_BASE_URL}/slots/0?action=save", json={"filename": _CACHE_SLOT}, timeout=10
-        )
-        if resp.status_code == 200 and resp.json().get("n_saved", 0) > 0:
-            _cache_warmed = True
-            log(f"Cache warm: saved {resp.json()['n_saved']} tokens")
-        else:
-            log(f"Cache warm: save failed ({resp.status_code}), continuing without cache")
-    except Exception as e:
-        log(f"Cache warm: error ({e}), continuing without cache")
-
-
-def _restore_cache():
-    """Restore system prompt KV state before each LLM request.
-    Non-fatal — silently skips if cache wasn't warmed or restore fails."""
-    if not _cache_warmed:
-        return
-    try:
-        requests.post(
-            f"{_BASE_URL}/slots/0?action=restore", json={"filename": _CACHE_SLOT}, timeout=10
-        )
-    except Exception:
-        pass
-
 
 PROBE_TOOLS = ["python3", "go", "node", "gcc", "cc", "make", "cargo", "rustc", "java", "javac"]
 PROBE_PKG_MANAGERS = ["brew", "apt-get", "dnf", "pacman", "apk"]
@@ -556,7 +506,6 @@ def ask_llm(
         if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
             headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
             headers["X-OpenRouter-Metadata"] = "enabled"
-        _restore_cache()
         # Transport-level error handling with retry + backoff
         try:
             resp = requests.post(API, json=body, headers=headers, timeout=timeout or LLM_TIMEOUT)
@@ -2383,7 +2332,6 @@ def _run_loop(
         log(f"Missing tools: {env['missing_tools']}")
     log(f"Package managers: {env['package_managers']}")
     log(f"Policy: allow_system_installs={state['policy']['allow_system_installs']}")
-    _warm_cache()
 
     # Rewrite damping is run-scoped, not attempt-scoped. A task-local retry or
     # full replan must not let the executor restart the same-target full-write
