@@ -45,8 +45,7 @@ on:
       - tests/**
       - .github/workflows/llm.yml
       - pyproject.toml
-      - requirements.txt
-      - requirements-dev.txt
+      - uv.lock
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
@@ -73,16 +72,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+        run: uv sync --locked
       - name: Preflight OpenRouter credential
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python tests/ci_llm_gate.py preflight
+        run: uv run --locked python tests/ci_llm_gate.py preflight
       - name: Run OpenRouter ${{ inputs.suite || 'easy' }} suite
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -99,7 +100,7 @@ jobs:
             hard)   K="TestOpenRouterHard" ;;
             *) echo "unknown suite: $SUITE" >&2; exit 1 ;;
           esac
-          python -m pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"
+          uv run --locked pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"
       - name: Assert the suite really ran (no silent skips)
         run: test -s llm-logs/smoke.jsonl
       - name: Upload agent run logs
@@ -128,16 +129,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+        run: uv sync --locked
       - name: Preflight OpenRouter credential
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python tests/ci_llm_gate.py preflight
+        run: uv run --locked python tests/ci_llm_gate.py preflight
       - name: Run Berkeley protocol cells
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -161,11 +164,11 @@ jobs:
             [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
             MODEL_COUNT=$((MODEL_COUNT + 1))
             SLUG="$(echo "$MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
-            python tests/bench_harness.py --backend openrouter --suite hard \
+            uv run --locked python tests/bench_harness.py --backend openrouter --suite hard \
               --test test_replan_build_with_dependency --trials "$TRIALS" \
               --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
               --log-dir "bench-logs/$SLUG/build"
-            python tests/bench_harness.py --backend openrouter --suite medium \
+            uv run --locked python tests/bench_harness.py --backend openrouter --suite medium \
               --test test_fix_python_syntax_error --trials "$TRIALS" \
               --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
               --log-dir "bench-logs/$SLUG/repair"
@@ -173,7 +176,7 @@ jobs:
           echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"
       - name: Gate on protocol pass rule
         run: |
-          python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
+          uv run --locked python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
             --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
       - name: Upload bench logs and summaries
         if: always()
@@ -183,4 +186,3 @@ jobs:
           path: bench-logs/
           if-no-files-found: warn
           retention-days: 14
-

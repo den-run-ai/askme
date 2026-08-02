@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 UNIT_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LLM_WORKFLOW = ROOT / ".github" / "workflows" / "llm.yml"
 PYPROJECT = ROOT / "pyproject.toml"
+UV_LOCK = ROOT / "uv.lock"
 
 
 def test_unit_workflow_stays_hermetic():
@@ -25,20 +26,28 @@ def test_unit_workflow_stays_hermetic():
 
 def test_unit_workflow_gates_quality_compatibility_and_coverage():
     text = UNIT_WORKFLOW.read_text(encoding="utf-8")
-    assert "python -m ruff check askme.py tests" in text
-    assert "python -m mypy" in text
-    assert 'python-version: ["3.10", "3.14"]' in text
+    assert "uv run --locked ruff check askme.py tests" in text
+    assert "uv run --locked ruff format --check askme.py tests" in text
+    assert "uv run --locked ty check" in text
+    assert "mypy" not in text
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in text
     assert "--cov=askme" in text
     assert "--cov-report=xml" in text
-    assert "requirements-dev.txt" in text
-    assert text.count("cache: pip") == 2
-    assert text.count("cache-dependency-path:") == 2
+    assert text.count("uv sync --locked") == 2
+    assert text.count("astral-sh/setup-uv@") == 2
+    assert text.count('version: "0.12.1"') == 2
+    assert text.count("cache-dependency-glob: uv.lock") == 2
+    assert "requirements" not in text
     assert text.count("persist-credentials: false") == 2
     assert "permissions:" in text
     assert "contents: read" in text
     assert "concurrency:" in text
     assert "cancel-in-progress: true" in text
-    assert "fail_under = 90" in PYPROJECT.read_text(encoding="utf-8")
+    project = PYPROJECT.read_text(encoding="utf-8")
+    assert "fail_under = 90" in project
+    assert "[tool.ty.environment]" in project
+    assert 'required-version = "==0.12.1"' in project
+    assert UV_LOCK.is_file()
 
 
 def test_workflows_pin_third_party_actions():
@@ -94,10 +103,10 @@ def test_llm_workflow_preflights_before_spending():
     assert smoke.count("ci_llm_gate.py preflight") == 1
     assert berkeley.count("ci_llm_gate.py preflight") == 1
     assert smoke.index("ci_llm_gate.py preflight") < smoke.index(
-        "python -m pytest tests/test_agent_integration.py"
+        "uv run --locked pytest tests/test_agent_integration.py"
     )
     assert berkeley.index("ci_llm_gate.py preflight") < berkeley.index(
-        "python tests/bench_harness.py"
+        "uv run --locked python tests/bench_harness.py"
     )
 
 
@@ -129,13 +138,16 @@ def test_llm_workflow_is_opt_in_for_pull_requests():
     assert text.count("github.event_name != 'pull_request'") == 2
 
 
-def test_llm_workflow_tracks_dependency_changes_and_uses_cache():
+def test_llm_workflow_tracks_locked_dependencies_and_uses_uv_cache():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     push_block = text.split("  push:", 1)[1].split("  pull_request:", 1)[0]
-    for path in ("pyproject.toml", "requirements.txt", "requirements-dev.txt"):
+    for path in ("pyproject.toml", "uv.lock"):
         assert f"- {path}" in push_block
-    assert text.count("cache: pip") == 2
-    assert text.count("cache-dependency-path:") == 2
+    assert "requirements" not in text
+    assert text.count("uv sync --locked") == 2
+    assert text.count("astral-sh/setup-uv@") == 2
+    assert text.count('version: "0.12.1"') == 2
+    assert text.count("cache-dependency-glob: uv.lock") == 2
 
 
 def test_llm_workflow_supports_effort_pinned_cells():

@@ -46,8 +46,8 @@ Start with:
 - `tests/featurebench/` — adapter, frozen protocols, audits, and historical result records
 - `talks/berkeley-agentic-ai-summit-2026/` — slide source, rendered artifacts,
   speaker material, evidence, and deck contracts
-- `.github/workflows/ci.yml` — Ruff, mypy, hermetic Python 3.10/3.14 tests,
-  and a 90% branch-aware coverage gate
+- `.github/workflows/ci.yml` — locked uv environments, Ruff lint/format, ty,
+  hermetic Python 3.10–3.14 tests, and a 90% branch-aware coverage gate
 - `.github/workflows/llm.yml` — credentialed, paid OpenRouter smoke/protocol jobs
 
 ## Commands
@@ -56,31 +56,32 @@ Run commands from the repository root.
 
 ```bash
 # Inspect the supported CLI
-python3 askme.py --help
+uv run --locked --no-dev askme.py --help
 
 # Run against a project that may be edited
-python3 askme.py --working-dir /path/to/project "Fix the failing tests"
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
 
-# Install pinned direct runtime and development dependencies
-python3 -m pip install -r requirements-dev.txt
+# Create the locked development environment
+uv sync --locked
 
 # Static checks and deterministic handoff gate; live-model tests skip by default
-python3 -m ruff check askme.py tests
-python3 -m mypy
-python3 -m pytest tests/ -q
+uv run --locked ruff check askme.py tests
+uv run --locked ruff format --check askme.py tests
+uv run --locked ty check
+uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-python3 -m pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml
+uv run --locked pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml
 
 # Common focused deterministic suites
-python3 -m pytest tests/test_agent_actions.py -q
-python3 -m pytest tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
+uv run --locked pytest tests/test_agent_actions.py -q
+uv run --locked pytest tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
 ```
 
-The runtime dependency is `requests`; development tools live in
-`requirements-dev.txt`. Ruff, mypy, strict pytest settings, and coverage are
-configured centrally in `pyproject.toml`. There is no repository-wide formatter
-configured. Keep Python 3.10 compatibility because CI explicitly tests it.
+The runtime dependency is `requests`; uv resolves it and the development tools
+declared in `pyproject.toml` into the committed, cross-platform `uv.lock`.
+Ruff, ty, strict pytest settings, and coverage are configured centrally in
+`pyproject.toml`. Keep Python 3.10 compatibility because CI explicitly tests it.
 
 Backend-dependent tests require `ASKME_RUN_LIVE_LLM_TESTS=1` and still skip when
 their server or credential is unavailable. A skipped integration suite is not
@@ -92,7 +93,7 @@ The ordinary full suite is deterministic even on a developer machine because
 
 ```bash
 # Opt in only when backend calls and possible OpenRouter charges are intended
-ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/ -v -m live_llm
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 ```
 
 ## CI and credentials

@@ -516,7 +516,7 @@ def _copy_bytes(cm: Any, container: Any, data: bytes, destination: str) -> None:
 
 
 def build_askme_agent_class(
-    base_agent: type,
+    base_agent: Any,
     askme_source: Path,
     api_key: str,
     inner_timeout: int,
@@ -892,7 +892,7 @@ def _validate_protocol_settings(settings: CanarySettings) -> Mapping[str, Any]:
 
     try:
         # FeatureBench supplies this optional dependency in its uv environment.
-        from datasets import load_dataset  # type: ignore[import-not-found]
+        from datasets import load_dataset  # ty: ignore[unresolved-import]
 
         rows = [
             row
