@@ -1938,7 +1938,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     _skip_step(i, step, act, action, "stuck_append")
                                     break
                             elif (act == "write" and not truncated_write
-                                  and prev.get("ok") and not prev.get("_append")
+                                  and prev.get("ok")
+                                  and not prev.get("_truncated_write")
+                                  and not prev.get("_append")
                                   and prev.get("_content", "") == action.get("content", "")):
                                 is_dup = True
                             elif act == "edit" and prev.get("ok") and prev.get("_find", "") == action.get("find", "") and prev.get("_replace", "") == action.get("replace", ""):
