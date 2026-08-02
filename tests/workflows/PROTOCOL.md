@@ -8,9 +8,11 @@ damping skips that persist across task-local and full-replan boundaries,
 the three post-merge Codex P2 fixes to the revision-3 write-forcing mechanics
 (success-only commit counting, failed-task-scoped intent classification,
 passive-phrasing
-exemptions in the write-task regex). Write-state flags and task-local
-`failed_steps` are task-scoped even when the failed task dispatched zero
-actions. Unresolved truncated writes block `done` and deterministic
+exemptions in the write-task regex). `no_write_executed`,
+`unvalidated_write`, and task-local `failed_steps` are task-scoped even when
+the failed task dispatched zero actions. Incomplete artifacts are run-scoped,
+including zero-byte pending truncations. Unresolved truncated writes block
+`done` and deterministic
 reconciliation, empty task lists are invalid plans, and a failed final
 validation requires new successful mutation/shell evidence before rechecking.
 Any outcome-bearing run under revision 4
