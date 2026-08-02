@@ -1,0 +1,156 @@
+name: LLM Tests
+
+# Live-model tests against OpenRouter. These spend real (tiny) OpenRouter
+# credits — the measured Berkeley smoke matrix cost ~$0.012 total — so the
+# workflow only runs when explicitly wanted:
+#   - push to main touching agent/test code
+#   - weekly schedule (provider/model drift check)
+#   - manual dispatch, with suite/model/provider/trial overrides
+#   - pull requests only when labeled 'llm-tests' AND from a same-repo
+#     branch — the job guards reject fork PRs before any credential is in
+#     scope (secrets are withheld from forks by GitHub, but configuration
+#     variables are not, and the vars fallback below stays honored)
+#
+# The credential comes from the repository's "Openrouter" deployment
+# environment, stored as an environment *secret* named OPENROUTER_API_KEY.
+# The expression below also honors an environment *variable* of the same
+# name as a fallback, so either storage keeps working.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Pytest suite for the smoke job
+        type: choice
+        options: [easy, medium, hard]
+        default: easy
+      models:
+        description: Comma-separated OpenRouter model IDs for the Berkeley job
+        type: string
+        default: google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b
+      provider:
+        description: OpenRouter provider slug ('auto' = automatic routing)
+        type: string
+        default: auto
+      trials:
+        description: Trials per Berkeley cell
+        type: string
+        default: "1"
+  schedule:
+    - cron: "17 14 * * 1" # Mondays 14:17 UTC
+  push:
+    branches: [main]
+    paths:
+      - askme.py
+      - tests/**
+      - .github/workflows/llm.yml
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openrouter-smoke:
+    # PRs opt in via the 'llm-tests' label and must come from a same-repo
+    # branch: a labeled fork PR would otherwise run fork-controlled code
+    # with the credential in scope.
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'llm-tests'))
+    runs-on: ubuntu-latest
+    environment: Openrouter
+    timeout-minutes: 30
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || vars.OPENROUTER_API_KEY }}
+      # Automatic provider routing: CI smoke checks the agent loop, not one
+      # provider's uptime. Dispatch the Berkeley job to pin providers.
+      OPENROUTER_PROVIDER: ""
+      AGENT_RUN_LOG: ${{ github.workspace }}/llm-logs/smoke.jsonl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest requests
+      - name: Preflight OpenRouter credential
+        run: python tests/ci_llm_gate.py preflight
+      - name: Run OpenRouter ${{ inputs.suite || 'easy' }} suite
+        run: |
+          mkdir -p llm-logs
+          case "${{ inputs.suite || 'easy' }}" in
+            easy)   K="TestOpenRouterEasy" ;;
+            medium) K="TestOpenRouterMedium" ;;
+            hard)   K="TestOpenRouterHard" ;;
+            *) echo "unknown suite: ${{ inputs.suite }}" >&2; exit 1 ;;
+          esac
+          python -m pytest tests/test_agent_integration.py -s -v -rs -k "$K"
+      - name: Assert the suite really ran (no silent skips)
+        run: test -s llm-logs/smoke.jsonl
+      - name: Upload agent run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openrouter-smoke-logs
+          path: llm-logs/
+          if-no-files-found: ignore
+
+  berkeley-protocol:
+    # Replays the two Berkeley talk eval cells per model — the hard build and
+    # medium repair selectors from talks/berkeley-agentic-ai-summit-2026/
+    # evals/README.md — through tests/bench_harness.py, then gates on the
+    # protocol's pass rule (pytest pass + agent complete for every trial).
+    # Same guard as openrouter-smoke: label opt-in AND same-repo head only.
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'llm-tests'))
+    runs-on: ubuntu-latest
+    environment: Openrouter
+    timeout-minutes: 90
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || vars.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest requests
+      - name: Preflight OpenRouter credential
+        run: python tests/ci_llm_gate.py preflight
+      - name: Run Berkeley protocol cells
+        env:
+          MODELS: ${{ inputs.models || 'google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b' }}
+          PROVIDER: ${{ inputs.provider || 'auto' }}
+          TRIALS: ${{ inputs.trials || '1' }}
+        run: |
+          set -u
+          MODEL_COUNT=0
+          IFS=',' read -ra MODEL_LIST <<< "$MODELS"
+          for MODEL in "${MODEL_LIST[@]}"; do
+            MODEL="$(echo "$MODEL" | xargs)"
+            [ -z "$MODEL" ] && continue
+            MODEL_COUNT=$((MODEL_COUNT + 1))
+            SLUG="$(echo "$MODEL" | tr '/.:' '---')"
+            python tests/bench_harness.py --backend openrouter --suite hard \
+              --test test_replan_build_with_dependency --trials "$TRIALS" \
+              --model "$MODEL" --provider "$PROVIDER" \
+              --log-dir "bench-logs/$SLUG/build"
+            python tests/bench_harness.py --backend openrouter --suite medium \
+              --test test_fix_python_syntax_error --trials "$TRIALS" \
+              --model "$MODEL" --provider "$PROVIDER" \
+              --log-dir "bench-logs/$SLUG/repair"
+          done
+          echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"
+      - name: Gate on protocol pass rule
+        run: |
+          python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
+            --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Upload bench logs and summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: berkeley-protocol-logs
+          path: bench-logs/
+          if-no-files-found: ignore
