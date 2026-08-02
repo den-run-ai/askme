@@ -796,6 +796,20 @@ class TestErrorSummarization:
             get_plan("test", state)
         assert "[missing_tool]" in captured["user_msg"]
 
+    def test_later_planning_attempt_uses_replan_policy_without_errors(self):
+        state = {
+            "completed_tasks": [],
+            "errors": [],
+            "environment": {},
+            "policy": {"allow_system_installs": False},
+            "planning_attempt": 1,
+        }
+        with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as llm:
+            get_plan("test", state)
+        assert llm.call_args.kwargs["think"] is True
+        assert llm.call_args.kwargs["timeout"] == askme.LLM_TIMEOUT_REPLAN
+        assert llm.call_args.kwargs["reasoning_trigger"] == "planner_replan"
+
 
 # --- Updated completion semantics tests ---
 
