@@ -1797,6 +1797,9 @@ def _run_loop(
             "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
             "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
             "reasoning_policy": reasoning_policy,
+            # Ablation-arm provenance (issue #41): zero repair receipts cannot
+            # distinguish arm B from an arm-A run that never hit the trigger.
+            "compile_repair": COMPILE_REPAIR_ENABLED,
             "limits": {
                 "max_replans": max_replans,
                 "max_tasks": max_tasks,

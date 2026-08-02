@@ -957,7 +957,11 @@ class TestCompileRepairTemplates:
             "output": "main.c:1:13: error: implicit declaration of function 'printf'",
             "error_type": "compile_error",
         }
-        with patch.object(askme, "COMPILE_REPAIR_ENABLED", False):
+        log_path = tmp_path / "run.jsonl"
+        with (
+            patch.object(askme, "COMPILE_REPAIR_ENABLED", False),
+            patch.object(askme, "RUN_LOG_PATH", str(log_path)),
+        ):
             result = _run_loop(
                 "compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3
             )
@@ -967,6 +971,22 @@ class TestCompileRepairTemplates:
         assert not any(s.get("deterministic_repair") for s in all_steps)
         assert not any(s.get("deterministic_retry") for s in all_steps)
         assert any(e.startswith("[compile_error]") for e in result["state"]["errors"])
+        # Arm provenance (issue #41): receipts alone cannot identify arm B,
+        # so run_start must record the resolved switch.
+        run_start = json.loads(log_path.read_text().splitlines()[0])
+        assert run_start["event"] == "run_start"
+        assert run_start["compile_repair"] is False
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_run_start_records_the_default_repair_arm(self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [{"tasks": ["say hi"]}, {"action": "done"}]
+        log_path = tmp_path / "run.jsonl"
+        with patch.object(askme, "RUN_LOG_PATH", str(log_path)):
+            result = _run_loop("say hi", str(tmp_path), max_replans=1, max_tasks=1, max_steps=2)
+        assert result["status"] == "complete"
+        run_start = json.loads(log_path.read_text().splitlines()[0])
+        assert run_start["compile_repair"] is True
 
     def test_try_compile_repair_skips_existing_include(self, tmp_path):
         src = tmp_path / "main.c"

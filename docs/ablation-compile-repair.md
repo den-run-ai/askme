@@ -48,13 +48,23 @@ Offline qualification of both arms (no model calls) already exists:
 
 ## Task family and controls
 
-- **Primary tasks:** the C-header task family that motivated the path
-  (FeatureBench canary lineage, `fix_missing_include` shape — a `.c` source
-  using `printf`/string functions without the header, compiled by a task
-  command; acceptance judged by the held-out evaluator, never returned to the
-  agent).
-- **Gold control (arm A):** a task where the repair is known to trigger;
-  requalify at the pinned revision before inference.
+- **Primary tasks:** a C-header task set — `.c` sources using `printf`/string
+  functions without the header, compiled by a task command, with acceptance
+  judged held-out and never returned to the agent. Candidate lineages differ
+  and must be pinned by exact artifact, not by shape: the local
+  `fix_missing_include` integration task lives in
+  `tests/test_agent_integration.py`, while the existing FeatureBench canary
+  protocols pin a different (Seaborn/Python) task. Registration names the
+  exact task IDs, fixture/dataset revision, runner, and acceptance command
+  (`PIN: task set` / `PIN: evaluator` below); operators must not substitute a
+  differently-shaped workload under the same protocol name.
+- **Gold control (both arms, before inference):** the pinned evaluator run
+  against a known-correct solution artifact (`predictions: gold` style) must
+  resolve, proving the dataset/evaluator infrastructure itself. A repair
+  trigger is not a gold control.
+- **Trigger check (arm A):** a task where the repair is known to fire,
+  requalified offline at the pinned revision — a manipulation check that the
+  treatment is active, recorded separately from the gold control.
 - **Harmless non-empty control (both arms):** a compiling C task with all
   headers present; the repair must not fire and both arms must pass.
 - Controls that fail requalification block registration.
@@ -63,6 +73,11 @@ Offline qualification of both arms (no model calls) already exists:
 
 - `PIN: execution revision` — commit hash containing the flag and both
   offline arm tests; runbook verified executable at exactly that revision.
+- `PIN: task set` — exact task IDs and fixture/dataset revision (file hashes
+  or dataset tag) for the primary tasks and every control.
+- `PIN: evaluator` — the exact held-out acceptance command/runner and its
+  revision; the same evaluator judges both arms and is never shown to the
+  agent.
 - `PIN: model` / `PIN: provider route` — identical for both arms;
   `OPENROUTER_ALLOW_FALLBACKS` and reasoning policy/effort frozen and
   reported (for always-on reasoners, `off` pins the declared baseline).
@@ -80,7 +95,10 @@ Offline qualification of both arms (no model calls) already exists:
 
 Per arm: acceptance rate with variance, selected/executed/skipped step
 counts, replans, wall time, typed-error mix, and `deterministic_repair` /
-`deterministic_retry` receipt counts (arm B must show zero). Summaries must
+`deterministic_retry` receipt counts (arm B must show zero). Every trial's
+`run_start` JSONL event records the resolved arm as `compile_repair`; receipt
+counts alone cannot identify the arm, because arm A also shows zero whenever
+the trigger never fires. Summaries must
 stay arithmetically consistent with retained JSONL records. Results land in
 [PERFORMANCE.md](PERFORMANCE.md) as a dated entry and close E22 in
 [EXPERIMENTS.md](EXPERIMENTS.md); the decision lands on issue #41.
