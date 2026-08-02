@@ -1,7 +1,7 @@
 # AskMe
 
 [![CI](https://github.com/den-run-ai/askme/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/den-run-ai/askme/actions/workflows/ci.yml?query=branch%3Amain)
-[![Coverage gate: ≥90%](https://img.shields.io/badge/coverage%20gate-%E2%89%A590%25-blue)](pyproject.toml)
+[![Coverage](https://codecov.io/gh/den-run-ai/askme/branch/main/graph/badge.svg?precision=2)](https://app.codecov.io/gh/den-run-ai/askme)
 [![LLM Tests](https://github.com/den-run-ai/askme/actions/workflows/llm.yml/badge.svg?branch=main)](https://github.com/den-run-ai/askme/actions/workflows/llm.yml?query=branch%3Amain)
 
 AskMe began with a simple dream: a small open model on my MacBook, through
@@ -110,7 +110,7 @@ uv run --locked ty check
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml
+uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Integration — local (requires llama-server on :8080)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestIntegration and not Medium and not Hard"
@@ -136,14 +136,24 @@ server or credential is unavailable. Ordinary test and coverage commands never
 opt into paid model calls. Dated run matrices and suite-size snapshots live in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
+The README coverage badge shows Codecov's latest `main` percentage to two
+decimal places and opens the detailed report. The Python 3.14 CI run also writes
+coverage.py's exact branch-aware table to the GitHub job summary and stores
+browsable HTML plus JSON/XML reports in the `coverage-python-3.14` artifact for
+14 days. Codecov [counts partially covered lines as
+misses](https://docs.codecov.com/docs/frequently-asked-questions#how-is-coverage-calculated),
+so its badge can differ from coverage.py's execution-opportunity percentage
+that enforces the 90% CI gate.
+
 ### LLM tests in CI
 
 Two GitHub Actions workflows split hermetic from live-model testing:
 
 - [`ci.yml`](.github/workflows/ci.yml) — locked uv environments, Ruff lint and
   formatting, ty type checking, Python 3.10–3.14 tests, and a 90% branch-aware
-  coverage floor on every push/PR. It deliberately has no OpenRouter credential,
-  so backend-gated suites auto-skip (guarded by `tests/test_ci_workflows_contract.py`).
+  coverage floor on every push/PR, with the Python 3.14 report published to
+  GitHub and Codecov. It deliberately has no OpenRouter credential, so
+  backend-gated suites auto-skip (guarded by `tests/test_ci_workflows_contract.py`).
 - [`llm.yml`](.github/workflows/llm.yml) — OpenRouter-backed tests, using the
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
   as an environment secret. The key is scoped only to preflight and live-model

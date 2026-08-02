@@ -76,7 +76,7 @@ uv run --locked ty check
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml
+uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Common focused deterministic suites
 uv run --locked pytest tests/test_agent_actions.py -q
