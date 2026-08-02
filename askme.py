@@ -958,6 +958,34 @@ def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
     return None
 
 
+def _completion_blocker(state, working_dir):
+    """Single finish-eligibility gate for incomplete-write obligations (#31).
+
+    Both completion sites — the executor's ``done`` claim and post-task
+    acceptance — must refuse while any truncated or zero-byte write obligation
+    is unresolved, and must steer recovery at the same target the replanner
+    visibility reports. Returns ``(name, recovery_arg, append_allowed)`` for
+    the most actionable obligation, or ``None`` when nothing blocks
+    completion. Selection order matches ``_incomplete_write_visibility``: a
+    restrictive pending overwrite first, then the newest unresolved truncated
+    write, then any remaining pending obligation.
+    """
+    unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
+    pending = state.get("pending_empty_writes", {})
+    if not unresolved and not pending:
+        return None
+    restrictive = _restrictive_pending_empty(pending)
+    if restrictive is not None:
+        target, pending_info = restrictive
+        return _pending_empty_hint(target, pending_info)
+    if unresolved:
+        target, (_, incomplete_step) = max(unresolved.items(), key=lambda item: item[1][0])
+        name, recovery_arg = _incomplete_step_hint(target, incomplete_step)
+        return name, recovery_arg, True
+    target, pending_info = _next_pending_empty(pending)
+    return _pending_empty_hint(target, pending_info)
+
+
 def _pending_append_targets(info):
     """Normalized referent guards from current and legacy pending records."""
     if not isinstance(info, dict):
@@ -1979,30 +2007,9 @@ def _run_loop(
                     log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
                     if act == "done":
-                        unresolved = _unresolved_incomplete_writes(
-                            state.get("all_steps", []), working_dir
-                        )
-                        pending_empty = state.get("pending_empty_writes", {})
-                        if unresolved or pending_empty:
-                            append_allowed = True
-                            restrictive = _restrictive_pending_empty(pending_empty)
-                            if restrictive is not None:
-                                incomplete_target, pending_info = restrictive
-                                (incomplete_name, recovery_arg, append_allowed) = (
-                                    _pending_empty_hint(incomplete_target, pending_info)
-                                )
-                            elif unresolved:
-                                incomplete_target, (_, incomplete_step) = max(
-                                    unresolved.items(), key=lambda item: item[1][0]
-                                )
-                                incomplete_name, recovery_arg = _incomplete_step_hint(
-                                    incomplete_target, incomplete_step
-                                )
-                            else:
-                                incomplete_target, pending_info = _next_pending_empty(pending_empty)
-                                (incomplete_name, recovery_arg, append_allowed) = (
-                                    _pending_empty_hint(incomplete_target, pending_info)
-                                )
+                        blocker = _completion_blocker(state, working_dir)
+                        if blocker is not None:
+                            incomplete_name, recovery_arg, append_allowed = blocker
                             if append_allowed:
                                 recovery = (
                                     "Retry that exact target with append:true if it "
@@ -2600,27 +2607,9 @@ def _run_loop(
                 break
 
             if task_done:
-                unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
-                pending_empty = state.get("pending_empty_writes", {})
-                if unresolved or pending_empty:
-                    restrictive = _restrictive_pending_empty(pending_empty)
-                    if restrictive is not None:
-                        incomplete_target, pending_info = restrictive
-                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info
-                        )
-                    elif unresolved:
-                        incomplete_target, (_, incomplete_step) = max(
-                            unresolved.items(), key=lambda item: item[1][0]
-                        )
-                        incomplete_name, recovery_arg = _incomplete_step_hint(
-                            incomplete_target, incomplete_step
-                        )
-                    else:
-                        incomplete_target, pending_info = _next_pending_empty(pending_empty)
-                        incomplete_name, recovery_arg, _ = _pending_empty_hint(
-                            incomplete_target, pending_info
-                        )
+                blocker = _completion_blocker(state, working_dir)
+                if blocker is not None:
+                    incomplete_name, recovery_arg, _append_allowed = blocker
                     state["errors"].append(
                         f"[incomplete_write] {incomplete_name} at "
                         f"{recovery_arg}: completion refused"
