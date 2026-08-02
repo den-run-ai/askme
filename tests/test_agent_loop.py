@@ -364,7 +364,7 @@ class TestRunLogSink:
 
     @patch("askme.ask_llm")
     def test_run_log_step_carries_discovery_truncation_reasons(self, mock_llm, tmp_path, work_dir):
-        """Capped search/tree steps keep their compact cap reasons in JSONL (issue #42)."""
+        """Discovery cap reasons reach JSONL and subsequent executor context (issue #42)."""
         import askme
 
         Path(work_dir, "notes.txt").write_text(
@@ -375,7 +375,7 @@ class TestRunLogSink:
             deep = deep / part
             deep.mkdir()
         (deep / "too_deep.txt").write_text("x")
-        mock_llm.side_effect = [
+        responses = [
             {"tasks": ["survey hit lines", "map the layout"]},
             {"action": "search", "arg": "hit line", "reasoning": "scan"},
             {"action": "search", "arg": "hit line 29", "reasoning": "narrow"},
@@ -383,6 +383,13 @@ class TestRunLogSink:
             {"action": "tree", "arg": ".", "reasoning": "map"},
             {"action": "done", "reasoning": "done"},
         ]
+        llm_calls = []
+
+        def scripted_llm(messages, **_kwargs):
+            llm_calls.append(messages)
+            return responses[len(llm_calls) - 1]
+
+        mock_llm.side_effect = scripted_llm
         log_path = tmp_path / "run.jsonl"
         old = askme.RUN_LOG_PATH
         askme.RUN_LOG_PATH = str(log_path)
@@ -390,15 +397,18 @@ class TestRunLogSink:
             askme.run("survey the workspace", work_dir)
         finally:
             askme.RUN_LOG_PATH = old
+        assert len(llm_calls) == len(responses)
+        assert "incomplete: matches" in llm_calls[2][-1]["content"]
+        assert "incomplete: depth" in llm_calls[5][-1]["content"]
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         capped_search, exact_search, tree_step = [e for e in events if e["event"] == "step"]
         assert capped_search["truncated"] is True
-        assert "matches" in capped_search["truncation_reasons"]
+        assert capped_search["truncation_reasons"] == ["matches"]
         # A complete observation must not grow either truncation key.
         assert "truncated" not in exact_search
         assert "truncation_reasons" not in exact_search
         assert tree_step["truncated"] is True
-        assert "depth" in tree_step["truncation_reasons"]
+        assert tree_step["truncation_reasons"] == ["depth"]
 
     @patch("askme.ask_llm")
     def test_run_log_disabled_when_env_unset(self, mock_llm, tmp_path, work_dir):
