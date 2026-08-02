@@ -1,8 +1,30 @@
 # AskMe
 
-Minimal agent that runs on local LLMs. Takes a prompt, plans tasks, executes them via shell/write/edit/read/search/tree actions, and replans on failure. Single file, no frameworks, no dependencies beyond `requests`.
+AskMe began with a simple dream: a small open model on my MacBook, through
+`llama.cpp`, helping with real coding work anywhere—even on a plane without
+Wi-Fi. This repository is a progress report toward that fully local coding
+agent.
 
-Built for Gemma 4 E4B on llama-server, also supports OpenRouter.
+The project explores whether a tight, minimal harness can make small models
+more useful: keep context lean, ask for one structured action at a time,
+execute it, return fresh evidence, preserve completed work, and repair locally
+before replanning broadly. The goal is not to lower the standard for small
+models, but to judge delivered behavior—and to evaluate the model, harness,
+task, and evaluator as one system.
+
+I presented this motivation, the design bets, early evidence, and remaining
+gaps in [*Are Small LLMs Ready for Coding
+Agents?*](talks/berkeley-agentic-ai-summit-2026/README.md), a five-minute
+lightning talk at the 2026 Agentic AI Summit at UC Berkeley
+([slides](talks/berkeley-agentic-ai-summit-2026/slides.pdf),
+[speaker script](talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md)).
+The current answer is deliberately cautious: bounded loops look promising,
+but realistic feature readiness remains open.
+
+Today, AskMe is a minimal, single-file Python agent with no frameworks and no
+dependencies beyond `requests`. It takes a prompt, plans tasks, executes them
+via shell/write/edit/read/search/tree actions, and replans on failure. It is
+built for Gemma 4 E4B on `llama-server` and also supports OpenRouter.
 
 ## Quick Start
 
