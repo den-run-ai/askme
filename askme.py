@@ -112,6 +112,10 @@ def _merge_effort(think_level):
 # Execution policy — controls what the agent is allowed to do
 ALLOW_SYSTEM_INSTALLS = os.environ.get("ALLOW_SYSTEM_INSTALLS", "0") == "1"
 ALLOW_NETWORK = os.environ.get("ALLOW_NETWORK", "1") == "1"
+# Ablation switch for the tracked #41 C-header repair path. Default on keeps
+# current behavior; the preregistered ablation (docs/ablation-compile-repair.md)
+# runs its off arm with AGENT_COMPILE_REPAIR=0 at one pinned revision.
+COMPILE_REPAIR_ENABLED = os.environ.get("AGENT_COMPILE_REPAIR", "1") == "1"
 
 if LLM_BACKEND == "openrouter":
     API = "https://openrouter.ai/api/v1/chat/completions"
@@ -1590,6 +1594,8 @@ def _compile_repair_candidates(error_output, cmd, working_dir):
 
 def _try_compile_repair(error_output, working_dir, cmd):
     """Apply a narrow deterministic source repair. Returns (file, desc) or None."""
+    if not COMPILE_REPAIR_ENABLED:
+        return None
     for pattern in _COMPILE_REPAIR_PATTERNS:
         if not pattern["diagnostic_re"].search(error_output):
             continue
