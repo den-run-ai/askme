@@ -1,5 +1,9 @@
 # AskMe
 
+[![Tests](https://img.shields.io/github/actions/workflow/status/den-run-ai/askme/ci.yml?branch=main&label=tests)](https://github.com/den-run-ai/askme/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage gate: ≥90%](https://img.shields.io/github/actions/workflow/status/den-run-ai/askme/ci.yml?branch=main&label=coverage%20%E2%89%A590%25)](https://github.com/den-run-ai/askme/actions/workflows/ci.yml?query=branch%3Amain)
+[![LLM evals](https://img.shields.io/github/actions/workflow/status/den-run-ai/askme/llm.yml?branch=main&label=LLM%20evals)](https://github.com/den-run-ai/askme/actions/workflows/llm.yml?query=branch%3Amain)
+
 AskMe began with a simple dream: a small open model on my MacBook, through
 `llama.cpp`, helping with real coding work anywhere—even on a plane without
 Wi-Fi. This repository is a progress report toward that fully local coding
