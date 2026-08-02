@@ -27,12 +27,13 @@ def test_unit_workflow_stays_hermetic():
 
 def test_unit_workflow_gates_quality_compatibility_and_coverage():
     text = UNIT_WORKFLOW.read_text(encoding="utf-8")
-    assert "uv run --locked ruff check askme.py tests" in text
-    assert "uv run --locked ruff format --check askme.py tests" in text
+    assert "uv run --locked ruff check askme.py actions.py tests" in text
+    assert "uv run --locked ruff format --check askme.py actions.py tests" in text
     assert "uv run --locked ty check" in text
     assert "mypy" not in text
     assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in text
     assert "--cov=askme" in text
+    assert "--cov=actions" in text
     assert "--cov-report=xml:coverage.xml" in text
     assert text.count("uv sync --locked") == 2
     assert text.count("astral-sh/setup-uv@") == 2

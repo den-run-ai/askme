@@ -3,14 +3,11 @@
 Requires: requests. Expects llama-server on localhost:8080."""
 
 import argparse
-import bisect
-import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -18,6 +15,39 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+import actions as _actions
+from actions import (
+    ACTION_SPECS,
+    OBSERVE_ACTIONS,
+    OBSERVE_STATE_CHARS,
+    SHELL_TIMEOUT_LONG,
+    SHELL_TIMEOUT_MAX,
+    ActionExecutor,
+    ActionResult,
+    StepReceipt,
+    _get_shell_timeout,
+    _mutation_target_key,
+    _read_key,
+    _step_path,
+    _target_recovery_arg,
+    _valid_nonempty_str,
+)
+
+# Compatibility re-exports (issue #36): the action layer lives in actions.py;
+# tests and downstream code keep importing these names from askme.
+MAX_RESULT = _actions.MAX_RESULT
+READ_CHARS = _actions.READ_CHARS
+READ_LIMIT_MAX = _actions.READ_LIMIT_MAX
+READ_LINES = _actions.READ_LINES
+SEARCH_MAX_CHARS = _actions.SEARCH_MAX_CHARS
+SEARCH_MAX_FILES = _actions.SEARCH_MAX_FILES
+SEARCH_MAX_MATCHES = _actions.SEARCH_MAX_MATCHES
+SHELL_TIMEOUT = _actions.SHELL_TIMEOUT
+TREE_MAX_CHARS = _actions.TREE_MAX_CHARS
+TREE_MAX_DEPTH = _actions.TREE_MAX_DEPTH
+TREE_MAX_ENTRIES = _actions.TREE_MAX_ENTRIES
+classify_error = _actions.classify_error
 
 
 def log(msg):
@@ -149,7 +179,6 @@ LLM_TIMEOUT_REPLAN = 180  # replans carry heavier state + thinking
 MAX_REPLANS = 3  # Total planning attempts (initial plan + up to 2 replans)
 MAX_TASKS = 10
 MAX_STEPS = 10
-MAX_RESULT = 300  # chars kept from command output
 MAX_STEP_HISTORY = 3  # sliding window of recent steps sent to executor
 
 # Write-forcing executor policy (issue #15): on a write-shaped task,
@@ -184,17 +213,6 @@ def _is_write_shaped(task):
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
 # stay navigable without blowing up executor state.
-READ_LINES = 60  # max lines per read window
-READ_CHARS = 1200  # max Unicode code points per read page
-READ_LIMIT_MAX = 200  # hard cap on model-specified read limit
-SEARCH_MAX_MATCHES = 15  # bounded literal search results
-SEARCH_MAX_CHARS = 1500  # bounded search output
-SEARCH_MAX_FILES = 500  # bounded search scan
-TREE_MAX_ENTRIES = 60  # bounded repository-tree listing
-TREE_MAX_CHARS = 1500  # bounded tree output
-TREE_MAX_DEPTH = 3  # bounded tree walk depth
-OBSERVE_ACTIONS = frozenset({"read", "search", "tree"})
-OBSERVE_STATE_CHARS = 1500  # executor-state budget for observation step output
 # Backend-aware output budgets (issue #15): small caps are a wall-clock
 # necessity at ~7 tok/s locally but a pure artifact on OpenRouter, where an
 # 8KB implementation file is ~3000 tokens and can never fit under 512/1536.
@@ -267,7 +285,7 @@ Rules:
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
-Actions: shell, write, edit, read, search, tree, done, fail.
+Actions: __ACTION_NAMES__.
 read: initial pages take "offset"/"limit" (1-based lines); continuation pages must echo
       the output's "cursor", "limit", and "sha256". Cursors count Unicode code points.
 search: literal pattern in "arg", optional "path" (default "."); bounded matches
@@ -279,7 +297,9 @@ write content may follow the JSON between sentinel lines instead of "content":
 raw file lines, no escaping
 CONTENT>>>
 edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
-Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}"""
+Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}""".replace(
+    "__ACTION_NAMES__", ", ".join(ACTION_SPECS)
+)
 
 
 MAX_LLM_RETRIES = 2
@@ -319,43 +339,26 @@ def _repair_json(text):
         return None
 
 
-def _valid_nonempty_str(value):
-    return isinstance(value, str) and bool(value.strip())
-
-
 def _validate_action_contract(obj):
-    """Return True for planner/validator dicts and complete action dicts."""
+    """Return True for planner/validator dicts and complete action dicts.
+
+    Required fields and per-action contracts come from ACTION_SPECS (issue
+    #36). Unknown actions pass here so the run loop can record them as an
+    executed step with a typed dispatch error, not a decode failure.
+    """
     if not isinstance(obj, dict) or "action" not in obj:
         return True
-    action = obj.get("action", "")
-    if action == "write":
-        content = obj.get("content")
-        return _valid_nonempty_str(obj.get("arg")) and (
-            _valid_nonempty_str(content) or isinstance(content, (dict, list))
-        )
-    if action == "edit":
-        return (
-            _valid_nonempty_str(obj.get("arg"))
-            and _valid_nonempty_str(obj.get("find"))
-            and "replace" in obj
-        )
-    if action == "read":
-        if not _valid_nonempty_str(obj.get("arg")):
-            return False
-        if "cursor" not in obj:
-            return True
-        try:
-            cursor = _read_cursor(obj)
-        except ValueError:
-            return False
-        try:
-            _read_continuation_limit(obj)
-        except ValueError:
-            return False
-        return cursor is not None and _valid_nonempty_str(obj.get("sha256"))
-    if action in ("shell", "search"):
-        return _valid_nonempty_str(obj.get("arg"))
-    return True
+    act = obj.get("action", "")
+    if not isinstance(act, str):
+        # Valid JSON can carry an unhashable action name ({"action": []});
+        # reject it as malformed instead of letting the registry lookup raise.
+        return False
+    spec = ACTION_SPECS.get(act)
+    if spec is None:
+        return True
+    if not all(_valid_nonempty_str(obj.get(name)) for name in spec.requires):
+        return False
+    return spec.contract(obj) if spec.contract else True
 
 
 def _accept_or_raise(obj, text):
@@ -749,6 +752,8 @@ _KNOWN_ERROR_TYPES = {
     "edit_failed",
     "stuck_loop",
     "unknown",
+    "unknown_action",
+    "control_action",
     "malformed_action",
     "response_truncated",
     "invalid_read_cursor",
@@ -848,31 +853,6 @@ def _step_digest(steps, count=6):
     return digest
 
 
-def _mutation_target_key(step, working_dir=None):
-    """Stable operation-aware identity for write/edit transition tracking."""
-    target = step.get("_target")
-    if _valid_nonempty_str(target):
-        return target
-    arg = step.get("arg", "")
-    if not _valid_nonempty_str(arg):
-        return None
-    if working_dir is not None:
-        path = _step_path(arg, working_dir)
-        lexical = os.path.abspath(os.fspath(path))
-        try:
-            if step.get("append") or step.get("_append"):
-                # Append opens the target directly and follows a leaf symlink.
-                path = path.resolve(strict=False)
-            else:
-                # Atomic overwrite/edit replaces a leaf symlink rather than
-                # mutating its referent. Resolve directory aliases only.
-                path = path.parent.resolve(strict=False) / path.name
-        except (OSError, RuntimeError, ValueError):
-            path = Path(lexical)
-        return os.path.normcase(os.path.normpath(os.fspath(path)))
-    return os.path.normcase(os.path.normpath(arg))
-
-
 def _unresolved_incomplete_writes(steps, working_dir=None):
     """Latest unresolved truncated writes, keyed by normalized target.
 
@@ -891,16 +871,6 @@ def _unresolved_incomplete_writes(steps, working_dir=None):
         else:
             unresolved.pop(target, None)
     return unresolved
-
-
-def _target_recovery_arg(target, working_dir):
-    """Action-ready spelling for a frozen mutation target."""
-    if not _valid_nonempty_str(target):
-        return None
-    # Keep the canonical absolute identity. A relative spelling can silently
-    # retarget if the working-directory path (or one of its parents) is itself
-    # a symlink changed by a shell step during recovery.
-    return target
 
 
 def _incomplete_step_hint(target, step):
@@ -1423,13 +1393,6 @@ def _should_validate(replan, history, state, user_prompt):
     return False
 
 
-def _step_path(arg, working_dir):
-    p = Path(arg)
-    if not p.is_absolute():
-        p = Path(working_dir) / p
-    return p
-
-
 def _deterministic_check(user_prompt, state, working_dir):
     """Conservative completion check. Returns True, False, or None."""
     all_steps = state.get("all_steps", [])
@@ -1535,63 +1498,6 @@ def _has_new_validation_evidence(state):
         s.get("action") in ("write", "edit", "shell") and s.get("ok")
         for s in state.get("all_steps", [])[start:]
     )
-
-
-_COMPILER_EXES = frozenset(
-    {
-        "cc",
-        "gcc",
-        "g++",
-        "clang",
-        "clang++",
-        "c++",
-        "rustc",
-        "javac",
-        "make",
-        "cmake",
-        "cargo",
-        "go",
-        "tsc",
-        "swiftc",
-    }
-)
-
-
-def _is_compiler_command(cmd):
-    """Check if a shell command invokes a compiler or build tool."""
-    try:
-        parts = shlex.split(cmd)
-    except ValueError:
-        parts = cmd.split()
-    if not parts:
-        return False
-    exe = os.path.basename(parts[0])
-    return exe in _COMPILER_EXES
-
-
-def classify_error(output, action="shell", cmd=""):
-    """Classify an error output into a typed category for structured diagnostics."""
-    out = output.lower()
-    if "timeout" in out or output == "TIMEOUT":
-        return "timeout"
-    if "command not found" in out:
-        return "missing_tool"
-    if "permission denied" in out:
-        return "permission_denied"
-    if "no such file" in out or "no such file or directory" in out:
-        if action == "shell" and cmd and _is_compiler_command(cmd):
-            return "compile_error"
-        return "missing_file"
-    if action == "shell" and cmd and _is_compiler_command(cmd):
-        if re.search(
-            r"error generated|implicit function declaration|undeclared (?:library )?function|"
-            r"include the header <[^>]+>|undefined reference|undefined symbols",
-            out,
-        ):
-            return "compile_error"
-    if "syntax error" in out or "error:" in out:
-        return "compile_error"
-    return "unknown"
 
 
 _EXPECTED_FAILURE_POS_RE = re.compile(
@@ -1748,170 +1654,6 @@ def _task_satisfied_by_deterministic_repair(task, state):
     return None
 
 
-# Command patterns that need longer timeouts
-_LONG_TIMEOUT_PATTERNS = [
-    "install",
-    "update",
-    "upgrade",  # package managers
-    "cmake",
-    "make",
-    "cargo build",
-    "go build",  # build tools
-    "npm install",
-    "pip install",
-    "brew ",  # specific installers
-]
-SHELL_TIMEOUT = 30  # default
-SHELL_TIMEOUT_LONG = 120  # for install/build commands
-SHELL_TIMEOUT_MAX = 300  # hard cap for model-specified timeout
-
-
-def _get_shell_timeout(cmd, hint=None):
-    """Return timeout for a shell command. Uses longer timeout for install/build patterns."""
-    if hint is not None:
-        return min(max(int(hint), 5), SHELL_TIMEOUT_MAX)
-    cmd_lower = cmd.lower()
-    for pattern in _LONG_TIMEOUT_PATTERNS:
-        if pattern in cmd_lower:
-            return SHELL_TIMEOUT_LONG
-    return SHELL_TIMEOUT
-
-
-def _atomic_write_text(path, content):
-    """Write via temp file + rename so a crashed/interrupted write never
-    leaves a partial file behind."""
-    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
-    tmp.write_text(content)
-    os.replace(tmp, path)
-
-
-# VCS / dependency / build directories excluded from search and tree walks.
-_REPO_SKIP_DIRS = frozenset(
-    {
-        ".git",
-        ".hg",
-        ".svn",
-        "node_modules",
-        "__pycache__",
-        ".venv",
-        "venv",
-        "target",
-        "dist",
-        "build",
-    }
-)
-
-
-def _iter_repo_files(root, max_files=SEARCH_MAX_FILES, on_error=None):
-    """Yield visible repo files under root, bounded and deterministic."""
-    count = 0
-    for dirpath, dirnames, filenames in os.walk(root, onerror=on_error):
-        dirnames[:] = sorted(
-            d for d in dirnames if d not in _REPO_SKIP_DIRS and not d.startswith(".")
-        )
-        for name in sorted(filenames):
-            if name.startswith("."):
-                continue
-            yield Path(dirpath) / name
-            count += 1
-            if count >= max_files:
-                return
-
-
-def _pack_observation_lines(make_header, records, reasons, max_chars):
-    """Pack complete discovery records, including the header, within a cap."""
-
-    def pack(active_reasons):
-        header = make_header(active_reasons)
-        kept = []
-        used = len(header)
-        for record in records:
-            extra = 1 + len(record)
-            if used + extra > max_chars:
-                break
-            kept.append(record)
-            used += extra
-        output = header + ("\n" + "\n".join(kept) if kept else "")
-        return output, kept
-
-    output, kept = pack(reasons)
-    if len(kept) == len(records):
-        return output, reasons
-    final_reasons = [*reasons, "chars"]
-    output, _ = pack(final_reasons)
-    return output, final_reasons
-
-
-def _read_offset_limit(action):
-    """Normalized 1-based read window (offset, limit) from an action dict."""
-    try:
-        offset = max(1, int(action.get("offset") or 1))
-    except (TypeError, ValueError):
-        offset = 1
-    try:
-        limit = max(1, min(int(action.get("limit") or READ_LINES), READ_LIMIT_MAX))
-    except (TypeError, ValueError):
-        limit = READ_LINES
-    return offset, limit
-
-
-def _read_cursor(action):
-    """Normalized 0-based Unicode-code-point cursor, or None for a line read."""
-    if "cursor" not in action:
-        return None
-    raw = action.get("cursor")
-    if isinstance(raw, bool):
-        raise ValueError("read cursor must be a non-negative integer")
-    if isinstance(raw, int):
-        cursor = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        cursor = int(raw.strip())
-    else:
-        raise ValueError("read cursor must be a non-negative integer")
-    if cursor < 0:
-        raise ValueError("read cursor must be a non-negative integer")
-    return cursor
-
-
-def _read_continuation_limit(action):
-    """Strict line limit echoed by an action-ready cursor continuation."""
-    raw = action.get("limit")
-    if isinstance(raw, bool):
-        raise ValueError("read continuation limit must be an integer")
-    if isinstance(raw, int):
-        limit = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        limit = int(raw.strip())
-    else:
-        raise ValueError("read continuation limit must be an integer")
-    if not 1 <= limit <= READ_LIMIT_MAX:
-        raise ValueError("read continuation limit is out of range")
-    return limit
-
-
-def _read_key(action):
-    """Identity for duplicate-read detection, including every range field."""
-    arg = action.get("arg", "")
-    try:
-        cursor = _read_cursor(action)
-    except ValueError:
-        return (arg, "invalid_cursor", repr(action.get("cursor")), action.get("sha256") or "")
-    if cursor is not None:
-        try:
-            limit = _read_continuation_limit(action)
-        except ValueError:
-            return (
-                arg,
-                "invalid_cursor_limit",
-                cursor,
-                repr(action.get("limit")),
-                action.get("sha256") or "",
-            )
-        return (arg, "cursor", cursor, limit, action.get("sha256") or "")
-    offset, limit = _read_offset_limit(action)
-    return (arg, "lines", offset, limit)
-
-
 def _read_continuation_hint(continuation):
     """Render an action-ready continuation for the executor prompt."""
     if isinstance(continuation, dict):
@@ -1925,397 +1667,73 @@ def _read_continuation_hint(continuation):
 
 
 def execute(action, working_dir="."):
-    act = action.get("action", "")
-    if act == "shell":
-        try:
-            timeout = _get_shell_timeout(action["arg"], action.get("timeout"))
-            r = subprocess.run(
-                action["arg"],
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=working_dir,
-            )
-            out = r.stdout[:MAX_RESULT] + r.stderr[-MAX_RESULT:]
-            result = {"ok": r.returncode == 0, "output": out.strip() or "(no output)"}
-            if not result["ok"]:
-                result["error_type"] = classify_error(result["output"], "shell", cmd=action["arg"])
-            return result
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "output": "TIMEOUT", "error_type": "timeout"}
-    elif act == "write":
-        try:
-            p = Path(action["arg"])
-            if not p.is_absolute():
-                p = Path(working_dir) / p
-            p.parent.mkdir(parents=True, exist_ok=True)
-            content = action.get("content", "")
-            # Auto-serialize dict/list content — models often output JSON as objects
-            # instead of escaped strings (e.g. "content": {"key": "val"} not "content": "{\"key\": \"val\"}")
-            if isinstance(content, (dict, list)):
-                content = json.dumps(content, indent=2)
-            if action.get("append"):
-                # Chunked-write transport: append one chunk at a time so large
-                # files fit within the executor token budget.
-                existed = p.exists()
-                with open(p, "a") as f:
-                    f.write(content)
-                size = p.stat().st_size
-                verb = "Appended to" if existed else "Wrote"
-                return {
-                    "ok": True,
-                    "output": f"{verb} {p.name} (+{len(content)} chars, total {size})",
-                }
-            _atomic_write_text(p, content)
-            return {"ok": True, "output": f"Wrote {p.name}"}
-        except Exception as e:
-            out = str(e)[:MAX_RESULT]
-            return {"ok": False, "output": out, "error_type": classify_error(out, "write")}
-    elif act == "edit":
-        try:
-            p = Path(action["arg"])
-            if not p.is_absolute():
-                p = Path(working_dir) / p
-            if not p.exists():
-                return {
-                    "ok": False,
-                    "output": f"File not found: {p.name}",
-                    "error_type": "missing_file",
-                }
-            text = p.read_text()
-            find = action.get("find", "")
-            replace = action.get("replace", "")
-            if not find:
-                return {
-                    "ok": False,
-                    "output": "edit requires non-empty 'find'",
-                    "error_type": "edit_failed",
-                }
-            count = text.count(find)
-            if count == 0:
-                return {
-                    "ok": False,
-                    "output": f"No match for find string in {p.name}",
-                    "error_type": "edit_failed",
-                }
-            if count > 1:
-                return {
-                    "ok": False,
-                    "output": f"Ambiguous: find string matches {count} times in {p.name}",
-                    "error_type": "edit_failed",
-                }
-            _atomic_write_text(p, text.replace(find, replace, 1))
-            return {"ok": True, "output": f"Edited {p.name}"}
-        except Exception as e:
-            out = str(e)[:MAX_RESULT]
-            return {"ok": False, "output": out, "error_type": classify_error(out, "edit")}
-    elif act == "read":
-        try:
-            p = Path(action["arg"])
-            if not p.is_absolute():
-                p = Path(working_dir) / p
-            raw = p.read_bytes()
-            text = raw.decode("utf-8")
-            lines = text.splitlines(keepends=True)
-            total = len(lines)
-            offset, limit = _read_offset_limit(action)
-            # Hash the exact bytes whose decoded text is paged. Continuation
-            # cursors count Python Unicode code points, not UTF-8 bytes or
-            # grapheme clusters, and are valid only for this source hash.
-            meta = {
-                "total_lines": total,
-                "total_bytes": len(raw),
-                "total_chars": len(text),
-                "sha256": hashlib.sha256(raw).hexdigest()[:12],
-            }
-            try:
-                cursor = _read_cursor(action)
-            except ValueError:
-                return {
-                    "ok": False,
-                    "truncated": False,
-                    "content": "",
-                    "continuation": None,
-                    "output": (f"[{p.name}: read cursor must be a non-negative integer]"),
-                    "error_type": "invalid_read_cursor",
-                    **meta,
-                }
-            if cursor is not None:
-                try:
-                    limit = _read_continuation_limit(action)
-                except ValueError:
-                    return {
-                        "ok": False,
-                        "truncated": False,
-                        "content": "",
-                        "continuation": None,
-                        "output": (
-                            f"[{p.name}: read continuation limit "
-                            f"must be an integer from 1 to "
-                            f"{READ_LIMIT_MAX}]"
-                        ),
-                        "error_type": "invalid_read_limit",
-                        **meta,
-                    }
-            expected_hash = action.get("sha256")
-            if cursor is not None and not expected_hash:
-                return {
-                    "ok": False,
-                    "truncated": False,
-                    "content": "",
-                    "continuation": None,
-                    "output": (
-                        f"[{p.name}: read cursor requires the source sha256 from its continuation]"
-                    ),
-                    "error_type": "read_cursor_hash_required",
-                    **meta,
-                }
-            if cursor is not None and expected_hash and expected_hash != meta["sha256"]:
-                return {
-                    "ok": False,
-                    "truncated": False,
-                    "content": "",
-                    "continuation": None,
-                    "output": (
-                        f"[{p.name}: stale read cursor; source changed "
-                        f"({expected_hash} -> {meta['sha256']})]"
-                    ),
-                    "error_type": "stale_read_cursor",
-                    **meta,
-                }
-            if cursor is None and offset > total:
-                return {
-                    "ok": True,
-                    "truncated": False,
-                    "content": "",
-                    "continuation": None,
-                    "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
-                    **meta,
-                }
-            if cursor is not None and cursor >= len(text):
-                return {
-                    "ok": False,
-                    "truncated": False,
-                    "content": "",
-                    "continuation": None,
-                    "output": (
-                        f"[{p.name}: read cursor {cursor} must point "
-                        f"before end of file ({len(text)} chars)]"
-                    ),
-                    "error_type": "invalid_read_cursor",
-                    **meta,
-                }
+    """Dispatch one action and return the legacy result dict.
 
-            starts = []
-            pos = 0
-            for line in lines:
-                starts.append(pos)
-                pos += len(line)
-            if cursor is None:
-                start = starts[offset - 1]
-                start_line_index = offset - 1
-            else:
-                start = cursor
-                start_line_index = max(0, bisect.bisect_right(starts, start) - 1)
-            window_end_index = min(total, start_line_index + limit)
-            window_end = starts[window_end_index] if window_end_index < total else len(text)
-            page_cap = READ_CHARS
-            while True:
-                page_end = min(start + page_cap, window_end)
-                body = text[start:page_end]
-                last_line_index = max(
-                    start_line_index,
-                    bisect.bisect_right(starts, max(start, page_end - 1)) - 1,
-                )
-                end = last_line_index + 1
-                continuation = None
-                if page_end < len(text):
-                    next_line_index = max(0, bisect.bisect_right(starts, page_end) - 1)
-                    continuation = {
-                        "cursor": page_end,
-                        "offset": next_line_index + 1,
-                        "limit": limit,
-                        "sha256": meta["sha256"],
-                    }
-                header = f"[{p.name}: lines {start_line_index + 1}-{end} of {total}"
-                if page_end < window_end:
-                    header += f", cut at {len(body)} chars"
-                if continuation:
-                    header += (
-                        f"; continue: cursor={continuation['cursor']}, "
-                        f"limit={continuation['limit']}, "
-                        f"sha256={continuation['sha256']}"
-                    )
-                header += "]"
-                output = f"{header}\n{body}"
-                overflow = len(output) - OBSERVE_STATE_CHARS
-                if overflow <= 0 or page_cap == 1:
-                    break
-                page_cap = max(1, page_cap - overflow)
-            truncated = continuation is not None
-            return {
-                "ok": True,
-                "output": output,
-                "truncated": truncated,
-                "content": body,
-                "continuation": continuation,
-                **meta,
-            }
-        except Exception as e:
-            out = str(e)[:MAX_RESULT]
-            return {"ok": False, "output": out, "error_type": classify_error(out, "read")}
-    elif act == "search":
-        pattern = action.get("arg", "")
-        if not pattern:
-            return {
-                "ok": False,
-                "output": "search requires non-empty 'arg' (pattern)",
-                "error_type": "unknown",
-            }
-        try:
-            base = Path(action.get("path") or ".")
-            if not base.is_absolute():
-                base = Path(working_dir) / base
-            if not base.is_dir():
-                return {
-                    "ok": False,
-                    "output": f"Directory not found: {base.name}",
-                    "error_type": "missing_file",
-                }
-            walk_errors: list[OSError] = []
-            files = list(_iter_repo_files(base, SEARCH_MAX_FILES + 1, on_error=walk_errors.append))
-            file_limited = len(files) > SEARCH_MAX_FILES
-            matches = []
-            snippets_limited = False
-            unreadable = 0
-            for f in files[:SEARCH_MAX_FILES]:
-                try:
-                    text = f.read_text(errors="replace")
-                except OSError:
-                    unreadable += 1
-                    continue
-                if "\0" in text[:2048]:
-                    continue  # skip binary files
-                for lineno, line in enumerate(text.splitlines(), 1):
-                    if pattern in line:
-                        snippet = line.strip()
-                        if len(snippet) > 100:
-                            snippet = snippet[:99] + "…"
-                            snippets_limited = True
-                        matches.append(f"{f.relative_to(base)}:{lineno}: {snippet}")
-                        if len(matches) > SEARCH_MAX_MATCHES:
-                            break
-                if len(matches) > SEARCH_MAX_MATCHES:
-                    break
-            match_limited = len(matches) > SEARCH_MAX_MATCHES
-            shown = matches[:SEARCH_MAX_MATCHES]
-            reasons = []
-            if match_limited:
-                reasons.append("matches")
-            if file_limited:
-                reasons.append("files")
-            if snippets_limited:
-                reasons.append("snippets")
-            if unreadable:
-                reasons.append("unreadable")
-            if walk_errors:
-                reasons.append("walk_errors")
+    Compatibility façade: tests and downstream code patch or call this seam,
+    so the run loop routes every dispatch — including deterministic retries —
+    through it.
+    """
+    return ActionExecutor(working_dir).dispatch(action).to_dict()
 
-            def search_header(active_reasons):
-                marker = (
-                    "+" if any(r in active_reasons for r in ("matches", "files", "chars")) else ""
-                )
-                header = f"[{len(shown)}{marker} matches for '{pattern[:40]}'"
-                if active_reasons:
-                    header += (
-                        " — incomplete: "
-                        + ", ".join(active_reasons)
-                        + "; narrow the pattern/path or read the file"
-                    )
-                return header + "]"
 
-            output, reasons = _pack_observation_lines(
-                search_header, shown, reasons, min(SEARCH_MAX_CHARS, OBSERVE_STATE_CHARS)
-            )
-            truncated = bool(reasons)
-            return {
-                "ok": True,
-                "output": output,
-                "truncated": truncated,
-                "truncation_reasons": reasons,
+class StepRecorder:
+    """The single record-and-count path for controller steps (issue #36).
+
+    Counter semantics: ``selected`` counts every decoded model action,
+    including ``done``/``fail``; ``executed`` counts model actions dispatched
+    to handlers (deterministic repair/retry receipts are recorded but never
+    counted as executed); ``skipped`` counts selected actions a controller
+    guard suppressed before dispatch. Per attempt, selected == executed +
+    skipped + accepted control actions.
+    """
+
+    def __init__(self, state, history):
+        self.state = state
+        self.history = history
+
+    def selected(self):
+        self.state["selected_steps"] += 1
+
+    def executed(self):
+        self.state["executed_steps"] += 1
+
+    def skip(self, task_index, step, act, action, reason):
+        """Record a selected-but-not-dispatched action in run metrics + log."""
+        self.state["skipped_steps"] += 1
+        _run_log(
+            {
+                "event": "step_skipped",
+                "task_index": task_index,
+                "step": step,
+                "action": act,
+                "arg": action.get("arg", "")[:120],
+                "reason": reason,
             }
-        except Exception as e:
-            out = str(e)[:MAX_RESULT]
-            return {"ok": False, "output": out, "error_type": classify_error(out, "search")}
-    elif act == "tree":
-        try:
-            base = Path(action.get("arg") or ".")
-            if not base.is_absolute():
-                base = Path(working_dir) / base
-            if not base.is_dir():
-                return {
-                    "ok": False,
-                    "output": f"Directory not found: {base.name}",
-                    "error_type": "missing_file",
-                }
-            entries: list[str] = []
-            depth_limited = False
-            walk_errors = []
-            root_depth = len(base.parts)
-            for dirpath, dirnames, filenames in os.walk(base, onerror=walk_errors.append):
-                depth = len(Path(dirpath).parts) - root_depth
-                dirnames[:] = sorted(
-                    d for d in dirnames if d not in _REPO_SKIP_DIRS and not d.startswith(".")
-                )
-                if depth >= TREE_MAX_DEPTH:
-                    if dirnames:
-                        depth_limited = True
-                    dirnames[:] = []
-                rel_dir = Path(dirpath).relative_to(base)
-                prefix = "" if str(rel_dir) == "." else f"{rel_dir}/"
-                entries.extend(f"{prefix}{d}/" for d in dirnames)
-                entries.extend(
-                    f"{prefix}{name}" for name in sorted(filenames) if not name.startswith(".")
-                )
-                if len(entries) > TREE_MAX_ENTRIES:
-                    break
-            entry_limited = len(entries) > TREE_MAX_ENTRIES
-            shown = entries[:TREE_MAX_ENTRIES]
-            reasons = []
-            if entry_limited:
-                reasons.append("entries")
-            if depth_limited:
-                reasons.append("depth")
-            if walk_errors:
-                reasons.append("walk_errors")
+        )
 
-            def tree_header(active_reasons):
-                header = f"[tree of {base.name}: {len(shown)} entries"
-                if "entries" in active_reasons:
-                    header += f", capped at {TREE_MAX_ENTRIES}"
-                if active_reasons:
-                    header += " — incomplete: " + ", ".join(active_reasons) + "; narrow the path"
-                return header + "]"
+    def note(self, entry):
+        """Model-visible corrective observation: enters the sliding window
+        only, never the run-wide structured record or the JSONL log."""
+        self.state["last_steps"].append(entry)
 
-            output, reasons = _pack_observation_lines(
-                tree_header, shown, reasons, min(TREE_MAX_CHARS, OBSERVE_STATE_CHARS)
-            )
-            truncated = bool(reasons)
-            return {
-                "ok": True,
-                "output": output,
-                "truncated": truncated,
-                "truncation_reasons": reasons,
-            }
-        except Exception as e:
-            out = str(e)[:MAX_RESULT]
-            return {"ok": False, "output": out, "error_type": classify_error(out, "tree")}
-    elif act == "done":
-        return {"ok": True, "output": "task_complete"}
-    elif act == "fail":
-        return {"ok": False, "output": action.get("reasoning", "failed")}
-    return {"ok": False, "output": f"unknown action: {act}"}
+    def record(self, receipt, task_index, step, wall_s=None):
+        """Append a receipt to every projection; returns the live entry."""
+        entry = receipt.entry
+        self.state["last_steps"].append(entry)
+        self.state["all_steps"].append(dict(entry))
+        self.history.append(receipt.history_event(task_index, step))
+        _run_log(receipt.jsonl_event(task_index, step, wall_s))
+        return entry
+
+    def annotate_last(self, key, value):
+        """Set a controller annotation on the newest recorded step."""
+        self.state["last_steps"][-1][key] = value
+        self.state["all_steps"][-1][key] = value
+
+    def append_recovery_hint(self, hint):
+        """Suffix the newest recorded step's output with a recovery hint."""
+        for steps in (self.state["last_steps"], self.state["all_steps"]):
+            steps[-1]["output"] = steps[-1]["output"][:100] + f" → {hint}"
 
 
 def _run_loop(
@@ -2363,20 +1781,7 @@ def _run_loop(
         "skipped_steps": 0,
     }
     history = []
-
-    def _skip_step(task_index, step_num, act, action, reason):
-        """Record a selected-but-not-dispatched action in run metrics + log."""
-        state["skipped_steps"] += 1
-        _run_log(
-            {
-                "event": "step_skipped",
-                "task_index": task_index,
-                "step": step_num,
-                "action": act,
-                "arg": action.get("arg", "")[:120],
-                "reason": reason,
-            }
-        )
+    recorder = StepRecorder(state, history)
 
     t_run = time.time()
     log(f"Prompt: {user_prompt}")
@@ -2561,7 +1966,7 @@ def _run_loop(
                         if action.get(_k) is None:
                             action[_k] = ""
                     act = action.get("action", "")
-                    state["selected_steps"] += 1
+                    recorder.selected()
                     log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
 
                     if act == "done":
@@ -2604,8 +2009,8 @@ def _run_loop(
                                 f"  [{step + 1}] skip (done with incomplete write: "
                                 f"{incomplete_name})"
                             )
-                            _skip_step(i, step, act, action, "incomplete_write_done")
-                            state["last_steps"].append(
+                            recorder.skip(i, step, act, action, "incomplete_write_done")
+                            recorder.note(
                                 {
                                     "action": "done",
                                     "arg": "",
@@ -2658,8 +2063,8 @@ def _run_loop(
                         and not pending_recovery.get("append_allowed", False)
                     ):
                         log(f"  [{step + 1}] skip (append before first replacement chunk landed)")
-                        _skip_step(i, step, act, action, "append_after_empty_overwrite")
-                        state["last_steps"].append(
+                        recorder.skip(i, step, act, action, "append_after_empty_overwrite")
+                        recorder.note(
                             {
                                 "action": act,
                                 "arg": action.get("arg", ""),
@@ -2677,7 +2082,7 @@ def _run_loop(
                         kept = kept[: kept.rfind("\n") + 1]
                         if not kept:
                             log(f"  [{step + 1}] skip (write truncated before a complete line)")
-                            _skip_step(i, step, act, action, "truncated_write_empty")
+                            recorder.skip(i, step, act, action, "truncated_write_empty")
                             # The recovery instruction asks for a clean resend;
                             # disarm rewrite damping before that resend even
                             # though this empty partial attempt wrote no bytes.
@@ -2737,7 +2142,7 @@ def _run_loop(
                                     "with a shorter first chunk, then continue with "
                                     "append:true chunks."
                                 )
-                            state["last_steps"].append(
+                            recorder.note(
                                 {
                                     "action": act,
                                     "arg": action.get("arg", ""),
@@ -2764,13 +2169,13 @@ def _run_loop(
                             state["errors"].append(
                                 f"[stuck_loop] {act} {action.get('arg', '')[:60]}: observation steps exhausted without a write"
                             )
-                            _skip_step(i, step, act, action, "observe_tail_exhausted")
+                            recorder.skip(i, step, act, action, "observe_tail_exhausted")
                             break
                         log(
                             f"  [{step + 1}] skip ({act} blocked: remaining steps reserved for write)"
                         )
-                        _skip_step(i, step, act, action, "observe_tail_reserved")
-                        state["last_steps"].append(
+                        recorder.skip(i, step, act, action, "observe_tail_reserved")
+                        recorder.note(
                             {
                                 "action": act,
                                 "arg": action.get("arg", ""),
@@ -2799,8 +2204,8 @@ def _run_loop(
                             f"{action.get('arg', '')[:40]} already written "
                             f"{consecutive_target_writes}x)"
                         )
-                        _skip_step(i, step, act, action, "rewrite_loop")
-                        state["last_steps"].append(
+                        recorder.skip(i, step, act, action, "rewrite_loop")
+                        recorder.note(
                             {
                                 "action": act,
                                 "arg": action.get("arg", ""),
@@ -2845,7 +2250,7 @@ def _run_loop(
                                     state["errors"].append(
                                         f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
                                     )
-                                    _skip_step(i, step, act, action, "stuck_append")
+                                    recorder.skip(i, step, act, action, "stuck_append")
                                     break
                             elif (
                                 act == "write"
@@ -2875,12 +2280,12 @@ def _run_loop(
                                 state["errors"].append(
                                     f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
                                 )
-                                _skip_step(i, step, act, action, "stuck_edit")
+                                recorder.skip(i, step, act, action, "stuck_edit")
                                 break
                             if is_dup:
                                 dup_skip_count += 1
                                 log(f"  [{step + 1}] skip (duplicate {act}, same content)")
-                                _skip_step(i, step, act, action, f"duplicate_{act}")
+                                recorder.skip(i, step, act, action, f"duplicate_{act}")
                                 if prev.get("_truncated_write"):
                                     dup_msg = (
                                         "File is incomplete — the earlier write was truncated. "
@@ -2902,7 +2307,7 @@ def _run_loop(
                                 elif act == "edit":
                                     entry["_find"] = action.get("find", "")
                                     entry["_replace"] = action.get("replace", "")
-                                state["last_steps"].append(entry)
+                                recorder.note(entry)
                                 if act == "edit" and last_successful_edit and dup_skip_count >= 2:
                                     edit_key = (
                                         action.get("arg", ""),
@@ -2925,7 +2330,7 @@ def _run_loop(
                         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
                             if prev.get("ok"):
                                 log(f"  [{step + 1}] auto-done (duplicate successful shell)")
-                                _skip_step(i, step, act, action, "duplicate_shell_auto_done")
+                                recorder.skip(i, step, act, action, "duplicate_shell_auto_done")
                                 task_done = True
                                 break
                             elif prev.get("error_type") == "timeout":
@@ -2942,7 +2347,7 @@ def _run_loop(
                                 state["errors"].append(
                                     f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
                                 )
-                                _skip_step(i, step, act, action, "stuck_shell")
+                                recorder.skip(i, step, act, action, "stuck_shell")
                                 break
                         elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
                             # Range-aware: new line windows and exact cursor
@@ -2960,10 +2365,10 @@ def _run_loop(
                                     state["errors"].append(
                                         f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
                                     )
-                                    _skip_step(i, step, act, action, "stuck_read")
+                                    recorder.skip(i, step, act, action, "stuck_read")
                                     break
                                 log(f"  [{step + 1}] skip (duplicate read)")
-                                _skip_step(i, step, act, action, "duplicate_read")
+                                recorder.skip(i, step, act, action, "duplicate_read")
                                 cont = prev.get("_continuation")
                                 if cont:
                                     obs = (
@@ -2982,34 +2387,36 @@ def _run_loop(
                                 }
                                 if cont:
                                     entry["_continuation"] = cont
-                                state["last_steps"].append(entry)
+                                recorder.note(entry)
                                 continue
                             else:
                                 log(f"  [{step + 1}] auto-fail (same read failed twice)")
                                 state["errors"].append(
                                     f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
                                 )
-                                _skip_step(i, step, act, action, "stuck_read_failed")
+                                recorder.skip(i, step, act, action, "stuck_read_failed")
                                 break
 
                     dup_skip_count = 0  # reset on any non-skipped action
-                    state["executed_steps"] += 1
+                    recorder.executed()
                     if act in OBSERVE_ACTIONS:
                         observe_executed += 1
-                    result = execute(action, working_dir)
-                    if result["ok"] and act == "write":
+                    # Normalize the seam's legacy dict once; controller policy
+                    # below runs on the typed result.
+                    result = ActionResult.from_dict(execute(action, working_dir))
+                    if result.ok and act == "write":
                         _clear_pending_empty_writes(
                             state["pending_empty_writes"],
                             logical_write_target,
                             operation_write_target,
                             bool(action.get("append")),
                         )
-                    if act not in OBSERVE_ACTIONS and result["ok"]:
+                    if act not in OBSERVE_ACTIONS and result.ok:
                         # Counted only on success (Codex P2, PR #16): a failed
                         # mutation must not disarm write pressure or the
                         # observation tail reserve.
                         commit_executed += 1
-                    if act == "write" and result["ok"]:
+                    if act == "write" and result.ok:
                         if truncated_write:
                             # A partial (truncated) write is not a completed
                             # rewrite (Codex P1, PR #21): the file is
@@ -3028,105 +2435,34 @@ def _run_loop(
                             else:
                                 last_write_target = target
                                 consecutive_target_writes = 1
-                    elif act in ("shell", "edit") and result["ok"]:
+                    elif act in ("shell", "edit") and result.ok:
                         # Verification or a targeted fix breaks the rewrite
                         # streak; observations do not (the v6 Gemma loop
                         # interleaved tree/read between rewrites).
                         consecutive_target_writes = 0
-                    if truncated_write and result["ok"]:
+                    if truncated_write and result.ok:
                         # The executor is stateless per step: without a resume
                         # anchor the model cannot know where the write stopped.
                         anchor = kept.splitlines()[-1][-80:]
                         recovery_arg = _target_recovery_arg(operation_write_target, working_dir)
-                        result["output"] += (
+                        result.output += (
                             f" (truncated after {kept.count(chr(10))} lines; "
                             f"last written line: {anchor!r}; continue with "
                             f"append:true at {recovery_arg} starting after "
                             "that line)"
                         )
-                    ok_str = "OK" if result["ok"] else "FAIL"
-                    log(f"  -> {ok_str} ({time.time() - t_step:.1f}s): {result['output'][:80]}")
+                    ok_str = "OK" if result.ok else "FAIL"
+                    log(f"  -> {ok_str} ({time.time() - t_step:.1f}s): {result.output[:80]}")
 
-                    # Truncated-write outputs carry the resume anchor the next
-                    # step navigates by — observation-class budget, not 100.
-                    out_cap = (
-                        OBSERVE_STATE_CHARS if act in OBSERVE_ACTIONS or truncated_write else 100
+                    step_entry = recorder.record(
+                        StepReceipt.executed(action, result, working_dir, truncated_write),
+                        i,
+                        step,
+                        wall_s=round(time.time() - t_step, 2),
                     )
-                    step_entry = {
-                        "action": act,
-                        "arg": action.get("arg", ""),
-                        "ok": result["ok"],
-                        "output": result["output"][:out_cap],
-                    }
-                    if not result["ok"] and "error_type" in result:
-                        step_entry["error_type"] = result["error_type"]
-                    if act == "shell" and "timeout" in action:
-                        step_entry["_timeout"] = action["timeout"]
-                    if act == "write":
-                        step_entry["_content"] = action.get("content", "")
-                        if action.get("append"):
-                            step_entry["_append"] = True
-                        if truncated_write:
-                            step_entry["_truncated_write"] = True
-                    if act == "edit":
-                        step_entry["_find"] = action.get("find", "")
-                        step_entry["_replace"] = action.get("replace", "")
-                    if act in ("write", "edit"):
-                        target_step = {"arg": action.get("arg", "")}
-                        if act == "write" and action.get("append"):
-                            target_step["append"] = True
-                        target = _mutation_target_key(target_step, working_dir)
-                        if target is not None:
-                            step_entry["_target"] = target
-                            if act == "write" and truncated_write:
-                                step_entry["_recovery_arg"] = _target_recovery_arg(
-                                    target, working_dir
-                                )
-                    if act == "read":
-                        step_entry["_read_key"] = _read_key(action)
-                        if result.get("continuation"):
-                            step_entry["_continuation"] = result["continuation"]
-                    state["last_steps"].append(step_entry)
-                    state["all_steps"].append(dict(step_entry))
-                    history.append(
-                        {
-                            "event": "step",
-                            "task": i,
-                            "step": step,
-                            "action": action,
-                            "result": {"ok": result["ok"], "output": result["output"][:100]},
-                        }
-                    )
-                    step_log = {
-                        "event": "step",
-                        "task_index": i,
-                        "step": step,
-                        "action": act,
-                        "arg": action.get("arg", "")[:120],
-                        "ok": result["ok"],
-                        "error_type": result.get("error_type"),
-                        "wall_s": round(time.time() - t_step, 2),
-                    }
-                    if result.get("truncated"):
-                        step_log["truncated"] = True
-                    # Bounded discovery is only auditable when the record says
-                    # why it stopped (issue #42): keep the compact cap reasons.
-                    if result.get("truncation_reasons"):
-                        step_log["truncation_reasons"] = result["truncation_reasons"]
-                    if truncated_write:
-                        step_log["truncated_write"] = True
-                    # Hash-linked read audit: which content, how much of it,
-                    # and where the window ended.
-                    if act == "read" and result.get("sha256"):
-                        step_log["sha256"] = result["sha256"]
-                        step_log["total_lines"] = result.get("total_lines")
-                        step_log["total_bytes"] = result.get("total_bytes")
-                        step_log["total_chars"] = result.get("total_chars")
-                        step_log["continuation"] = result.get("continuation")
-                    _run_log(step_log)
 
-                    if not result["ok"]:
-                        etype = result.get("error_type", "unknown")
+                    if not result.ok:
+                        etype = result.error_type or "unknown"
                         if (
                             act == "shell"
                             and etype in ("compile_error", "unknown")
@@ -3134,112 +2470,56 @@ def _run_loop(
                         ):
                             log("  Expected failure observed; completing task with evidence")
                             step_entry["expected_failure"] = True
-                            state["last_steps"][-1]["expected_failure"] = True
-                            state["all_steps"][-1]["expected_failure"] = True
+                            recorder.annotate_last("expected_failure", True)
                             task_steps.append(step_entry)
                             task_done = True
                             break
 
                         if act == "shell" and etype == "compile_error":
                             repair = _try_compile_repair(
-                                result["output"], working_dir, action.get("arg", "")
+                                result.output, working_dir, action.get("arg", "")
                             )
                             if repair:
                                 # The deterministic source edit is a successful
                                 # targeted fix, so it breaks an armed rewrite
                                 # streak just like a model-selected edit.
                                 consecutive_target_writes = 0
-                                repair_step = {
-                                    "action": "edit",
-                                    "arg": repair[0],
-                                    "ok": True,
-                                    "output": repair[1],
-                                    "deterministic_repair": True,
-                                }
                                 log(f"  Deterministic repair: {repair[1]} in {repair[0]}")
-                                state["last_steps"].append(repair_step)
-                                state["all_steps"].append(dict(repair_step))
-                                task_steps.append(repair_step)
-                                history.append(
-                                    {
-                                        "event": "step",
-                                        "task": i,
-                                        "step": step,
-                                        "action": repair_step,
-                                        "result": {"ok": True, "output": repair[1]},
-                                        "deterministic_repair": True,
-                                    }
-                                )
-                                _run_log(
-                                    {
-                                        "event": "deterministic_repair",
-                                        "kind": "compile_include",
-                                        "file": repair[0],
-                                        "description": repair[1],
-                                    }
+                                # The repair mutated the workspace outside the
+                                # action handlers (the tracked #41 exception);
+                                # its receipt and the scaffold retry still go
+                                # through the one recorder.
+                                task_steps.append(
+                                    recorder.record(
+                                        StepReceipt.deterministic_repair(repair[0], repair[1]),
+                                        i,
+                                        step,
+                                    )
                                 )
 
-                                retry_result = execute(action, working_dir)
-                                retry_step = {
-                                    "action": "shell",
-                                    "arg": action.get("arg", ""),
-                                    "ok": retry_result["ok"],
-                                    "output": retry_result["output"][:100],
-                                    "deterministic_retry": True,
-                                }
-                                if not retry_result["ok"] and "error_type" in retry_result:
-                                    retry_step["error_type"] = retry_result["error_type"]
-                                state["last_steps"].append(retry_step)
-                                state["all_steps"].append(dict(retry_step))
-                                history.append(
-                                    {
-                                        "event": "step",
-                                        "task": i,
-                                        "step": step,
-                                        "action": {"action": "shell", "arg": action.get("arg", "")},
-                                        "result": {
-                                            "ok": retry_result["ok"],
-                                            "output": retry_result["output"][:100],
-                                        },
-                                        "deterministic_retry": True,
-                                    }
+                                retry_result = ActionResult.from_dict(execute(action, working_dir))
+                                retry_entry = recorder.record(
+                                    StepReceipt.deterministic_retry(action, retry_result),
+                                    i,
+                                    step,
+                                    wall_s=round(time.time() - t_step, 2),
                                 )
-                                _run_log(
-                                    {
-                                        "event": "step",
-                                        "task_index": i,
-                                        "step": step,
-                                        "action": "shell",
-                                        "arg": action.get("arg", "")[:120],
-                                        "ok": retry_result["ok"],
-                                        "error_type": retry_result.get("error_type"),
-                                        "deterministic_retry": True,
-                                        "wall_s": round(time.time() - t_step, 2),
-                                    }
-                                )
-                                if retry_result["ok"]:
-                                    log(
-                                        f"  -> OK deterministic retry: {retry_result['output'][:80]}"
-                                    )
-                                    task_steps.append(retry_step)
+                                if retry_result.ok:
+                                    log(f"  -> OK deterministic retry: {retry_result.output[:80]}")
+                                    task_steps.append(retry_entry)
                                     use_think = False
                                     reasoning_trigger = "executor"
                                     continue
-                                log(f"  -> FAIL deterministic retry: {retry_result['output'][:80]}")
+                                log(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
                                 result = retry_result
-                                step_entry = retry_step
-                                etype = result.get("error_type", "unknown")
+                                step_entry = retry_entry
+                                etype = result.error_type or "unknown"
 
-                        err_output = result["output"][:100]
+                        err_output = result.output[:100]
                         hint = _RECOVERY_HINTS.get(etype)
                         if hint:
                             err_output = f"{err_output} → {hint}"
-                            state["last_steps"][-1]["output"] = (
-                                state["last_steps"][-1]["output"][:100] + f" → {hint}"
-                            )
-                            state["all_steps"][-1]["output"] = (
-                                state["all_steps"][-1]["output"][:100] + f" → {hint}"
-                            )
+                            recorder.append_recovery_hint(hint)
                         state["errors"].append(
                             f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}"
                         )

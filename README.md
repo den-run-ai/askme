@@ -25,9 +25,11 @@ lightning talk at the 2026 Agentic AI Summit at UC Berkeley
 The current answer is deliberately cautious: bounded loops look promising,
 but realistic feature readiness remains open.
 
-Today, AskMe is a minimal, single-file Python agent with no frameworks and no
-dependencies beyond `requests`. It takes a prompt, plans tasks, executes them
-via shell/write/edit/read/search/tree actions, and replans on failure. It is
+Today, AskMe is a minimal two-module Python agent with no frameworks and no
+dependencies beyond `requests`: `askme.py` owns the CLI, LLM calls, and the
+plan/execute/replan controller, and `actions.py` owns the action registry and
+handlers. It takes a prompt, plans tasks, executes them via
+shell/write/edit/read/search/tree actions, and replans on failure. It is
 built for Gemma 4 E4B on `llama-server` and also supports OpenRouter.
 
 ## Quick Start
@@ -100,15 +102,15 @@ run logging, context budgets, and the automation/evaluation CLI — lives in
 uv sync --locked
 
 # Fast local quality checks
-uv run --locked ruff check askme.py tests
-uv run --locked ruff format --check askme.py tests
+uv run --locked ruff check askme.py actions.py tests
+uv run --locked ruff format --check askme.py actions.py tests
 uv run --locked ty check
 
 # Deterministic suite (live LLM tests are opt-in and skip by default)
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml:coverage.xml
+uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Integration — local (requires llama-server on :8080)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestIntegration and not Medium and not Hard"
