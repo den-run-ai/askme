@@ -30,49 +30,21 @@ LLM_BACKEND=openrouter python3 askme.py "your task here"
 
 ## Coding Task Quick Tutorial
 
-This example uses the repository's qualified configuration-precedence
-workflow: a small Python CLI with a real semantic bug, visible tests, and
-held-out acceptance checks. It exercises a typical coding-agent loop — inspect
-an existing project, reproduce a failure, edit code, and run focused tests.
+From a fresh AskMe checkout, try fixing a small Python bug using the backend
+configured in Quick Start. The first command works on a copy, so the checked-in
+example stays untouched.
 
 ```bash
-# 1. Work on a disposable copy of the intentionally broken project.
-askme_root="$PWD"
-tutorial_dir="$(mktemp -d)"
-cp -R tests/workflows/config_precedence/seed/. "$tutorial_dir/"
-
-# The compatibility checks pass, while the focused bug check fails.
-python3 "$tutorial_dir/tests/check_regression.py" -v
-! python3 "$tutorial_dir/tests/check_feedback.py" -v
-
-# 2. Ask the agent to diagnose, fix, and test the project in place.
-python3 "$askme_root/askme.py" --working-dir "$tutorial_dir" \
-  "Fix config_cli.py so timeout precedence is CLI --timeout > ASKME_TIMEOUT > JSON config > default 30. Invalid timeout values must print exactly 'error: timeout must be a positive integer' to stderr and exit 2. Preserve JSON output and --name behavior. Run the public tests."
-
-# 3. Treat the agent's completion claim as provisional: verify it yourself.
-python3 "$tutorial_dir/tests/check_regression.py" -v
-python3 "$tutorial_dir/tests/check_feedback.py" -v
-(
-  cd "$tutorial_dir"
-  python3 "$askme_root/tests/workflow_evaluators/config_precedence.py"
-)
-diff -ru "$askme_root/tests/workflows/config_precedence/seed" \
-  "$tutorial_dir" || true
+cp -R tests/workflows/config_precedence/seed coding-tutorial
+python3 -B -m unittest discover -s coding-tutorial/tests -p 'check_*.py' -v
+python3 askme.py --working-dir coding-tutorial "Fix config_cli.py: use CLI --timeout, then ASKME_TIMEOUT, JSON, and 30. Invalid values must show the existing error and exit 2. Keep current output; do not edit tests; run them."
+python3 -B -m unittest discover -s coding-tutorial/tests -p 'check_*.py' -v
+diff -ru tests/workflows/config_precedence/seed coding-tutorial
 ```
 
-Both public test files and the held-out evaluator should now pass, and the
-recursive diff should show only the intended implementation edit—test changes
-and extra files are visible too. `--working-dir` changes files in place but does
-not sandbox the agent, which is why the tutorial uses a disposable copy. To use
-OpenRouter, prefix the AskMe command with `LLM_BACKEND=openrouter`.
-
-The same scenario is continuously qualified against protected public tests,
-an independent alternative implementation, and a held-out evaluator:
-
-```bash
-python3 -m pytest \
-  tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
-```
+The first run reports one failure; the second should pass all four tests, and
+the diff should show only `config_cli.py`. Review that diff before keeping
+anything—AskMe runs commands with your permissions and is not a sandbox.
 
 ## How It Works
 
