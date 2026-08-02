@@ -185,24 +185,31 @@ class TestExecuteEdit:
 
 
 class TestExecuteDoneFail:
-    def test_done(self, work_dir):
-        result = execute({"action": "done", "arg": ""}, work_dir)
-        assert result["ok"] is True
-        assert result["output"] == "task_complete"
+    """done/fail are controller decisions (issue #36): the executor refuses
+    to dispatch them, and the run loop resolves them before dispatch."""
 
-    def test_fail(self, work_dir):
+    def test_done_is_controller_only(self, work_dir):
+        result = execute({"action": "done", "arg": ""}, work_dir)
+        assert result["ok"] is False
+        assert result["error_type"] == "control_action"
+        assert "controller" in result["output"]
+
+    def test_fail_is_controller_only(self, work_dir):
         result = execute({"action": "fail", "reasoning": "can't do it"}, work_dir)
         assert result["ok"] is False
-        assert "can't do it" in result["output"]
+        assert result["error_type"] == "control_action"
+        assert "controller" in result["output"]
 
     def test_unknown_action(self, work_dir):
         result = execute({"action": "dance", "arg": ""}, work_dir)
         assert result["ok"] is False
         assert "unknown" in result["output"]
+        assert result["error_type"] == "unknown_action"
 
     def test_missing_action_key(self, work_dir):
         result = execute({}, work_dir)
         assert result["ok"] is False
+        assert result["error_type"] == "unknown_action"
 
 
 # --- ask_llm() tests ---
