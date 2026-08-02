@@ -348,7 +348,12 @@ def _validate_action_contract(obj):
     """
     if not isinstance(obj, dict) or "action" not in obj:
         return True
-    spec = ACTION_SPECS.get(obj.get("action", ""))
+    act = obj.get("action", "")
+    if not isinstance(act, str):
+        # Valid JSON can carry an unhashable action name ({"action": []});
+        # reject it as malformed instead of letting the registry lookup raise.
+        return False
+    spec = ACTION_SPECS.get(act)
     if spec is None:
         return True
     if not all(_valid_nonempty_str(obj.get(name)) for name in spec.requires):

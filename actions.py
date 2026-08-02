@@ -334,6 +334,10 @@ class ActionExecutor:
 
     def dispatch(self, action):
         act = action.get("action", "")
+        if not isinstance(act, str):
+            return ActionResult(
+                False, "malformed action: non-string action name", "malformed_action"
+            )
         spec = ACTION_SPECS.get(act)
         if spec is None:
             return ActionResult(False, f"unknown action: {act}", "unknown_action")

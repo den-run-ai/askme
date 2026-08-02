@@ -125,6 +125,16 @@ class TestTypedDispatchErrors:
             assert result["error_type"] == "malformed_action", action
         assert list(tmp_path.iterdir()) == []
 
+    def test_non_string_action_names_are_typed_failures_not_crashes(self, tmp_path):
+        """Valid JSON can carry an unhashable action name ({"action": []});
+        both registry lookups must reject it instead of raising TypeError."""
+        for bad_name in ([], {}, 7, None):
+            assert _validate_action_contract({"action": bad_name}) is False, bad_name
+            result = execute({"action": bad_name, "arg": "x"}, str(tmp_path))
+            assert result["ok"] is False, bad_name
+            assert result["error_type"] == "malformed_action", bad_name
+        assert list(tmp_path.iterdir()) == []
+
     def test_dispatch_leaves_runtime_read_cursor_errors_to_the_handler(self, tmp_path):
         """Cursor rules are decode + handler concerns: the handler's richer
         typed errors (with source metadata) must not be pre-empted."""
