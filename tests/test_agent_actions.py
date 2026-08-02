@@ -1005,9 +1005,9 @@ class TestTruncatedWriteContinuation:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_reemitted_truncated_write_points_at_append(self, mock_llm,
-                                                        mock_replan, tmp_path):
-        """Retrying the full write after truncation must not read as 'done'."""
+    def test_reemitted_truncated_prefix_is_clean_restart(self, mock_llm,
+                                                         mock_replan, tmp_path):
+        """A complete resend of a retained prefix is dispatched, not 'done'."""
         mock_llm.side_effect = [
             {"tasks": ["create impl.py with the implementation"]},
             {"action": "write", "arg": "impl.py",
@@ -1030,7 +1030,8 @@ class TestTruncatedWriteContinuation:
                                max_steps=6)
         assert result["status"] == "complete"
         assert Path(tmp_path, "impl.py").read_text() == "a\nb\n"
-        assert any("File is incomplete" in o for o in captured)
+        assert result["state"]["executed_steps"] == 3
+        assert not any("Already done" in o for o in captured)
         assert not any("Already done" in o for o in captured)
 
 
@@ -1976,6 +1977,33 @@ class TestValidateAfterWrite:
                   for line in log_path.read_text().splitlines()]
         assert not any(e.get("reason") == "duplicate_write" for e in events)
         assert sum(e.get("truncated_write") is True for e in events) == 1
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_complete_restart_matching_truncated_prefix_is_dispatched(
+            self, mock_llm, mock_replan, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "complete\n", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "complete\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create app.py", str(tmp_path),
+                               max_replans=1, max_tasks=1, max_steps=3)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (tmp_path / "app.py").read_text() == "complete\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(tmp_path))
+        events = [json.loads(line)
+                  for line in log_path.read_text().splitlines()]
+        assert not any(e.get("reason") == "duplicate_write" for e in events)
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
