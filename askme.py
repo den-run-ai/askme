@@ -70,14 +70,6 @@ def _load_env():
 
 _load_env()
 
-# Backend config: set LLM_BACKEND=openrouter to use OpenRouter API
-LLM_BACKEND = os.environ.get("LLM_BACKEND", "local")  # "local" or "openrouter"
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
-OPENROUTER_PROVIDER = os.environ.get("OPENROUTER_PROVIDER", "Parasail").strip()
-OPENROUTER_ALLOW_FALLBACKS = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "1") == "1"
-OPENROUTER_REQUIRE_PARAMETERS = os.environ.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1"
-
 # Baseline explicit-reasoning effort for always-on reasoning models
 # (e.g. openai/gpt-oss-20b). Harmony-format models expose low/medium/high
 # effort but no off switch, so the reasoning-disabled request contract below
@@ -100,15 +92,99 @@ def _parse_reasoning_effort(raw):
     return effort
 
 
-OPENROUTER_REASONING_EFFORT = _parse_reasoning_effort(os.environ.get("OPENROUTER_REASONING_EFFORT"))
+LLM_TIMEOUT = 120  # seconds; covers slow first-token on local LLM
+LLM_TIMEOUT_REPLAN = 180  # replans carry heavier state + thinking
+
+OPENROUTER_CHAT_API = "https://openrouter.ai/api/v1/chat/completions"
+_OPENROUTER_DEFAULT_MODEL = "google/gemma-4-26b-a4b-it"
 
 
-def _merge_effort(think_level):
+@dataclass(frozen=True)
+class LLMSettings:
+    """Immutable client-local LLM configuration (issue #37).
+
+    One derivation (``from_env``) replaces the former import-time global
+    branching; the module-level names below remain the env-derived
+    compatibility surface that tests patch and ``ask_llm`` snapshots per
+    call (``current``). Distinct settings let two clients share one process
+    without global leakage. Run-level configuration and composition stay
+    with issue #40.
+    """
+
+    backend: str
+    api: str
+    model: str
+    api_key: str
+    provider: str
+    allow_fallbacks: bool
+    require_parameters: bool
+    reasoning_effort: str
+    timeout: int
+
+    @classmethod
+    def from_env(cls, env=None):
+        """Derive settings from an environment mapping (default os.environ)."""
+        e = os.environ if env is None else env
+        backend = e.get("LLM_BACKEND", "local")  # "local" or "openrouter"
+        if backend == "openrouter":
+            api = OPENROUTER_CHAT_API
+            model = e.get("OPENROUTER_MODEL", _OPENROUTER_DEFAULT_MODEL)
+        else:
+            api = e.get("LLM_API_URL", "http://localhost:8080/v1/chat/completions")
+            model = e.get("LLM_MODEL", "gemma-4-e4b")
+        return cls(
+            backend=backend,
+            api=api,
+            model=model,
+            api_key=e.get("OPENROUTER_API_KEY", ""),
+            provider=e.get("OPENROUTER_PROVIDER", "Parasail").strip(),
+            allow_fallbacks=e.get("OPENROUTER_ALLOW_FALLBACKS", "1") == "1",
+            require_parameters=e.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1",
+            reasoning_effort=_parse_reasoning_effort(e.get("OPENROUTER_REASONING_EFFORT")),
+            timeout=LLM_TIMEOUT,
+        )
+
+    @classmethod
+    def current(cls):
+        """Snapshot the module-level (patchable) configuration."""
+        return cls(
+            backend=LLM_BACKEND,
+            api=API,
+            model=MODEL,
+            api_key=OPENROUTER_API_KEY,
+            provider=OPENROUTER_PROVIDER,
+            allow_fallbacks=OPENROUTER_ALLOW_FALLBACKS,
+            require_parameters=OPENROUTER_REQUIRE_PARAMETERS,
+            reasoning_effort=OPENROUTER_REASONING_EFFORT,
+            timeout=LLM_TIMEOUT,
+        )
+
+
+# Backend config: set LLM_BACKEND=openrouter to use OpenRouter API. These
+# module-level mirrors of the one from_env derivation remain the
+# compatibility surface that tests and the integration helpers patch;
+# ask_llm snapshots them per call via LLMSettings.current().
+_DEFAULT_LLM_SETTINGS = LLMSettings.from_env()
+LLM_BACKEND = _DEFAULT_LLM_SETTINGS.backend  # "local" or "openrouter"
+OPENROUTER_API_KEY = _DEFAULT_LLM_SETTINGS.api_key
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", _OPENROUTER_DEFAULT_MODEL)
+OPENROUTER_PROVIDER = _DEFAULT_LLM_SETTINGS.provider
+OPENROUTER_ALLOW_FALLBACKS = _DEFAULT_LLM_SETTINGS.allow_fallbacks
+OPENROUTER_REQUIRE_PARAMETERS = _DEFAULT_LLM_SETTINGS.require_parameters
+OPENROUTER_REASONING_EFFORT = _DEFAULT_LLM_SETTINGS.reasoning_effort
+API = _DEFAULT_LLM_SETTINGS.api
+MODEL = _DEFAULT_LLM_SETTINGS.model
+
+
+def _merge_effort(think_level, baseline=None):
     """Effort to request from OpenRouter: the gated level, raised to the
-    baseline. Falsy result means request reasoning disabled (hybrid contract)."""
-    if OPENROUTER_REASONING_EFFORT and think_level:
-        return max(OPENROUTER_REASONING_EFFORT, think_level, key=_EFFORT_RANK.__getitem__)
-    return OPENROUTER_REASONING_EFFORT or think_level
+    baseline (the module default when unspecified). Falsy result means
+    request reasoning disabled (hybrid contract)."""
+    if baseline is None:
+        baseline = OPENROUTER_REASONING_EFFORT
+    if baseline and think_level:
+        return max(baseline, think_level, key=_EFFORT_RANK.__getitem__)
+    return baseline or think_level
 
 
 # Execution policy — controls what the agent is allowed to do
@@ -118,13 +194,6 @@ ALLOW_NETWORK = os.environ.get("ALLOW_NETWORK", "1") == "1"
 # current behavior; the preregistered ablation (docs/ablation-compile-repair.md)
 # runs its off arm with AGENT_COMPILE_REPAIR=0 at one pinned revision.
 COMPILE_REPAIR_ENABLED = os.environ.get("AGENT_COMPILE_REPAIR", "1") == "1"
-
-if LLM_BACKEND == "openrouter":
-    API = "https://openrouter.ai/api/v1/chat/completions"
-    MODEL = OPENROUTER_MODEL
-else:
-    API = os.environ.get("LLM_API_URL", "http://localhost:8080/v1/chat/completions")
-    MODEL = os.environ.get("LLM_MODEL", "gemma-4-e4b")
 
 PROBE_TOOLS = ["python3", "go", "node", "gcc", "cc", "make", "cargo", "rustc", "java", "javac"]
 PROBE_PKG_MANAGERS = ["brew", "apt-get", "dnf", "pacman", "apk"]
@@ -178,9 +247,6 @@ class LLMTransportError(Exception):
 
     pass
 
-
-LLM_TIMEOUT = 120  # seconds; covers slow first-token on local LLM
-LLM_TIMEOUT_REPLAN = 180  # replans carry heavier state + thinking
 
 MAX_REPLANS = 3  # Total planning attempts (initial plan + up to 2 replans)
 MAX_TASKS = 10
@@ -447,24 +513,26 @@ def _reasoning_decision(attempt, think, think_level, reasoning_policy, reasoning
     return requested, effective, trigger
 
 
-def _build_llm_request(messages, budget, effective_think_level, strict):
+def _build_llm_request(messages, budget, effective_think_level, strict, settings=None):
     """Build one backend-specific request: (body, headers, sent_effort).
 
     `strict` appends the E03 strict-JSON contract as a final user turn after
-    backend shaping. Never mutates the caller's message list."""
-    body = {"model": MODEL, "messages": messages, "temperature": 0.1, "max_tokens": budget}
+    backend shaping. Never mutates the caller's message list. `settings`
+    defaults to a snapshot of the module-level configuration (issue #37)."""
+    cfg = LLMSettings.current() if settings is None else settings
+    body = {"model": cfg.model, "messages": messages, "temperature": 0.1, "max_tokens": budget}
     sent_effort = effective_think_level
-    if LLM_BACKEND == "openrouter":
-        if OPENROUTER_PROVIDER:
+    if cfg.backend == "openrouter":
+        if cfg.provider:
             body["provider"] = {
-                "order": [OPENROUTER_PROVIDER],
-                "allow_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
-                "require_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+                "order": [cfg.provider],
+                "allow_fallbacks": cfg.allow_fallbacks,
+                "require_parameters": cfg.require_parameters,
             }
         # Always-on reasoners: the baseline effort applies to every call —
         # strict E03 retries included, since the model cannot stop
         # reasoning and "no thinking" can only mean the baseline.
-        sent_effort = _merge_effort(effective_think_level)
+        sent_effort = _merge_effort(effective_think_level, baseline=cfg.reasoning_effort)
         if sent_effort:
             body["reasoning"] = {
                 "enabled": True,
@@ -487,24 +555,27 @@ def _build_llm_request(messages, budget, effective_think_level, strict):
         msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
         body["messages"] = msgs
     headers = {"Content-Type": "application/json"}
-    if LLM_BACKEND == "openrouter" and OPENROUTER_API_KEY:
-        headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
+    if cfg.backend == "openrouter" and cfg.api_key:
+        headers["Authorization"] = f"Bearer {cfg.api_key}"
         headers["X-OpenRouter-Metadata"] = "enabled"
     return body, headers, sent_effort
 
 
-def _llm_http_attempt(body, headers, timeout, post=None):
+def _llm_http_attempt(body, headers, timeout, post=None, api=None):
     """One HTTP attempt against the configured chat-completions endpoint.
 
     Pure transport: returns (response_json, None) on success, or
     (None, failure) where failure = {"kind", "detail", "error", "status"}
     classifies the outcome for the caller's retry policy. Kinds:
     "transport" (connection/timeout), "http_retryable" (429/5xx),
-    "http_fatal" (other 4xx), "non_json" (unparseable success body)."""
+    "http_fatal" (other 4xx), "non_json" (unparseable success body).
+    `api` defaults to the module-level endpoint (issue #37)."""
     if post is None:
         post = requests.post
+    if api is None:
+        api = API
     try:
-        resp = post(API, json=body, headers=headers, timeout=timeout)
+        resp = post(api, json=body, headers=headers, timeout=timeout)
     except (
         requests.exceptions.ConnectionError,
         requests.exceptions.Timeout,
@@ -604,8 +675,16 @@ def _decode_action_reply(text, finish_reason):
         raise
 
 
-def _log_llm_usage(rj, sent_effort, attempt, finish_reason):
-    """Console + JSONL usage/route telemetry for one decoded HTTP success."""
+def _log_llm_usage(
+    rj, sent_effort, attempt, finish_reason, settings=None, log_sink=None, event_sink=None
+):
+    """Console + JSONL usage/route telemetry for one decoded HTTP success.
+
+    `settings` and the sinks default to the module-level configuration,
+    `log`, and `_run_log` (issue #37)."""
+    cfg = LLMSettings.current() if settings is None else settings
+    emit = log if log_sink is None else log_sink
+    record = _run_log if event_sink is None else event_sink
     usage = rj.get("usage", {})
     if not usage:
         return
@@ -623,15 +702,15 @@ def _log_llm_usage(rj, sent_effort, attempt, finish_reason):
     tok_msg = f"  tokens: prompt={usage.get('prompt_tokens', 0)} completion={usage.get('completion_tokens', 0)} total={usage.get('total_tokens', 0)}"
     if sent_effort:
         tok_msg += f" thinking={sent_effort}"
-    log(tok_msg)
-    _run_log(
+    emit(tok_msg)
+    record(
         {
             "event": "tokens",
             "prompt": usage.get("prompt_tokens", 0),
             "completion": usage.get("completion_tokens", 0),
             "total": usage.get("total_tokens", 0),
             "openrouter_cost": usage.get("cost", 0),
-            "model": selected.get("model") or rj.get("model", MODEL),
+            "model": selected.get("model") or rj.get("model", cfg.model),
             "provider": selected.get("provider") or rj.get("provider", ""),
             "route_attempt": selected.get("attempt"),
             "thinking": sent_effort,
@@ -639,6 +718,154 @@ def _log_llm_usage(rj, sent_effort, attempt, finish_reason):
             "attempt": attempt,
         }
     )
+
+
+class LLMClient:
+    """LLM provider client (issue #37): immutable per-client settings plus
+    injectable transport `post`, sleeper, and log/event sinks.
+
+    ``ask_llm`` stays the module-level compatibility facade: it snapshots
+    the module configuration into a fresh client per call, so callers and
+    tests that patch the module globals keep working. Constructing clients
+    explicitly gives two backends/models in one process with no global
+    leakage; injecting a client into the run composition belongs to #40.
+    """
+
+    def __init__(self, settings=None, post=None, sleep=None, log_sink=None, event_sink=None):
+        self.settings = LLMSettings.current() if settings is None else settings
+        # None means "resolve the module default at call time" so patched
+        # requests.post / log / _run_log stay effective for the facade.
+        self._post = post
+        self._sleep = time.sleep if sleep is None else sleep
+        self._log = log if log_sink is None else log_sink
+        self._event = _run_log if event_sink is None else event_sink
+
+    def ask(
+        self,
+        messages,
+        max_tokens=256,
+        think=False,
+        think_level=None,
+        max_retries=MAX_LLM_RETRIES,
+        raw=False,
+        timeout=None,
+        reasoning_policy=DEFAULT_REASONING_POLICY,
+        reasoning_trigger="unspecified",
+    ):
+        """Call the backend and decode one plan/action/validator reply.
+
+        This loop owns only retry/backoff policy, the parse-retry budget
+        escalation, and the typed errors callers rely on (LLMTransportError,
+        KeyError for API-error bodies, json.JSONDecodeError with
+        malformed_action/response_truncated)."""
+        if reasoning_policy not in REASONING_POLICIES:
+            raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
+        cfg = self.settings
+        budget = max_tokens
+        for attempt in range(max_retries + 1):
+            requested_level, effective_think_level, effective_trigger = _reasoning_decision(
+                attempt, think, think_level, reasoning_policy, reasoning_trigger
+            )
+            self._event(
+                {
+                    "event": "reasoning_decision",
+                    "requested_policy": reasoning_policy,
+                    "requested_trigger": effective_trigger,
+                    "requested_level": requested_level,
+                    "effective_level": effective_think_level,
+                    "baseline_effort": (cfg.reasoning_effort or None)
+                    if cfg.backend == "openrouter"
+                    else None,
+                    "attempt": attempt,
+                }
+            )
+
+            # E03 strict contract on the final auto-retry — suppress reasoning leaks
+            body, headers, sent_effort = _build_llm_request(
+                messages,
+                budget,
+                effective_think_level,
+                strict=attempt >= 2 and not think_level,
+                settings=cfg,
+            )
+            # One transport attempt; retry/backoff policy is enacted here.
+            rj, failure = _llm_http_attempt(
+                body, headers, timeout or cfg.timeout, post=self._post, api=cfg.api
+            )
+            if failure is not None:
+                kind = failure["kind"]
+                if kind == "http_fatal":
+                    # Client errors fail fast: retrying an auth/request-shape bug wastes budget.
+                    raise LLMTransportError(failure["detail"])
+                if kind == "transport":
+                    self._log(f"  Transport error: {failure['detail']}")
+                elif kind == "http_retryable":
+                    self._log(f"  HTTP {failure['status']}, retrying...")
+                else:  # non_json: proxy/gateway glitch returned an unparseable body
+                    self._log(f"  Non-JSON response body: {failure['detail']}")
+                if attempt < max_retries:
+                    self._sleep(1 if attempt == 0 else 3)
+                    continue
+                if kind == "transport":
+                    raise LLMTransportError(
+                        f"Transport failed after {max_retries + 1} attempts: {failure['error']}"
+                    ) from failure["error"]
+                if kind == "http_retryable":
+                    raise LLMTransportError(
+                        f"HTTP {failure['status']} after {max_retries + 1} attempts"
+                    )
+                raise LLMTransportError(
+                    f"Non-JSON response after {max_retries + 1} attempts"
+                ) from failure["error"]
+            # Handle API error responses (JSON body with "error" key)
+            if "error" in rj:
+                self._log(
+                    f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}"
+                )
+                if attempt < max_retries:
+                    continue
+                raise KeyError(f"API error: {rj['error']}")
+            finish_reason = (rj.get("choices") or [{}])[0].get("finish_reason", "")
+            _log_llm_usage(
+                rj,
+                sent_effort,
+                attempt,
+                finish_reason,
+                settings=cfg,
+                log_sink=self._log,
+                event_sink=self._event,
+            )
+            if finish_reason == "length":
+                self._log("  output hit token budget (finish_reason=length)")
+            text = _extract_message_text(rj)
+            if raw:
+                return text
+            try:
+                obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
+            except json.JSONDecodeError as parse_err:
+                cleaned = getattr(parse_err, "cleaned_text", "")
+                if attempt < max_retries:
+                    # Action-specific budget: a truncated write/edit payload
+                    # needs room for content, not more reasoning. The budget
+                    # constant is decode policy, deliberately not a client
+                    # setting.
+                    if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(cleaned):
+                        budget = STEP_WRITE_TOKENS
+                        self._log(f"  write/edit payload budget -> {budget}")
+                    think_str = f" thinking={sent_effort}" if sent_effort else ""
+                    self._log(
+                        f"  [retry {attempt + 1}]{think_str} JSON parse failed, raw: {cleaned[:120]}"
+                    )
+                    continue
+                # Typed classification for the caller (issue #7): output that
+                # hit the token budget is a transport failure of the action
+                # envelope, not model noise — the recovery differs.
+                setattr(parse_err, "malformed_action", True)
+                setattr(parse_err, "response_truncated", finish_reason == "length")
+                raise
+            if repaired:
+                self._log(f"  JSON repaired on attempt {attempt}")
+            return obj
 
 
 def ask_llm(
@@ -654,99 +881,22 @@ def ask_llm(
 ):
     """Call the configured backend and decode one plan/action/validator reply.
 
-    Compatibility facade over the client seams above: this loop owns only
-    retry/backoff policy, the parse-retry budget escalation, and the typed
-    errors callers rely on (LLMTransportError, KeyError for API-error bodies,
-    json.JSONDecodeError with malformed_action/response_truncated)."""
-    if reasoning_policy not in REASONING_POLICIES:
-        raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
-    budget = max_tokens
-    for attempt in range(max_retries + 1):
-        requested_level, effective_think_level, effective_trigger = _reasoning_decision(
-            attempt, think, think_level, reasoning_policy, reasoning_trigger
-        )
-        _run_log(
-            {
-                "event": "reasoning_decision",
-                "requested_policy": reasoning_policy,
-                "requested_trigger": effective_trigger,
-                "requested_level": requested_level,
-                "effective_level": effective_think_level,
-                "baseline_effort": (OPENROUTER_REASONING_EFFORT or None)
-                if LLM_BACKEND == "openrouter"
-                else None,
-                "attempt": attempt,
-            }
-        )
-
-        # E03 strict contract on the final auto-retry — suppress reasoning leaks
-        body, headers, sent_effort = _build_llm_request(
-            messages, budget, effective_think_level, strict=attempt >= 2 and not think_level
-        )
-        # One transport attempt; retry/backoff policy is enacted here.
-        rj, failure = _llm_http_attempt(body, headers, timeout or LLM_TIMEOUT)
-        if failure is not None:
-            kind = failure["kind"]
-            if kind == "http_fatal":
-                # Client errors fail fast: retrying an auth/request-shape bug wastes budget.
-                raise LLMTransportError(failure["detail"])
-            if kind == "transport":
-                log(f"  Transport error: {failure['detail']}")
-            elif kind == "http_retryable":
-                log(f"  HTTP {failure['status']}, retrying...")
-            else:  # non_json: proxy/gateway glitch returned an unparseable body
-                log(f"  Non-JSON response body: {failure['detail']}")
-            if attempt < max_retries:
-                time.sleep(1 if attempt == 0 else 3)
-                continue
-            if kind == "transport":
-                raise LLMTransportError(
-                    f"Transport failed after {max_retries + 1} attempts: {failure['error']}"
-                ) from failure["error"]
-            if kind == "http_retryable":
-                raise LLMTransportError(
-                    f"HTTP {failure['status']} after {max_retries + 1} attempts"
-                )
-            raise LLMTransportError(
-                f"Non-JSON response after {max_retries + 1} attempts"
-            ) from failure["error"]
-        # Handle API error responses (JSON body with "error" key)
-        if "error" in rj:
-            log(
-                f"  API error: {rj['error'].get('message', rj['error']) if isinstance(rj['error'], dict) else rj['error']}"
-            )
-            if attempt < max_retries:
-                continue
-            raise KeyError(f"API error: {rj['error']}")
-        finish_reason = (rj.get("choices") or [{}])[0].get("finish_reason", "")
-        _log_llm_usage(rj, sent_effort, attempt, finish_reason)
-        if finish_reason == "length":
-            log("  output hit token budget (finish_reason=length)")
-        text = _extract_message_text(rj)
-        if raw:
-            return text
-        try:
-            obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
-        except json.JSONDecodeError as parse_err:
-            cleaned = getattr(parse_err, "cleaned_text", "")
-            if attempt < max_retries:
-                # Action-specific budget: a truncated write/edit payload needs
-                # room for content, not more reasoning.
-                if budget < STEP_WRITE_TOKENS and _WRITE_ATTEMPT_RE.search(cleaned):
-                    budget = STEP_WRITE_TOKENS
-                    log(f"  write/edit payload budget -> {budget}")
-                think_str = f" thinking={sent_effort}" if sent_effort else ""
-                log(f"  [retry {attempt + 1}]{think_str} JSON parse failed, raw: {cleaned[:120]}")
-                continue
-            # Typed classification for the caller (issue #7): output that
-            # hit the token budget is a transport failure of the action
-            # envelope, not model noise — the recovery differs.
-            setattr(parse_err, "malformed_action", True)
-            setattr(parse_err, "response_truncated", finish_reason == "length")
-            raise
-        if repaired:
-            log(f"  JSON repaired on attempt {attempt}")
-        return obj
+    Compatibility facade over LLMClient: snapshots the module-level
+    configuration for this call and delegates. Retry/backoff policy, the
+    parse-retry budget escalation, and the typed errors callers rely on
+    (LLMTransportError, KeyError for API-error bodies, json.JSONDecodeError
+    with malformed_action/response_truncated) live in LLMClient.ask."""
+    return LLMClient().ask(
+        messages,
+        max_tokens=max_tokens,
+        think=think,
+        think_level=think_level,
+        max_retries=max_retries,
+        raw=raw,
+        timeout=timeout,
+        reasoning_policy=reasoning_policy,
+        reasoning_trigger=reasoning_trigger,
+    )
 
 
 _KNOWN_ERROR_TYPES = {
