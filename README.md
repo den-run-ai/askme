@@ -107,6 +107,32 @@ Backend-dependent integration tests skip automatically when their server or
 credential is unavailable. Dated run matrices and suite-size snapshots live in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
+### LLM tests in CI
+
+Two GitHub Actions workflows split hermetic from live-model testing:
+
+- [`ci.yml`](.github/workflows/ci.yml) — unit tests on every push/PR. It
+  deliberately has no OpenRouter credential, so backend-gated suites
+  auto-skip (guarded by `tests/test_ci_workflows_contract.py`).
+- [`llm.yml`](.github/workflows/llm.yml) — OpenRouter-backed tests, using the
+  repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
+  (honored as an environment variable or secret). Runs on push to `main`
+  touching agent/test code, weekly on schedule, on manual dispatch (choose
+  suite, models, provider, trials), and on pull requests only when labeled
+  `llm-tests` (same-repo branches; fork PRs cannot read the key).
+
+`llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
+by default) with automatic provider routing. The Berkeley job replays the two
+protocol cells from
+[the talk's eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
+— hard build + medium repair — per model through `tests/bench_harness.py`,
+then `tests/ci_llm_gate.py report` enforces the protocol pass rule (every
+trial: pytest pass and agent completion) and publishes a summary table.
+JSONL run logs and `summary.json` files are uploaded as artifacts. A
+preflight step fails loudly when the key is missing or rejected, so a bad
+credential can never produce a silently green (all-skipped) run. The full
+default matrix measured about $0.01 in OpenRouter credits per run.
+
 ## Files
 
 - `askme.py` — the agent

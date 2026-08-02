@@ -54,7 +54,17 @@ python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterHard"
 python3 tests/bench_harness.py                                    # 3 trials, easy, local
 python3 tests/bench_harness.py --suite medium --backend openrouter # 3 trials, medium, openrouter
 python3 tests/bench_harness.py --list                             # show available tests
+
+# CI gate over bench summaries (offline; used by .github/workflows/llm.yml)
+python3 tests/ci_llm_gate.py report /path/to/*/summary.json --expect-cells 4
 ```
+
+CI: `.github/workflows/ci.yml` runs unit tests hermetically (no OpenRouter
+key — keep it that way; `tests/test_ci_workflows_contract.py` enforces it).
+`.github/workflows/llm.yml` runs OpenRouter-backed tests via the `Openrouter`
+deployment environment: on push to `main`, weekly, on manual dispatch, and on
+PRs labeled `llm-tests`. Its Berkeley job replays the talk's eval protocol
+cells through `bench_harness.py` and gates with `tests/ci_llm_gate.py`.
 
 For the `llama-server` launch command, see [README.md](README.md) or [docs/gemma4-setup.md](docs/gemma4-setup.md).
 
@@ -66,6 +76,7 @@ Test modules are split by concern:
 - `test_agent_recovery.py` — guards / error classification
 - `test_agent_planning.py` — planner / preflight / policy / timeouts
 - `test_agent_integration.py` — end-to-end (local + OpenRouter)
+- `test_ci_llm_gate.py` / `test_ci_workflows_contract.py` / `test_berkeley_evals_contract.py` — LLM CI gate logic, workflow contracts, Berkeley eval-data consistency
 
 Unit tests mock `ask_llm` or `requests.post` — no LLM needed. Integration tests use `int_run()` from `_test_support.py` and auto-skip if the backend isn't available (no llama-server on `:8080`, or `OPENROUTER_API_KEY` unset).
 
