@@ -755,10 +755,16 @@ def _pending_empty_recovery(pending, logical_target, operation_target,
         return recovery
     matches = []
     for key, info in pending.items():
-        if (key == logical_target
-                or (operation_target is not None
-                    and isinstance(info, dict)
-                    and info.get("append_target") == operation_target)):
+        append_allowed = (isinstance(info, dict)
+                          and info.get("append_allowed", False))
+        same_operation = (
+            operation_target is not None
+            and isinstance(info, dict)
+            and info.get("append_target") == operation_target)
+        # A pending overwrite is tied to the logical pathname and also blocks
+        # physical aliases. A permissive append obligation follows only the
+        # referent observed when it was created, so retargeting cannot satisfy it.
+        if same_operation or (not append_allowed and key == logical_target):
             matches.append(info)
     if not matches:
         return None
@@ -773,10 +779,11 @@ def _pending_empty_recovery(pending, logical_target, operation_target,
     }
 
 
-def _clear_pending_empty_writes(pending, logical_target, operation_target):
+def _clear_pending_empty_writes(pending, logical_target, operation_target,
+                                is_append):
     """Clear zero-byte obligations satisfied by a successful write."""
     keys = set()
-    if logical_target is not None:
+    if not is_append and logical_target is not None:
         keys.add(logical_target)
     if operation_target is not None:
         for key, info in pending.items():
@@ -1943,7 +1950,14 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             # though this empty partial attempt wrote no bytes.
                             last_write_target = None
                             consecutive_target_writes = 0
-                            pending_target = logical_write_target
+                            # Empty append attempts are obligations on the
+                            # referent observed at dispatch time. Key them by
+                            # that operation target so retargeting a leaf
+                            # symlink cannot overwrite an older obligation.
+                            pending_target = (
+                                operation_write_target
+                                if action.get("append")
+                                else logical_write_target)
                             if pending_target is not None:
                                 existing = state["pending_empty_writes"].get(
                                     pending_target)
@@ -2169,7 +2183,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     if result["ok"] and act == "write":
                         _clear_pending_empty_writes(
                             state["pending_empty_writes"],
-                            logical_write_target, operation_write_target)
+                            logical_write_target, operation_write_target,
+                            bool(action.get("append")))
                     if act not in OBSERVE_ACTIONS and result["ok"]:
                         # Counted only on success (Codex P2, PR #16): a failed
                         # mutation must not disarm write pressure or the
