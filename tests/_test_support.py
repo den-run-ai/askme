@@ -92,15 +92,18 @@ def int_run(
     max_tasks=INT_MAX_TASKS,
     max_steps=INT_MAX_STEPS,
 ):
-    """Integration test agent loop — thin delegation to production _run_loop().
+    """Integration test agent loop — thin delegation to public run_result().
 
     int_run callers use max_replans to mean "replans after first plan",
-    but _run_loop uses it as total plan attempts. Adjust by +1.
+    but the run budget means total plan attempts. Adjust by +1. No ``llm``
+    is pinned, so the module-level backend configuration stays in effect.
     """
-    from askme import _run_loop
+    from askme import RunConfig, run_result
 
-    return _run_loop(
-        user_prompt, work_dir, max_replans=max_replans + 1, max_tasks=max_tasks, max_steps=max_steps
+    return run_result(
+        user_prompt,
+        working_dir=work_dir,
+        config=RunConfig(max_replans=max_replans + 1, max_tasks=max_tasks, max_steps=max_steps),
     )
 
 
@@ -148,54 +151,25 @@ def or_run(
     max_tasks=INT_MAX_TASKS,
     max_steps=INT_MAX_STEPS,
 ):
-    """Agent loop using the configured OpenRouter model and provider."""
-    old_env = {
-        "LLM_BACKEND": os.environ.get("LLM_BACKEND"),
-        "OPENROUTER_MODEL": os.environ.get("OPENROUTER_MODEL"),
-        "OPENROUTER_PROVIDER": os.environ.get("OPENROUTER_PROVIDER"),
-        "OPENROUTER_ALLOW_FALLBACKS": os.environ.get("OPENROUTER_ALLOW_FALLBACKS"),
-        "OPENROUTER_REQUIRE_PARAMETERS": os.environ.get("OPENROUTER_REQUIRE_PARAMETERS"),
-    }
-    model = old_env["OPENROUTER_MODEL"] or "google/gemma-4-26b-a4b-it"
-    provider = (
-        old_env["OPENROUTER_PROVIDER"] if old_env["OPENROUTER_PROVIDER"] is not None else "Parasail"
+    """Agent loop pinned to the configured OpenRouter model and provider.
+
+    Immutable per-run configuration (issue #40) replaces the former
+    module-global and environment save/restore: the run derives OpenRouter
+    settings from the environment through the one LLMSettings derivation
+    and pins them for this run only. Token budgets follow the pinned
+    backend, not the process-wide import-time backend.
+    """
+    from askme import LLMSettings, RunConfig, run_result
+
+    env = dict(os.environ)
+    env["LLM_BACKEND"] = "openrouter"
+    return run_result(
+        user_prompt,
+        working_dir=work_dir,
+        config=RunConfig(
+            llm=LLMSettings.from_env(env),
+            max_replans=max_replans + 1,
+            max_tasks=max_tasks,
+            max_steps=max_steps,
+        ),
     )
-    allow_fallbacks = (old_env["OPENROUTER_ALLOW_FALLBACKS"] or "1") == "1"
-    require_parameters = (old_env["OPENROUTER_REQUIRE_PARAMETERS"] or "0") == "1"
-    os.environ["LLM_BACKEND"] = "openrouter"
-    os.environ["OPENROUTER_MODEL"] = model
-    os.environ["OPENROUTER_PROVIDER"] = provider
-    os.environ["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
-    os.environ["OPENROUTER_REQUIRE_PARAMETERS"] = "1" if require_parameters else "0"
-
-    # Reload module-level config
-    import askme
-
-    old_config: dict[str, object] = {
-        "LLM_BACKEND": askme.LLM_BACKEND,
-        "API": askme.API,
-        "MODEL": askme.MODEL,
-        "OPENROUTER_MODEL": askme.OPENROUTER_MODEL,
-        "OPENROUTER_PROVIDER": askme.OPENROUTER_PROVIDER,
-        "OPENROUTER_ALLOW_FALLBACKS": askme.OPENROUTER_ALLOW_FALLBACKS,
-        "OPENROUTER_REQUIRE_PARAMETERS": askme.OPENROUTER_REQUIRE_PARAMETERS,
-    }
-    askme.LLM_BACKEND = "openrouter"
-    askme.API = "https://openrouter.ai/api/v1/chat/completions"
-    askme.MODEL = model
-    askme.OPENROUTER_MODEL = model
-    askme.OPENROUTER_PROVIDER = provider
-    askme.OPENROUTER_ALLOW_FALLBACKS = allow_fallbacks
-    askme.OPENROUTER_REQUIRE_PARAMETERS = require_parameters
-    askme.OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-
-    try:
-        return int_run(user_prompt, work_dir, max_replans, max_tasks, max_steps)
-    finally:
-        for key, value in old_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        for config_key, config_value in old_config.items():
-            setattr(askme, config_key, config_value)

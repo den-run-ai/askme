@@ -12,9 +12,10 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from dataclasses import replace as _dataclass_replace
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import requests
 
@@ -109,6 +110,16 @@ def _step_write_tokens(backend):
     return 8192 if backend == "openrouter" else 512
 
 
+def _step_tokens(backend):
+    """Backend-shaped executor step budget (issue #15).
+
+    Small caps are a wall-clock necessity at ~7 tok/s locally but a pure
+    artifact on OpenRouter, where an implementation file can never fit
+    under them. Like the write retry budget, the bound must follow the
+    client's backend for pinned per-run configurations (issue #40)."""
+    return 4096 if backend == "openrouter" else 256
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     """Immutable client-local LLM configuration (issue #37).
@@ -139,6 +150,10 @@ class LLMSettings:
         if self.step_write_tokens is not None:
             return self.step_write_tokens
         return _step_write_tokens(self.backend)
+
+    def step_tokens(self):
+        """Executor step budget for this backend (issues #15/#40)."""
+        return _step_tokens(self.backend)
 
     @classmethod
     def from_env(cls, env=None):
@@ -309,7 +324,7 @@ def _is_write_shaped(task):
 # necessity at ~7 tok/s locally but a pure artifact on OpenRouter, where an
 # 8KB implementation file is ~3000 tokens and can never fit under 512/1536.
 # Local values are unchanged — the local path keeps chunked append instead.
-STEP_TOKENS = 4096 if LLM_BACKEND == "openrouter" else 256
+STEP_TOKENS = _step_tokens(LLM_BACKEND)
 # Retry budget when a truncated write/edit payload fails to parse.
 STEP_WRITE_TOKENS = _step_write_tokens(LLM_BACKEND)
 PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
@@ -1254,7 +1269,7 @@ def _write_visibility_flag(task_steps):
     return {"unvalidated_write": Path(arg).name if arg else True}
 
 
-def get_plan(user_prompt, state):
+def get_plan(user_prompt, state, client=None):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
     # model, and raw step payloads (write contents) never reach the planner —
@@ -1301,7 +1316,10 @@ def get_plan(user_prompt, state):
         or plan_state.get("errors")
         or plan_state.get("completed_tasks")
     )
-    return ask_llm(
+    # An injected per-run client (issue #40) replaces the patchable module
+    # facade only when the caller supplied one.
+    ask = ask_llm if client is None else client.ask
+    return ask(
         [
             {"role": "system", "content": SYSTEM_PLAN},
             {
@@ -1335,6 +1353,7 @@ def get_step(
     goal_context_chars=GOAL_CONTEXT_CHARS,
     write_pressure=False,
     validate_pressure=None,
+    client=None,
 ):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
@@ -1392,9 +1411,14 @@ def get_step(
             "file again. Next action MUST be shell (verify it), edit (targeted fix), "
             "or done."
         )
-    return ask_llm(
+    # A pinned per-run client's step budget follows that client's backend
+    # (issues #15/#40); the module facade keeps the patchable global.
+    ask = ask_llm if client is None else client.ask
+    settings = getattr(client, "settings", None)
+    step_budget = STEP_TOKENS if settings is None else settings.step_tokens()
+    return ask(
         [{"role": "system", "content": SYSTEM_STEP}, {"role": "user", "content": user_msg}],
-        max_tokens=STEP_TOKENS,
+        max_tokens=step_budget,
         think=think,
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
@@ -1411,7 +1435,31 @@ Format: {"task": "replacement task description"}"""
 
 MAX_TASK_LOCAL_REPLANS = 1
 TASK_REPLAN_MAX_TOKENS = 96
-_last_task_replan_reject_reason = None
+
+
+class TaskReplanResult(NamedTuple):
+    """Structured task-local replan outcome (issue #40).
+
+    ``task`` is the accepted replacement, or None when the replan failed;
+    ``reject_reason`` then carries the typed reason. This return value
+    replaces the former ``_last_task_replan_reject_reason`` module-global
+    side channel."""
+
+    task: str | None
+    reject_reason: str | None
+
+
+def _coerce_task_replan(result):
+    """Normalize the replan seam's return to :class:`TaskReplanResult`.
+
+    Tests that script ``askme.replan_task`` with the legacy ``str | None``
+    stand-in keep working; a bare falsy return carries no typed reason."""
+    if isinstance(result, TaskReplanResult):
+        return result
+    if isinstance(result, tuple) and len(result) == 2:
+        return TaskReplanResult(*result)
+    return TaskReplanResult(result, None if result else "unknown")
+
 
 _PASSIVE_TASK_RE = re.compile(r"^\s*(read|inspect|view|open|list|check|examine)\b", re.I)
 _ACTION_TASK_RE = re.compile(
@@ -1496,12 +1544,18 @@ def _is_passive_replacement(original, replacement):
 
 
 def replan_task(
-    failed_task, errors, completed_tasks, state, user_prompt, goal_context_chars=GOAL_CONTEXT_CHARS
+    failed_task,
+    errors,
+    completed_tasks,
+    state,
+    user_prompt,
+    goal_context_chars=GOAL_CONTEXT_CHARS,
+    client=None,
 ):
     """Mini-planner: generate a replacement for one failed task.
-    Returns replacement task string, or None if replan fails."""
-    global _last_task_replan_reject_reason
-    _last_task_replan_reject_reason = None
+
+    Returns a :class:`TaskReplanResult`; ``task`` is None when the replan
+    failed and ``reject_reason`` then names the typed rejection."""
     replan_state = {
         "failed_task": failed_task,
         "errors": summarize_errors(errors),
@@ -1529,8 +1583,9 @@ def replan_task(
     if env.get("missing_tools"):
         replan_state["missing_tools"] = env["missing_tools"]
     replan_state["policy"] = state.get("policy", get_policy())
+    ask = ask_llm if client is None else client.ask
     try:
-        result = ask_llm(
+        result = ask(
             [
                 {"role": "system", "content": SYSTEM_TASK_REPLAN},
                 {
@@ -1546,31 +1601,23 @@ def replan_task(
         )
         task = result.get("task", "")
         if not task or not isinstance(task, str):
-            _last_task_replan_reject_reason = "empty"
-            return None
+            return TaskReplanResult(None, "empty")
         task = task.strip()
         if len(task) <= 3:
-            _last_task_replan_reject_reason = "too_short"
-            return None
+            return TaskReplanResult(None, "too_short")
         if task == failed_task.strip():
-            _last_task_replan_reject_reason = "exact_duplicate"
-            return None
+            return TaskReplanResult(None, "exact_duplicate")
         if _is_near_duplicate_task(failed_task, task):
-            _last_task_replan_reject_reason = "near_duplicate"
-            return None
+            return TaskReplanResult(None, "near_duplicate")
         if _is_passive_replacement(failed_task, task):
-            _last_task_replan_reject_reason = "passive_downgrade"
-            return None
-        return task
+            return TaskReplanResult(None, "passive_downgrade")
+        return TaskReplanResult(task, None)
     except LLMTransportError:
-        _last_task_replan_reject_reason = "transport_error"
-        return None
+        return TaskReplanResult(None, "transport_error")
     except json.JSONDecodeError:
-        _last_task_replan_reject_reason = "parse_error"
-        return None
+        return TaskReplanResult(None, "parse_error")
     except KeyError:
-        _last_task_replan_reject_reason = "missing_task_key"
-        return None
+        return TaskReplanResult(None, "missing_task_key")
 
 
 def _should_validate(replan, history, state, user_prompt):
@@ -1637,8 +1684,9 @@ def _deterministic_check(user_prompt, state, working_dir):
     return None
 
 
-def _validate_completion(user_prompt, state, working_dir):
+def _validate_completion(user_prompt, state, working_dir, client=None, log_sink=None):
     """Run LLM-based final validation. Returns dict or None (fail-open)."""
+    emit = log if log_sink is None else log_sink
     deterministic = _deterministic_check(user_prompt, state, working_dir)
     if deterministic is True:
         return {"valid": True, "deterministic": True}
@@ -1674,8 +1722,9 @@ def _validate_completion(user_prompt, state, working_dir):
         f"COMPLETED TASKS AND EVIDENCE:\n{evidence}\n\n"
         f"FILES IN WORKING DIRECTORY:\n{json.dumps(files)}"
     )
+    ask = ask_llm if client is None else client.ask
     try:
-        result = ask_llm(
+        result = ask(
             [{"role": "system", "content": SYSTEM_VALIDATE}, {"role": "user", "content": user_msg}],
             max_tokens=768,
             think=True,
@@ -1686,13 +1735,13 @@ def _validate_completion(user_prompt, state, working_dir):
         )
         if isinstance(result, dict) and isinstance(result.get("valid"), bool):
             return result
-        log(f"  Validation returned unexpected format: {result}")
+        emit(f"  Validation returned unexpected format: {result}")
         return None
     except LLMTransportError as e:
-        log(f"  Validation transport error (fail-open): {e}")
+        emit(f"  Validation transport error (fail-open): {e}")
         return None
     except (json.JSONDecodeError, KeyError) as e:
-        log(f"  Validation parse error (fail-open): {e}")
+        emit(f"  Validation parse error (fail-open): {e}")
         return None
 
 
@@ -1893,9 +1942,15 @@ class StepRecorder:
     skipped + accepted control actions.
     """
 
-    def __init__(self, state, history):
+    def __init__(self, state, history, event_sink=None):
         self.state = state
         self.history = history
+        # None resolves the module _run_log at call time so patched sinks
+        # and RUN_LOG_PATH swaps keep working (issue #40).
+        self._event_sink = event_sink
+
+    def _event(self, event):
+        (_run_log if self._event_sink is None else self._event_sink)(event)
 
     def selected(self):
         self.state["selected_steps"] += 1
@@ -1906,7 +1961,7 @@ class StepRecorder:
     def skip(self, task_index, step, act, action, reason):
         """Record a selected-but-not-dispatched action in run metrics + log."""
         self.state["skipped_steps"] += 1
-        _run_log(
+        self._event(
             {
                 "event": "step_skipped",
                 "task_index": task_index,
@@ -1928,7 +1983,7 @@ class StepRecorder:
         self.state["last_steps"].append(entry)
         self.state["all_steps"].append(dict(entry))
         self.history.append(receipt.history_event(task_index, step))
-        _run_log(receipt.jsonl_event(task_index, step, wall_s))
+        self._event(receipt.jsonl_event(task_index, step, wall_s))
         return entry
 
     def annotate_last(self, key, value):
@@ -2004,7 +2059,8 @@ class RunState:
     successful shell/edit and truncation paths disarm it.
     """
 
-    def __init__(self, reasoning_policy, goal_context_chars):
+    def __init__(self, reasoning_policy, goal_context_chars, clock=None, event_sink=None):
+        self.clock = time.time if clock is None else clock
         self.data: dict[str, Any] = {
             "completed_tasks": [],
             "errors": [],
@@ -2028,14 +2084,14 @@ class RunState:
             "skipped_steps": 0,
         }
         self.history = []
-        self.recorder = StepRecorder(self.data, self.history)
-        self.started = time.time()
+        self.recorder = StepRecorder(self.data, self.history, event_sink=event_sink)
+        self.started = self.clock()
         self.last_write_target = None
         self.consecutive_target_writes = 0
 
     def elapsed(self):
         """Wall seconds since the run started."""
-        return time.time() - self.started
+        return self.clock() - self.started
 
     def disarm_rewrite_damping(self):
         """Forget the streak entirely (documented truncation-recovery paths)."""
@@ -2072,6 +2128,94 @@ class RunState:
         return None
 
 
+@dataclass(frozen=True)
+class RunConfig:
+    """Immutable per-run configuration (issue #40).
+
+    ``None`` fields resolve from the module-level compatibility surface when
+    the run starts, so a default config behaves exactly like the patchable
+    globals. Explicit fields pin the run: a pinned ``llm`` makes the run
+    construct its own :class:`LLMClient` instead of using the module
+    ``ask_llm`` facade, so differently configured runs coexist in one
+    process without saving or restoring globals."""
+
+    llm: LLMSettings | None = None
+    allow_system_installs: bool | None = None
+    allow_network: bool | None = None
+    reasoning_policy: str | None = None
+    max_replans: int | None = None
+    max_tasks: int | None = None
+    max_steps: int | None = None
+    goal_context_chars: int | None = None
+
+    @classmethod
+    def from_env(cls, env=None):
+        """Derive the CLI-boundary configuration from an environment mapping.
+
+        Budgets stay None (module defaults); the CLI overrides them from
+        its parsed arguments."""
+        e = os.environ if env is None else env
+        policy = e.get("AGENT_REASONING_POLICY", "gated").strip().lower()
+        if policy not in REASONING_POLICIES:
+            raise ValueError(
+                f"AGENT_REASONING_POLICY must be one of {', '.join(REASONING_POLICIES)}"
+            )
+        return cls(
+            llm=LLMSettings.from_env(e),
+            allow_system_installs=e.get("ALLOW_SYSTEM_INSTALLS", "0") == "1",
+            allow_network=e.get("ALLOW_NETWORK", "1") == "1",
+            reasoning_policy=policy,
+        )
+
+
+@dataclass(frozen=True)
+class RunDependencies:
+    """Injectable collaborators for one run (issue #40).
+
+    ``None`` fields keep the module seams — ``ask_llm``, ``execute``,
+    ``log``, ``_run_log``, and ``time.time`` — resolved at call time, so
+    patch-based tests keep intercepting them. An injected ``llm_client``
+    (an :class:`LLMClient` or any object with a compatible ``ask``) handles
+    every planner, executor, validator, and task-replanner call. An injected
+    ``action_executor`` receives every dispatch, including deterministic
+    retries, and must target the run's workspace. Sinks cover
+    controller-owned logging and the injected client's telemetry."""
+
+    llm_client: Any = None
+    action_executor: Any = None
+    clock: Any = None
+    log_sink: Any = None
+    event_sink: Any = None
+
+
+@dataclass(frozen=True)
+class RunWorkspace:
+    """Workspace identity and ownership for one run (issue #40).
+
+    ``created`` is True only when the run made the temporary directory, so
+    callers can clean up intentionally; supplied directories are never
+    removed by AskMe."""
+
+    path: str
+    created: bool
+
+    @classmethod
+    def resolve(cls, working_dir=None):
+        """Use the caller's directory, or create an isolated temporary one."""
+        if working_dir is None:
+            return cls(path=tempfile.mkdtemp(prefix="askme_"), created=True)
+        return cls(path=str(working_dir), created=False)
+
+    def cleanup(self):
+        """Remove the directory only if this run created it."""
+        if self.created:
+            shutil.rmtree(self.path, ignore_errors=True)
+
+    def describe(self):
+        """JSON-ready ownership record for the structured run result."""
+        return {"path": self.path, "created": self.created}
+
+
 class _RunController:
     """Thin coordinator over planning, task attempts, step decisions, and
     finalization (issue #31).
@@ -2084,34 +2228,114 @@ class _RunController:
     repair, and retry — still flows through the one :class:`StepRecorder`.
     """
 
-    def __init__(
-        self,
-        user_prompt,
-        working_dir,
-        max_replans=MAX_REPLANS,
-        max_tasks=MAX_TASKS,
-        max_steps=MAX_STEPS,
-        reasoning_policy=DEFAULT_REASONING_POLICY,
-        goal_context_chars=GOAL_CONTEXT_CHARS,
-    ):
+    def __init__(self, user_prompt, working_dir, config=None, dependencies=None):
+        cfg = RunConfig() if config is None else config
+        deps = RunDependencies() if dependencies is None else dependencies
+        reasoning_policy = (
+            DEFAULT_REASONING_POLICY if cfg.reasoning_policy is None else cfg.reasoning_policy
+        )
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
+        goal_context_chars = (
+            GOAL_CONTEXT_CHARS if cfg.goal_context_chars is None else cfg.goal_context_chars
+        )
         if goal_context_chars < 1:
             raise ValueError("goal_context_chars must be a positive integer")
         self.user_prompt = user_prompt
         self.working_dir = working_dir
-        self.max_replans = max_replans
-        self.max_tasks = max_tasks
-        self.max_steps = max_steps
+        self.max_replans = MAX_REPLANS if cfg.max_replans is None else cfg.max_replans
+        self.max_tasks = MAX_TASKS if cfg.max_tasks is None else cfg.max_tasks
+        self.max_steps = MAX_STEPS if cfg.max_steps is None else cfg.max_steps
         self.reasoning_policy = reasoning_policy
         self.goal_context_chars = goal_context_chars
         # Freeze the executor/replanner view once so all policy arms receive the same
         # task context even if module configuration changes while a run is active.
         self.goal_context = user_prompt[:goal_context_chars]
-        self.run_state = RunState(reasoning_policy, goal_context_chars)
+        # Dependency seams (issue #40): None keeps the patchable module
+        # behavior; a pinned llm config builds this run's own client.
+        if deps.llm_client is not None:
+            self._client = deps.llm_client
+        elif cfg.llm is not None:
+            self._client = LLMClient(
+                settings=cfg.llm, log_sink=deps.log_sink, event_sink=deps.event_sink
+            )
+        else:
+            self._client = None
+        self._action_executor = deps.action_executor
+        self._clock = time.time if deps.clock is None else deps.clock
+        self._log_sink = deps.log_sink
+        self._event_sink = deps.event_sink
+        # Resolved, immutable run metadata for run_start and the structured
+        # result. The module snapshot keeps the default path identical to
+        # the former global reads at run start.
+        client_settings = getattr(self._client, "settings", None)
+        if client_settings is not None:
+            self._llm_meta = client_settings
+        else:
+            self._llm_meta = cfg.llm if cfg.llm is not None else LLMSettings.current()
+        self._policy = {
+            "allow_system_installs": (
+                ALLOW_SYSTEM_INSTALLS
+                if cfg.allow_system_installs is None
+                else cfg.allow_system_installs
+            ),
+            "allow_network": (ALLOW_NETWORK if cfg.allow_network is None else cfg.allow_network),
+        }
+        self.run_state = RunState(
+            reasoning_policy,
+            goal_context_chars,
+            clock=self._clock,
+            event_sink=deps.event_sink,
+        )
         self.state = self.run_state.data
         self.history = self.run_state.history
         self.recorder = self.run_state.recorder
+
+    def _emit(self, msg):
+        """Console line through the injected sink, defaulting to log()."""
+        (log if self._log_sink is None else self._log_sink)(msg)
+
+    def _event(self, event):
+        """JSONL event through the injected sink, defaulting to _run_log()."""
+        (_run_log if self._event_sink is None else self._event_sink)(event)
+
+    def _llm_kwargs(self):
+        """Extra kwargs for LLM-backed helpers; empty on the module facade
+        path so patched helpers keep their legacy call signatures."""
+        return {} if self._client is None else {"client": self._client}
+
+    def _dispatch(self, action):
+        """One normalized dispatch through the action seam (issue #40): the
+        injected executor when provided, else the patchable execute()."""
+        if self._action_executor is None:
+            raw = execute(action, self.working_dir)
+        else:
+            raw = self._action_executor.dispatch(action).to_dict()
+        return ActionResult.from_dict(raw)
+
+    def config_metadata(self):
+        """Resolved immutable run configuration for the structured result.
+
+        Mirrors the ``run_start`` event fields and never includes
+        credentials."""
+        meta = self._llm_meta
+        return {
+            "backend": meta.backend,
+            "model": meta.model,
+            "provider": meta.provider if meta.backend == "openrouter" else "",
+            "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
+            "allow_provider_fallbacks": meta.allow_fallbacks,
+            "require_provider_parameters": meta.require_parameters,
+            "policy": dict(self._policy),
+            "reasoning_policy": self.reasoning_policy,
+            "compile_repair": COMPILE_REPAIR_ENABLED,
+            "limits": {
+                "max_replans": self.max_replans,
+                "max_tasks": self.max_tasks,
+                "max_steps": self.max_steps,
+                "goal_context_chars": self.goal_context_chars,
+            },
+        }
 
     def run(self):
         """Drive planning, task attempts, validation, and finalization."""
@@ -2128,21 +2352,20 @@ class _RunController:
         return self._finish_after_exhaustion()
 
     def _log_run_start(self):
-        log(f"Prompt: {self.user_prompt}")
-        log(f"Working directory: {self.working_dir}")
-        _run_log(
+        meta = self._llm_meta
+        self._emit(f"Prompt: {self.user_prompt}")
+        self._emit(f"Working directory: {self.working_dir}")
+        self._event(
             {
                 "event": "run_start",
                 "prompt": self.user_prompt,
                 "working_dir": self.working_dir,
-                "backend": LLM_BACKEND,
-                "model": MODEL,
-                "provider": OPENROUTER_PROVIDER if LLM_BACKEND == "openrouter" else "",
-                "reasoning_effort": (
-                    OPENROUTER_REASONING_EFFORT if LLM_BACKEND == "openrouter" else ""
-                ),
-                "allow_provider_fallbacks": OPENROUTER_ALLOW_FALLBACKS,
-                "require_provider_parameters": OPENROUTER_REQUIRE_PARAMETERS,
+                "backend": meta.backend,
+                "model": meta.model,
+                "provider": meta.provider if meta.backend == "openrouter" else "",
+                "reasoning_effort": (meta.reasoning_effort if meta.backend == "openrouter" else ""),
+                "allow_provider_fallbacks": meta.allow_fallbacks,
+                "require_provider_parameters": meta.require_parameters,
                 "reasoning_policy": self.reasoning_policy,
                 # Ablation-arm provenance (issue #41): zero repair receipts cannot
                 # distinguish arm B from an arm-A run that never hit the trigger.
@@ -2157,35 +2380,35 @@ class _RunController:
         )
 
     def _preflight(self):
-        # Preflight: probe environment and set policy
+        # Preflight: probe environment and set the run's resolved policy
         env = preflight_probe(self.working_dir)
         self.state["environment"] = env
-        self.state["policy"] = get_policy()
-        log(f"Environment: platform={env['platform']} arch={env['arch']}")
-        log(f"Available tools: {env['available_tools']}")
+        self.state["policy"] = dict(self._policy)
+        self._emit(f"Environment: platform={env['platform']} arch={env['arch']}")
+        self._emit(f"Available tools: {env['available_tools']}")
         if env["missing_tools"]:
-            log(f"Missing tools: {env['missing_tools']}")
-        log(f"Package managers: {env['package_managers']}")
-        log(f"Policy: allow_system_installs={self.state['policy']['allow_system_installs']}")
+            self._emit(f"Missing tools: {env['missing_tools']}")
+        self._emit(f"Package managers: {env['package_managers']}")
+        self._emit(f"Policy: allow_system_installs={self.state['policy']['allow_system_installs']}")
 
     def _plan(self, replan):
         """One planning attempt; returns the task list or None on failure."""
-        log("=" * 40)
-        t_plan = time.time()
-        log(f"Planning (attempt {replan + 1}/{self.max_replans})...")
+        self._emit("=" * 40)
+        t_plan = self._clock()
+        self._emit(f"Planning (attempt {replan + 1}/{self.max_replans})...")
         self.state["planning_attempt"] = replan
         try:
-            plan = get_plan(self.user_prompt, self.state)
+            plan = get_plan(self.user_prompt, self.state, **self._llm_kwargs())
         except LLMTransportError as e:
-            log(f"  Planner transport error: {e}")
+            self._emit(f"  Planner transport error: {e}")
             self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
             self.history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
-            _run_log(
+            self._event(
                 {
                     "event": "plan_error",
                     "replan": replan,
                     "error": str(e)[:200],
-                    "wall_s": round(time.time() - t_plan, 2),
+                    "wall_s": round(self._clock() - t_plan, 2),
                 }
             )
             return None
@@ -2194,22 +2417,24 @@ class _RunController:
         if not tasks or any(not _valid_nonempty_str(task) for task in tasks):
             error = "[malformed_plan] planner returned no valid tasks"
             self.state["errors"].append(error)
-            log(f"  Planner contract error: {error}")
+            self._emit(f"  Planner contract error: {error}")
             self.history.append({"event": "plan_error", "replan": replan, "error": error})
-            _run_log(
+            self._event(
                 {
                     "event": "plan_error",
                     "replan": replan,
                     "error": error,
-                    "wall_s": round(time.time() - t_plan, 2),
+                    "wall_s": round(self._clock() - t_plan, 2),
                 }
             )
             return None
         self.state["errors"] = []  # reset errors each replan; planner already saw them
-        plan_wall = time.time() - t_plan
-        log(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
+        plan_wall = self._clock() - t_plan
+        self._emit(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         self.history.append({"event": "plan", "replan": replan, "tasks": tasks})
-        _run_log({"event": "plan", "replan": replan, "tasks": tasks, "wall_s": round(plan_wall, 2)})
+        self._event(
+            {"event": "plan", "replan": replan, "tasks": tasks, "wall_s": round(plan_wall, 2)}
+        )
         return tasks
 
     def _execute_tasks(self, tasks):
@@ -2218,7 +2443,7 @@ class _RunController:
         for i, task in enumerate(tasks):
             # Carry over last step from previous task so executor has cross-task context
             prev_last = self.state["last_steps"][-1:] if self.state.get("last_steps") else []
-            t_task = time.time()
+            t_task = self._clock()
             # Scope for no_write_executed: an earlier task's write must not
             # mask a stall in this one.
             self.state["task_start_step_count"] = len(self.state["all_steps"])
@@ -2231,29 +2456,29 @@ class _RunController:
                         f"[incomplete_write] {incomplete_name} at "
                         f"{recovery_arg}: completion refused"
                     )
-                    log(f"  Task completion refused: {incomplete_name} is incomplete")
+                    self._emit(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
             if task_done:
                 self.state["completed_tasks"].append(task)
                 self.state["completed_step_groups"].append(task_steps)
-                log(f"  Task complete. ({time.time() - t_task:.1f}s)")
-                _run_log(
+                self._emit(f"  Task complete. ({self._clock() - t_task:.1f}s)")
+                self._event(
                     {
                         "event": "task_complete",
                         "task_index": i,
                         "task": task,
-                        "wall_s": round(time.time() - t_task, 2),
+                        "wall_s": round(self._clock() - t_task, 2),
                     }
                 )
             else:
                 all_done = False
-                log(f"  Task failed, will replan. ({time.time() - t_task:.1f}s)")
-                _run_log(
+                self._emit(f"  Task failed, will replan. ({self._clock() - t_task:.1f}s)")
+                self._event(
                     {
                         "event": "task_failed",
                         "task_index": i,
                         "task": task,
-                        "wall_s": round(time.time() - t_task, 2),
+                        "wall_s": round(self._clock() - t_task, 2),
                     }
                 )
                 break
@@ -2272,13 +2497,13 @@ class _RunController:
             self.state["current_task"] = task
             self.state["task_index"] = f"{i + 1}/{len(tasks)}"
             self.state["last_steps"] = list(prev_last)
-            log(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
+            self._emit(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             # Reset per-attempt execution state (the task may be a replacement)
             attempt = TaskAttemptState(task=task, wants_write=_is_write_shaped(task))
             completed_repair = _task_satisfied_by_deterministic_repair(task, self.state)
             if completed_repair:
-                log(
+                self._emit(
                     f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})"
                 )
                 attempt.steps.append(completed_repair)
@@ -2292,19 +2517,23 @@ class _RunController:
             # E11: try task-local replan before falling through to full replan
             if task_attempt < MAX_TASK_LOCAL_REPLANS:
                 saved_errors = list(self.state["errors"])
-                t_lr = time.time()
-                replacement = replan_task(
-                    task,
-                    self.state["errors"],
-                    self.state["completed_tasks"],
-                    self.state,
-                    self.goal_context,
-                    goal_context_chars=self.goal_context_chars,
+                t_lr = self._clock()
+                replan = _coerce_task_replan(
+                    replan_task(
+                        task,
+                        self.state["errors"],
+                        self.state["completed_tasks"],
+                        self.state,
+                        self.goal_context,
+                        goal_context_chars=self.goal_context_chars,
+                        **self._llm_kwargs(),
+                    )
                 )
-                lr_wall = time.time() - t_lr
+                replacement = replan.task
+                lr_wall = self._clock() - t_lr
                 if replacement:
-                    log(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
-                    _run_log(
+                    self._emit(f"  Task-local replan ({lr_wall:.1f}s): '{replacement[:60]}'")
+                    self._event(
                         {
                             "event": "task_local_replan",
                             "task_index": i,
@@ -2319,9 +2548,9 @@ class _RunController:
                     self.state["errors"] = []
                     continue  # retry with replacement
                 else:
-                    reject_reason = _last_task_replan_reject_reason or "unknown"
-                    log(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
-                    _run_log(
+                    reject_reason = replan.reject_reason or "unknown"
+                    self._emit(f"  Task-local replan failed ({lr_wall:.1f}s), will full replan.")
+                    self._event(
                         {
                             "event": "task_local_replan",
                             "task_index": i,
@@ -2355,7 +2584,7 @@ class _RunController:
 
     def _select_action(self, i, attempt, step):
         """Ask the executor for one action; None ends the attempt."""
-        t_step = time.time()
+        t_step = self._clock()
         try:
             action = get_step(
                 attempt.task,
@@ -2369,9 +2598,10 @@ class _RunController:
                 goal_context_chars=self.goal_context_chars,
                 write_pressure=attempt.write_pressure(),
                 validate_pressure=self.run_state.validate_pressure_target(),
+                **self._llm_kwargs(),
             )
         except LLMTransportError as e:
-            log(f"  [{step + 1}] LLM transport error ({time.time() - t_step:.1f}s): {e}")
+            self._emit(f"  [{step + 1}] LLM transport error ({self._clock() - t_step:.1f}s): {e}")
             self.state["errors"].append(
                 f"[unknown] LLM transport error on task '{attempt.task}': {str(e)[:100]}"
             )
@@ -2386,11 +2616,11 @@ class _RunController:
                 etype = "malformed_action"
             else:
                 etype = "unknown"
-            log(f"  [{step + 1}] LLM parse error ({time.time() - t_step:.1f}s) [{etype}]")
+            self._emit(f"  [{step + 1}] LLM parse error ({self._clock() - t_step:.1f}s) [{etype}]")
             self.state["errors"].append(
                 f"[{etype}] LLM parse error on task '{attempt.task}': {str(e)[:100]}"
             )
-            _run_log(
+            self._event(
                 {
                     "event": "step_error",
                     "task_index": i,
@@ -2405,7 +2635,7 @@ class _RunController:
                 action[_k] = ""
         act = action.get("action", "")
         self.recorder.selected()
-        log(f"  [{step + 1}] {act}: {action['arg'][:80]}")
+        self._emit(f"  [{step + 1}] {act}: {action['arg'][:80]}")
         return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
 
     def _decide_step(self, ctx, attempt):
@@ -2414,7 +2644,7 @@ class _RunController:
             return self._handle_done(ctx, attempt)
         if ctx.act == "fail":
             reason = ctx.action.get("reasoning", "no reason")
-            log(f"  FAIL ({time.time() - ctx.started:.1f}s): {reason}")
+            self._emit(f"  FAIL ({self._clock() - ctx.started:.1f}s): {reason}")
             self.state["errors"].append(f"Task '{attempt.task}': {reason}")
             return _StepFlow.END_ATTEMPT
         flow = self._prepare_write(ctx)
@@ -2442,7 +2672,7 @@ class _RunController:
                     "Resend a shorter write to that exact target with "
                     "append:false before using append:true."
                 )
-            log(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
+            self._emit(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
             self.recorder.skip(
                 ctx.task_index, ctx.step, ctx.act, ctx.action, "incomplete_write_done"
             )
@@ -2496,7 +2726,7 @@ class _RunController:
             and pending_recovery
             and not pending_recovery.get("append_allowed", False)
         ):
-            log(f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)")
+            self._emit(f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)")
             self.recorder.skip(
                 ctx.task_index, ctx.step, act, action, "append_after_empty_overwrite"
             )
@@ -2517,7 +2747,7 @@ class _RunController:
             kept = action.get("content", "")
             kept = kept[: kept.rfind("\n") + 1]
             if not kept:
-                log(f"  [{ctx.step + 1}] skip (write truncated before a complete line)")
+                self._emit(f"  [{ctx.step + 1}] skip (write truncated before a complete line)")
                 self.recorder.skip(ctx.task_index, ctx.step, act, action, "truncated_write_empty")
                 # The recovery instruction asks for a clean resend; disarm
                 # rewrite damping before that resend even though this empty
@@ -2594,7 +2824,9 @@ class _RunController:
             return None
         attempt.observe_blocked += 1
         if attempt.observe_blocked >= 2:
-            log(f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)")
+            self._emit(
+                f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)"
+            )
             self.state["errors"].append(
                 f"[stuck_loop] {ctx.act} {ctx.action.get('arg', '')[:60]}: observation steps exhausted without a write"
             )
@@ -2602,7 +2834,9 @@ class _RunController:
                 ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_exhausted"
             )
             return _StepFlow.END_ATTEMPT
-        log(f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)")
+        self._emit(
+            f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)"
+        )
         self.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_reserved")
         self.recorder.note(
             {
@@ -2628,7 +2862,7 @@ class _RunController:
         ):
             return None
         attempt.dup_skip_count += 1
-        log(
+        self._emit(
             f"  [{ctx.step + 1}] skip (rewrite loop: "
             f"{ctx.action.get('arg', '')[:40]} already written "
             f"{self.run_state.consecutive_target_writes}x)"
@@ -2674,7 +2908,7 @@ class _RunController:
                 # Chunked append is never a no-op — an identical consecutive
                 # chunk is a stuck loop, not a duplicate.
                 if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
-                    log(
+                    self._emit(
                         f"  [{ctx.step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
                     )
                     self.state["errors"].append(
@@ -2704,7 +2938,7 @@ class _RunController:
                 and not prev.get("ok")
                 and prev.get("_find", "") == action.get("find", "")
             ):
-                log(
+                self._emit(
                     f"  [{ctx.step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
                 )
                 self.state["errors"].append(
@@ -2714,7 +2948,7 @@ class _RunController:
                 return _StepFlow.END_ATTEMPT
             if is_dup:
                 attempt.dup_skip_count += 1
-                log(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
+                self._emit(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
                 self.recorder.skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
                 if prev.get("_truncated_write"):
                     dup_msg = (
@@ -2745,7 +2979,7 @@ class _RunController:
                         action.get("replace", ""),
                     )
                     if edit_key == attempt.last_successful_edit:
-                        log(
+                        self._emit(
                             f"  [{ctx.step + 1}] auto-done (edit already succeeded, model re-emitting)"
                         )
                         attempt.done = True
@@ -2759,7 +2993,7 @@ class _RunController:
                 return _StepFlow.NEXT_STEP
         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
             if prev.get("ok"):
-                log(f"  [{ctx.step + 1}] auto-done (duplicate successful shell)")
+                self._emit(f"  [{ctx.step + 1}] auto-done (duplicate successful shell)")
                 self.recorder.skip(
                     ctx.task_index, ctx.step, act, action, "duplicate_shell_auto_done"
                 )
@@ -2771,9 +3005,9 @@ class _RunController:
                 prev_timeout = prev.get("_timeout", _get_shell_timeout(action.get("arg", "")))
                 bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
                 action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
-                log(f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)")
+                self._emit(f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)")
             else:
-                log(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
+                self._emit(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
                 self.state["errors"].append(
                     f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
                 )
@@ -2789,7 +3023,7 @@ class _RunController:
             elif prev.get("ok"):
                 attempt.dup_skip_count += 1
                 if attempt.dup_skip_count >= 2:
-                    log(
+                    self._emit(
                         f"  [{ctx.step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
                     )
                     self.state["errors"].append(
@@ -2797,7 +3031,7 @@ class _RunController:
                     )
                     self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read")
                     return _StepFlow.END_ATTEMPT
-                log(f"  [{ctx.step + 1}] skip (duplicate read)")
+                self._emit(f"  [{ctx.step + 1}] skip (duplicate read)")
                 self.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
                 cont = prev.get("_continuation")
                 if cont:
@@ -2820,7 +3054,7 @@ class _RunController:
                 self.recorder.note(entry)
                 return _StepFlow.NEXT_STEP
             else:
-                log(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
+                self._emit(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
                 self.state["errors"].append(
                     f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
                 )
@@ -2829,7 +3063,7 @@ class _RunController:
         return None
 
     def _execute_step(self, ctx, attempt):
-        """Dispatch through the execute() seam and record the receipt."""
+        """Dispatch through the action seam and record the receipt."""
         action, act = ctx.action, ctx.act
         attempt.dup_skip_count = 0  # reset on any non-skipped action
         self.recorder.executed()
@@ -2837,7 +3071,7 @@ class _RunController:
             attempt.observe_executed += 1
         # Normalize the seam's legacy dict once; controller policy below
         # runs on the typed result.
-        result = ActionResult.from_dict(execute(action, self.working_dir))
+        result = self._dispatch(action)
         if result.ok and act == "write":
             _clear_pending_empty_writes(
                 self.state["pending_empty_writes"],
@@ -2879,13 +3113,13 @@ class _RunController:
                 "that line)"
             )
         ok_str = "OK" if result.ok else "FAIL"
-        log(f"  -> {ok_str} ({time.time() - ctx.started:.1f}s): {result.output[:80]}")
+        self._emit(f"  -> {ok_str} ({self._clock() - ctx.started:.1f}s): {result.output[:80]}")
 
         step_entry = self.recorder.record(
             StepReceipt.executed(action, result, self.working_dir, ctx.truncated_write),
             ctx.task_index,
             ctx.step,
-            wall_s=round(time.time() - ctx.started, 2),
+            wall_s=round(self._clock() - ctx.started, 2),
         )
 
         if not result.ok:
@@ -2910,7 +3144,7 @@ class _RunController:
             and etype in ("compile_error", "unknown")
             and _expects_failure(attempt.task)
         ):
-            log("  Expected failure observed; completing task with evidence")
+            self._emit("  Expected failure observed; completing task with evidence")
             step_entry["expected_failure"] = True
             self.recorder.annotate_last("expected_failure", True)
             attempt.steps.append(step_entry)
@@ -2924,7 +3158,7 @@ class _RunController:
                 # so it breaks an armed rewrite streak just like a
                 # model-selected edit.
                 self.run_state.break_rewrite_streak()
-                log(f"  Deterministic repair: {repair[1]} in {repair[0]}")
+                self._emit(f"  Deterministic repair: {repair[1]} in {repair[0]}")
                 # The repair mutated the workspace outside the action
                 # handlers (the tracked #41 exception); its receipt and the
                 # scaffold retry still go through the one recorder.
@@ -2936,20 +3170,20 @@ class _RunController:
                     )
                 )
 
-                retry_result = ActionResult.from_dict(execute(action, self.working_dir))
+                retry_result = self._dispatch(action)
                 retry_entry = self.recorder.record(
                     StepReceipt.deterministic_retry(action, retry_result),
                     ctx.task_index,
                     ctx.step,
-                    wall_s=round(time.time() - ctx.started, 2),
+                    wall_s=round(self._clock() - ctx.started, 2),
                 )
                 if retry_result.ok:
-                    log(f"  -> OK deterministic retry: {retry_result.output[:80]}")
+                    self._emit(f"  -> OK deterministic retry: {retry_result.output[:80]}")
                     attempt.steps.append(retry_entry)
                     attempt.use_think = False
                     attempt.reasoning_trigger = "executor"
                     return _StepFlow.NEXT_STEP
-                log(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
+                self._emit(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
                 result = retry_result
                 etype = result.error_type or "unknown"
 
@@ -2975,7 +3209,12 @@ class _RunController:
         if wants_validation and (first_validation or recheck_validation):
             self.state["validated_once"] = True
             self.state["validation_attempts"] = self.state.get("validation_attempts", 0) + 1
-            vresult = _validate_completion(self.user_prompt, self.state, self.working_dir)
+            validate_kwargs = self._llm_kwargs()
+            if self._log_sink is not None:
+                validate_kwargs["log_sink"] = self._log_sink
+            vresult = _validate_completion(
+                self.user_prompt, self.state, self.working_dir, **validate_kwargs
+            )
             if vresult and vresult.get("valid") is False:
                 reason = vresult.get("reason", "validation failed")
                 missing = vresult.get("missing", [])
@@ -2985,8 +3224,8 @@ class _RunController:
                 self.state["errors"].append(error_msg)
                 self.state["validation_recheck_needed"] = True
                 self.state["validated_step_count"] = len(self.state.get("all_steps", []))
-                log(f"  Validation failed: {reason}")
-                _run_log(
+                self._emit(f"  Validation failed: {reason}")
+                self._event(
                     {
                         "event": "validation",
                         "valid": False,
@@ -3000,8 +3239,8 @@ class _RunController:
                 # A first optional validator failure remains fail-open, but
                 # once validation explicitly failed, an unavailable second
                 # verdict cannot erase that known failure.
-                log("  Validation recheck produced no verdict; failure remains pending.")
-                _run_log(
+                self._emit("  Validation recheck produced no verdict; failure remains pending.")
+                self._event(
                     {
                         "event": "validation",
                         "valid": None,
@@ -3011,8 +3250,8 @@ class _RunController:
                 )
             else:
                 self.state["validation_recheck_needed"] = False
-                log("  Validation passed.")
-                _run_log(
+                self._emit("  Validation passed.")
+                self._event(
                     {
                         "event": "validation",
                         "valid": True,
@@ -3027,13 +3266,13 @@ class _RunController:
                     "completion after failed validation requires new write, edit, or shell evidence"
                 )
             self.state["errors"].append(f"[validation_failed] {reason}")
-            log(f"  Completion refused: {reason}")
-            _run_log({"event": "validation_pending", "reason": reason})
+            self._emit(f"  Completion refused: {reason}")
+            self._event({"event": "validation_pending", "reason": reason})
             return None
         total_wall = self.run_state.elapsed()
-        log(f"All tasks complete. ({total_wall:.1f}s total)")
-        log(f"Output in: {self.working_dir}")
-        _run_log(
+        self._emit(f"All tasks complete. ({total_wall:.1f}s total)")
+        self._emit(f"Output in: {self.working_dir}")
+        self._event(
             {
                 "event": "run_end",
                 "status": "complete",
@@ -3054,9 +3293,11 @@ class _RunController:
         total_wall = self.run_state.elapsed()
         deterministic = _deterministic_check(self.user_prompt, self.state, self.working_dir)
         if deterministic is True and not self.state.get("validation_recheck_needed"):
-            log(f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)")
-            log(f"Output in: {self.working_dir}")
-            _run_log(
+            self._emit(
+                f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)"
+            )
+            self._emit(f"Output in: {self.working_dir}")
+            self._event(
                 {
                     "event": "run_end",
                     "status": "complete_deterministic_after_exhausted",
@@ -3072,10 +3313,10 @@ class _RunController:
             )
             return {"status": "complete", "state": self.state, "log": self.history}
 
-        log(f"Exhausted {self.max_replans} replan attempts. ({total_wall:.1f}s total)")
-        log(f"Errors: {self.state['errors']}")
-        log(f"Output in: {self.working_dir}")
-        _run_log(
+        self._emit(f"Exhausted {self.max_replans} replan attempts. ({total_wall:.1f}s total)")
+        self._emit(f"Errors: {self.state['errors']}")
+        self._emit(f"Output in: {self.working_dir}")
+        self._event(
             {
                 "event": "run_end",
                 "status": "exhausted",
@@ -3092,6 +3333,27 @@ class _RunController:
         return {"status": "exhausted", "state": self.state, "log": self.history}
 
 
+def run_result(user_prompt, working_dir=None, config=None, dependencies=None):
+    """Public structured-run API (issue #40).
+
+    Resolves the workspace (creating an isolated temporary directory when
+    ``working_dir`` is None), composes the controller from the immutable
+    :class:`RunConfig` and the injectable :class:`RunDependencies`, and
+    returns the structured result: ``status``, ``state``, and ``log``, plus
+    the resolved ``config`` metadata (never credentials) and the
+    ``workspace`` ownership record. ``run()``, ``_run_loop``, and the CLI
+    are wrappers over this one path.
+    """
+    workspace = RunWorkspace.resolve(working_dir)
+    controller = _RunController(
+        user_prompt, workspace.path, config=config, dependencies=dependencies
+    )
+    result = controller.run()
+    result["config"] = controller.config_metadata()
+    result["workspace"] = workspace.describe()
+    return result
+
+
 def _run_loop(
     user_prompt,
     working_dir,
@@ -3101,30 +3363,32 @@ def _run_loop(
     reasoning_policy=DEFAULT_REASONING_POLICY,
     goal_context_chars=GOAL_CONTEXT_CHARS,
 ):
-    """Core agent loop. Returns structured result dict.
+    """Compatibility seam over run_result() (issues #31/#40).
 
-    Used by run() (public API, returns bool) and by integration test harness
-    (needs rich dict with state + log). All production behavior lives in
-    _RunController; this wrapper remains the stable seam callers target.
+    Existing callers and tests keep this kwargs signature; composition and
+    all production behavior live in run_result()/_RunController. The
+    module-level LLM facade stays in effect because no per-run ``llm``
+    configuration is pinned here.
     """
-    return _RunController(
+    return run_result(
         user_prompt,
-        working_dir,
-        max_replans=max_replans,
-        max_tasks=max_tasks,
-        max_steps=max_steps,
-        reasoning_policy=reasoning_policy,
-        goal_context_chars=goal_context_chars,
-    ).run()
+        working_dir=working_dir,
+        config=RunConfig(
+            reasoning_policy=reasoning_policy,
+            max_replans=max_replans,
+            max_tasks=max_tasks,
+            max_steps=max_steps,
+            goal_context_chars=goal_context_chars,
+        ),
+    )
 
 
 def run(user_prompt, working_dir=None):
-    """Public API: run agent and return True (success) or False (failure)."""
-    # Create isolated temp directory per run unless caller provides one
-    if working_dir is None:
-        working_dir = tempfile.mkdtemp(prefix="askme_")
-    result = _run_loop(user_prompt, working_dir)
-    return result["status"] == "complete"
+    """Public API: run agent and return True (success) or False (failure).
+
+    Compatibility wrapper over run_result(); an isolated temporary
+    directory is created per run unless the caller provides one."""
+    return run_result(user_prompt, working_dir=working_dir)["status"] == "complete"
 
 
 def _positive_int(value):
@@ -3192,22 +3456,24 @@ def _main(argv=None):
         parser.error("prompt must not be empty")
 
     if args.working_dir is None:
-        working_dir = tempfile.mkdtemp(prefix="askme_")
+        working_dir = None  # run_result creates and records an isolated workspace
     else:
         workspace = Path(args.working_dir)
         if not workspace.is_dir():
             parser.error("--working-dir must name an existing directory")
         working_dir = str(workspace)
 
-    result = _run_loop(
-        user_prompt,
-        working_dir,
+    # Immutable per-run configuration loaded from the environment at the CLI
+    # boundary (issue #40); parsed arguments override policy and budgets.
+    config = _dataclass_replace(
+        RunConfig.from_env(),
+        reasoning_policy=args.reasoning_policy,
         max_replans=args.max_replans,
         max_tasks=args.max_tasks,
         max_steps=args.max_steps,
-        reasoning_policy=args.reasoning_policy,
         goal_context_chars=args.goal_context_chars,
     )
+    result = run_result(user_prompt, working_dir=working_dir, config=config)
     if args.result_json:
         try:
             Path(args.result_json).write_text(json.dumps(result, indent=2, default=str) + "\n")
