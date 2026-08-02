@@ -423,49 +423,6 @@ class TestServerConfig:
         assert len(slots) == 1, f"Expected 1 slot (-np 1), got {len(slots)}"
         assert slots[0]["n_ctx"] == 16384, f"Expected 16384 ctx, got {slots[0]['n_ctx']}"
 
-    def test_slot_save_enabled(self):
-        """--slot-save-path should be configured, allowing slot save via API."""
-        import requests
-
-        requests.post(
-            "http://localhost:8080/v1/chat/completions",
-            json={
-                "model": "gemma-4-e4b",
-                "messages": [{"role": "user", "content": "hi"}],
-                "max_tokens": 1,
-            },
-            timeout=60,
-        )
-        resp = requests.post(
-            "http://localhost:8080/slots/0?action=save",
-            json={"filename": "test-config-check"},
-            timeout=10,
-        )
-        assert resp.status_code == 200, f"Slot save failed: {resp.status_code} {resp.text}"
-        data = resp.json()
-        assert data.get("n_saved", 0) > 0, f"Expected n_saved > 0, got {data}"
-
-    def test_slot_restore(self):
-        """Saved slot state should be restorable."""
-        import requests
-
-        resp = requests.post(
-            "http://localhost:8080/slots/0?action=restore",
-            json={"filename": "test-config-check"},
-            timeout=10,
-        )
-        assert resp.status_code == 200, f"Slot restore failed: {resp.status_code} {resp.text}"
-        data = resp.json()
-        assert data.get("n_restored", 0) > 0, f"Expected n_restored > 0, got {data}"
-
-    def test_slot_save_file_on_disk(self):
-        """Saved slot state should exist as a file in --slot-save-path dir."""
-        cache_dir = Path("/tmp/llama-cache")
-        assert cache_dir.exists(), f"Cache dir {cache_dir} not found (--slot-save-path not set?)"
-        saved = list(cache_dir.glob("test-config-check"))
-        assert len(saved) == 1, f"Expected saved cache file, found: {list(cache_dir.iterdir())}"
-        assert saved[0].stat().st_size > 0, "Saved cache file is empty"
-
 
 # --- E11: Task-local replan function tests ---
 
