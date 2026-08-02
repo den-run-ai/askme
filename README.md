@@ -56,15 +56,15 @@ python3 "$tutorial_dir/tests/check_feedback.py" -v
   cd "$tutorial_dir"
   python3 "$askme_root/tests/workflow_evaluators/config_precedence.py"
 )
-diff -u "$askme_root/tests/workflows/config_precedence/seed/config_cli.py" \
-  "$tutorial_dir/config_cli.py" || true
+diff -ru "$askme_root/tests/workflows/config_precedence/seed" \
+  "$tutorial_dir" || true
 ```
 
-Both public test files and the held-out evaluator should now pass, and the diff
-should be limited to the intended implementation. `--working-dir` changes files
-in place but does not sandbox the agent, which is why the tutorial uses a
-disposable copy. To use OpenRouter, prefix the AskMe command with
-`LLM_BACKEND=openrouter`.
+Both public test files and the held-out evaluator should now pass, and the
+recursive diff should show only the intended implementation edit—test changes
+and extra files are visible too. `--working-dir` changes files in place but does
+not sandbox the agent, which is why the tutorial uses a disposable copy. To use
+OpenRouter, prefix the AskMe command with `LLM_BACKEND=openrouter`.
 
 The same scenario is continuously qualified against protected public tests,
 an independent alternative implementation, and a held-out evaluator:
