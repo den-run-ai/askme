@@ -28,6 +28,52 @@ python3 askme.py "create a hello world program in C and compile it"
 LLM_BACKEND=openrouter python3 askme.py "your task here"
 ```
 
+## Coding Task Quick Tutorial
+
+This example uses the repository's qualified configuration-precedence
+workflow: a small Python CLI with a real semantic bug, visible tests, and
+held-out acceptance checks. It exercises a typical coding-agent loop — inspect
+an existing project, reproduce a failure, edit code, and run focused tests.
+
+```bash
+# 1. Work on a disposable copy of the intentionally broken project.
+askme_root="$PWD"
+tutorial_dir="$(mktemp -d)"
+cp -R tests/workflows/config_precedence/seed/. "$tutorial_dir/"
+
+# The compatibility checks pass, while the focused bug check fails.
+python3 "$tutorial_dir/tests/check_regression.py" -v
+! python3 "$tutorial_dir/tests/check_feedback.py" -v
+
+# 2. Ask the agent to diagnose, fix, and test the project in place.
+python3 "$askme_root/askme.py" --working-dir "$tutorial_dir" \
+  "Fix config_cli.py so timeout precedence is CLI --timeout > ASKME_TIMEOUT > JSON config > default 30. Invalid timeout values must print exactly 'error: timeout must be a positive integer' to stderr and exit 2. Preserve JSON output and --name behavior. Run the public tests."
+
+# 3. Treat the agent's completion claim as provisional: verify it yourself.
+python3 "$tutorial_dir/tests/check_regression.py" -v
+python3 "$tutorial_dir/tests/check_feedback.py" -v
+(
+  cd "$tutorial_dir"
+  python3 "$askme_root/tests/workflow_evaluators/config_precedence.py"
+)
+diff -u "$askme_root/tests/workflows/config_precedence/seed/config_cli.py" \
+  "$tutorial_dir/config_cli.py" || true
+```
+
+Both public test files and the held-out evaluator should now pass, and the diff
+should be limited to the intended implementation. `--working-dir` changes files
+in place but does not sandbox the agent, which is why the tutorial uses a
+disposable copy. To use OpenRouter, prefix the AskMe command with
+`LLM_BACKEND=openrouter`.
+
+The same scenario is continuously qualified against protected public tests,
+an independent alternative implementation, and a held-out evaluator:
+
+```bash
+python3 -m pytest \
+  tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
+```
+
 ## How It Works
 
 ```mermaid
@@ -122,3 +168,4 @@ credential is unavailable. Dated run matrices and suite-size snapshots live in
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) — active experiment backlog
 - [docs/SECURITY.md](docs/SECURITY.md) — threat boundary and safe-use guidance
 - [CLAUDE.md](CLAUDE.md) — guidance for AI agents working in this directory
+
