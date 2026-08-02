@@ -25,6 +25,19 @@ def _big_file(work_dir, name="big.py", lines=200):
     return p
 
 
+def _symlinked_target_dirs(tmp_path):
+    work = tmp_path / "work"
+    real = tmp_path / "real"
+    work.mkdir()
+    real.mkdir()
+    alias = work / "alias"
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable")
+    return work, real, alias
+
+
 # --- Ranged reads with continuation metadata ---
 
 class TestRangedRead:
@@ -443,6 +456,25 @@ class TestAppendStuckGuard:
         assert result["status"] == "exhausted"
         assert "auto-fail (same chunk appended twice" in out
         # The chunk must not have been applied twice
+        assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_same_chunk_via_path_alias_auto_fails(self, mock_llm, mock_replan,
+                                                  capsys, tmp_path):
+        mock_llm.side_effect = [
+            {"tasks": ["build big.py in chunks"]},
+            {"action": "write", "arg": "big.py", "content": "x = 1\n",
+             "append": True},
+            {"action": "write", "arg": "./big.py", "content": "x = 1\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("build big.py in chunks", str(tmp_path),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        out = capsys.readouterr().out
+        assert result["status"] == "exhausted"
+        assert "auto-fail (same chunk appended twice" in out
         assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
 
     @patch("askme.replan_task", return_value=None)
@@ -1360,33 +1392,68 @@ class TestValidateAfterWrite:
 
     def test_full_and_task_replans_surface_incomplete_write(self):
         state = {
-            "all_steps": [{"action": "write", "arg": "app.py", "ok": True,
-                           "_truncated_write": True}],
-            "task_start_step_count": 0,
-            "current_task": "implement feature in app.py",
+            "all_steps": [
+                {"action": "write", "arg": "app.py", "ok": True,
+                 "_truncated_write": True},
+                {"action": "read", "arg": "app.py", "ok": True},
+            ],
+            # The next plan already started a non-write-shaped replacement;
+            # its task-scoped slice excludes the earlier partial artifact.
+            "task_start_step_count": 1,
+            "current_task": "inspect app.py",
             "errors": ["[unknown] stalled"],
         }
         with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as full:
-            askme.get_plan("implement feature in app.py", state)
+            askme.get_plan("finish app.py", state)
         full_msg = full.call_args.args[0][-1]["content"]
         full_state = json.loads(full_msg.split("STATE:\n", 1)[1])
         assert full_state["incomplete_write"] == "app.py"
         assert "unvalidated_write" not in full_state
+        assert "no_write_executed" not in full_state
 
         with patch("askme.ask_llm",
-                   return_value={"task": "complete app.py from resume anchor"}) as local:
-            askme.replan_task("implement feature in app.py",
+                   return_value={"task": "finish app.py"}) as local:
+            askme.replan_task("inspect app.py",
                               ["[unknown] stalled"], [], state, "goal")
         local_msg = local.call_args.args[0][-1]["content"]
         local_state = json.loads(local_msg.split("STATE:\n", 1)[1])
         assert local_state["incomplete_write"] == "app.py"
         assert "unvalidated_write" not in local_state
+        assert "no_write_executed" not in local_state
+        assert [step["action"] for step in local_state["failed_steps"]] == ["read"]
+
+    def test_pending_empty_write_is_visible_to_both_replanners(self):
+        state = {
+            "all_steps": [],
+            "pending_empty_writes": {
+                "/internal/normalized/app.py": {
+                    "name": "app.py", "append_allowed": False,
+                }
+            },
+            "task_start_step_count": 0,
+            "current_task": "inspect app.py",
+            "errors": ["[unknown] stalled"],
+        }
+        with patch("askme.ask_llm", return_value={"tasks": ["retry"]}) as full:
+            askme.get_plan("finish app.py", state)
+        full_state = json.loads(
+            full.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
+        assert full_state["incomplete_write"] == "app.py"
+        assert "no_write_executed" not in full_state
+
+        with patch("askme.ask_llm", return_value={"task": "finish app.py"}) as local:
+            askme.replan_task("inspect app.py", ["[unknown] stalled"], [],
+                              state, "goal")
+        local_state = json.loads(
+            local.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
+        assert local_state["incomplete_write"] == "app.py"
+        assert "no_write_executed" not in local_state
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_empty_truncated_write_replans_as_no_write(self, mock_llm,
-                                                       mock_replan,
-                                                       tmp_path):
+    def test_empty_truncated_write_replans_as_incomplete(self, mock_llm,
+                                                         mock_replan,
+                                                         tmp_path):
         plan_msgs = []
 
         def llm(messages, **kwargs):
@@ -1411,8 +1478,8 @@ class TestValidateAfterWrite:
         assert result["status"] == "exhausted"
         assert len(plan_msgs) == 1
         plan_state = json.loads(plan_msgs[0].split("STATE:\n", 1)[1])
-        assert plan_state["no_write_executed"] is True
-        assert "incomplete_write" not in plan_state
+        assert plan_state["incomplete_write"] == "app.py"
+        assert "no_write_executed" not in plan_state
         assert not (tmp_path / "app.py").exists()
 
     @patch("askme.replan_task", return_value=None)
@@ -1501,6 +1568,231 @@ class TestValidateAfterWrite:
         assert (tmp_path / "big.py").read_text() == "v3\n"
         events = [json.loads(l) for l in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    def test_target_key_resolves_parent_symlinks_but_not_leaf(self, tmp_path):
+        work, real, alias = _symlinked_target_dirs(tmp_path)
+        # The immediate parent and file do not exist yet; strict=False must
+        # still collapse the existing directory alias.
+        alias_key = askme._mutation_target_key(
+            {"arg": "alias/new/app.py"}, str(work))
+        real_key = askme._mutation_target_key(
+            {"arg": str(real / "new" / "app.py")}, str(work))
+        assert alias_key == real_key
+        # Preserve OS traversal order: alias is followed before `..` applies.
+        assert askme._mutation_target_key(
+            {"arg": "alias/../app.py"}, str(work)) == \
+            askme._mutation_target_key(
+                {"arg": str(tmp_path / "app.py")}, str(work))
+
+        referent = real / "referent.py"
+        referent.write_text("real\n")
+        leaf = work / "leaf.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        # Atomic full writes replace the leaf symlink itself, so it is a
+        # different mutation destination from the referent.
+        assert askme._mutation_target_key(
+            {"arg": "leaf.py"}, str(work)) != askme._mutation_target_key(
+                {"arg": str(referent)}, str(work))
+        assert askme._mutation_target_key(
+            {"arg": "leaf.py", "append": True}, str(work)) == \
+            askme._mutation_target_key(
+                {"arg": str(referent), "append": True}, str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_rewrite_streak_collapses_symlinked_parent_aliases(
+            self, mock_llm, mock_replan, tmp_path):
+        work, real, _ = _symlinked_target_dirs(tmp_path)
+        real_target = str(real / "big.py")
+        mock_llm.side_effect = [
+            {"tasks": ["create big.py"]},
+            {"action": "write", "arg": "alias/big.py", "content": "v1\n"},
+            {"action": "write", "arg": real_target, "content": "v2\n"},
+            {"action": "write", "arg": "alias/big.py", "content": "v3\n"},
+            {"action": "write", "arg": real_target, "content": "v4\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("create big.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert (real / "big.py").read_text() == "v3\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "rewrite_loop" for e in events)
+
+    @pytest.mark.parametrize("truncated_content", [
+        "partial line\nmissing tail",
+        "no complete line",
+    ])
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_complete_symlink_alias_clears_incomplete_write(
+            self, mock_llm, mock_replan, tmp_path, truncated_content):
+        work, real, _ = _symlinked_target_dirs(tmp_path)
+        real_target = str(real / "app.py")
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": "alias/app.py",
+             "content": truncated_content, "content_truncated": True},
+            {"action": "write", "arg": real_target, "content": "final\n"},
+            {"action": "done"},
+        ]
+        result = _run_loop("create app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert (real / "app.py").read_text() == "final\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_append_through_leaf_symlink_resolves_partial_referent(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["create app.py"]},
+            {"action": "write", "arg": str(referent),
+             "content": "prefix\nmissing tail", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "tail\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("create app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert referent.read_text() == "prefix\ntail\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_blocks_append_through_leaf_alias(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "write", "arg": str(referent), "content": "BAD\n",
+             "append": True},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=5)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert referent.read_text() == "OLD\n"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_pending_overwrite_wins_across_append_aliases(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "write", "arg": str(referent),
+             "content": "still no complete line", "content_truncated": True},
+            {"action": "write", "arg": "app.py", "content": "BAD\n",
+             "append": True},
+            {"action": "write", "arg": str(referent), "content": "GOOD\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=6)
+        finally:
+            askme.RUN_LOG_PATH = old
+        assert result["status"] == "complete"
+        assert referent.read_text() == "GOOD\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert any(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_append_can_resume_through_physical_alias(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        referent = real / "app.py"
+        referent.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["update app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "append": True,
+             "content_truncated": True},
+            {"action": "write", "arg": str(referent), "content": "NEW\n",
+             "append": True},
+            {"action": "done"},
+        ]
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert referent.read_text() == "OLD\nNEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
