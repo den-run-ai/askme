@@ -3,15 +3,18 @@ one-shot transport, and pure reply decode — each exercised independently of
 the ask_llm retry loop, whose policy behavior stays pinned by the existing
 TestAskLlm/TestThinkingRetry/TestLLMTransport/TestTieredRetryContract suites."""
 
+import dataclasses
 import json
 from unittest.mock import patch
 
 import pytest
 import requests as req_lib
-from _test_support import mock_http_response
+from _test_support import mock_http_response, mock_response, mock_response_raw
 
 import askme
 from askme import (
+    LLMClient,
+    LLMSettings,
     _build_llm_request,
     _decode_action_reply,
     _extract_message_text,
@@ -349,3 +352,306 @@ class TestDecodeActionReply:
         obj, _, _ = _decode_action_reply(text, "stop")
         assert obj["content"] == "line1\nline2"
         assert "content_truncated" not in obj
+
+
+# --- Client-local settings and injected dependencies (issue #37) ---
+
+
+class TestLLMSettings:
+    def test_from_env_local_defaults(self):
+        s = LLMSettings.from_env(env={})
+        assert s.backend == "local"
+        assert s.api == "http://localhost:8080/v1/chat/completions"
+        assert s.model == "gemma-4-e4b"
+        assert s.api_key == ""
+        assert s.provider == "Parasail"
+        assert s.allow_fallbacks is True
+        assert s.require_parameters is False
+        assert s.reasoning_effort == ""
+        assert s.timeout == askme.LLM_TIMEOUT
+
+    def test_from_env_openrouter_derivation(self):
+        s = LLMSettings.from_env(
+            env={
+                "LLM_BACKEND": "openrouter",
+                "OPENROUTER_MODEL": "vendor/model-x",
+                "OPENROUTER_API_KEY": "k",
+                "OPENROUTER_PROVIDER": " SomeProvider ",
+                "OPENROUTER_ALLOW_FALLBACKS": "0",
+                "OPENROUTER_REQUIRE_PARAMETERS": "1",
+                "OPENROUTER_REASONING_EFFORT": "High",
+            }
+        )
+        assert s.backend == "openrouter"
+        assert s.api == askme.OPENROUTER_CHAT_API
+        assert s.model == "vendor/model-x"
+        assert s.api_key == "k"
+        assert s.provider == "SomeProvider"
+        assert s.allow_fallbacks is False
+        assert s.require_parameters is True
+        assert s.reasoning_effort == "high"
+
+    def test_from_env_local_custom_endpoint(self):
+        s = LLMSettings.from_env(
+            env={"LLM_API_URL": "http://gpu-box:9090/v1/chat/completions", "LLM_MODEL": "m"}
+        )
+        assert s.api == "http://gpu-box:9090/v1/chat/completions"
+        assert s.model == "m"
+
+    def test_from_env_rejects_bad_effort(self):
+        with pytest.raises(ValueError, match="OPENROUTER_REASONING_EFFORT"):
+            LLMSettings.from_env(env={"OPENROUTER_REASONING_EFFORT": "max"})
+
+    def test_settings_are_immutable(self):
+        s = LLMSettings.from_env(env={})
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            s.model = "other"  # type: ignore[misc]
+
+    @patch("askme.MODEL", "patched-model")
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_current_snapshots_patched_globals(self):
+        s = LLMSettings.current()
+        assert s.model == "patched-model"
+        assert s.backend == "openrouter"
+
+    def test_module_mirrors_match_the_one_derivation(self):
+        s = askme._DEFAULT_LLM_SETTINGS
+        assert askme.LLM_BACKEND == s.backend
+        assert askme.API == s.api
+        assert askme.MODEL == s.model
+        assert askme.OPENROUTER_API_KEY == s.api_key
+        assert askme.OPENROUTER_PROVIDER == s.provider
+        assert askme.OPENROUTER_ALLOW_FALLBACKS == s.allow_fallbacks
+        assert askme.OPENROUTER_REQUIRE_PARAMETERS == s.require_parameters
+        assert askme.OPENROUTER_REASONING_EFFORT == s.reasoning_effort
+
+    def test_settings_passthrough_overrides_globals(self):
+        custom = LLMSettings(
+            backend="openrouter",
+            api=askme.OPENROUTER_CHAT_API,
+            model="vendor/custom",
+            api_key="secret",
+            provider="ProvX",
+            allow_fallbacks=False,
+            require_parameters=True,
+            reasoning_effort="",
+            timeout=5,
+        )
+        body, headers, _ = _build_llm_request(
+            [{"role": "user", "content": "hi"}], 256, None, strict=False, settings=custom
+        )
+        assert body["model"] == "vendor/custom"
+        assert body["provider"] == {
+            "order": ["ProvX"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+        assert headers["Authorization"] == "Bearer secret"
+
+    def test_http_attempt_api_override(self):
+        calls = {}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            calls["url"] = url
+            return mock_http_response(json_body={"choices": []})
+
+        _, failure = _llm_http_attempt({}, {}, 1, post=fake_post, api="http://alt:1/v1")
+        assert failure is None
+        assert calls["url"] == "http://alt:1/v1"
+
+
+def _client_settings(**overrides):
+    base = {
+        "backend": "openrouter",
+        "api": askme.OPENROUTER_CHAT_API,
+        "model": "vendor/model-a",
+        "api_key": "key-a",
+        "provider": "ProvA",
+        "allow_fallbacks": True,
+        "require_parameters": False,
+        "reasoning_effort": "",
+        "timeout": 7,
+    }
+    base.update(overrides)
+    return LLMSettings(**base)
+
+
+DONE_REPLY = {"action": "done", "arg": "", "reasoning": "r"}
+
+
+class TestLLMClientInjection:
+    def test_two_clients_share_a_process_without_global_leakage(self):
+        calls = []
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            calls.append((url, json["model"], (headers or {}).get("Authorization"), timeout))
+            return mock_response(DONE_REPLY, finish_reason="stop")
+
+        before = (askme.LLM_BACKEND, askme.API, askme.MODEL, askme.OPENROUTER_API_KEY)
+        events = []
+        a = LLMClient(
+            settings=_client_settings(),
+            post=fake_post,
+            event_sink=events.append,
+            log_sink=lambda m: None,
+        )
+        b = LLMClient(
+            settings=_client_settings(
+                backend="local",
+                api="http://localhost:1234/v1/chat/completions",
+                model="local-b",
+                api_key="",
+                provider="",
+                timeout=9,
+            ),
+            post=fake_post,
+            event_sink=events.append,
+            log_sink=lambda m: None,
+        )
+        ra = a.ask([{"role": "user", "content": "hi"}], reasoning_trigger="seam_test")
+        rb = b.ask([{"role": "user", "content": "hi"}], reasoning_trigger="seam_test")
+        assert ra["action"] == "done" and rb["action"] == "done"
+        assert calls[0] == (askme.OPENROUTER_CHAT_API, "vendor/model-a", "Bearer key-a", 7)
+        assert calls[1] == ("http://localhost:1234/v1/chat/completions", "local-b", None, 9)
+        assert (askme.LLM_BACKEND, askme.API, askme.MODEL, askme.OPENROUTER_API_KEY) == before
+
+    def test_injected_sleeper_and_log_sink_cover_retries(self, capsys):
+        sleeps, logs = [], []
+        attempts = {"n": 0}
+
+        def flaky_post(url, json=None, headers=None, timeout=None):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                return mock_http_response(status_code=500)
+            return mock_response(DONE_REPLY, finish_reason="stop")
+
+        client = LLMClient(
+            settings=_client_settings(),
+            post=flaky_post,
+            sleep=sleeps.append,
+            log_sink=logs.append,
+            event_sink=lambda e: None,
+        )
+        obj = client.ask([{"role": "user", "content": "hi"}], reasoning_trigger="seam_test")
+        assert obj["action"] == "done"
+        assert sleeps == [1, 3]
+        assert sum("HTTP 500" in m for m in logs) == 2
+        # The module console logger was not touched by the injected sinks.
+        assert "HTTP 500" not in capsys.readouterr().out
+
+    def test_usage_and_reasoning_events_reach_injected_event_sink(self):
+        events = []
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            return mock_response(
+                DONE_REPLY,
+                finish_reason="stop",
+                usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+            )
+
+        client = LLMClient(
+            settings=_client_settings(reasoning_effort="low"),
+            post=fake_post,
+            log_sink=lambda m: None,
+            event_sink=events.append,
+        )
+        client.ask([{"role": "user", "content": "hi"}], reasoning_trigger="seam_test")
+        decision = next(e for e in events if e["event"] == "reasoning_decision")
+        assert decision["baseline_effort"] == "low"
+        tokens = next(e for e in events if e["event"] == "tokens")
+        assert tokens["total"] == 5
+        assert tokens["model"] == "vendor/model-a"
+
+    def test_ask_llm_facade_still_snapshots_module_globals(self):
+        with (
+            patch("askme.LLM_BACKEND", "openrouter"),
+            patch("askme.API", "http://facade-test/v1"),
+            patch("askme.MODEL", "facade/model"),
+            patch("askme.OPENROUTER_API_KEY", "fk"),
+            patch("askme.requests.post") as mock_post,
+        ):
+            mock_post.return_value = mock_response(DONE_REPLY, finish_reason="stop")
+            obj = askme.ask_llm([{"role": "user", "content": "hi"}], reasoning_trigger="seam_test")
+        assert obj["action"] == "done"
+        url = mock_post.call_args[0][0]
+        body = mock_post.call_args[1]["json"]
+        headers = mock_post.call_args[1]["headers"]
+        assert url == "http://facade-test/v1"
+        assert body["model"] == "facade/model"
+        assert headers["Authorization"] == "Bearer fk"
+
+
+class TestWriteRetryBudgetPerClient:
+    """Codex P2 (PR #61): the truncated-write retry budget must follow the
+    client's backend, not the process-wide import-time backend."""
+
+    def test_write_retry_tokens_follow_settings_backend(self):
+        assert _client_settings().write_retry_tokens() == 8192
+        assert _client_settings(backend="local").write_retry_tokens() == 512
+        assert _client_settings(step_write_tokens=1024).write_retry_tokens() == 1024
+        assert LLMSettings.from_env(env={}).write_retry_tokens() == 512
+        assert LLMSettings.from_env(env={"LLM_BACKEND": "openrouter"}).write_retry_tokens() == 8192
+
+    @patch("askme.STEP_WRITE_TOKENS", 777)
+    def test_current_pins_the_patchable_module_budget(self):
+        assert LLMSettings.current().write_retry_tokens() == 777
+
+    def _truncated_then_done(self, bodies):
+        truncated_write = '{"action": "write", "arg": "a.py", "content": "aaaa'
+        replies = [
+            mock_response_raw(truncated_write, finish_reason="length"),
+            mock_response(DONE_REPLY, finish_reason="stop"),
+        ]
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            bodies.append(json)
+            return replies.pop(0)
+
+        return fake_post
+
+    @patch("askme.STEP_WRITE_TOKENS", 512)
+    @patch("askme.LLM_BACKEND", "local")
+    def test_openrouter_client_in_local_process_gets_full_budget(self):
+        bodies = []
+        client = LLMClient(
+            settings=_client_settings(),
+            post=self._truncated_then_done(bodies),
+            log_sink=lambda m: None,
+            event_sink=lambda e: None,
+        )
+        obj = client.ask(
+            [{"role": "user", "content": "hi"}],
+            max_tokens=256,
+            max_retries=1,
+            reasoning_policy="off",
+            reasoning_trigger="seam_test",
+        )
+        assert obj["action"] == "done"
+        assert bodies[0]["max_tokens"] == 256
+        assert bodies[1]["max_tokens"] == 8192
+
+    @patch("askme.STEP_WRITE_TOKENS", 8192)
+    @patch("askme.LLM_BACKEND", "openrouter")
+    def test_local_client_in_openrouter_process_keeps_local_bound(self):
+        bodies = []
+        client = LLMClient(
+            settings=_client_settings(
+                backend="local",
+                api="http://localhost:1234/v1/chat/completions",
+                api_key="",
+                provider="",
+            ),
+            post=self._truncated_then_done(bodies),
+            log_sink=lambda m: None,
+            event_sink=lambda e: None,
+        )
+        obj = client.ask(
+            [{"role": "user", "content": "hi"}],
+            max_tokens=256,
+            max_retries=1,
+            reasoning_policy="off",
+            reasoning_trigger="seam_test",
+        )
+        assert obj["action"] == "done"
+        assert bodies[0]["max_tokens"] == 256
+        assert bodies[1]["max_tokens"] == 512
