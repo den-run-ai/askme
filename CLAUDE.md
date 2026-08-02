@@ -60,8 +60,9 @@ python3 askme.py --help
 # Run against a project that may be edited
 python3 askme.py --working-dir /path/to/project "Fix the failing tests"
 
-# Exact hermetic CI test command
-python3 -m pytest tests/ -v
+# Offline deterministic handoff gate; the empty key blocks `.env` key loading
+OPENROUTER_API_KEY= python3 -m pytest tests/ -v -k \
+  "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
 
 # Common focused deterministic suites
 python3 -m pytest tests/test_agent_actions.py -q
@@ -81,6 +82,15 @@ Backend-dependent tests skip when their server or credential is unavailable.
 A skipped integration suite is not evidence that a backend works. Run paid/live
 model tests only when the change needs them and the required credentialed
 environment is intentionally available.
+
+The unfiltered full suite is safe in hermetic CI, which has neither backend. On
+a developer machine it is explicit opt-in because `tests/conftest.py` enables
+live integration classes when it finds a local server or valid OpenRouter key:
+
+```bash
+# Opt in only when backend calls and possible OpenRouter charges are intended
+python3 -m pytest tests/ -v
+```
 
 ## CI and credentials
 
@@ -103,6 +113,9 @@ environment is intentionally available.
   scoped change explicitly migrates them with contract tests and documentation.
 - Token, context, step, output, and timeout bounds are product constraints.
   Do not remove or inflate them casually; local inference is deliberately slow.
+- Treat `AGENT_REASONING_POLICY` and `OPENROUTER_REASONING_EFFORT` as separate
+  axes. For always-on reasoners, `off` pins the declared baseline effort; it does
+  not mean zero reasoning. Freeze and report that baseline in evaluations.
 - Keep prompts and model-visible state compact. The planner receives a curated
   state summary—not full raw state—and the executor receives a smaller sliding
   view. Never leak raw write payloads or held-out evaluator evidence into prompts.
@@ -157,9 +170,10 @@ environment is intentionally available.
   intended file; extra files and modified tests must remain visible.
 - Mock the provider/HTTP boundary for deterministic suites. Keep ordinary tests
   network-free, credential-free, and independent of a running model server.
-- Run the narrowest relevant suite while iterating, then `python3 -m pytest tests/ -v`
-  before handoff. Do not make a failure green by weakening assertions, swallowing
-  errors, broadening skips, or deleting historical evidence.
+- Run the narrowest relevant suite while iterating, then the offline deterministic
+  handoff gate above. Treat the unfiltered full suite as explicit opt-in. Do not
+  make a failure green by weakening assertions, swallowing errors, broadening
+  skips, or deleting historical evidence.
 - Update action docs, workflow contracts, structured schemas, and tests together
   when a public or model-visible contract changes.
 

@@ -32,6 +32,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | Run | ID  | Experiment                                              | Wave | Priority | Effort | Status   |
 |-----|-----|---------------------------------------------------------|------|----------|--------|----------|
 | 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
+| —   | E21 | gpt-oss-20b low/med/high effort as CI/prototyping model | 1    | P1       | S      | running  |
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
 | 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | done     |
 | 3   | E06 | Typed recovery templates by `error_type`                | 2    | P1       | M      | done     |
@@ -278,6 +279,60 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Risk.** Low. Model is a swap; reverts trivially. Decode throughput may drop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
 - **Effort.** S.
+
+### E21 — gpt-oss-20b low/medium/high effort as the OpenRouter CI/prototyping model
+
+- **Context.** OpenRouter-backed CI (`.github/workflows/llm.yml`) and fast
+  prototyping currently default to `google/gemma-4-26b-a4b-it` — the hosted
+  stand-in for the local Gemma 4 MoE. `openai/gpt-oss-20b` is a comparable-class
+  MoE (21B total, ~3.6B active) that was explicitly post-trained for agentic
+  tool use and CoT, with a selectable reasoning dial (harmony `low`/`medium`/
+  `high`) instead of Gemma's hybrid on/off reasoning.
+- **Hypothesis.** At `low` effort, gpt-oss-20b matches or beats the Gemma 4
+  26B-A4B pass rate on the easy/medium/Berkeley cells at lower cost and similar
+  wall time; `medium`/`high` buys back hard-suite failures at a measurable
+  token/wall premium. If `low` holds, CI smoke and prototyping get a cheaper,
+  effort-tunable default; if not, the effort ladder still gives a controlled
+  reasoning-dose axis Gemma cannot express.
+- **Evidence (2026-08-02, unauthenticated OpenRouter catalog probe).**
+  gpt-oss-20b is live and routable: 131K context, `reasoning`/`reasoning_effort`
+  advertised, $0.03/M prompt + $0.13/M completion vs Gemma 4 26B-A4B's
+  $0.07/$0.34 (~2.4× cheaper per token; the gap narrows as effort raises
+  completion-token share). 12 endpoints; the repo-default Parasail serves it
+  (88.1% 30-min uptime), CoreWeave/DeepInfra at 100% uptime and the lowest
+  prices. Caveat: gpt-oss cannot disable reasoning, so the harness's
+  `reasoning.enabled=false` contract silently degrades to provider-default
+  effort — a baseline knob is required for a controlled comparison.
+- **Change.** `OPENROUTER_REASONING_EFFORT` baseline in `askme.py` (merged as
+  `max(baseline, gated level)`; `off` policy pins to the baseline; budget
+  floors 1024/1536/2048), `--reasoning-effort` on `tests/bench_harness.py`,
+  `model@effort` suffix in the llm.yml Berkeley job (e.g.
+  `openai/gpt-oss-20b@low`), effort-qualified cells in `tests/ci_llm_gate.py`.
+- **Metric.** Per E01 harness: pytest pass + agent-complete rate, wall time,
+  completion tokens, `openrouter_cost`, thinking retries — cells
+  `gemma-4-26b-a4b-it` (control) vs `gpt-oss-20b@{low,medium,high}` on the
+  easy suite plus the two Berkeley protocol cells, ≥3 trials.
+- **Upside.** ~2.4× cheaper CI cells and a reasoning-dose axis for experiments
+  like E19; a hosted default that stays in the same active-parameter class as
+  the local model.
+- **Risk.** Low-medium. Reasoning tokens bill as completion tokens even at
+  `low` — cost parity must be measured, not assumed from unit prices. JSON
+  envelope discipline under harmony reasoning is unproven in this harness;
+  the existing `reasoning`-field fallback and E03 repair should absorb leaks,
+  and the strict-retry contract intentionally keeps the baseline effort.
+- **Code.** `askme.py` (`OPENROUTER_REASONING_EFFORT`, `_merge_effort`),
+  `tests/bench_harness.py`, `tests/ci_llm_gate.py`,
+  `.github/workflows/llm.yml`.
+- **Effort.** S.
+- **Status.** Running (2026-08-02). Wiring + unit coverage landed; live cells
+  pending an `OPENROUTER_API_KEY` run:
+  `python3 tests/bench_harness.py --backend openrouter --suite easy --model openai/gpt-oss-20b --reasoning-effort low`
+  (repeat per effort, plus the control without `--reasoning-effort`), or
+  dispatch llm.yml with
+  `models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`.
+  Decision rule: adopt for CI smoke only if every `@low` cell passes at cost
+  ≤ the Gemma control and wall time ≤ 1.5× control; otherwise keep Gemma as
+  default and retain the effort axis for experiments.
 
 ### E12 — Split planner vs executor retry budgets
 

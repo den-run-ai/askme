@@ -8,6 +8,49 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## E21 gpt-oss-20b Effort-Cell Wiring — 2026-08-02
+
+Wiring for [EXPERIMENTS.md E21](EXPERIMENTS.md#e21--gpt-oss-20b-lowmediumhigh-effort-as-the-openrouter-ciprototyping-model)
+landed: `OPENROUTER_REASONING_EFFORT` baseline in `askme.py`,
+`--reasoning-effort` on `bench_harness.py`, `model@effort` cells in the llm.yml
+Berkeley job, and effort-qualified rows in `ci_llm_gate.py`. No live cells have
+run yet (no key in the authoring environment) — the numbers below are from the
+unauthenticated OpenRouter catalog (`/models`, `/models/openai/gpt-oss-20b/endpoints`,
+2026-08-02), recorded so the eventual run can detect pricing/routing drift.
+
+| Model | Context | Prompt $/M | Completion $/M | Notes |
+|---|---|---|---|---|
+| `google/gemma-4-26b-a4b-it` (control) | 262K | 0.07 | 0.34 | current CI default |
+| `openai/gpt-oss-20b` | 131K | 0.03 | 0.13 | MoE 21B total / ~3.6B active; effort low/medium/high; `:free` variant exists |
+| `qwen/qwen3.6-27b` (second CI cell) | 262K | 0.30 | 2.00 | for reference |
+
+gpt-oss-20b endpoints: 12 total; repo-default Parasail serves it at
+$0.03/$0.15 with 88.1% 30-min uptime; CoreWeave ($0.03/$0.13) and DeepInfra
+($0.03/$0.14) at 100% uptime. All advertise the `reasoning` parameter.
+SiliconFlow caps completion at 8K tokens — below `STEP_WRITE_TOKENS` (8192)
+plus reasoning share, so pin one of the full-window providers for write-heavy
+cells.
+
+Observation worth recording: before this change, pointing `OPENROUTER_MODEL`
+at gpt-oss-20b silently degraded the harness's reasoning gating — the
+`reasoning.enabled=false` request contract cannot disable harmony-format
+reasoning, so every "no thinking" call actually ran at provider-default
+effort with reasoning tokens billed as completion tokens outside any budget
+the harness chose. The baseline knob makes the served effort an explicit,
+logged axis instead.
+
+Comparison matrix to run once a key is available (3 trials each):
+
+```bash
+python3 tests/bench_harness.py --backend openrouter --suite easy                              # control
+python3 tests/bench_harness.py --backend openrouter --suite easy \
+  --model openai/gpt-oss-20b --reasoning-effort low      # repeat with medium, high
+```
+
+or dispatch llm.yml with
+`models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`
+(8 Berkeley cells). Decision rule is predeclared in E21.
+
 ## Revision-4 Focused Test Snapshot — 2026-08-02
 
 `python -m pytest tests/test_agent_actions.py -q` completed locally with

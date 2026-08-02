@@ -73,6 +73,18 @@ def test_llm_workflow_is_opt_in_for_pull_requests():
     assert text.count("github.event_name != 'pull_request'") == 2
 
 
+def test_llm_workflow_supports_effort_pinned_cells():
+    """Berkeley model entries may pin a baseline reasoning effort
+    ('openai/gpt-oss-20b@low') for always-on reasoners. The loop must strip
+    the suffix before --model sees it and forward it as --reasoning-effort,
+    with the effort kept in the log-dir slug so cells don't collide."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    assert 'EFFORT="${MODEL##*@}"' in text
+    assert 'MODEL="${MODEL%@*}"' in text
+    assert "--reasoning-effort" in text
+    assert "${EFFORT:+-$EFFORT}" in text
+
+
 def test_llm_workflow_bounds_spend():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in text
