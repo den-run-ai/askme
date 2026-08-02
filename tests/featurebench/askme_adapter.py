@@ -55,7 +55,7 @@ INNER_TIMEOUT_KILL_GRACE_SECONDS = 15
 def launcher_source() -> str:
     """Return a credential-scrubbing, action-guarded launcher for pinned AskMe."""
     return textwrap.dedent(
-        f'''\
+        f"""\
         #!/usr/bin/env python3
         import importlib.util
         import hashlib
@@ -270,7 +270,7 @@ def launcher_source() -> str:
 
         if __name__ == "__main__":
             raise SystemExit(main())
-        '''
+        """
     )
 
 
@@ -492,9 +492,7 @@ def retained_endpoint_catalog_preflight(
     record.update(
         {
             "catalog_model": catalog_model,
-            "completed_at_utc": dt.datetime.now(dt.timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z"),
+            "completed_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
             "endpoint_count": len(endpoints),
             "matches": matches,
             "response_sha256": hashlib.sha256(body).hexdigest(),
@@ -595,8 +593,7 @@ test -z "${OPENROUTER_API_KEY:-}"
                 )
                 exit_code, _ = self.cm.exec_command(
                     container,
-                    f"chmod 0555 {ASKME_PATH} {LAUNCHER_PATH} && "
-                    f"chmod 0400 {CREDENTIAL_PATH}",
+                    f"chmod 0555 {ASKME_PATH} {LAUNCHER_PATH} && chmod 0400 {CREDENTIAL_PATH}",
                     log_file=log_file,
                 )
                 return exit_code == 0
@@ -704,9 +701,7 @@ test -z "${OPENROUTER_API_KEY:-}"
             )
             missing = [path for path in required_artifacts if not copied.get(path)]
             if missing:
-                self.logger.error(
-                    "AskMe run artifacts were not preserved: " + ", ".join(missing)
-                )
+                self.logger.error("AskMe run artifacts were not preserved: " + ", ".join(missing))
                 return False
             try:
                 result = json.loads((Path(log_file).parent / "askme-result.json").read_text())
@@ -840,7 +835,10 @@ def _validate_protocol_settings(settings: CanarySettings) -> Mapping[str, Any]:
         raise ValueError(f"invalid canary protocol: {error}") from error
 
     checks = {
-        "FeatureBench revision": (featurebench_source.get("commit"), settings.featurebench_revision),
+        "FeatureBench revision": (
+            featurebench_source.get("commit"),
+            settings.featurebench_revision,
+        ),
         "dataset revision": (dataset_source.get("revision"), settings.dataset_revision),
         "dataset split": (dataset_source.get("split"), settings.split),
         "task ID": (dataset_source.get("instance_id"), settings.task_id),
@@ -928,8 +926,7 @@ def _write_run_provenance(
     askme_protocol = protocol["sources"]["askme"]
     repo_root = Path(__file__).resolve().parents[2]
     observed_code_files = {
-        relative: sha256_file(repo_root / relative)
-        for relative in askme_protocol["code_files"]
+        relative: sha256_file(repo_root / relative) for relative in askme_protocol["code_files"]
     }
     data = {
         "schema_version": 1,
@@ -1028,8 +1025,7 @@ def run_canary(
     askme_revision = _git_revision(settings.askme_path.parent)
     if askme_revision != settings.askme_revision:
         raise ValueError(
-            "AskMe revision mismatch: "
-            f"expected {settings.askme_revision}, got {askme_revision}"
+            f"AskMe revision mismatch: expected {settings.askme_revision}, got {askme_revision}"
         )
     dataset_path = settings.dataset_path.resolve()
     if not dataset_path.is_dir():

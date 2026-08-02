@@ -2,10 +2,7 @@ import json
 from pathlib import Path
 
 RESULT_PATH = (
-    Path(__file__).parent
-    / "featurebench"
-    / "results"
-    / "2026-07-13-gemma-4-31b-canary.json"
+    Path(__file__).parent / "featurebench" / "results" / "2026-07-13-gemma-4-31b-canary.json"
 )
 
 
@@ -29,9 +26,7 @@ def test_published_canary_result_is_internally_consistent():
     assert usage["responses"] == 28
     assert usage["openrouter_cost_usd"] == 0.01585905
 
-    assert result["cell"]["served_models"] == [
-        "google/gemma-4-31b-it-20260402"
-    ]
+    assert result["cell"]["served_models"] == ["google/gemma-4-31b-it-20260402"]
     assert result["cell"]["served_providers"] == ["SiliconFlow"]
     assert result["agent"]["status"] == "exhausted"
     assert result["agent"]["reported_completion"] is False
@@ -54,4 +49,3 @@ def test_published_canary_result_is_internally_consistent():
         "causal estimate",
     ):
         assert unsupported_claim in interpretation
-

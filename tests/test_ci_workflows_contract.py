@@ -5,6 +5,7 @@ test_talk_deck_contract.py: pin the properties that keep CI safe —
 the unit matrix stays credential-free, and the paid LLM workflow always
 preflights, gates, and stays opt-in for pull requests.
 """
+
 import re
 from pathlib import Path
 
@@ -53,22 +54,15 @@ def test_unit_workflow_gates_quality_compatibility_and_coverage():
 def test_workflows_pin_third_party_actions():
     for workflow in (UNIT_WORKFLOW, LLM_WORKFLOW):
         text = workflow.read_text(encoding="utf-8")
-        external_actions = re.findall(
-            r"^\s*-\s+uses:\s+([^#\s]+)", text, flags=re.MULTILINE
-        )
+        external_actions = re.findall(r"^\s*-\s+uses:\s+([^#\s]+)", text, flags=re.MULTILINE)
         assert external_actions
         for action in external_actions:
             assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", action), action
 
 
 def test_workflows_do_not_persist_checkout_credentials():
-    text = (
-        UNIT_WORKFLOW.read_text(encoding="utf-8")
-        + LLM_WORKFLOW.read_text(encoding="utf-8")
-    )
-    assert text.count("persist-credentials: false") == text.count(
-        "actions/checkout@"
-    )
+    text = UNIT_WORKFLOW.read_text(encoding="utf-8") + LLM_WORKFLOW.read_text(encoding="utf-8")
+    assert text.count("persist-credentials: false") == text.count("actions/checkout@")
 
 
 def test_llm_workflow_uses_the_openrouter_environment():
@@ -76,16 +70,12 @@ def test_llm_workflow_uses_the_openrouter_environment():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert text.count("environment: Openrouter") == 2
     assert "vars.OPENROUTER_API_KEY" not in text
-    assert text.count(
-        "OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}"
-    ) == 4
+    assert text.count("OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}") == 4
 
     smoke, berkeley = _paid_job_sections(text)
     for section in (smoke, berkeley):
         assert not re.search(r"^    env:", section, flags=re.MULTILINE)
-        assert section.index("Install dependencies") < section.index(
-            "OPENROUTER_API_KEY:"
-        )
+        assert section.index("Install dependencies") < section.index("OPENROUTER_API_KEY:")
 
 
 def _paid_job_sections(text: str) -> tuple[str, str]:
@@ -115,7 +105,7 @@ def test_llm_workflow_guards_against_silent_skips():
     # pytest reports skip reasons, and the smoke job asserts the agent
     # actually logged run events.
     assert "-rs" in text
-    assert "ASKME_RUN_LIVE_LLM_TESTS: \"1\"" in text
+    assert 'ASKME_RUN_LIVE_LLM_TESTS: "1"' in text
     assert "-m live_llm" in text
     assert "test -s llm-logs/smoke.jsonl" in text
 
@@ -132,8 +122,10 @@ def test_llm_workflow_gates_bench_results():
 def test_llm_workflow_is_opt_in_for_pull_requests():
     """PRs need the 'llm-tests' label and a same-repository head branch."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    guard = ("github.event.pull_request.head.repo.full_name == github.repository"
-             " && contains(github.event.pull_request.labels.*.name, 'llm-tests')")
+    guard = (
+        "github.event.pull_request.head.repo.full_name == github.repository"
+        " && contains(github.event.pull_request.labels.*.name, 'llm-tests')"
+    )
     assert text.count(guard) == 2  # both paid jobs: same-repo AND label
     assert text.count("github.event_name != 'pull_request'") == 2
 

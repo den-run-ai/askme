@@ -112,8 +112,11 @@ def load_manifest(manifest_path: Path | str) -> dict[str, Any]:
         if not isinstance(spec, dict):
             raise ManifestError(f"{key} must be an object")
         command = spec.get("command")
-        if (not isinstance(command, list) or not command or
-                any(not isinstance(token, str) or not token for token in command)):
+        if (
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(token, str) or not token for token in command)
+        ):
             raise ManifestError(f"{key}.command must be a non-empty string list")
         timeout = spec.get("timeout_seconds", 30)
         if not isinstance(timeout, (int, float)) or timeout <= 0:
@@ -157,8 +160,7 @@ def _protected_hashes(workspace: Path, paths: Sequence[str]) -> dict[str, Option
     return hashes
 
 
-def _expand_command(command: Sequence[str], workspace: Path,
-                    evaluator: Path) -> list[str]:
+def _expand_command(command: Sequence[str], workspace: Path, evaluator: Path) -> list[str]:
     values = {
         "python": sys.executable,
         "workspace": str(workspace),
@@ -178,8 +180,7 @@ def _stream_text(value: Any) -> str:
     return value if isinstance(value, str) else str(value)
 
 
-def _run_command(command: Sequence[str], workspace: Path,
-                 timeout_seconds: float) -> dict[str, Any]:
+def _run_command(command: Sequence[str], workspace: Path, timeout_seconds: float) -> dict[str, Any]:
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["ASKME_EVAL_WORKSPACE"] = str(workspace)
@@ -264,12 +265,14 @@ def _read_agent_run_log(path: Path) -> tuple[dict[str, Any], Optional[str]]:
                     if not isinstance(event, dict):
                         raise ValueError("event must be a JSON object")
                 except (json.JSONDecodeError, ValueError) as exc:
-                    evidence["errors"].append({
-                        "line": line_number,
-                        "error": str(exc),
-                        "text": line[:MAX_RUN_LOG_ERROR_CHARS],
-                        "text_truncated": len(line) > MAX_RUN_LOG_ERROR_CHARS,
-                    })
+                    evidence["errors"].append(
+                        {
+                            "line": line_number,
+                            "error": str(exc),
+                            "text": line[:MAX_RUN_LOG_ERROR_CHARS],
+                            "text_truncated": len(line) > MAX_RUN_LOG_ERROR_CHARS,
+                        }
+                    )
                     continue
                 evidence["event_count"] += 1
                 if len(evidence["events"]) < MAX_RUN_LOG_EVENTS:
@@ -288,9 +291,7 @@ def _read_agent_run_log(path: Path) -> tuple[dict[str, Any], Optional[str]]:
     return evidence, None
 
 
-def _reasoning_policy_error(
-    run_log: Mapping[str, Any], reasoning_policy: str
-) -> Optional[str]:
+def _reasoning_policy_error(run_log: Mapping[str, Any], reasoning_policy: str) -> Optional[str]:
     for index, event in enumerate(run_log.get("events", []), start=1):
         if event.get("event") != "reasoning_decision":
             continue
@@ -321,9 +322,7 @@ def evaluate_workflow(
     agent reports an incomplete status or raises an exception.
     """
     if reasoning_policy not in REASONING_POLICIES:
-        raise ValueError(
-            f"reasoning_policy must be one of: {', '.join(REASONING_POLICIES)}"
-        )
+        raise ValueError(f"reasoning_policy must be one of: {', '.join(REASONING_POLICIES)}")
     manifest = load_manifest(manifest_path)
     managed_workspace = workspace is None
     if managed_workspace:
@@ -354,16 +353,14 @@ def evaluate_workflow(
             adapter_error = agent_result.get(_ADAPTER_ERROR)
             if isinstance(adapter_error, str) and adapter_error:
                 agent_error = adapter_error
-            adapter_infrastructure_error = agent_result.get(
-                _ADAPTER_INFRASTRUCTURE_ERROR
-            )
-            if (isinstance(adapter_infrastructure_error, str) and
-                    adapter_infrastructure_error):
+            adapter_infrastructure_error = agent_result.get(_ADAPTER_INFRASTRUCTURE_ERROR)
+            if isinstance(adapter_infrastructure_error, str) and adapter_infrastructure_error:
                 infrastructure_errors.append(adapter_infrastructure_error)
 
         final_hashes = _protected_hashes(workspace_path, manifest["protected_files"])
         changed = sorted(
-            relative for relative in manifest["protected_files"]
+            relative
+            for relative in manifest["protected_files"]
             if initial_hashes.get(relative) != final_hashes.get(relative)
         )
         if changed:
@@ -396,9 +393,7 @@ def evaluate_workflow(
             ("held-out evaluator", acceptance_result),
         ):
             if command_result["status"] == "launch_error":
-                infrastructure_errors.append(
-                    f"{name} could not launch: {command_result['stderr']}"
-                )
+                infrastructure_errors.append(f"{name} could not launch: {command_result['stderr']}")
 
         status = "error" if agent_error is not None else _agent_status(agent_result)
         agent_complete = status == "complete"
@@ -408,9 +403,7 @@ def evaluate_workflow(
         regression_passed = bool(public_result["passed"])
         feedback_passed = bool(feedback_result["passed"])
         acceptance_passed = bool(acceptance_result["passed"])
-        artifact_accepted = (
-            regression_passed and feedback_passed and acceptance_passed
-        )
+        artifact_accepted = regression_passed and feedback_passed and acceptance_passed
         if not run_valid:
             outcome = "invalid_run"
         elif agent_complete and artifact_accepted:
@@ -544,20 +537,26 @@ def _askme_agent(
         command = [
             sys.executable,
             str(askme_script),
-            "--prompt-file", str(prompt_file),
-            "--working-dir", str(workspace),
-            "--result-json", str(result_file),
-            "--reasoning-policy", reasoning_policy,
-            "--max-replans", str(agent_limits["max_replans"]),
-            "--max-tasks", str(agent_limits["max_tasks"]),
-            "--max-steps", str(agent_limits["max_steps"]),
-            "--goal-context-chars", str(agent_limits["goal_context_chars"]),
+            "--prompt-file",
+            str(prompt_file),
+            "--working-dir",
+            str(workspace),
+            "--result-json",
+            str(result_file),
+            "--reasoning-policy",
+            reasoning_policy,
+            "--max-replans",
+            str(agent_limits["max_replans"]),
+            "--max-tasks",
+            str(agent_limits["max_tasks"]),
+            "--max-steps",
+            str(agent_limits["max_steps"]),
+            "--goal-context-chars",
+            str(agent_limits["goal_context_chars"]),
         ]
         environment = os.environ.copy()
         environment["AGENT_REASONING_POLICY"] = reasoning_policy
-        environment["AGENT_GOAL_CONTEXT_CHARS"] = str(
-            agent_limits["goal_context_chars"]
-        )
+        environment["AGENT_GOAL_CONTEXT_CHARS"] = str(agent_limits["goal_context_chars"])
         environment["AGENT_FINAL_VALIDATE"] = str(agent_limits["final_validate"])
         environment["AGENT_RUN_LOG"] = str(run_log_file)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -582,9 +581,7 @@ def _askme_agent(
             )
             metadata["timeout_seconds"] = timeout_seconds
             metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
-            policy_error = _reasoning_policy_error(
-                metadata["run_log"], reasoning_policy
-            )
+            policy_error = _reasoning_policy_error(metadata["run_log"], reasoning_policy)
             return failure(
                 error,
                 metadata,
@@ -592,9 +589,7 @@ def _askme_agent(
             )
         except OSError as exc:
             error = f"could not launch AskMe child process: {exc}"
-            metadata = process_metadata(
-                "launch_error", command=command, stderr=str(exc)
-            )
+            metadata = process_metadata("launch_error", command=command, stderr=str(exc))
             metadata["run_log"], _ = _read_agent_run_log(run_log_file)
             return failure(error, metadata, infrastructure_error=error)
 
@@ -629,9 +624,7 @@ def _askme_agent(
         except json.JSONDecodeError as exc:
             metadata["status"] = "malformed_result"
             metadata["result_error"] = str(exc)
-            bounded_result, result_truncated, result_chars = _bounded_child_stream(
-                result_text
-            )
+            bounded_result, result_truncated, result_chars = _bounded_child_stream(result_text)
             metadata["result_text"] = bounded_result
             metadata["result_text_chars"] = result_chars
             metadata["result_text_truncated"] = result_truncated
@@ -641,9 +634,11 @@ def _askme_agent(
                 infrastructure_error=run_log_error,
             )
 
-        if (not isinstance(child_result, dict) or
-                not isinstance(child_result.get("status"), str) or
-                not child_result["status"]):
+        if (
+            not isinstance(child_result, dict)
+            or not isinstance(child_result.get("status"), str)
+            or not child_result["status"]
+        ):
             metadata["status"] = "malformed_result"
             metadata["result"] = child_result
             error = "AskMe structured result must contain a non-empty string status"
@@ -687,7 +682,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--agent", choices=("noop", "askme"), default="noop")
     parser.add_argument(
-        "--reasoning-policy", choices=REASONING_POLICIES, default="gated",
+        "--reasoning-policy",
+        choices=REASONING_POLICIES,
+        default="gated",
         help="Explicit-reasoning policy recorded for this run (default: %(default)s)",
     )
     parser.add_argument("--workspace", type=Path)
@@ -697,6 +694,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     manifest = load_manifest(args.manifest)
     if args.agent == "askme":
+
         def askme_callback(prompt: str, workspace: Path) -> Mapping[str, Any]:
             return _askme_agent(
                 prompt,
@@ -704,6 +702,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 reasoning_policy=args.reasoning_policy,
                 agent_limits=manifest["agent_limits"],
             )
+
         callback: AgentCallback = askme_callback
     else:
         callback = _noop_agent

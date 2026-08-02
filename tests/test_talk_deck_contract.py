@@ -167,9 +167,7 @@ def test_companion_benchmark_shortlist_stays_bounded():
     readme = README.read_text(encoding="utf-8")
     blog_prose = _single_line(blog)
     readme_prose = _single_line(readme)
-    companion = "\n".join(
-        path.read_text(encoding="utf-8") for path in (BLOG, README, SPEC)
-    )
+    companion = "\n".join(path.read_text(encoding="utf-8") for path in (BLOG, README, SPEC))
     for benchmark in ("FeatureBench", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in companion
     assert "small is a deployment class, not a strict parameter threshold" in blog
@@ -178,7 +176,10 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "successful FeatureBench adapter/evaluator qualification" in readme_prose
     assert "feature-scale interface work is active in" in readme_prose
     assert "AskMe adapter is now implemented and qualified" in blog_prose
-    assert "successful diagnostic run with a negative task outcome—not a FeatureBench score" in blog_prose
+    assert (
+        "successful diagnostic run with a negative task outcome—not a FeatureBench score"
+        in blog_prose
+    )
     assert "exhausted without emitting a patch" in blog_prose
     assert "reasoning-policy study is deferred" in blog_prose
     assert "It is not" in blog_prose and "a prerequisite for this talk" in blog_prose
@@ -216,8 +217,14 @@ def test_companion_benchmark_shortlist_stays_bounded():
     for benchmark in ("FeatureBench-fast", "Vals Vibe Code Bench", "ProgramBench"):
         assert benchmark in roadmap_prose
     assert "one pinned public task" in roadmap_prose
-    assert "successful diagnostic run with a negative task outcome—not a FeatureBench score" in roadmap_prose
-    assert "Repeating more tasks under the same known action bottleneck would add little" in roadmap_prose
+    assert (
+        "successful diagnostic run with a negative task outcome—not a FeatureBench score"
+        in roadmap_prose
+    )
+    assert (
+        "Repeating more tasks under the same known action bottleneck would add little"
+        in roadmap_prose
+    )
     assert "bounded shortlist, not a commitment to run all three" in roadmap_prose
 
     root_readme = _single_line(ROOT_README.read_text(encoding="utf-8"))

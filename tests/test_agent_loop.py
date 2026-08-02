@@ -1,4 +1,5 @@
 """Full agent loop tests: run(), cross-task state, output formatting, content serialization."""
+
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -6,6 +7,7 @@ from unittest.mock import patch
 from askme import MAX_STEP_HISTORY, _run_loop, execute, run
 
 # --- Full agent loop tests ---
+
 
 class TestRunLoop:
     @patch("askme.ask_llm")
@@ -58,7 +60,12 @@ class TestRunLoop:
         """Plan with multiple tasks, all succeed."""
         mock_llm.side_effect = [
             {"tasks": ["create file", "read file"]},
-            {"action": "write", "arg": "/tmp/test_askme.txt", "content": "hi", "reasoning": "create"},
+            {
+                "action": "write",
+                "arg": "/tmp/test_askme.txt",
+                "content": "hi",
+                "reasoning": "create",
+            },
             {"action": "done", "reasoning": "created"},
             {"action": "read", "arg": "/tmp/test_askme.txt", "reasoning": "read"},
             {"action": "done", "reasoning": "read it"},
@@ -136,6 +143,7 @@ class TestRunLoop:
 
 # --- Tests for cross-task state and output formatting bugs ---
 
+
 class TestCrossTaskState:
     """Verify fixes for empty executor state between tasks."""
 
@@ -143,20 +151,28 @@ class TestCrossTaskState:
     def test_completed_tasks_in_state(self, mock_llm, capsys):
         """Executor should see completed_tasks from prior tasks."""
         calls = []
+
         def capture_llm(messages, **kwargs):
             calls.append(messages)
             if len(calls) == 1:
                 return {"tasks": ["create file", "read file"]}
             if len(calls) == 2:
-                return {"action": "write", "arg": "test.txt", "content": "hi", "reasoning": "create"}
+                return {
+                    "action": "write",
+                    "arg": "test.txt",
+                    "content": "hi",
+                    "reasoning": "create",
+                }
             if len(calls) == 3:
                 return {"action": "done", "reasoning": "created"}
             if len(calls) == 4:
                 user_msg = messages[-1]["content"]
-                assert "completed_tasks" in user_msg, \
+                assert "completed_tasks" in user_msg, (
                     f"Executor should see completed_tasks in state, got: {user_msg[-200:]}"
+                )
                 return {"action": "done", "reasoning": "already done"}
             return {"action": "done"}
+
         mock_llm.side_effect = capture_llm
         run("create and read a file")
         out = capsys.readouterr().out
@@ -166,21 +182,29 @@ class TestCrossTaskState:
     def test_last_step_carries_over(self, mock_llm, capsys):
         """Last step from task N should be visible at start of task N+1."""
         calls = []
+
         def capture_llm(messages, **kwargs):
             calls.append(messages)
             if len(calls) == 1:
                 return {"tasks": ["write file", "compile file"]}
             if len(calls) == 2:
-                return {"action": "write", "arg": "main.c", "content": "code", "reasoning": "create"}
+                return {
+                    "action": "write",
+                    "arg": "main.c",
+                    "content": "code",
+                    "reasoning": "create",
+                }
             if len(calls) == 3:
                 return {"action": "done", "reasoning": "created"}
             if len(calls) == 4:
                 user_msg = messages[-1]["content"]
                 assert "last_steps" in user_msg
-                assert "write" in user_msg, \
+                assert "write" in user_msg, (
                     f"Executor should see carryover step from task 1, got: {user_msg[-200:]}"
+                )
                 return {"action": "done", "reasoning": "already done"}
             return {"action": "done"}
+
         mock_llm.side_effect = capture_llm
         run("write and compile")
         out = capsys.readouterr().out
@@ -192,7 +216,9 @@ class TestOutputFormatting:
 
     def test_write_output_basename(self, work_dir):
         """Write action output should show filename, not full path."""
-        result = execute({"action": "write", "arg": f"{work_dir}/subdir/test.txt", "content": "hi"}, work_dir)
+        result = execute(
+            {"action": "write", "arg": f"{work_dir}/subdir/test.txt", "content": "hi"}, work_dir
+        )
         assert result["ok"] is True
         assert result["output"] == "Wrote test.txt"
         assert work_dir not in result["output"]
@@ -208,7 +234,12 @@ class TestOutputFormatting:
             "current_task": "test",
             "task_index": "1/1",
             "last_steps": [
-                {"action": "write", "arg": "/very/long/path/to/file.txt", "ok": True, "output": "Wrote file.txt"},
+                {
+                    "action": "write",
+                    "arg": "/very/long/path/to/file.txt",
+                    "ok": True,
+                    "output": "Wrote file.txt",
+                },
             ],
             "completed_tasks": [],
         }
@@ -223,8 +254,10 @@ class TestOutputFormatting:
         """Edit action output should show filename, not full path."""
         Path(work_dir, "sub").mkdir()
         Path(work_dir, "sub", "test.txt").write_text("old")
-        result = execute({"action": "edit", "arg": f"{work_dir}/sub/test.txt",
-                          "find": "old", "replace": "new"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": f"{work_dir}/sub/test.txt", "find": "old", "replace": "new"},
+            work_dir,
+        )
         assert result["ok"] is True
         assert result["output"] == "Edited test.txt"
         assert work_dir not in result["output"]
@@ -235,7 +268,12 @@ class TestOutputFormatting:
             "current_task": "test",
             "task_index": "1/1",
             "last_steps": [
-                {"action": "edit", "arg": "/very/long/path/to/file.txt", "ok": True, "output": "Edited file.txt"},
+                {
+                    "action": "edit",
+                    "arg": "/very/long/path/to/file.txt",
+                    "ok": True,
+                    "output": "Edited file.txt",
+                },
             ],
             "completed_tasks": [],
         }
@@ -252,7 +290,9 @@ class TestWriteContentSerialization:
 
     def test_write_dict_content(self, work_dir):
         """Write action with dict content should auto-serialize to JSON string."""
-        result = execute({"action": "write", "arg": "config.json", "content": {"status": "SUCCESS"}}, work_dir)
+        result = execute(
+            {"action": "write", "arg": "config.json", "content": {"status": "SUCCESS"}}, work_dir
+        )
         assert result["ok"] is True
         written = (Path(work_dir) / "config.json").read_text()
         assert '"status"' in written
@@ -264,6 +304,7 @@ class TestWriteContentSerialization:
         assert result["ok"] is True
         written = (Path(work_dir) / "data.json").read_text()
         import json as _json
+
         assert _json.loads(written) == [1, 2, 3]
 
     def test_write_string_content_unchanged(self, work_dir):
@@ -278,6 +319,7 @@ class TestWriteContentSerialization:
         result = execute({"action": "write", "arg": "config.json", "content": content}, work_dir)
         assert result["ok"] is True
         import json as _json
+
         parsed = _json.loads((Path(work_dir) / "config.json").read_text())
         assert parsed == content
 
@@ -286,6 +328,7 @@ class TestWriteContentSerialization:
         result = execute({"action": "write", "arg": "empty.json", "content": {}}, work_dir)
         assert result["ok"] is True
         import json as _json
+
         assert _json.loads((Path(work_dir) / "empty.json").read_text()) == {}
 
 
@@ -295,6 +338,7 @@ class TestRunLogSink:
     @patch("askme.ask_llm")
     def test_run_log_emits_lifecycle_events(self, mock_llm, tmp_path, work_dir):
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["echo hi"]},
             {"action": "shell", "arg": "echo hi", "reasoning": "hi"},
@@ -321,6 +365,7 @@ class TestRunLogSink:
     @patch("askme.ask_llm")
     def test_run_log_disabled_when_env_unset(self, mock_llm, tmp_path, work_dir):
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["x"]},
             {"action": "done", "reasoning": "done"},
@@ -337,6 +382,7 @@ class TestRunLogSink:
     @patch("askme.ask_llm")
     def test_run_log_failure_is_nonfatal(self, mock_llm, tmp_path, work_dir):
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["x"]},
             {"action": "done", "reasoning": "done"},
@@ -354,6 +400,7 @@ class TestRunLogSink:
 
 # --- E11: Task-local replan loop tests ---
 
+
 class TestTaskLocalReplan:
     """Verify task-local replan behavior in the run loop."""
 
@@ -362,7 +409,7 @@ class TestTaskLocalReplan:
     def test_local_replan_succeeds_no_full_replan(self, mock_llm, mock_replan, capsys):
         """Task fails, local replan returns replacement, replacement succeeds, no full replan."""
         mock_llm.side_effect = [
-            {"tasks": ["compile code"]},            # plan
+            {"tasks": ["compile code"]},  # plan
             {"action": "fail", "reasoning": "gcc error"},  # task 1 fails
             # replacement task execution:
             {"action": "shell", "arg": "echo fixed", "reasoning": "fix"},
@@ -383,12 +430,12 @@ class TestTaskLocalReplan:
     def test_local_replan_fails_triggers_full_replan(self, mock_llm, mock_replan, capsys):
         """Task fails, local replan returns replacement, replacement also fails, triggers full replan."""
         mock_llm.side_effect = [
-            {"tasks": ["compile code"]},                    # plan 1
-            {"action": "fail", "reasoning": "gcc error"},   # task 1 fails
+            {"tasks": ["compile code"]},  # plan 1
+            {"action": "fail", "reasoning": "gcc error"},  # task 1 fails
             # replacement task execution:
             {"action": "fail", "reasoning": "still broken"},  # replacement also fails
             # full replan:
-            {"tasks": ["install gcc then compile"]},         # plan 2
+            {"tasks": ["install gcc then compile"]},  # plan 2
             {"action": "shell", "arg": "echo ok", "reasoning": "fix"},
             {"action": "done", "reasoning": "done"},
         ]
@@ -404,10 +451,10 @@ class TestTaskLocalReplan:
     def test_local_replan_none_triggers_full_replan(self, mock_llm, mock_replan, capsys):
         """Task fails, replan_task returns None, falls through to full replan immediately."""
         mock_llm.side_effect = [
-            {"tasks": ["compile code"]},                    # plan 1
-            {"action": "fail", "reasoning": "gcc error"},   # task 1 fails
+            {"tasks": ["compile code"]},  # plan 1
+            {"action": "fail", "reasoning": "gcc error"},  # task 1 fails
             # full replan (no local replan attempted):
-            {"tasks": ["fix and compile"]},                  # plan 2
+            {"tasks": ["fix and compile"]},  # plan 2
             {"action": "shell", "arg": "echo ok", "reasoning": "fix"},
             {"action": "done", "reasoning": "done"},
         ]
@@ -423,16 +470,18 @@ class TestTaskLocalReplan:
     def test_local_replan_capped_at_one(self, mock_llm, mock_replan, capsys):
         """Only one task-local replan attempt per task, then full replan."""
         call_count = {"replan": 0}
+
         def counting_replan(*args, **kwargs):
             call_count["replan"] += 1
             return "replacement task"
+
         mock_replan.side_effect = counting_replan
         mock_llm.side_effect = [
-            {"tasks": ["compile code"]},                    # plan 1
-            {"action": "fail", "reasoning": "error 1"},     # task 1 fails
-            {"action": "fail", "reasoning": "error 2"},     # replacement also fails
+            {"tasks": ["compile code"]},  # plan 1
+            {"action": "fail", "reasoning": "error 1"},  # task 1 fails
+            {"action": "fail", "reasoning": "error 2"},  # replacement also fails
             # full replan:
-            {"tasks": ["new approach"]},                     # plan 2
+            {"tasks": ["new approach"]},  # plan 2
             {"action": "done", "reasoning": "done"},
         ]
         result = run("compile my code")
@@ -445,6 +494,7 @@ class TestTaskLocalReplan:
         """When both original and replacement fail, full replan should see errors from both."""
         plan_states = []
         call_idx = {"n": 0}
+
         def tracking_llm(messages, **kwargs):
             call_idx["n"] += 1
             n = call_idx["n"]
@@ -462,16 +512,19 @@ class TestTaskLocalReplan:
             if n == 5:
                 return {"action": "done", "reasoning": "done"}
             return {"action": "done"}
+
         mock_llm.side_effect = tracking_llm
         mock_replan.return_value = "try alternative approach"
         result = run("compile my code")
         assert result is True
         assert len(plan_states) == 1, "Should have captured one full replan state"
         replan_state = plan_states[0]
-        assert "original gcc error" in replan_state, \
+        assert "original gcc error" in replan_state, (
             f"Full replan should see original error, got: {replan_state[-300:]}"
-        assert "replacement also failed" in replan_state, \
+        )
+        assert "replacement also failed" in replan_state, (
             f"Full replan should see replacement error, got: {replan_state[-300:]}"
+        )
 
     @patch("askme.replan_task")
     @patch("askme.ask_llm")
@@ -479,6 +532,7 @@ class TestTaskLocalReplan:
         """Replacement attempt should start with fresh execution state (steps, think, etc.)."""
         step_nums = []
         call_idx = {"n": 0}
+
         def tracking_llm(messages, **kwargs):
             call_idx["n"] += 1
             n = call_idx["n"]
@@ -493,12 +547,14 @@ class TestTaskLocalReplan:
                 user_msg = messages[-1]["content"]
                 if '"step":' in user_msg:
                     import re
+
                     m = re.search(r'"step":\s*"(\d+)/\d+"', user_msg)
                     if m:
                         step_nums.append(int(m.group(1)))
             if n == 4:
                 return {"action": "done", "reasoning": "done"}
             return {"action": "done"}
+
         mock_llm.side_effect = tracking_llm
         mock_replan.return_value = "recompile with fix"
         result = run("compile my code")
@@ -517,8 +573,9 @@ class TestTaskLocalReplan:
             {"action": "read", "arg": "fix_me.c", "reasoning": "read again"},
             {"action": "read", "arg": "fix_me.c", "reasoning": "still reading"},
         ]
-        result = _run_loop("inspect fix_me.c", str(tmp_path),
-                           max_replans=1, max_tasks=1, max_steps=5)
+        result = _run_loop(
+            "inspect fix_me.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=5
+        )
         out = capsys.readouterr().out
         assert result["status"] == "exhausted"
         assert "skip (duplicate read)" in out
@@ -530,6 +587,7 @@ class TestTaskLocalReplan:
     def test_local_replan_emits_jsonl_event(self, mock_llm, mock_replan, tmp_path, work_dir):
         """task_local_replan event should appear in JSONL log."""
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["compile code"]},
             {"action": "fail", "reasoning": "error"},
@@ -556,6 +614,7 @@ class TestTaskLocalReplan:
     def test_failed_local_replan_emits_jsonl_event(self, mock_llm, mock_replan, tmp_path, work_dir):
         """Failed task_local_replan event should appear with ok=False and replacement=None."""
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["compile code"]},
             {"action": "fail", "reasoning": "error"},
@@ -579,6 +638,7 @@ class TestTaskLocalReplan:
     def test_failed_local_replan_logs_reject_reason(self, mock_llm, tmp_path, work_dir):
         """Guard-rejected replacements should log why they were rejected."""
         import askme
+
         mock_llm.side_effect = [
             {"tasks": ["add missing include"]},
             {"action": "fail", "reasoning": "same edit failed"},

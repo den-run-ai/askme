@@ -20,6 +20,7 @@ The pass rule mirrors talks/berkeley-agentic-ai-summit-2026/evals/README.md:
 a reported pass requires pytest success, agent_complete, and the
 deterministic acceptance check (embedded in the pytest assertions).
 """
+
 import argparse
 import json
 import os
@@ -31,6 +32,7 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
 # --- preflight ---
+
 
 def check_openrouter_key(env=None, get=None):
     """Return (ok, message). The message never contains the key itself."""
@@ -45,10 +47,10 @@ def check_openrouter_key(env=None, get=None):
         )
     if get is None:
         import requests
+
         get = requests.get
     try:
-        resp = get(OPENROUTER_MODELS_URL,
-                   headers={"Authorization": "Bearer " + key}, timeout=30)
+        resp = get(OPENROUTER_MODELS_URL, headers={"Authorization": "Bearer " + key}, timeout=30)
     except Exception as exc:
         return False, "OpenRouter preflight request failed: {!r}".format(exc)
     status = getattr(resp, "status_code", None)
@@ -58,6 +60,7 @@ def check_openrouter_key(env=None, get=None):
 
 
 # --- report ---
+
 
 def load_summaries(paths):
     """Return a list of (path, summary_dict_or_None, error_or_None)."""
@@ -95,8 +98,7 @@ def evaluate(loaded, expect_cells=None):
             agent_complete = int(result.get("agent_complete", 0))
             walls = [w for w in (result.get("wall_s") or []) if w is not None]
             cost = sum(float(c or 0) for c in (result.get("openrouter_cost") or []))
-            served = sorted({p for trial in (result.get("served_providers") or [])
-                             for p in trial})
+            served = sorted({p for trial in (result.get("served_providers") or []) for p in trial})
             cell = "{}/{}".format(data.get("suite", "?"), test_name)
             passed = total > 0 and pytest_passed == total and agent_complete == total
             model = data.get("model") or "?"
@@ -104,43 +106,57 @@ def evaluate(loaded, expect_cells=None):
             # only by reasoning effort; keep the rows distinguishable.
             if data.get("reasoning_effort"):
                 model = "{}@{}".format(model, data["reasoning_effort"])
-            rows.append({
-                "cell": cell,
-                "model": model,
-                "provider": data.get("provider") or "auto",
-                "served_providers": served,
-                "pytest_passed": pytest_passed,
-                "agent_complete": agent_complete,
-                "total": total,
-                "median_wall_s": statistics.median(walls) if walls else None,
-                "cost": cost,
-                "ok": passed,
-            })
+            rows.append(
+                {
+                    "cell": cell,
+                    "model": model,
+                    "provider": data.get("provider") or "auto",
+                    "served_providers": served,
+                    "pytest_passed": pytest_passed,
+                    "agent_complete": agent_complete,
+                    "total": total,
+                    "median_wall_s": statistics.median(walls) if walls else None,
+                    "cost": cost,
+                    "ok": passed,
+                }
+            )
             if not passed:
                 failures.append(
                     "{} [{}]: pytest {}/{}, agent complete {}/{}".format(
-                        cell, model,
-                        pytest_passed, total, agent_complete, total))
+                        cell, model, pytest_passed, total, agent_complete, total
+                    )
+                )
     if expect_cells is not None and len(rows) != expect_cells:
-        failures.append(
-            "expected {} result cell(s), found {}".format(expect_cells, len(rows)))
+        failures.append("expected {} result cell(s), found {}".format(expect_cells, len(rows)))
     return rows, failures
 
 
 def render_markdown(rows, failures):
     lines = ["## LLM gate — {} cell(s), {} failure(s)".format(len(rows), len(failures)), ""]
     if rows:
-        lines.append("| Cell | Model | Provider | Pytest | Agent complete | Median wall (s) | Cost ($) |")
+        lines.append(
+            "| Cell | Model | Provider | Pytest | Agent complete | Median wall (s) | Cost ($) |"
+        )
         lines.append("|---|---|---|---|---|---|---|")
         for row in rows:
             provider = row["provider"]
             if row["served_providers"]:
                 provider = "{} → {}".format(provider, ", ".join(row["served_providers"]))
             wall = "—" if row["median_wall_s"] is None else "{:.1f}".format(row["median_wall_s"])
-            lines.append("| {} {} | {} | {} | {}/{} | {}/{} | {} | {:.5f} |".format(
-                "✅" if row["ok"] else "❌", row["cell"], row["model"], provider,
-                row["pytest_passed"], row["total"],
-                row["agent_complete"], row["total"], wall, row["cost"]))
+            lines.append(
+                "| {} {} | {} | {} | {}/{} | {}/{} | {} | {:.5f} |".format(
+                    "✅" if row["ok"] else "❌",
+                    row["cell"],
+                    row["model"],
+                    provider,
+                    row["pytest_passed"],
+                    row["total"],
+                    row["agent_complete"],
+                    row["total"],
+                    wall,
+                    row["cost"],
+                )
+            )
     if failures:
         lines.extend(["", "**Failures:**", ""])
         lines.extend("- {}".format(failure) for failure in failures)
@@ -153,11 +169,17 @@ def main(argv=None):
     sub.add_parser("preflight", help="fail unless OPENROUTER_API_KEY works")
     report = sub.add_parser("report", help="gate bench_harness summary.json files")
     report.add_argument("summaries", nargs="+", help="paths to summary.json files")
-    report.add_argument("--expect-cells", type=int, default=None,
-                        help="fail unless exactly this many result cells were found")
-    report.add_argument("--markdown-out", default="",
-                        help="append the markdown table to this file "
-                             "(e.g. $GITHUB_STEP_SUMMARY)")
+    report.add_argument(
+        "--expect-cells",
+        type=int,
+        default=None,
+        help="fail unless exactly this many result cells were found",
+    )
+    report.add_argument(
+        "--markdown-out",
+        default="",
+        help="append the markdown table to this file (e.g. $GITHUB_STEP_SUMMARY)",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "preflight":
@@ -165,8 +187,7 @@ def main(argv=None):
         print(("PREFLIGHT OK: " if ok else "PREFLIGHT FAILED: ") + message)
         return 0 if ok else 1
 
-    rows, failures = evaluate(load_summaries(args.summaries),
-                              expect_cells=args.expect_cells)
+    rows, failures = evaluate(load_summaries(args.summaries), expect_cells=args.expect_cells)
     markdown = render_markdown(rows, failures)
     print(markdown)
     if args.markdown_out:
@@ -178,4 +199,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

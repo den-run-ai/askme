@@ -19,6 +19,7 @@ Usage:
 
 Output: JSON with per-request timings + summary table to stdout.
 """
+
 import argparse
 import json
 import statistics
@@ -59,21 +60,25 @@ SYSTEM_STEP = (
     'Format: {"action":"...","arg":"...","content":"...","reasoning":"max 10 words"}'
 )
 
-PLAN_STATE = json.dumps({
-    "completed_tasks": [],
-    "completed_step_groups": [],
-    "errors": [],
-    "environment": {
-        "platform": "darwin",
-        "available_tools": ["python3", "gcc", "make"],
-        "missing_tools": [],
-        "package_managers": ["brew"],
-        "dir_listing": ["(empty)"],
-    },
-    "policy": {"allow_system_installs": False, "allow_network": False},
-})
+PLAN_STATE = json.dumps(
+    {
+        "completed_tasks": [],
+        "completed_step_groups": [],
+        "errors": [],
+        "environment": {
+            "platform": "darwin",
+            "available_tools": ["python3", "gcc", "make"],
+            "missing_tools": [],
+            "package_managers": ["brew"],
+            "dir_listing": ["(empty)"],
+        },
+        "policy": {"allow_system_installs": False, "allow_network": False},
+    }
+)
 
-USER_PROMPT = "Create a C program that prints fibonacci numbers up to N, compile and run it with N=10"
+USER_PROMPT = (
+    "Create a C program that prints fibonacci numbers up to N, compile and run it with N=10"
+)
 
 
 def make_plan_messages():
@@ -95,7 +100,10 @@ def make_step_messages(task, step_num, last_steps=None, completed_tasks=None):
         slim["completed_tasks"] = completed_tasks
     return [
         {"role": "system", "content": SYSTEM_STEP},
-        {"role": "user", "content": f"GOAL:\n{USER_PROMPT}\n\nTASK:\n{task}\n\nSTATE:\n{json.dumps(slim)}"},
+        {
+            "role": "user",
+            "content": f"GOAL:\n{USER_PROMPT}\n\nTASK:\n{task}\n\nSTATE:\n{json.dumps(slim)}",
+        },
     ]
 
 
@@ -114,42 +122,80 @@ TASK2 = "Verify output is correct fibonacci sequence"
 REQUESTS = [
     ("plan", make_plan_messages),
     ("step_1", lambda: make_step_messages(TASK1, 1)),
-    ("step_2", lambda: make_step_messages(TASK1, 2, last_steps=[
-        {"action": "write", "arg": "fib.c", "ok": True,
-         "output": "Wrote fib.c (42 lines)"},
-    ])),
-    ("step_3", lambda: make_step_messages(TASK1, 3, last_steps=[
-        {"action": "write", "arg": "fib.c", "ok": True,
-         "output": "Wrote fib.c (42 lines)"},
-        {"action": "shell", "arg": "gcc -o fib fib.c", "ok": True,
-         "output": ""},
-    ])),
-    ("step_4", lambda: make_step_messages(TASK1, 4, last_steps=[
-        {"action": "shell", "arg": "gcc -o fib fib.c", "ok": True,
-         "output": ""},
-        {"action": "shell", "arg": "./fib 10", "ok": True,
-         "output": "0 1 1 2 3 5 8 13 21 34"},
-    ])),
+    (
+        "step_2",
+        lambda: make_step_messages(
+            TASK1,
+            2,
+            last_steps=[
+                {"action": "write", "arg": "fib.c", "ok": True, "output": "Wrote fib.c (42 lines)"},
+            ],
+        ),
+    ),
+    (
+        "step_3",
+        lambda: make_step_messages(
+            TASK1,
+            3,
+            last_steps=[
+                {"action": "write", "arg": "fib.c", "ok": True, "output": "Wrote fib.c (42 lines)"},
+                {"action": "shell", "arg": "gcc -o fib fib.c", "ok": True, "output": ""},
+            ],
+        ),
+    ),
+    (
+        "step_4",
+        lambda: make_step_messages(
+            TASK1,
+            4,
+            last_steps=[
+                {"action": "shell", "arg": "gcc -o fib fib.c", "ok": True, "output": ""},
+                {
+                    "action": "shell",
+                    "arg": "./fib 10",
+                    "ok": True,
+                    "output": "0 1 1 2 3 5 8 13 21 34",
+                },
+            ],
+        ),
+    ),
     ("step_5", lambda: make_step_messages(TASK2, 1, completed_tasks=[TASK1])),
-    ("step_6", lambda: make_step_messages(TASK2, 2,
-        last_steps=[{"action": "read", "arg": "fib.c", "ok": True,
-                     "output": "#include <stdio.h>\\nvoid fib(int n) { ... }"}],
-        completed_tasks=[TASK1])),
+    (
+        "step_6",
+        lambda: make_step_messages(
+            TASK2,
+            2,
+            last_steps=[
+                {
+                    "action": "read",
+                    "arg": "fib.c",
+                    "ok": True,
+                    "output": "#include <stdio.h>\\nvoid fib(int n) { ... }",
+                }
+            ],
+            completed_tasks=[TASK1],
+        ),
+    ),
 ]
 
 
 # ── Benchmark runner ───────────────────────────────────────────────────
 
+
 def post_chat(messages, max_tokens=32):
     """Send chat completion, return (response_json, wall_seconds)."""
     t0 = time.time()
-    r = requests.post(URL_CHAT, json={
-        "model": "local",
-        "messages": messages,
-        "temperature": 0.0,
-        "seed": 1,
-        "max_tokens": max_tokens,
-    }, timeout=300)
+    r = requests.post(
+        URL_CHAT,
+        json={
+            "model": "local",
+            "messages": messages,
+            "temperature": 0.0,
+            "seed": 1,
+            "max_tokens": max_tokens,
+        },
+        timeout=300,
+    )
     wall = time.time() - t0
     r.raise_for_status()
     return r.json(), wall
@@ -198,18 +244,23 @@ def run_trial(label, trial_num):
         }
         results.append(row)
         # Short label for live progress
-        prompt_info = f"prompt_n={timings.get('prompt_n', '?')}" if "prompt_n" in timings else f"prompt_tok={timings.get('prompt_tokens', '?')}"
+        prompt_info = (
+            f"prompt_n={timings.get('prompt_n', '?')}"
+            if "prompt_n" in timings
+            else f"prompt_tok={timings.get('prompt_tokens', '?')}"
+        )
         print(f"  [{name:8s}] wall={wall_s:.2f}s {prompt_info}", flush=True)
     return results
 
 
 # ── Reporting ──────────────────────────────────────────────────────────
 
+
 def summarize(all_results, label, n_trials):
     """Print summary table with median ± range across trials."""
-    print(f"\n{'='*72}")
+    print(f"\n{'=' * 72}")
     print(f"Summary: {label}  ({n_trials} trials)")
-    print(f"{'='*72}")
+    print(f"{'=' * 72}")
 
     # Group by request name
     by_name = {}
@@ -240,18 +291,28 @@ def summarize(all_results, label, n_trials):
             dn_med = statistics.median(dn)
             dt_med = statistics.median(dt)
             line = f"{name:<10s} {pn_med:>10.0f} {pm_med:>10.1f} {dn_med:>8.0f} {dt_med:>10.2f} {wall_med:>8.3f}"
-            summary_rows.append({
-                "name": name, "prompt_n": pn_med, "prompt_ms": pm_med,
-                "predicted_n": dn_med, "decode_tok_s": dt_med, "wall_s": wall_med,
-            })
+            summary_rows.append(
+                {
+                    "name": name,
+                    "prompt_n": pn_med,
+                    "prompt_ms": pm_med,
+                    "predicted_n": dn_med,
+                    "decode_tok_s": dt_med,
+                    "wall_s": wall_med,
+                }
+            )
         else:
             pt = [r.get("prompt_tokens", 0) for r in rows]
             ct = [r.get("completion_tokens", 0) for r in rows]
             line = f"{name:<10s} {statistics.median(pt):>10.0f} {statistics.median(ct):>10.0f} {wall_med:>8.3f}"
-            summary_rows.append({
-                "name": name, "prompt_tokens": statistics.median(pt),
-                "completion_tokens": statistics.median(ct), "wall_s": wall_med,
-            })
+            summary_rows.append(
+                {
+                    "name": name,
+                    "prompt_tokens": statistics.median(pt),
+                    "completion_tokens": statistics.median(ct),
+                    "wall_s": wall_med,
+                }
+            )
         print(line)
 
     total_wall = sum(r["wall_s"] for r in summary_rows)
@@ -267,7 +328,9 @@ def summarize(all_results, label, n_trials):
                 avg_later = statistics.mean(later_exec)
                 if first_exec > 0:
                     saved_pct = (1 - avg_later / first_exec) * 100
-                    print(f"Executor prompt_n: first={first_exec:.0f}, avg_later={avg_later:.0f} → {saved_pct:+.0f}% eval saved")
+                    print(
+                        f"Executor prompt_n: first={first_exec:.0f}, avg_later={avg_later:.0f} → {saved_pct:+.0f}% eval saved"
+                    )
 
     return summary_rows
 
@@ -294,7 +357,7 @@ def main():
 
     all_results = []
     for t in range(args.trials):
-        print(f"\n--- Trial {t+1}/{args.trials} ---")
+        print(f"\n--- Trial {t + 1}/{args.trials} ---")
         trial_results = run_trial(args.label, t + 1)
         all_results.extend(trial_results)
 

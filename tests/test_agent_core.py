@@ -1,4 +1,5 @@
 """Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization, transport hardening."""
+
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ from askme import (
 )
 
 # --- execute() tests ---
+
 
 class TestExecuteShell:
     def test_success(self, work_dir):
@@ -109,9 +111,15 @@ class TestExecuteRead:
 class TestExecuteEdit:
     def test_edit_single_match(self, work_dir):
         Path(work_dir, "main.c").write_text('#include "msg.h"\nint main(){return 0;}')
-        result = execute({"action": "edit", "arg": "main.c",
-                          "find": '#include "msg.h"',
-                          "replace": '#include <stdio.h>\n#include "msg.h"'}, work_dir)
+        result = execute(
+            {
+                "action": "edit",
+                "arg": "main.c",
+                "find": '#include "msg.h"',
+                "replace": '#include <stdio.h>\n#include "msg.h"',
+            },
+            work_dir,
+        )
         assert result["ok"] is True
         assert "Edited" in result["output"]
         text = (Path(work_dir) / "main.c").read_text()
@@ -120,52 +128,58 @@ class TestExecuteEdit:
 
     def test_edit_no_match(self, work_dir):
         Path(work_dir, "f.txt").write_text("hello world")
-        result = execute({"action": "edit", "arg": "f.txt",
-                          "find": "goodbye", "replace": "hi"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "f.txt", "find": "goodbye", "replace": "hi"}, work_dir
+        )
         assert result["ok"] is False
         assert "No match" in result["output"]
 
     def test_edit_multiple_matches(self, work_dir):
         Path(work_dir, "f.txt").write_text("aaa\naaa\naaa")
-        result = execute({"action": "edit", "arg": "f.txt",
-                          "find": "aaa", "replace": "bbb"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "f.txt", "find": "aaa", "replace": "bbb"}, work_dir
+        )
         assert result["ok"] is False
         assert "3 times" in result["output"]
 
     def test_edit_missing_file(self, work_dir):
-        result = execute({"action": "edit", "arg": "nope.txt",
-                          "find": "x", "replace": "y"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "nope.txt", "find": "x", "replace": "y"}, work_dir
+        )
         assert result["ok"] is False
         assert result.get("error_type") == "missing_file"
 
     def test_edit_relative_path(self, work_dir):
         (Path(work_dir) / "sub").mkdir()
         (Path(work_dir) / "sub" / "f.txt").write_text("old text")
-        result = execute({"action": "edit", "arg": "sub/f.txt",
-                          "find": "old text", "replace": "new text"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "sub/f.txt", "find": "old text", "replace": "new text"},
+            work_dir,
+        )
         assert result["ok"] is True
         assert (Path(work_dir) / "sub" / "f.txt").read_text() == "new text"
 
     def test_edit_empty_find(self, work_dir):
         Path(work_dir, "f.txt").write_text("content")
-        result = execute({"action": "edit", "arg": "f.txt",
-                          "find": "", "replace": "x"}, work_dir)
+        result = execute({"action": "edit", "arg": "f.txt", "find": "", "replace": "x"}, work_dir)
         assert result["ok"] is False
         assert "non-empty" in result["output"]
 
     def test_edit_delete_text(self, work_dir):
         """Replace with empty string effectively deletes the matched text."""
         Path(work_dir, "f.txt").write_text("line1\nDELETE_ME\nline3")
-        result = execute({"action": "edit", "arg": "f.txt",
-                          "find": "DELETE_ME\n", "replace": ""}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": "f.txt", "find": "DELETE_ME\n", "replace": ""}, work_dir
+        )
         assert result["ok"] is True
         assert (Path(work_dir) / "f.txt").read_text() == "line1\nline3"
 
     def test_edit_absolute_path(self, work_dir):
         p = Path(work_dir) / "abs.txt"
         p.write_text("before")
-        result = execute({"action": "edit", "arg": str(p),
-                          "find": "before", "replace": "after"}, work_dir)
+        result = execute(
+            {"action": "edit", "arg": str(p), "find": "before", "replace": "after"}, work_dir
+        )
         assert result["ok"] is True
         assert p.read_text() == "after"
 
@@ -193,6 +207,7 @@ class TestExecuteDoneFail:
 
 # --- ask_llm() tests ---
 
+
 class TestAskLlm:
     @patch("askme.requests.post")
     def test_parses_json(self, mock_post):
@@ -210,9 +225,7 @@ class TestAskLlm:
 
     @patch("askme.requests.post")
     def test_strips_code_fences(self, mock_post):
-        mock_post.return_value = mock_response_raw(
-            '```json\n{"action":"shell","arg":"ls"}\n```'
-        )
+        mock_post.return_value = mock_response_raw('```json\n{"action":"shell","arg":"ls"}\n```')
         result = ask_llm([{"role": "user", "content": "test"}])
         assert result["action"] == "shell"
 
@@ -226,6 +239,7 @@ class TestAskLlm:
 
 
 # --- Thinking-on-retry tests ---
+
 
 class TestThinkingRetry:
     """Verify thinking-on-retry escalation in ask_llm()."""
@@ -255,14 +269,19 @@ class TestThinkingRetry:
             mock_response_raw("not json"),
             mock_response({"action": "done"}),
         ]
-        result = ask_llm([
-            {"role": "system", "content": "You are a helper."},
-            {"role": "user", "content": "test"}
-        ], max_tokens=256)
+        result = ask_llm(
+            [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "test"},
+            ],
+            max_tokens=256,
+        )
         assert result == {"action": "done"}
         second_call_body = mock_post.call_args_list[1][1]["json"]
         sys_content = second_call_body["messages"][0]["content"]
-        assert sys_content.startswith("<|think|>\n"), f"Expected <|think|> prefix, got: {sys_content[:50]}"
+        assert sys_content.startswith("<|think|>\n"), (
+            f"Expected <|think|> prefix, got: {sys_content[:50]}"
+        )
         assert second_call_body["max_tokens"] >= 512
         first_call_body = mock_post.call_args_list[0][1]["json"]
         first_sys = first_call_body["messages"][0]["content"]
@@ -280,9 +299,7 @@ class TestThinkingRetry:
     @patch("askme.requests.post")
     def test_thinking_strips_unclosed_channel_tags(self, mock_post):
         """Unclosed <|channel> blocks (truncated at max_tokens) should be stripped."""
-        mock_post.return_value = mock_response_raw(
-            '<|channel>thought\nstill thinking...'
-        )
+        mock_post.return_value = mock_response_raw("<|channel>thought\nstill thinking...")
         with pytest.raises(json.JSONDecodeError):
             ask_llm([{"role": "user", "content": "test"}])
 
@@ -327,7 +344,8 @@ class TestThinkingRetry:
         ask_llm([{"role": "user", "content": "test"}])
         call = mock_post.call_args_list[0]
         assert call[1]["json"]["provider"] == {
-            "order": ["siliconflow"], "allow_fallbacks": False,
+            "order": ["siliconflow"],
+            "allow_fallbacks": False,
             "require_parameters": True,
         }
         assert call[1]["headers"]["X-OpenRouter-Metadata"] == "enabled"
@@ -352,7 +370,9 @@ class TestThinkingRetry:
         resp_null = MagicMock()
         resp_null.status_code = 200
         resp_null.json.return_value = {
-            "choices": [{"message": {"content": None, "reasoning": '{"action": "shell", "arg": "echo hi"}'}}],
+            "choices": [
+                {"message": {"content": None, "reasoning": '{"action": "shell", "arg": "echo hi"}'}}
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         }
         mock_post.return_value = resp_null
@@ -387,6 +407,7 @@ class TestThinkingRetry:
 
 
 # --- Baseline reasoning-effort tests (always-on reasoners, e.g. gpt-oss-20b) ---
+
 
 class TestReasoningEffortBaseline:
     """OPENROUTER_REASONING_EFFORT pins a floor effort for models whose
@@ -473,10 +494,13 @@ class TestReasoningEffortBaseline:
     def test_local_backend_ignores_baseline(self, mock_post):
         """The knob is OpenRouter-only; the local request stays untouched."""
         mock_post.return_value = mock_response({"action": "done"})
-        ask_llm([
-            {"role": "system", "content": "You are a helper."},
-            {"role": "user", "content": "test"},
-        ], max_tokens=256)
+        ask_llm(
+            [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "test"},
+            ],
+            max_tokens=256,
+        )
         body = mock_post.call_args_list[0][1]["json"]
         assert "reasoning" not in body
         assert not body["messages"][0]["content"].startswith("<|think|>")
@@ -492,6 +516,7 @@ class TestReasoningEffortBaseline:
 
 
 # --- Null arg normalization tests ---
+
 
 class TestNullArgNormalization:
     """Verify that null/None values in action fields don't crash the agent."""
@@ -510,8 +535,12 @@ class TestNullArgNormalization:
         """Write action with null reasoning field — should not crash."""
         responses = [
             {"tasks": ["write file"]},
-            {"action": "write", "arg": str(tmp_path / "f.txt"),
-             "content": "hello", "reasoning": None},
+            {
+                "action": "write",
+                "arg": str(tmp_path / "f.txt"),
+                "content": "hello",
+                "reasoning": None,
+            },
             {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses):
@@ -519,6 +548,7 @@ class TestNullArgNormalization:
 
 
 # --- LLM transport hardening tests ---
+
 
 class TestLLMTransport:
     """Verify transport-level error handling in ask_llm()."""
@@ -592,14 +622,17 @@ class TestLLMTransport:
     def test_transport_error_in_planner_consumes_attempt(self, tmp_path):
         """LLMTransportError in get_plan() should consume a plan attempt, not crash."""
         plan_calls = {"n": 0}
+
         def mock_get_plan(user_prompt, state):
             plan_calls["n"] += 1
             if plan_calls["n"] == 1:
                 raise LLMTransportError("connection refused")
             return {"tasks": ["say hello"]}
 
-        with patch("askme.get_plan", side_effect=mock_get_plan), \
-             patch("askme.get_step", return_value={"action": "done"}):
+        with (
+            patch("askme.get_plan", side_effect=mock_get_plan),
+            patch("askme.get_step", return_value={"action": "done"}),
+        ):
             result = _run_loop("test", str(tmp_path), max_replans=2)
         assert result["status"] == "complete"
         assert plan_calls["n"] == 2  # first failed, second succeeded
@@ -611,15 +644,16 @@ class TestLLMTransport:
         """LLMTransportError in get_step() should trigger replan, not crash."""
         step_calls = {"n": 0}
 
-        def mock_get_step(task, state, goal="", step_num=0, max_steps=10,
-                          think=False, **kwargs):
+        def mock_get_step(task, state, goal="", step_num=0, max_steps=10, think=False, **kwargs):
             step_calls["n"] += 1
             if step_calls["n"] == 1:
                 raise LLMTransportError("timeout")
             return {"action": "done"}
 
-        with patch("askme.get_plan", return_value={"tasks": ["do something"]}), \
-             patch("askme.get_step", side_effect=mock_get_step):
+        with (
+            patch("askme.get_plan", return_value={"tasks": ["do something"]}),
+            patch("askme.get_step", side_effect=mock_get_step),
+        ):
             result = _run_loop("test", str(tmp_path), max_replans=2)
         assert result["status"] == "complete"
 
@@ -635,6 +669,7 @@ class TestLLMTransport:
 
 
 # --- E03: JSON repair tests ---
+
 
 class TestJsonRepair:
     """E03: _repair_json salvages mechanically broken JSON from truncation."""
@@ -668,7 +703,7 @@ class TestJsonRepair:
         assert _repair_json("just some text") is None
 
     def test_unfixable_garbage(self):
-        assert _repair_json('{{{broken') is None
+        assert _repair_json("{{{broken") is None
 
     def test_non_dict_rejected(self):
         assert _repair_json("[1, 2, 3]") is None
@@ -701,20 +736,14 @@ class TestActionContractValidation:
             {"action": "write", "arg": "items.json", "content": [1, 2]}
         )
         assert not _validate_action_contract({"action": "write", "arg": "cli.py"})
-        assert not _validate_action_contract(
-            {"action": "write", "arg": "cli.py", "content": ""}
-        )
-        assert not _validate_action_contract(
-            {"action": "write", "arg": "", "content": "x"}
-        )
+        assert not _validate_action_contract({"action": "write", "arg": "cli.py", "content": ""})
+        assert not _validate_action_contract({"action": "write", "arg": "", "content": "x"})
 
     def test_edit_contract(self):
         assert _validate_action_contract(
             {"action": "edit", "arg": "f.py", "find": "old", "replace": ""}
         )
-        assert not _validate_action_contract(
-            {"action": "edit", "arg": "f.py", "find": "old"}
-        )
+        assert not _validate_action_contract({"action": "edit", "arg": "f.py", "find": "old"})
         assert not _validate_action_contract(
             {"action": "edit", "arg": "f.py", "find": "", "replace": "new"}
         )
@@ -755,6 +784,7 @@ class TestActionContractValidation:
 
 # --- E03: Tiered retry contract tests ---
 
+
 class TestTieredRetryContract:
     """E03: Final auto-retry uses strict contract, no thinking."""
 
@@ -785,10 +815,12 @@ class TestTieredRetryContract:
             mock_response_raw("bad2"),
             mock_response({"action": "done"}),
         ]
-        ask_llm([
-            {"role": "system", "content": "You are a helper."},
-            {"role": "user", "content": "test"},
-        ])
+        ask_llm(
+            [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "test"},
+            ]
+        )
         third_msgs = mock_post.call_args_list[2][1]["json"]["messages"]
         assert third_msgs[-1]["content"] == _STRICT_JSON_SUFFIX
 
@@ -819,10 +851,12 @@ class TestTieredRetryContract:
             mock_response_raw("bad2"),
             mock_response({"action": "done"}),
         ]
-        ask_llm([
-            {"role": "system", "content": "You are a helper."},
-            {"role": "user", "content": "test"},
-        ])
+        ask_llm(
+            [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "test"},
+            ]
+        )
         third_body = mock_post.call_args_list[2][1]["json"]
         sys_content = third_body["messages"][0]["content"]
         assert not sys_content.startswith("<|think|>"), "Final retry should not use thinking"
@@ -848,4 +882,3 @@ class TestTieredRetryContract:
         assert mock_post.call_args_list[0][1]["json"]["reasoning"]["effort"] == "medium"
         assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "high"
         assert mock_post.call_args_list[2][1]["json"]["reasoning"] == {"enabled": False}
-

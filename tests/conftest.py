@@ -1,4 +1,5 @@
 """Shared pytest fixtures and skip markers for agent tests."""
+
 import os
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ def disable_validation():
     """Disable final validation in all unit tests by default.
     TestFinalValidation tests explicitly re-enable it."""
     import askme
+
     old = askme.FINAL_VALIDATE
     askme.FINAL_VALIDATE = "0"
     yield
@@ -27,9 +29,11 @@ def disable_validation():
 
 # --- Availability probes (evaluated once at collection time) ---
 
+
 def _llm_available():
     try:
         import requests
+
         r = requests.get("http://localhost:8080/health", timeout=3)
         return r.status_code == 200
     except Exception:
@@ -40,6 +44,7 @@ def _openrouter_available():
     """Check if OpenRouter API is accessible with a valid key."""
     try:
         import requests
+
         env_path = Path(__file__).parent.parent / ".env"
         if env_path.exists():
             for line in env_path.read_text().splitlines():
@@ -50,8 +55,11 @@ def _openrouter_available():
         key = os.environ.get("OPENROUTER_API_KEY", "")
         if not key:
             return False
-        r = requests.get("https://openrouter.ai/api/v1/models",
-                         headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        r = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=10,
+        )
         return r.status_code == 200
     except Exception:
         return False

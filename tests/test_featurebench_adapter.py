@@ -155,9 +155,9 @@ def test_launcher_guards_actions_and_records_outcomes(tmp_path):
 
     assert module.execute({"action": "shell", "arg": "pytest -q"}, workspace)["ok"]
     assert module.execute({"action": "shell", "arg": "git diff --check"}, workspace)["ok"]
-    assert not module.execute(
-        {"action": "shell", "arg": "curl https://example.com"}, workspace
-    )["ok"]
+    assert not module.execute({"action": "shell", "arg": "curl https://example.com"}, workspace)[
+        "ok"
+    ]
     assert not module.execute(
         {"action": "write", "arg": "../escape.py", "content": "pass"}, workspace
     )["ok"]
@@ -169,7 +169,9 @@ def test_launcher_guards_actions_and_records_outcomes(tmp_path):
     with pytest.raises(RuntimeError, match="boom"):
         module.execute({"action": "shell", "arg": "exception-case"}, workspace)
 
-    events = [json.loads(line) for line in Path(namespace["POLICY_LOG_PATH"]).read_text().splitlines()]
+    events = [
+        json.loads(line) for line in Path(namespace["POLICY_LOG_PATH"]).read_text().splitlines()
+    ]
     decisions = [event for event in events if event["event"] == "action_decision"]
     results = [event for event in events if event["event"] == "action_result"]
     assert len(decisions) == 7
@@ -440,9 +442,7 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
             self.__dict__.update(kwargs)
             records["config"] = kwargs
 
-    run_infer_module = SimpleNamespace(
-        get_agent=lambda agent_name, **kwargs: (agent_name, kwargs)
-    )
+    run_infer_module = SimpleNamespace(get_agent=lambda agent_name, **kwargs: (agent_name, kwargs))
     original_get_agent = run_infer_module.get_agent
 
     class FakeRunner:
@@ -538,9 +538,7 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
     assert records["config"]["white_box"] is False
     assert isinstance(records["agent"], FakeBaseAgent)
     assert records["events"] == ["catalog_preflight", "runner"]
-    assert records["catalog_preflight"]["expected"] == (
-        "qwen/qwen3.6-27b-20260422",
-    )
+    assert records["catalog_preflight"]["expected"] == ("qwen/qwen3.6-27b-20260422",)
     assert records["catalog_preflight"]["output_path"] == (
         run_dir / adapter.ENDPOINT_CATALOG_PREFLIGHT
     )

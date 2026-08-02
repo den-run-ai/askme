@@ -338,17 +338,14 @@ def _make_inner_timeout(paths, *, in_flight=False, reason="launcher received sig
     run_events = [
         event
         for event in (json.loads(line) for line in run_path.read_text().splitlines())
-        if event["event"] != "run_end"
-        and not (in_flight and event["event"] == "step")
+        if event["event"] != "run_end" and not (in_flight and event["event"] == "step")
     ]
     _jsonl(run_path, run_events)
 
     policy_path = paths["attempt"] / "askme-policy.jsonl"
     policy_events = [
         event
-        for event in (
-            json.loads(line) for line in policy_path.read_text().splitlines()
-        )
+        for event in (json.loads(line) for line in policy_path.read_text().splitlines())
         if not (in_flight and event["event"] == "action_result")
     ]
     policy_events.append({"event": "launcher_terminal", "reason": reason})
@@ -439,9 +436,7 @@ def test_present_endpoint_catalog_preflight_cannot_disable_requirement(tmp_path)
         ("wrong_match_provider", "endpoint_catalog_preflight_matches"),
     ],
 )
-def test_required_endpoint_catalog_preflight_rejects_tampering(
-    tmp_path, mutation, code
-):
+def test_required_endpoint_catalog_preflight_rejects_tampering(tmp_path, mutation, code):
     paths = _fixture(tmp_path)
     preflight_path = _require_endpoint_catalog_preflight(paths)
     record = json.loads(preflight_path.read_text())
@@ -861,9 +856,7 @@ def test_policy_denial_is_observed_behavior_not_infrastructure_failure(tmp_path)
     decision["decision"] = "deny"
     decision["reason"] = "path_outside_workspace"
     action_result = next(event for event in events if event["event"] == "action_result")
-    action_result.update(
-        {"decision": "deny", "ok": False, "error_type": "policy_violation"}
-    )
+    action_result.update({"decision": "deny", "ok": False, "error_type": "policy_violation"})
     _jsonl(policy_path, events)
 
     result = _audit(paths)
@@ -891,9 +884,7 @@ def test_policy_full_argument_matches_bounded_run_log_prefix(tmp_path):
     _jsonl(run_path, run_events)
     policy_path = paths["attempt"] / "askme-policy.jsonl"
     policy_events = [json.loads(line) for line in policy_path.read_text().splitlines()]
-    next(event for event in policy_events if event["event"] == "action_decision")[
-        "arg"
-    ] = full_arg
+    next(event for event in policy_events if event["event"] == "action_decision")["arg"] = full_arg
     _jsonl(policy_path, policy_events)
 
     result = _audit(paths)
@@ -961,9 +952,7 @@ def test_malformed_jsonl_is_reported_as_invalid_not_raised(tmp_path):
     assert "run_log_invalid_json" in _codes(result)
 
 
-def test_cli_requires_run_revision_and_writes_structured_output(
-    tmp_path, monkeypatch, capsys
-):
+def test_cli_requires_run_revision_and_writes_structured_output(tmp_path, monkeypatch, capsys):
     paths = _fixture(tmp_path)
     output = tmp_path / "reports" / "audit.json"
     monkeypatch.setenv("OPENROUTER_API_KEY", API_KEY)
@@ -995,4 +984,3 @@ def test_cli_requires_run_revision_and_writes_structured_output(
 
     with pytest.raises(SystemExit):
         canary_audit.parse_args([str(paths["root"])])
-

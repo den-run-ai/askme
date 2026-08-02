@@ -17,6 +17,7 @@ Usage:
     # List available tests
     python3 tests/bench_harness.py --list
 """
+
 import argparse
 import json
 import os
@@ -54,9 +55,21 @@ def discover_tests(suite, backend):
     if class_name == "TestIntegration":
         k_expr = "TestIntegration and not Medium and not Hard"
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/test_agent_integration.py",
-         "--collect-only", "-q", "-m", "live_llm", "-k", k_expr],
-        capture_output=True, text=True, cwd=str(AGENT_DIR),
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_agent_integration.py",
+            "--collect-only",
+            "-q",
+            "-m",
+            "live_llm",
+            "-k",
+            k_expr,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(AGENT_DIR),
     )
     tests = []
     for line in result.stdout.splitlines():
@@ -68,9 +81,17 @@ def discover_tests(suite, backend):
     return tests
 
 
-def run_single_test(test_name, suite, backend, log_path, model=None, provider=None,
-                    allow_fallbacks=False, require_parameters=True,
-                    reasoning_effort=None):
+def run_single_test(
+    test_name,
+    suite,
+    backend,
+    log_path,
+    model=None,
+    provider=None,
+    allow_fallbacks=False,
+    require_parameters=True,
+    reasoning_effort=None,
+):
     """Run one pytest test with AGENT_RUN_LOG set. Returns (passed, wall_seconds)."""
     class_name = SUITES[suite][backend]
     if class_name == "TestIntegration":
@@ -94,9 +115,22 @@ def run_single_test(test_name, suite, backend, log_path, model=None, provider=No
         env["OPENROUTER_REASONING_EFFORT"] = reasoning_effort or ""
     t0 = time.time()
     result = subprocess.run(
-        [sys.executable, "-m", "pytest",
-         "tests/test_agent_integration.py", "-s", "-v", "-m", "live_llm", "-k", k_expr],
-        capture_output=True, text=True, cwd=str(AGENT_DIR), env=env,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_agent_integration.py",
+            "-s",
+            "-v",
+            "-m",
+            "live_llm",
+            "-k",
+            k_expr,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(AGENT_DIR),
+        env=env,
         timeout=1200,
     )
     wall = time.time() - t0
@@ -120,9 +154,7 @@ def parse_log(log_path):
         return None
 
     run_end = next((e for e in events if e["event"] == "run_end"), None)
-    run_start: dict[str, Any] = next(
-        (e for e in events if e["event"] == "run_start"), {}
-    )
+    run_start: dict[str, Any] = next((e for e in events if e["event"] == "run_start"), {})
     plans = [e for e in events if e["event"] == "plan"]
     plan_errors = [e for e in events if e["event"] == "plan_error"]
     steps = [e for e in events if e["event"] == "step"]
@@ -196,13 +228,21 @@ def git_state():
     """Return the source revision used for a benchmark run."""
     try:
         revision = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(AGENT_DIR),
-            capture_output=True, text=True, check=True,
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(AGENT_DIR),
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
-        dirty = bool(subprocess.run(
-            ["git", "status", "--porcelain"], cwd=str(AGENT_DIR),
-            capture_output=True, text=True, check=True,
-        ).stdout.strip())
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(AGENT_DIR),
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
         return revision, dirty
     except (OSError, subprocess.CalledProcessError):
         return "unknown", None
@@ -213,13 +253,14 @@ def print_report(test_name, trial_results):
     metrics = [r["metrics"] for r in trial_results if r["metrics"]]
     pytest_passes = sum(1 for r in trial_results if r["passed"])
     agent_completes = sum(
-        1 for r in trial_results
-        if r["metrics"] and r["metrics"].get("status") == "complete"
+        1 for r in trial_results if r["metrics"] and r["metrics"].get("status") == "complete"
     )
     total = len(trial_results)
 
     print(f"\n{'─' * 60}")
-    print(f"  {test_name}  [pytest {pytest_passes}/{total}, agent complete {agent_completes}/{total}]")
+    print(
+        f"  {test_name}  [pytest {pytest_passes}/{total}, agent complete {agent_completes}/{total}]"
+    )
     print(f"{'─' * 60}")
 
     if not metrics:
@@ -247,13 +288,16 @@ def print_report(test_name, trial_results):
     for i, r in enumerate(trial_results):
         status = "PYTEST_PASS" if r["passed"] else "PYTEST_FAIL"
         wall = r["metrics"]["wall_s"] if r["metrics"] else r["wall_s"]
-        print(f"  trial {i+1}: {status}  {wall:.1f}s", end="")
+        print(f"  trial {i + 1}: {status}  {wall:.1f}s", end="")
         if r["metrics"]:
             m = r["metrics"]
             agent = m.get("status", "unknown")
-            lr = f", lr={m['local_replans_ok']}/{m['local_replans']}" if m['local_replans'] else ""
-            print(f"  (agent={agent}, steps={m['steps']}, replans={m['replans']}{lr}, "
-                  f"retries={m['thinking_retries']})", end="")
+            lr = f", lr={m['local_replans_ok']}/{m['local_replans']}" if m["local_replans"] else ""
+            print(
+                f"  (agent={agent}, steps={m['steps']}, replans={m['replans']}{lr}, "
+                f"retries={m['thinking_retries']})",
+                end="",
+            )
         print()
 
 
@@ -264,18 +308,25 @@ def main():
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--test", help="Run a single test by name")
     parser.add_argument("--model", help="OpenRouter model ID (honors OPENROUTER_MODEL by default)")
-    parser.add_argument("--provider", help="OpenRouter provider slug; use 'auto' for automatic routing")
     parser.add_argument(
-        "--reasoning-effort", choices=["low", "medium", "high"],
+        "--provider", help="OpenRouter provider slug; use 'auto' for automatic routing"
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
         help="Baseline reasoning effort for always-on reasoners like "
-             "openai/gpt-oss-20b (honors OPENROUTER_REASONING_EFFORT by default)")
+        "openai/gpt-oss-20b (honors OPENROUTER_REASONING_EFFORT by default)",
+    )
     parser.add_argument(
-        "--allow-provider-fallbacks", action="store_true",
+        "--allow-provider-fallbacks",
+        action="store_true",
         help="Allow OpenRouter to leave the requested provider (disabled by default)",
     )
     parser.add_argument(
-        "--no-require-provider-parameters", dest="require_provider_parameters",
-        action="store_false", default=True,
+        "--no-require-provider-parameters",
+        dest="require_provider_parameters",
+        action="store_false",
+        default=True,
         help="Allow a provider that does not advertise all request parameters",
     )
     parser.add_argument("--list", action="store_true", help="List available tests")
@@ -283,23 +334,27 @@ def main():
     args = parser.parse_args()
 
     if args.backend != "openrouter" and (
-            args.model or args.provider or args.allow_provider_fallbacks
-            or args.reasoning_effort or not args.require_provider_parameters):
+        args.model
+        or args.provider
+        or args.allow_provider_fallbacks
+        or args.reasoning_effort
+        or not args.require_provider_parameters
+    ):
         parser.error("OpenRouter routing options require --backend openrouter")
 
     model = None
     provider = None
     reasoning_effort = None
     if args.backend == "openrouter":
-        model = args.model or os.environ.get(
-            "OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
+        model = args.model or os.environ.get("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
         provider_arg = args.provider
         if provider_arg is None:
             provider = os.environ.get("OPENROUTER_PROVIDER", "Parasail")
         else:
             provider = "" if provider_arg.lower() == "auto" else provider_arg
-        reasoning_effort = args.reasoning_effort or os.environ.get(
-            "OPENROUTER_REASONING_EFFORT") or None
+        reasoning_effort = (
+            args.reasoning_effort or os.environ.get("OPENROUTER_REASONING_EFFORT") or None
+        )
 
     if args.list:
         for suite in SUITES:
@@ -323,10 +378,14 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"Suite: {args.suite} | Backend: {args.backend} | Trials: {args.trials}")
     if args.backend == "openrouter":
-        print(f"Model: {model} | Provider: {provider or 'auto'} | "
-              f"Reasoning effort: {reasoning_effort or 'model default'}")
+        print(
+            f"Model: {model} | Provider: {provider or 'auto'} | "
+            f"Reasoning effort: {reasoning_effort or 'model default'}"
+        )
         if provider:
-            print(f"Provider fallbacks: {'enabled' if args.allow_provider_fallbacks else 'disabled'}")
+            print(
+                f"Provider fallbacks: {'enabled' if args.allow_provider_fallbacks else 'disabled'}"
+            )
             print(f"Require parameters: {'yes' if args.require_provider_parameters else 'no'}")
         else:
             print("Provider routing: automatic (fallback setting does not apply)")
@@ -339,21 +398,31 @@ def main():
     for test_name in tests:
         all_results[test_name] = []
         for trial in range(args.trials):
-            log_path = log_dir / f"{test_name}_trial{trial+1}.jsonl"
-            print(f"\n[{time.strftime('%H:%M:%S')}] "
-                  f"{test_name} trial {trial+1}/{args.trials} ...", end="", flush=True)
+            log_path = log_dir / f"{test_name}_trial{trial + 1}.jsonl"
+            print(
+                f"\n[{time.strftime('%H:%M:%S')}] {test_name} trial {trial + 1}/{args.trials} ...",
+                end="",
+                flush=True,
+            )
             try:
                 passed, wall, stdout, stderr = run_single_test(
-                    test_name, args.suite, args.backend, log_path, model, provider,
-                    args.allow_provider_fallbacks, args.require_provider_parameters,
-                    reasoning_effort)
+                    test_name,
+                    args.suite,
+                    args.backend,
+                    log_path,
+                    model,
+                    provider,
+                    args.allow_provider_fallbacks,
+                    args.require_provider_parameters,
+                    reasoning_effort,
+                )
             except subprocess.TimeoutExpired:
                 passed, wall = False, 1200.0
                 print(" TIMEOUT", flush=True)
                 metrics = parse_log(log_path)
-                all_results[test_name].append({
-                    "passed": False, "wall_s": wall, "metrics": metrics,
-                    "timed_out": True})
+                all_results[test_name].append(
+                    {"passed": False, "wall_s": wall, "metrics": metrics, "timed_out": True}
+                )
                 continue
 
             metrics = parse_log(log_path)
@@ -364,8 +433,7 @@ def main():
             if not passed and not metrics:
                 print(f"  stderr tail: {stderr[-300:]}" if stderr else "  (no stderr)")
 
-            all_results[test_name].append({
-                "passed": passed, "wall_s": wall, "metrics": metrics})
+            all_results[test_name].append({"passed": passed, "wall_s": wall, "metrics": metrics})
 
     # Summary
     total_wall = time.time() - t_total
@@ -380,12 +448,16 @@ def main():
     # Save combined summary as JSON
     summary_path = log_dir / "summary.json"
     summary = {
-        "suite": args.suite, "backend": args.backend, "trials": args.trials,
-        "model": model, "provider": provider,
+        "suite": args.suite,
+        "backend": args.backend,
+        "trials": args.trials,
+        "model": model,
+        "provider": provider,
         "reasoning_effort": reasoning_effort,
         "allow_provider_fallbacks": args.allow_provider_fallbacks if provider else None,
         "require_provider_parameters": args.require_provider_parameters if provider else None,
-        "git_commit": git_commit, "git_dirty": git_dirty,
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
         "total_wall_s": round(total_wall, 1),
         "tests": {},
     }
@@ -419,4 +491,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
