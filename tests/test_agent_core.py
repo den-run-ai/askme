@@ -69,10 +69,13 @@ class TestExecuteWrite:
         assert result["ok"] is True
         assert (Path(work_dir) / "sub" / "test.txt").read_text() == "nested"
 
-    def test_write_empty_content(self, work_dir):
+    def test_write_empty_content_is_malformed(self, work_dir):
+        """A write without content fails at dispatch (issue #36) instead of
+        silently creating an empty file."""
         result = execute({"action": "write", "arg": "empty.txt"}, work_dir)
-        assert result["ok"] is True
-        assert (Path(work_dir) / "empty.txt").read_text() == ""
+        assert result["ok"] is False
+        assert result["error_type"] == "malformed_action"
+        assert not (Path(work_dir) / "empty.txt").exists()
 
     def test_write_bad_path(self, work_dir):
         result = execute({"action": "write", "arg": "/proc/0/impossible", "content": "x"}, work_dir)
@@ -160,10 +163,12 @@ class TestExecuteEdit:
         assert (Path(work_dir) / "sub" / "f.txt").read_text() == "new text"
 
     def test_edit_empty_find(self, work_dir):
+        """Registry dispatch rejects the malformed edit before the handler."""
         Path(work_dir, "f.txt").write_text("content")
         result = execute({"action": "edit", "arg": "f.txt", "find": "", "replace": "x"}, work_dir)
         assert result["ok"] is False
-        assert "non-empty" in result["output"]
+        assert result["error_type"] == "malformed_action"
+        assert (Path(work_dir) / "f.txt").read_text() == "content"
 
     def test_edit_delete_text(self, work_dir):
         """Replace with empty string effectively deletes the matched text."""

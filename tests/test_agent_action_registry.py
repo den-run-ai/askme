@@ -59,6 +59,13 @@ class TestActionRegistry:
             else:
                 assert callable(spec.handler)
 
+    def test_system_step_action_list_derives_from_the_registry(self):
+        """The executor prompt's action list is rendered from ACTION_SPECS,
+        byte-identical to the historical literal."""
+        assert f"Actions: {', '.join(askme.ACTION_SPECS)}." in askme.SYSTEM_STEP
+        assert "Actions: shell, write, edit, read, search, tree, done, fail." in askme.SYSTEM_STEP
+        assert "__ACTION_NAMES__" not in askme.SYSTEM_STEP
+
     def test_specs_drive_the_decode_contract(self):
         """Blanking any registry-required field must fail decode validation."""
         complete = {
@@ -99,6 +106,32 @@ class TestTypedDispatchErrors:
             assert result["ok"] is False
             assert result["error_type"] == "control_action"
         assert list(tmp_path.iterdir()) == []
+
+    def test_malformed_actions_fail_at_dispatch_before_side_effects(self, tmp_path):
+        """The registry contract is enforced at dispatch, not just decode: a
+        write without content must not create an empty file."""
+        cases = [
+            {"action": "write", "arg": "x"},
+            {"action": "write", "arg": "x", "content": "  "},
+            {"action": "edit", "arg": "x", "find": "a"},
+            {"action": "edit", "arg": "x", "find": "", "replace": "b"},
+            {"action": "shell", "arg": " "},
+            {"action": "search", "arg": ""},
+            {"action": "read", "arg": ""},
+        ]
+        for action in cases:
+            result = execute(dict(action), str(tmp_path))
+            assert result["ok"] is False, action
+            assert result["error_type"] == "malformed_action", action
+        assert list(tmp_path.iterdir()) == []
+
+    def test_dispatch_leaves_runtime_read_cursor_errors_to_the_handler(self, tmp_path):
+        """Cursor rules are decode + handler concerns: the handler's richer
+        typed errors (with source metadata) must not be pre-empted."""
+        (tmp_path / "f.txt").write_text("hello\n")
+        result = execute({"action": "read", "arg": "f.txt", "cursor": -1}, str(tmp_path))
+        assert result["error_type"] == "invalid_read_cursor"
+        assert result["sha256"]
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
