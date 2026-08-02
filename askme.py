@@ -684,7 +684,7 @@ def _step_digest(steps, count=6):
 
 
 def _mutation_target_key(step, working_dir=None):
-    """Stable internal target identity for write/edit transition tracking."""
+    """Stable operation-aware identity for write/edit transition tracking."""
     target = step.get("_target")
     if _valid_nonempty_str(target):
         return target
@@ -692,8 +692,19 @@ def _mutation_target_key(step, working_dir=None):
     if not _valid_nonempty_str(arg):
         return None
     if working_dir is not None:
-        return os.path.normcase(os.path.abspath(
-            os.fspath(_step_path(arg, working_dir))))
+        path = _step_path(arg, working_dir)
+        lexical = os.path.abspath(os.fspath(path))
+        try:
+            if step.get("append") or step.get("_append"):
+                # Append opens the target directly and follows a leaf symlink.
+                path = path.resolve(strict=False)
+            else:
+                # Atomic overwrite/edit replaces a leaf symlink rather than
+                # mutating its referent. Resolve directory aliases only.
+                path = path.parent.resolve(strict=False) / path.name
+        except (OSError, RuntimeError, ValueError):
+            path = Path(lexical)
+        return os.path.normcase(os.path.normpath(os.fspath(path)))
     return os.path.normcase(os.path.normpath(arg))
 
 
@@ -715,6 +726,66 @@ def _unresolved_incomplete_writes(steps, working_dir=None):
         else:
             unresolved.pop(target, None)
     return unresolved
+
+
+def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
+    """Run-scoped incomplete artifact state for either replanner."""
+    unresolved = _unresolved_incomplete_writes(all_steps)
+    if unresolved:
+        _, last_step = max(unresolved.values(), key=lambda item: item[0])
+        arg = last_step.get("arg", "")
+        return {"incomplete_write": Path(arg).name if arg else True}
+
+    pending = pending_empty_writes or {}
+    if pending:
+        pending_info = list(pending.values())[-1]
+        if isinstance(pending_info, dict):
+            name = pending_info.get("name", "")
+        else:
+            name = pending_info
+        return {"incomplete_write": Path(str(name)).name if name else True}
+    return None
+
+
+def _pending_empty_recovery(pending, logical_target, operation_target,
+                            is_append):
+    """Find a pending zero-byte recovery by pathname or append referent."""
+    recovery = pending.get(logical_target) if logical_target is not None else None
+    if not is_append:
+        return recovery
+    matches = []
+    for key, info in pending.items():
+        if (key == logical_target
+                or (operation_target is not None
+                    and isinstance(info, dict)
+                    and info.get("append_target") == operation_target)):
+            matches.append(info)
+    if not matches:
+        return None
+    # Multiple aliases can carry different recovery obligations for one
+    # referent. A pending overwrite always wins over a permissive append.
+    return {
+        "append_allowed": all(
+            isinstance(info, dict)
+            and info.get("append_allowed", False)
+            for info in matches
+        )
+    }
+
+
+def _clear_pending_empty_writes(pending, logical_target, operation_target):
+    """Clear zero-byte obligations satisfied by a successful write."""
+    keys = set()
+    if logical_target is not None:
+        keys.add(logical_target)
+    if operation_target is not None:
+        for key, info in pending.items():
+            if (isinstance(info, dict)
+                    and info.get("append_allowed", False)
+                    and info.get("append_target") == operation_target):
+                keys.add(key)
+    for key in keys:
+        pending.pop(key, None)
 
 
 def _write_visibility_flag(task_steps):
@@ -763,12 +834,16 @@ def get_plan(user_prompt, state):
         plan_state["recent_steps"] = recent
     # Write-forcing visibility (issue #15): both 2026-08-01 canary models'
     # replans restated the failed task text; make the actual write state
-    # visible instead. Compute this independently of recent_steps so a task
-    # that fails before dispatch still reports no_write_executed. Scope to
-    # the failed task, and classify from that task itself (Codex P2, PR #16).
+    # visible instead. Incomplete artifacts are run-scoped completion blockers;
+    # no_write/unvalidated progress remains scoped to, and classified from,
+    # the failed task itself (Codex P2, PR #16).
     task_steps = state.get("all_steps", [])[state.get("task_start_step_count", 0):]
     current_task = state.get("current_task", "")
-    if _is_write_shaped(current_task):
+    incomplete = _incomplete_write_visibility(
+        state.get("all_steps", []), state.get("pending_empty_writes"))
+    if incomplete:
+        plan_state.update(incomplete)
+    elif _is_write_shaped(current_task):
         flag = _write_visibility_flag(task_steps)
         if flag:
             plan_state.update(flag)
@@ -779,11 +854,16 @@ def get_plan(user_prompt, state):
     # Summarize errors for compact, typed diagnostics
     if plan_state.get("errors"):
         plan_state["errors"] = summarize_errors(plan_state["errors"])
-    # Think on replans (errors present) — first plans don't benefit from thinking
-    # and thinking tokens compete with the task-list budget (768 tokens).
+    # Think on second/later planning attempts (or stateful direct replans) —
+    # first plans don't benefit from thinking, and thinking tokens compete with
+    # the task-list budget (768 tokens).
     # Benchmark evidence: think=False produces equal/better plans and avoids
     # token-budget truncation on the local 4B model. See benchmarks/.
-    is_replan = bool(plan_state.get("errors") or plan_state.get("completed_tasks"))
+    is_replan = bool(
+        state.get("planning_attempt", 0) > 0
+        or plan_state.get("errors")
+        or plan_state.get("completed_tasks")
+    )
     return ask_llm([
         {"role": "system", "content": SYSTEM_PLAN},
         {"role": "user", "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}"}
@@ -945,10 +1025,14 @@ def replan_task(failed_task, errors, completed_tasks, state, user_prompt,
     failed_steps = _step_digest(task_steps, count=3)
     if failed_steps:
         replan_state["failed_steps"] = failed_steps
-    # A task can fail before dispatching a step, and failed_steps must never
-    # leak actions from an earlier task. Visibility therefore uses the scoped
-    # slice even when it is empty.
-    if _is_write_shaped(failed_task):
+    # failed_steps and advisory progress flags remain task-scoped even when
+    # the slice is empty. Incomplete artifacts are checked run-wide because
+    # they remain a completion blocker across replacement-task boundaries.
+    incomplete = _incomplete_write_visibility(
+        state.get("all_steps", []), state.get("pending_empty_writes"))
+    if incomplete:
+        replan_state.update(incomplete)
+    elif _is_write_shaped(failed_task):
         flag = _write_visibility_flag(task_steps)
         if flag:
             replan_state.update(flag)
@@ -1668,6 +1752,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
         log("=" * 40)
         t_plan = time.time()
         log(f"Planning (attempt {replan + 1}/{max_replans})...")
+        state["planning_attempt"] = replan
         try:
             plan = get_plan(user_prompt, state)
         except LLMTransportError as e:
@@ -1822,11 +1907,16 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     # complete lines that arrived and steer the model to finish
                     # the file with chunked append instead of failing the step.
                     truncated_write = act == "write" and action.pop("content_truncated", False)
-                    write_target = (_mutation_target_key(
+                    logical_write_target = (_mutation_target_key(
                         {"arg": action.get("arg", "")}, working_dir)
                         if act == "write" else None)
-                    pending_recovery = state["pending_empty_writes"].get(
-                        write_target) if write_target is not None else None
+                    operation_write_target = (_mutation_target_key({
+                        "arg": action.get("arg", ""),
+                        "append": bool(action.get("append")),
+                    }, working_dir) if act == "write" else None)
+                    pending_recovery = _pending_empty_recovery(
+                        state["pending_empty_writes"], logical_write_target,
+                        operation_write_target, bool(action.get("append")))
                     if (act == "write" and action.get("append")
                             and pending_recovery
                             and not pending_recovery.get("append_allowed", False)):
@@ -1853,8 +1943,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                             # though this empty partial attempt wrote no bytes.
                             last_write_target = None
                             consecutive_target_writes = 0
-                            pending_target = _mutation_target_key(
-                                {"arg": action.get("arg", "")}, working_dir)
+                            pending_target = logical_write_target
                             if pending_target is not None:
                                 existing = state["pending_empty_writes"].get(
                                     pending_target)
@@ -1867,6 +1956,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                     "name": Path(
                                         action.get("arg", "") or "file").name,
                                     "append_allowed": append_allowed,
+                                    "append_target": _mutation_target_key({
+                                        "arg": action.get("arg", ""),
+                                        "append": True,
+                                    }, working_dir),
                                 }
                             # Nothing was written: the first dispatched chunk
                             # must stay a non-append write (append would land
@@ -1932,7 +2025,20 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                     last = state["last_steps"][-1:] if state["last_steps"] else []
                     if last and last[0]["action"] == act:
                         prev = last[0]
-                        if act in ("write", "edit") and prev.get("arg", "") == action.get("arg", ""):
+                        same_mutation_target = False
+                        if act in ("write", "edit"):
+                            current_target_step = {
+                                "arg": action.get("arg", ""),
+                            }
+                            if act == "write" and action.get("append"):
+                                current_target_step["append"] = True
+                            current_target = _mutation_target_key(
+                                current_target_step, working_dir)
+                            same_mutation_target = (
+                                current_target is not None
+                                and _mutation_target_key(prev, working_dir)
+                                == current_target)
+                        if act in ("write", "edit") and same_mutation_target:
                             # write: same content = duplicate; edit: same find+replace = duplicate
                             is_dup = False
                             if act == "write" and action.get("append"):
@@ -2061,11 +2167,9 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         observe_executed += 1
                     result = execute(action, working_dir)
                     if result["ok"] and act == "write":
-                        completed_target = _mutation_target_key(
-                            {"arg": action.get("arg", "")}, working_dir)
-                        if completed_target is not None:
-                            state["pending_empty_writes"].pop(
-                                completed_target, None)
+                        _clear_pending_empty_writes(
+                            state["pending_empty_writes"],
+                            logical_write_target, operation_write_target)
                     if act not in OBSERVE_ACTIONS and result["ok"]:
                         # Counted only on success (Codex P2, PR #16): a failed
                         # mutation must not disarm write pressure or the
@@ -2129,8 +2233,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         step_entry["_find"] = action.get("find", "")
                         step_entry["_replace"] = action.get("replace", "")
                     if act in ("write", "edit"):
-                        target = _mutation_target_key(
-                            {"arg": action.get("arg", "")}, working_dir)
+                        target_step = {"arg": action.get("arg", "")}
+                        if act == "write" and action.get("append"):
+                            target_step["append"] = True
+                        target = _mutation_target_key(target_step, working_dir)
                         if target is not None:
                             step_entry["_target"] = target
                     if act == "read":
