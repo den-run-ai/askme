@@ -98,9 +98,14 @@ def evaluate(loaded, expect_cells=None):
                              for p in trial})
             cell = "{}/{}".format(data.get("suite", "?"), test_name)
             passed = total > 0 and pytest_passed == total and agent_complete == total
+            model = data.get("model") or "?"
+            # Effort-pinned cells (always-on reasoners like gpt-oss-20b) differ
+            # only by reasoning effort; keep the rows distinguishable.
+            if data.get("reasoning_effort"):
+                model = "{}@{}".format(model, data["reasoning_effort"])
             rows.append({
                 "cell": cell,
-                "model": data.get("model") or "?",
+                "model": model,
                 "provider": data.get("provider") or "auto",
                 "served_providers": served,
                 "pytest_passed": pytest_passed,
@@ -113,7 +118,7 @@ def evaluate(loaded, expect_cells=None):
             if not passed:
                 failures.append(
                     "{} [{}]: pytest {}/{}, agent complete {}/{}".format(
-                        cell, data.get("model") or "?",
+                        cell, model,
                         pytest_passed, total, agent_complete, total))
     if expect_cells is not None and len(rows) != expect_cells:
         failures.append(

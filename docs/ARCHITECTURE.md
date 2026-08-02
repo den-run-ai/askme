@@ -110,9 +110,17 @@ reasoning. Normal runtime defaults to `gated`. Evaluation runs freeze either
 | Task-local replan | Disabled | Disabled |
 | LLM final validator, when enabled | High | Disabled |
 
+On OpenRouter, `OPENROUTER_REASONING_EFFORT` adds an orthogonal baseline for
+always-on reasoners (harmony-format gpt-oss models expose `low`/`medium`/`high`
+but no off switch): the requested effort is the maximum of the baseline and the
+effective level from the table above, so `gated` escalation can raise but never
+lower it, and `off` pins every request to exactly the baseline. Unset (the
+default) preserves the reasoning-disabled request contract for hybrid models.
+
 Every HTTP attempt emits a `reasoning_decision` JSONL event with the policy,
-named trigger, requested level, effective level, and attempt number. The `off`
-policy nulls the effective level even when a caller requests an explicit level.
+named trigger, requested level, effective level, baseline effort, and attempt
+number. The `off` policy nulls the effective level even when a caller requests
+an explicit level.
 The frozen evaluation contract lives in
 [`tests/workflows/PROTOCOL.md`](../tests/workflows/PROTOCOL.md).
 
@@ -205,7 +213,7 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `WRITE_PRESSURE_OBSERVATIONS` | 3 | Executed observation steps before the executor prompt demands a committing action (write-shaped tasks) |
 | `OBSERVE_TAIL_RESERVE` | 3 | Final steps per task attempt reserved for committing actions on write-shaped tasks |
 | Thinking tokens (local) | 512 (medium) / 768 (high) | Must be bumped when thinking is enabled |
-| Thinking tokens (OpenRouter) | 1536 (medium) / 2048 (high) | Reasoning tokens share budget with Parasail |
+| Thinking tokens (OpenRouter) | 1024 (low) / 1536 (medium) / 2048 (high) | Reasoning tokens share budget with Parasail; same floors apply to the `OPENROUTER_REASONING_EFFORT` baseline |
 
 ## Design Decisions
 
@@ -245,7 +253,7 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `_content` in step dict | Stored for duplicate detection; excluded from slim state via underscore-prefix convention |
 | Multi-turn rejected | Accumulated prior turns bloat context (500-800 tokens across 3 turns) vs curated slim state (~150-200). Revisit with a stronger local model and more context headroom |
 | Null content (OpenRouter) | Parasail reasoning can return `content: null` when reasoning exhausts `max_tokens` — fall back to `reasoning_content` / `reasoning` fields, then require result is a dict (non-dict like `null`/`[]` triggers retry) |
-| Effort + max_tokens (OpenRouter) | `reasoning.effort` and `reasoning.max_tokens` are mutually exclusive; API returns 400. Use `effort` only; bump outer `max_tokens` to 1536/2048 |
+| Effort + max_tokens (OpenRouter) | `reasoning.effort` and `reasoning.max_tokens` are mutually exclusive; API returns 400. Use `effort` only; floor outer `max_tokens` at 1024/1536/2048 per effort |
 | `<\|think\|>` prefix (local) | Prepended to system prompt to enable thinking; `max_tokens` must be bumped 256→512→768 as thinking tokens share the budget |
 
 ## Current Constraints
@@ -262,6 +270,7 @@ Active limitations that still shape the design.
 - **Replan thinking latency.** ~73s per replan on local (thinking shares the 768-token planner budget). Justified by better error analysis on recovery plans; not justified on first plans.
 - **Parse-retry thinking latency.** E03 mitigates: `_repair_json` salvages truncated JSON without retrying; final auto-retry (attempt 2) uses a strict contract with no explicit reasoning instead of escalating to high. Caller-specified levels remain active under `gated` and are suppressed under `off`. Upstream has no grammar+reasoning coexistence solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)) and `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)).
 - **Shell error classification is heuristic.** `classify_error(output, cmd)` uses substring matching for shell output. E16 hardened this: compiler-family commands (`cc`, `gcc`, `g++`, `clang`, `make`, `cargo build`, etc.) now prefer `compile_error` for ambiguous diagnostics like `No such file or directory`. Edit-origin errors are not affected because they are tagged deterministically in `execute()`.
+- **The reasoning-off request contract assumes hybrid models.** Ordinary OpenRouter calls send `reasoning.enabled=false`, which always-on reasoners (harmony-format gpt-oss) cannot honor — they reason at the provider-default effort regardless, spending unbudgeted completion tokens outside the harness's gating. `OPENROUTER_REASONING_EFFORT` pins such models to a declared baseline instead (E21). This declares the requested effort; it does not verify the served effort — check the `thinking`/`completion` fields in `tokens` events for drift.
 
 ## Multi-Backend Support
 
@@ -270,7 +279,7 @@ Active limitations that still shape the design.
 - **OpenRouter**: any OpenAI-compatible model via OpenRouter API. `OPENROUTER_PROVIDER` sets the provider preference (Parasail by default); `OPENROUTER_ALLOW_FALLBACKS=0` makes that selection strict, and `OPENROUTER_REQUIRE_PARAMETERS=1` rejects endpoints that do not advertise every requested parameter.
 
 Thinking mechanisms differ:
-- **OpenRouter**: `reasoning.enabled=true` with `reasoning.effort` ("medium"/"high"). Reasoning tokens share the outer `max_tokens` on Parasail; `content` can be `null` if reasoning exhausts the budget.
+- **OpenRouter**: `reasoning.enabled=true` with `reasoning.effort` ("low"/"medium"/"high" — gated escalation, raised to the optional `OPENROUTER_REASONING_EFFORT` baseline for always-on reasoners such as gpt-oss-20b). Reasoning tokens share the outer `max_tokens` on Parasail; `content` can be `null` if reasoning exhausts the budget.
 - **Local**: `<|think|>` prepended to the system prompt; `--reasoning on` at server launch. `<|channel>...<channel|>` blocks stripped from output.
 
 Env var reference lives in [configuration.md](configuration.md).

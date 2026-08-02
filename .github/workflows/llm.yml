@@ -25,7 +25,10 @@ on:
         options: [easy, medium, hard]
         default: easy
       models:
-        description: Comma-separated OpenRouter model IDs for the Berkeley job
+        description: >-
+          Comma-separated OpenRouter model IDs for the Berkeley job. Append
+          '@low', '@medium', or '@high' to pin a baseline reasoning effort for
+          always-on reasoners (e.g. openai/gpt-oss-20b@low).
         type: string
         default: google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b
       provider:
@@ -131,15 +134,23 @@ jobs:
           for MODEL in "${MODEL_LIST[@]}"; do
             MODEL="$(echo "$MODEL" | xargs)"
             [ -z "$MODEL" ] && continue
+            # Optional '@effort' suffix pins a baseline reasoning effort for
+            # always-on reasoners: 'openai/gpt-oss-20b@low'.
+            EFFORT=""
+            case "$MODEL" in
+              *@*) EFFORT="${MODEL##*@}"; MODEL="${MODEL%@*}" ;;
+            esac
+            EFFORT_ARGS=()
+            [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
             MODEL_COUNT=$((MODEL_COUNT + 1))
-            SLUG="$(echo "$MODEL" | tr '/.:' '---')"
+            SLUG="$(echo "$MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
             python tests/bench_harness.py --backend openrouter --suite hard \
               --test test_replan_build_with_dependency --trials "$TRIALS" \
-              --model "$MODEL" --provider "$PROVIDER" \
+              --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
               --log-dir "bench-logs/$SLUG/build"
             python tests/bench_harness.py --backend openrouter --suite medium \
               --test test_fix_python_syntax_error --trials "$TRIALS" \
-              --model "$MODEL" --provider "$PROVIDER" \
+              --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
               --log-dir "bench-logs/$SLUG/repair"
           done
           echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"

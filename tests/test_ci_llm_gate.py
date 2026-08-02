@@ -176,3 +176,20 @@ class TestReportGate:
         ci_llm_gate.main(["report", path])
         out = capsys.readouterr().out
         assert "auto → SiliconFlow" in out
+
+    def test_effort_pinned_cells_stay_distinguishable(self, tmp_path, capsys):
+        """Two gpt-oss-20b cells differing only by reasoning effort must show
+        distinct model labels and both count toward --expect-cells."""
+        low = _summary(model="openai/gpt-oss-20b")
+        low["reasoning_effort"] = "low"
+        high = _summary(model="openai/gpt-oss-20b", pytest_passed=0)
+        high["reasoning_effort"] = "high"
+        paths = [_write(tmp_path, "low.json", low),
+                 _write(tmp_path, "high.json", high)]
+        rc = ci_llm_gate.main(["report"] + paths + ["--expect-cells", "2"])
+        out = capsys.readouterr().out
+        assert rc == 1  # the high cell fails the pass rule
+        assert "openai/gpt-oss-20b@low" in out
+        assert "openai/gpt-oss-20b@high" in out
+        # the failure line carries the effort-qualified label
+        assert "[openai/gpt-oss-20b@high]: pytest 0/1" in out

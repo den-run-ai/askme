@@ -68,7 +68,8 @@ def discover_tests(suite, backend):
 
 
 def run_single_test(test_name, suite, backend, log_path, model=None, provider=None,
-                    allow_fallbacks=False, require_parameters=True):
+                    allow_fallbacks=False, require_parameters=True,
+                    reasoning_effort=None):
     """Run one pytest test with AGENT_RUN_LOG set. Returns (passed, wall_seconds)."""
     class_name = SUITES[suite][backend]
     if class_name == "TestIntegration":
@@ -83,6 +84,9 @@ def run_single_test(test_name, suite, backend, log_path, model=None, provider=No
             env["OPENROUTER_PROVIDER"] = provider
         env["OPENROUTER_ALLOW_FALLBACKS"] = "1" if allow_fallbacks else "0"
         env["OPENROUTER_REQUIRE_PARAMETERS"] = "1" if require_parameters else "0"
+        # Explicit either way so a cell never inherits a stray effort from the
+        # caller's environment.
+        env["OPENROUTER_REASONING_EFFORT"] = reasoning_effort or ""
     t0 = time.time()
     result = subprocess.run(
         [sys.executable, "-m", "pytest",
@@ -255,6 +259,10 @@ def main():
     parser.add_argument("--model", help="OpenRouter model ID (honors OPENROUTER_MODEL by default)")
     parser.add_argument("--provider", help="OpenRouter provider slug; use 'auto' for automatic routing")
     parser.add_argument(
+        "--reasoning-effort", choices=["low", "medium", "high"],
+        help="Baseline reasoning effort for always-on reasoners like "
+             "openai/gpt-oss-20b (honors OPENROUTER_REASONING_EFFORT by default)")
+    parser.add_argument(
         "--allow-provider-fallbacks", action="store_true",
         help="Allow OpenRouter to leave the requested provider (disabled by default)",
     )
@@ -269,11 +277,12 @@ def main():
 
     if args.backend != "openrouter" and (
             args.model or args.provider or args.allow_provider_fallbacks
-            or not args.require_provider_parameters):
+            or args.reasoning_effort or not args.require_provider_parameters):
         parser.error("OpenRouter routing options require --backend openrouter")
 
     model = None
     provider = None
+    reasoning_effort = None
     if args.backend == "openrouter":
         model = args.model or os.environ.get(
             "OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it")
@@ -282,6 +291,8 @@ def main():
             provider = os.environ.get("OPENROUTER_PROVIDER", "Parasail")
         else:
             provider = "" if provider_arg.lower() == "auto" else provider_arg
+        reasoning_effort = args.reasoning_effort or os.environ.get(
+            "OPENROUTER_REASONING_EFFORT") or None
 
     if args.list:
         for suite in SUITES:
@@ -305,7 +316,8 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"Suite: {args.suite} | Backend: {args.backend} | Trials: {args.trials}")
     if args.backend == "openrouter":
-        print(f"Model: {model} | Provider: {provider or 'auto'}")
+        print(f"Model: {model} | Provider: {provider or 'auto'} | "
+              f"Reasoning effort: {reasoning_effort or 'model default'}")
         if provider:
             print(f"Provider fallbacks: {'enabled' if args.allow_provider_fallbacks else 'disabled'}")
             print(f"Require parameters: {'yes' if args.require_provider_parameters else 'no'}")
@@ -326,7 +338,8 @@ def main():
             try:
                 passed, wall, stdout, stderr = run_single_test(
                     test_name, args.suite, args.backend, log_path, model, provider,
-                    args.allow_provider_fallbacks, args.require_provider_parameters)
+                    args.allow_provider_fallbacks, args.require_provider_parameters,
+                    reasoning_effort)
             except subprocess.TimeoutExpired:
                 passed, wall = False, 1200.0
                 print(f" TIMEOUT", flush=True)
@@ -362,6 +375,7 @@ def main():
     summary = {
         "suite": args.suite, "backend": args.backend, "trials": args.trials,
         "model": model, "provider": provider,
+        "reasoning_effort": reasoning_effort,
         "allow_provider_fallbacks": args.allow_provider_fallbacks if provider else None,
         "require_provider_parameters": args.require_provider_parameters if provider else None,
         "git_commit": git_commit, "git_dirty": git_dirty,
