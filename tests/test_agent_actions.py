@@ -1367,6 +1367,18 @@ class TestValidateAfterWrite:
             "incomplete_write": "app.py"
         }
 
+    def test_nonempty_append_visibility_exposes_frozen_recovery_target(self):
+        steps = [
+            {"action": "write", "arg": "app.py", "ok": True,
+             "_append": True, "_truncated_write": True,
+             "_target": "/real/old.py"},
+        ]
+        assert askme._incomplete_write_visibility(steps) == {
+            "incomplete_write": "app.py",
+            "incomplete_write_target": "/real/old.py",
+            "incomplete_write_append_allowed": True,
+        }
+
     def test_truncated_overwrite_supersedes_older_complete_write(self):
         steps = [
             {"action": "write", "arg": "app.py", "ok": True},
@@ -1439,6 +1451,9 @@ class TestValidateAfterWrite:
         full_state = json.loads(
             full.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
         assert full_state["incomplete_write"] == "app.py"
+        assert (full_state["incomplete_write_target"]
+                == "/internal/normalized/app.py")
+        assert full_state["incomplete_write_append_allowed"] is False
         assert "no_write_executed" not in full_state
 
         with patch("askme.ask_llm", return_value={"task": "finish app.py"}) as local:
@@ -1447,6 +1462,9 @@ class TestValidateAfterWrite:
         local_state = json.loads(
             local.call_args.args[0][-1]["content"].split("STATE:\n", 1)[1])
         assert local_state["incomplete_write"] == "app.py"
+        assert (local_state["incomplete_write_target"]
+                == "/internal/normalized/app.py")
+        assert local_state["incomplete_write_append_allowed"] is False
         assert "no_write_executed" not in local_state
 
     @patch("askme.replan_task", return_value=None)
@@ -1768,6 +1786,63 @@ class TestValidateAfterWrite:
         assert any(e.get("reason") == "append_after_empty_overwrite"
                    for e in events)
 
+    @pytest.mark.parametrize(("first_content", "expected_old"), [
+        ("no complete line", "OLD\nTAIL\n"),
+        ("PART\nmissing tail", "OLD\nPART\nTAIL\n"),
+    ])
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_recovery_prioritizes_restrictive_overwrite_obligation(
+            self, mock_llm, mock_replan, tmp_path, first_content,
+            expected_old):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        old_target.write_text("OLD\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["replace app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": first_content, "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "write", "arg": "app.py",
+                        "content": "still no complete line",
+                        "content_truncated": True}
+            if llm.n in (4, 6, 8):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            if llm.n == 5:
+                assert f'"incomplete_write_target": "{leaf}"' in prompt
+                assert '"incomplete_write_append_allowed": false' in prompt
+                return {"action": "write", "arg": str(leaf),
+                        "content": "GOOD\n"}
+            assert f'"incomplete_write_target": "{old_target}"' in prompt
+            assert '"incomplete_write_append_allowed": true' in prompt
+            return {"action": "write", "arg": str(old_target),
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("replace app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=7)
+        assert result["status"] == "complete"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert old_target.read_text() == expected_old
+        assert result["state"]["pending_empty_writes"] == {}
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
     def test_empty_append_can_resume_through_physical_alias(
@@ -1815,38 +1890,245 @@ class TestValidateAfterWrite:
             leaf.symlink_to(old_target)
         except (OSError, NotImplementedError):
             pytest.skip("file symlinks are unavailable")
-        mock_llm.side_effect = [
-            {"tasks": ["update app.py"]},
-            {"action": "write", "arg": "app.py",
-             "content": "no complete line", "append": True,
-             "content_truncated": True},
-            {"action": "shell",
-             "arg": f"ln -sfn {new_target} app.py"},
-            {"action": "write", "arg": "app.py",
-             "content": "still no complete line", "append": True,
-             "content_truncated": True},
-            {"action": "write", "arg": "app.py", "content": "NEWTAIL\n",
-             "append": True},
-            {"action": "done"},
-            {"action": "write", "arg": str(old_target),
-             "content": "OLDTAIL\n", "append": True},
-            {"action": "done"},
-        ]
+        recovery_args = {
+            str(old_target): "OLDTAIL\n",
+            str(new_target): "NEWTAIL\n",
+        }
+        surfaced = []
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n == 4:
+                return {"action": "write", "arg": "app.py",
+                        "content": "still no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n in (5, 7, 9):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            positions = {
+                target: prompt.rfind(f" at {target}. Retry")
+                for target in recovery_args
+            }
+            target = max(positions, key=positions.get)
+            assert positions[target] >= 0
+            surfaced.append(target)
+            return {"action": "write", "arg": target,
+                    "content": recovery_args[target], "append": True}
+
+        mock_llm.side_effect = llm
         log_path = tmp_path / "run.jsonl"
         old_log = askme.RUN_LOG_PATH
         askme.RUN_LOG_PATH = str(log_path)
         try:
             result = _run_loop("update app.py", str(work),
-                               max_replans=1, max_tasks=1, max_steps=7)
+                               max_replans=1, max_tasks=1, max_steps=8)
         finally:
             askme.RUN_LOG_PATH = old_log
         assert result["status"] == "complete"
         assert old_target.read_text() == "OLD\nOLDTAIL\n"
         assert new_target.read_text() == "NEW\nNEWTAIL\n"
         assert result["state"]["pending_empty_writes"] == {}
+        assert surfaced == [str(old_target), str(new_target)]
         events = [json.loads(l) for l in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done"
                    for e in events)
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_nonempty_append_recovery_hint_survives_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        expected_target = str(old_target)
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "PART\nmissing tail", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n in (4, 6):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            assert f" at {expected_target}. Retry" in prompt
+            return {"action": "write", "arg": expected_target,
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nPART\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert not askme._unresolved_incomplete_writes(
+            result["state"]["all_steps"], str(work))
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_recovery_target_survives_working_dir_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        old_root = tmp_path / "old-root"
+        new_root = tmp_path / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        old_target = old_root / "app.py"
+        new_target = new_root / "app.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        work_link = tmp_path / "work"
+        try:
+            work_link.symlink_to(old_root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("directory symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_root} {work_link}"}
+            if llm.n in (4, 6):
+                return {"action": "done"}
+            prompt = messages[-1]["content"]
+            assert f'"incomplete_write_target": "{old_target}"' in prompt
+            assert '"incomplete_write_append_allowed": true' in prompt
+            return {"action": "write", "arg": str(old_target),
+                    "content": "TAIL\n", "append": True}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work_link),
+                           max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value="finish app.py")
+    @patch("askme.ask_llm")
+    def test_task_local_retry_keeps_structured_recovery_target(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+
+        def llm(messages, **kwargs):
+            llm.n = getattr(llm, "n", 0) + 1
+            if llm.n == 1:
+                return {"tasks": ["update app.py"]}
+            if llm.n == 2:
+                return {"action": "write", "arg": "app.py",
+                        "content": "no complete line", "append": True,
+                        "content_truncated": True}
+            if llm.n == 3:
+                return {"action": "shell",
+                        "arg": f"ln -sfn {new_target} app.py"}
+            if llm.n == 4:
+                return {"action": "fail", "reasoning": "need retry"}
+            if llm.n == 5:
+                prompt = messages[-1]["content"]
+                assert f'"incomplete_write_target": "{old_target}"' in prompt
+                assert '"incomplete_write_append_allowed": true' in prompt
+                return {"action": "write", "arg": str(old_target),
+                        "content": "TAIL\n", "append": True}
+            return {"action": "done"}
+
+        mock_llm.side_effect = llm
+        result = _run_loop("update app.py", str(work),
+                           max_replans=1, max_tasks=1, max_steps=4)
+        assert result["status"] == "complete"
+        assert mock_replan.called
+        assert old_target.read_text() == "OLD\nTAIL\n"
+        assert new_target.read_text() == "NEW\n"
+        assert result["state"]["pending_empty_writes"] == {}
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_empty_overwrite_referent_guards_survive_symlink_retarget(
+            self, mock_llm, mock_replan, tmp_path):
+        work = tmp_path / "work"
+        real = tmp_path / "real"
+        work.mkdir()
+        real.mkdir()
+        old_target = real / "old.py"
+        new_target = real / "new.py"
+        old_target.write_text("OLD\n")
+        new_target.write_text("NEW\n")
+        leaf = work / "app.py"
+        try:
+            leaf.symlink_to(old_target)
+        except (OSError, NotImplementedError):
+            pytest.skip("file symlinks are unavailable")
+        mock_llm.side_effect = [
+            {"tasks": ["replace app.py"]},
+            {"action": "write", "arg": "app.py",
+             "content": "no complete line", "content_truncated": True},
+            {"action": "shell", "arg": f"ln -sfn {new_target} app.py"},
+            {"action": "write", "arg": "app.py",
+             "content": "still no complete line", "content_truncated": True},
+            {"action": "write", "arg": str(old_target),
+             "content": "BAD-OLD\n", "append": True},
+            {"action": "write", "arg": str(new_target),
+             "content": "BAD-NEW\n", "append": True},
+            {"action": "write", "arg": "app.py", "content": "GOOD\n"},
+            {"action": "done"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        old_log = askme.RUN_LOG_PATH
+        askme.RUN_LOG_PATH = str(log_path)
+        try:
+            result = _run_loop("replace app.py", str(work),
+                               max_replans=1, max_tasks=1, max_steps=7)
+        finally:
+            askme.RUN_LOG_PATH = old_log
+        assert result["status"] == "complete"
+        assert old_target.read_text() == "OLD\n"
+        assert new_target.read_text() == "NEW\n"
+        assert not leaf.is_symlink()
+        assert leaf.read_text() == "GOOD\n"
+        assert result["state"]["pending_empty_writes"] == {}
+        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        assert sum(e.get("reason") == "append_after_empty_overwrite"
+                   for e in events) == 2
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
