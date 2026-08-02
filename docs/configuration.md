@@ -17,7 +17,6 @@ settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `OPENROUTER_REASONING_EFFORT` | (unset) | Baseline reasoning effort (`low`/`medium`/`high`) for always-on reasoners like `openai/gpt-oss-20b`. Leave unset for hybrid models like Gemma 4 |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
-| `CACHE_WORKAROUND` | `0` | Obsolete manual slot save/restore bypass (local only). Measured 40% slower than baseline; superseded by `--swa-full --cache-reuse 256`. Kept in code only for retesting after server rebuilds — leave at `0`. See [gemma4-setup.md](gemma4-setup.md). |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |

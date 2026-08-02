@@ -54,13 +54,12 @@ cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
 ```bash
 cd /Users/macmone/code/llama.cpp
-mkdir -p /tmp/llama-cache
 ./build/bin/llama-server \
   -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf \
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
   --swa-full --cache-reuse 256 \
-  -np 1 --slot-save-path /tmp/llama-cache \
+  -np 1 \
   --port 8080
 ```
 
@@ -73,7 +72,6 @@ mkdir -p /tmp/llama-cache
 | `--flash-attn on` | Memory-efficient attention | |
 | `--cache-type-k q4_0 --cache-type-v q4_0` | Quantized KV cache (~4x less memory) | Current recommended default on M1 16GB. See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08). |
 | `-np 1` | Single slot (avoids 4-way context split on M1) | |
-| `--slot-save-path /tmp/llama-cache` | Disk persistence for KV state | Verified by `TestServerConfig` |
 | `--swa-full --cache-reuse 256` | Full SWA attention + cross-slot cache reuse | Requires build `a702f395`+ ([#22288](https://github.com/ggml-org/llama.cpp/pull/22288)). Deterministic benchmark: no decode penalty, 4.5% faster prompt eval vs without. Not compatible with `--mmproj`. |
 | `--port 8080` | Server port | |
 
@@ -82,7 +80,6 @@ mkdir -p /tmp/llama-cache
 | Flag | Issue | Status |
 |------|-------|--------|
 | `--cache-reuse 256` (alone, no `--swa-full`) | KV prefix reuse — broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)). On local build `85dde8dc4`, server logs `cache_reuse is not supported by this context, it will be disabled`. | **Fix merged upstream** via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) — requires `--swa-full` companion. After rebuild, move to the experimental table below and validate. |
-| `CACHE_WORKAROUND=1` | Manual slot save/restore bypass — tested in Phase 2, **counterproductive** (40% slower). Same iSWA bug affects slot restore. | Disabled by default. Code kept for retesting after Phase 6 rebuild. |
 
 #### Experimental / deferred
 
@@ -113,6 +110,11 @@ mkdir -p /tmp/llama-cache
 
 ### Save/Restore KV State via API
 
+Diagnostic use only: these calls require launching the server with
+`--slot-save-path`, which the recommended command no longer sets. The AskMe
+runtime no longer issues them — the Phase 2 `CACHE_WORKAROUND` experiment that
+did was measured counterproductive and removed (issue #38).
+
 ```bash
 # Save slot 0 (e.g. after processing system prompt)
 curl http://localhost:8080/slots/0?action=save -X POST \
@@ -135,7 +137,7 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
 
 **Historical context (before fix):** Gemma 4's shared KV layers / iSWA architecture broke the prefix matching assumptions in `--cache-reuse`. The system prompt (~200 tokens) was re-processed on every `ask_llm()` call. For a medium integration test doing ~15 LLM calls, that's ~3000 wasted prompt tokens. On M1 at ~50 tok/s prompt eval, that's ~60s overhead per test — explaining why `fix_python_syntax` took 520s and `fix_missing_include` took 660s.
 
-**Workaround (Phase 2): OBSOLETE.** `CACHE_WORKAROUND=1` remains off by default in `askme.py`. Once Phase 6 rebuild + test validates the upstream fix, the Phase 2 workaround code can be removed.
+**Workaround (Phase 2): OBSOLETE — removed.** The `CACHE_WORKAROUND` slot save/restore code was removed from `askme.py` (issue #38) after `--swa-full --cache-reuse 256` was promoted to the stable default. The Phase 2 measurements below are preserved as historical evidence; recover the code from Git history if a future server rebuild needs the experiment re-run.
 
 ## Upstream Gemma 4 Commits
 
@@ -394,7 +396,7 @@ Bypass broken `--cache-reuse` by explicitly saving/restoring KV state around the
 
 **Root cause:** The same iSWA prefix-matching issue that breaks `--cache-reuse` (#21468) also prevents slot restore from saving prompt eval time. Restoring stale KV state for a different prompt forces the server to do expensive comparison/invalidation before processing, which is slower than just evaluating from scratch.
 
-**Status:** Code remains in `askme.py` but `CACHE_WORKAROUND` defaults to off (`0`). Kept for future testing when upstream fixes land.
+**Status (historical):** The code stayed in `askme.py`, disabled by default, until it was removed in issue #38 once `--swa-full --cache-reuse 256` became the stable default. Recover it from Git history to re-test after a server rebuild.
 
 **Verification:**
 - [x] `TestCacheWorkaround` unit tests pass (7/7)
@@ -542,7 +544,7 @@ Then launch the server with the current q4_0 flags **plus** `--swa-full --cache-
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
   --swa-full --cache-reuse 256 \
-  -np 1 --slot-save-path /tmp/llama-cache \
+  -np 1 \
   --port 8080
 ```
 
@@ -552,7 +554,7 @@ Then launch the server with the current q4_0 flags **plus** `--swa-full --cache-
 - [ ] Easy integration vs Phase 5 baseline (1:36) — expect improvement from ~200 tokens × 15 calls ≈ 60s saved on prompt eval per medium test, proportionally smaller on easy tests
 - [ ] Sanity second-message output quality (guard against [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) KV-quant gibberish widening)
 - [ ] Measure memory cost of `--swa-full` on E4B 16GB — not characterized yet
-- [ ] On success, remove Phase 2 `CACHE_WORKAROUND` code from `askme.py` (no longer needed as a fallback)
+- [x] On success, remove Phase 2 `CACHE_WORKAROUND` code from `askme.py` (no longer needed as a fallback) — removed early in issue #38; the promoted `--swa-full --cache-reuse 256` default made the fallback moot
 
 ### Phase 7: Monitor remaining upstream items
 
@@ -630,7 +632,7 @@ Phase 6 (cache-reuse unblock) — **COMPLETE (2026-04-25)**:
 - **35B MoE OOMs on Metal GPU** regardless of context size or flash attention
 - **Use `-np 1` for agents** — default auto-detects 4 slots, splitting context 4 ways
 - **Use `--cache-type-k q4_0 --cache-type-v q4_0`** — current recommended default. Best result in single-trial testing: 4% faster than f16 on Metal M1, identical quality, ~4x less KV memory (~0.5GB vs ~2GB at 16K context). q8_0 is 7% slower in single-trial testing — not recommended.
-- **`--swa-full --cache-reuse 256` is the default** — fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (requires build `a702f395`+). Deterministic benchmark: no decode penalty, 4.5% faster prompt eval. Not compatible with `--mmproj`. Manual slot save/restore (`CACHE_WORKAROUND=1`) is obsolete — see Phase 2.
+- **`--swa-full --cache-reuse 256` is the default** — fixed upstream via [#22288](https://github.com/ggml-org/llama.cpp/pull/22288) (requires build `a702f395`+). Deterministic benchmark: no decode penalty, 4.5% faster prompt eval. Not compatible with `--mmproj`. Manual slot save/restore (`CACHE_WORKAROUND=1`) was measured counterproductive and removed in issue #38 — see Phase 2.
 - **`--flash-attn on`** works correctly on Metal for Gemma 4 iSWA
 
 ## References

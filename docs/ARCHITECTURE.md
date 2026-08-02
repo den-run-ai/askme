@@ -121,6 +121,17 @@ Every HTTP attempt emits a `reasoning_decision` JSONL event with the policy,
 named trigger, requested level, effective level, baseline effort, and attempt
 number. The `off` policy nulls the effective level even when a caller requests
 an explicit level.
+
+Internally the provider call is split into client seams (issue #37, first
+extraction): a pure per-attempt reasoning decision, a backend-specific request
+builder, a one-shot transport step that only classifies its outcome
+(`transport`/`http_retryable`/`http_fatal`/`non_json`), and a pure reply
+decoder owning reasoning/fence stripping, sentinel content, JSON
+extraction/repair, and action-contract validation. `ask_llm(...)` remains the
+compatibility facade and still owns retry/backoff policy, the parse-retry
+budget escalation, and the typed errors callers see; its signature, defaults,
+and error contract are unchanged. Per-run immutable configuration and
+injectable clients (the rest of #37, with #40) come after the remaining seams.
 The frozen evaluation contract lives in
 [`tests/workflows/PROTOCOL.md`](../tests/workflows/PROTOCOL.md).
 

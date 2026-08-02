@@ -30,10 +30,10 @@
 - Clarify the difference between broken `--cache-reuse` and working slot save/restore so "cache enabled" is not misleading.
 - Working directory assumptions in command examples are now aligned across `README.md` and `CLAUDE.md`; keep them in sync if commands change again.
 
-## Cache Workaround State
+## Cache Workaround State — RESOLVED (2026-08-02)
 
-- Keep `CACHE_WORKAROUND=1` documented as implemented but currently counterproductive, not as an active optimization path.
-- Retest manual slot save/restore only after upstream fix for `#21468` lands.
+- ~~Keep `CACHE_WORKAROUND=1` documented as implemented but currently counterproductive, not as an active optimization path.~~ → Removed from `askme.py` in issue #38; the Phase 2 measurements remain as historical evidence in `gemma4-setup.md`.
+- ~~Retest manual slot save/restore only after upstream fix for `#21468` lands.~~ → Superseded: the upstream fix shipped as `--swa-full --cache-reuse 256` and was promoted to the stable default (2026-04-25), making the manual path moot. Recover the code from Git history if a rebuild ever needs the experiment re-run.
 - If Phase 2 is revisited, document measured timings separately from implementation mechanics so outcome and mechanism are not conflated.
 
 ## Planner Follow-Up — DONE (2026-04-07)
