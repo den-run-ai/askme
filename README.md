@@ -116,10 +116,12 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   auto-skip (guarded by `tests/test_ci_workflows_contract.py`).
 - [`llm.yml`](.github/workflows/llm.yml) — OpenRouter-backed tests, using the
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
-  (honored as an environment variable or secret). Runs on push to `main`
-  touching agent/test code, weekly on schedule, on manual dispatch (choose
-  suite, models, provider, trials), and on pull requests only when labeled
-  `llm-tests` (same-repo branches; fork PRs cannot read the key).
+  (stored as an environment secret; a variable of the same name is honored
+  as a fallback). Runs on push to `main` touching agent/test code, weekly on
+  schedule, on manual dispatch (choose suite, models, provider, trials), and
+  on pull requests only when labeled `llm-tests` — the job guard also
+  requires the PR head branch to live in this repository, so labeled fork
+  PRs are rejected before any credential is in scope.
 
 `llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
 by default) with automatic provider routing. The Berkeley job replays the two

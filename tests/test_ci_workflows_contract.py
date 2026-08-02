@@ -23,8 +23,9 @@ def test_unit_workflow_stays_hermetic():
 
 def test_llm_workflow_uses_the_openrouter_environment():
     """Both paid jobs must bind the 'Openrouter' deployment environment and
-    accept the key from either an environment secret or variable — the key
-    is currently stored as a variable (see the environment settings)."""
+    accept the key from either an environment secret or variable — it lives
+    as an environment secret today; the variable fallback keeps the older
+    setup working and is why the fork guard below is load-bearing."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert text.count("environment: Openrouter") == 2
     assert text.count(
@@ -61,9 +62,14 @@ def test_llm_workflow_gates_bench_results():
 
 
 def test_llm_workflow_is_opt_in_for_pull_requests():
+    """PRs need the 'llm-tests' label AND a same-repo head branch. GitHub
+    withholds secrets from fork PR runs, but not configuration variables —
+    and the workflow honors a vars fallback — so a labeled fork PR must be
+    rejected by the guard itself, never reach checkout with a key in scope."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    guard = "contains(github.event.pull_request.labels.*.name, 'llm-tests')"
-    assert text.count(guard) == 2  # both paid jobs carry the label gate
+    guard = ("github.event.pull_request.head.repo.full_name == github.repository"
+             " && contains(github.event.pull_request.labels.*.name, 'llm-tests')")
+    assert text.count(guard) == 2  # both paid jobs: same-repo AND label
     assert text.count("github.event_name != 'pull_request'") == 2
 
 
