@@ -11,7 +11,7 @@ rules in addition to this file.
 
 ## Project
 
-AskMe is an experimental, dependency-light Python coding-agent harness for
+AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
 entry point remains `python3 askme.py`; the runtime is currently concentrated in
 `askme.py`, but that is not a reason to keep enlarging its longest functions.
@@ -46,7 +46,8 @@ Start with:
 - `tests/featurebench/` — adapter, frozen protocols, audits, and historical result records
 - `talks/berkeley-agentic-ai-summit-2026/` — slide source, rendered artifacts,
   speaker material, evidence, and deck contracts
-- `.github/workflows/ci.yml` — hermetic Python 3.9/3.12 pytest matrix
+- `.github/workflows/ci.yml` — Ruff, mypy, hermetic Python 3.10/3.14 tests,
+  and a 90% branch-aware coverage gate
 - `.github/workflows/llm.yml` — credentialed, paid OpenRouter smoke/protocol jobs
 
 ## Commands
@@ -60,32 +61,38 @@ python3 askme.py --help
 # Run against a project that may be edited
 python3 askme.py --working-dir /path/to/project "Fix the failing tests"
 
-# Offline deterministic handoff gate; the empty key blocks `.env` key loading
-OPENROUTER_API_KEY= python3 -m pytest tests/ -v -k \
-  "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
+# Install pinned direct runtime and development dependencies
+python3 -m pip install -r requirements-dev.txt
+
+# Static checks and deterministic handoff gate; live-model tests skip by default
+python3 -m ruff check askme.py tests
+python3 -m mypy
+python3 -m pytest tests/ -q
+
+# CI-equivalent, branch-aware coverage gate
+python3 -m pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml
 
 # Common focused deterministic suites
 python3 -m pytest tests/test_agent_actions.py -q
 python3 -m pytest tests/test_workflow_eval.py tests/test_workflow_alternatives.py -q
 ```
 
-The runtime dependency is `requests`; tests also require `pytest`. There is no
-repository-wide formatter, linter, type-checker, or coverage gate yet, so do not
-claim those checks ran. Keep Python 3.9 compatibility because CI explicitly
-tests it.
+The runtime dependency is `requests`; development tools live in
+`requirements-dev.txt`. Ruff, mypy, strict pytest settings, and coverage are
+configured centrally in `pyproject.toml`. There is no repository-wide formatter
+configured. Keep Python 3.10 compatibility because CI explicitly tests it.
 
-Backend-dependent tests skip when their server or credential is unavailable.
-A skipped integration suite is not evidence that a backend works. Run paid/live
-model tests only when the change needs them and the required credentialed
-environment is intentionally available.
+Backend-dependent tests require `ASKME_RUN_LIVE_LLM_TESTS=1` and still skip when
+their server or credential is unavailable. A skipped integration suite is not
+evidence that a backend works. Run paid/live model tests only when the change
+needs them and the required credentialed environment is intentionally available.
 
-The unfiltered full suite is safe in hermetic CI, which has neither backend. On
-a developer machine it is explicit opt-in because `tests/conftest.py` enables
-live integration classes when it finds a local server or valid OpenRouter key:
+The ordinary full suite is deterministic even on a developer machine because
+`tests/conftest.py` requires an explicit opt-in before probing either backend:
 
 ```bash
 # Opt in only when backend calls and possible OpenRouter charges are intended
-python3 -m pytest tests/ -v
+ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/ -v -m live_llm
 ```
 
 ## CI and credentials
@@ -93,7 +100,7 @@ python3 -m pytest tests/ -v
 - Keep `ci.yml` hermetic. It must never receive an OpenRouter key.
 - `llm.yml` spends credits and may expose its key only to its intended jobs.
   Pull-request jobs must remain opt-in via `llm-tests` **and** restricted to
-  same-repository branches before credentials or configuration fallbacks enter scope.
+  same-repository branches before the credential enters scope.
 - Never print, persist, upload, or copy API keys into fixtures, logs, artifacts,
   issues, or PR text. Treat model responses and JSONL logs as potentially sensitive.
 - Do not weaken a credential guard to make a fork or untrusted branch run.

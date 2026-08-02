@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-
 DEFAULT_PROTOCOL = Path(__file__).with_name("canary-protocol.json")
 DEFAULT_ASKME_SOURCE = Path(__file__).resolve().parents[2] / "askme.py"
 POLICY_LOG_NAME = "askme-policy.jsonl"
@@ -1254,16 +1253,16 @@ def audit_canary(
 
     served_models = sorted(
         {
-            event.get("model")
+            observed_model
             for event in token_events
-            if isinstance(event.get("model"), str)
+            if isinstance((observed_model := event.get("model")), str)
         }
     )
     served_providers = sorted(
         {
-            event.get("provider")
+            observed_provider
             for event in token_events
-            if isinstance(event.get("provider"), str)
+            if isinstance((observed_provider := event.get("provider")), str)
         }
     )
     result["route"].update(

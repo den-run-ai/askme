@@ -5,7 +5,6 @@ from pathlib import Path
 
 from workflow_eval import evaluate_workflow
 
-
 TESTS_ROOT = Path(__file__).parent
 MANIFEST = TESTS_ROOT / "workflows" / "config_precedence" / "manifest.json"
 ALTERNATIVE = (

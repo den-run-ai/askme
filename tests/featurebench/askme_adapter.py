@@ -12,6 +12,7 @@ import contextlib
 import datetime as dt
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -24,7 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterator, Mapping
-
 
 AGENT_NAME = "askme"
 PROMPT_PATH = "/installed-agent/task-prompt.txt"
@@ -891,7 +891,8 @@ def _validate_protocol_settings(settings: CanarySettings) -> Mapping[str, Any]:
             raise ValueError(f"protocol code-file hash mismatch: {relative}")
 
     try:
-        from datasets import load_dataset
+        # FeatureBench supplies this optional dependency in its uv environment.
+        from datasets import load_dataset  # type: ignore[import-not-found]
 
         rows = [
             row

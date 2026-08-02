@@ -3,9 +3,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from askme import execute, run, get_step, _run_loop, MAX_STEP_HISTORY, MAX_INPUT
-from _test_support import mock_response
-
+from askme import MAX_STEP_HISTORY, _run_loop, execute, run
 
 # --- Full agent loop tests ---
 

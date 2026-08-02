@@ -8,13 +8,10 @@ name: LLM Tests
 #   - manual dispatch, with suite/model/provider/trial overrides
 #   - pull requests only when labeled 'llm-tests' AND from a same-repo
 #     branch — the job guards reject fork PRs before any credential is in
-#     scope (secrets are withheld from forks by GitHub, but configuration
-#     variables are not, and the vars fallback below stays honored)
+#     scope (secrets are withheld from forks by GitHub)
 #
 # The credential comes from the repository's "Openrouter" deployment
 # environment, stored as an environment *secret* named OPENROUTER_API_KEY.
-# The expression below also honors an environment *variable* of the same
-# name as a fallback, so either storage keeps working.
 
 on:
   workflow_dispatch:
@@ -47,6 +44,9 @@ on:
       - askme.py
       - tests/**
       - .github/workflows/llm.yml
+      - pyproject.toml
+      - requirements.txt
+      - requirements-dev.txt
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
@@ -66,40 +66,50 @@ jobs:
     runs-on: ubuntu-latest
     environment: Openrouter
     timeout-minutes: 30
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || vars.OPENROUTER_API_KEY }}
-      # Automatic provider routing: CI smoke checks the agent loop, not one
-      # provider's uptime. Dispatch the Berkeley job to pin providers.
-      OPENROUTER_PROVIDER: ""
-      AGENT_RUN_LOG: ${{ github.workspace }}/llm-logs/smoke.jsonl
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install dependencies
-        run: python -m pip install --upgrade pip pytest requests
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Preflight OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python tests/ci_llm_gate.py preflight
       - name: Run OpenRouter ${{ inputs.suite || 'easy' }} suite
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Automatic routing: this checks the loop, not one provider's uptime.
+          OPENROUTER_PROVIDER: ""
+          AGENT_RUN_LOG: ${{ github.workspace }}/llm-logs/smoke.jsonl
+          ASKME_RUN_LIVE_LLM_TESTS: "1"
+          SUITE: ${{ inputs.suite || 'easy' }}
         run: |
           mkdir -p llm-logs
-          case "${{ inputs.suite || 'easy' }}" in
+          case "$SUITE" in
             easy)   K="TestOpenRouterEasy" ;;
             medium) K="TestOpenRouterMedium" ;;
             hard)   K="TestOpenRouterHard" ;;
-            *) echo "unknown suite: ${{ inputs.suite }}" >&2; exit 1 ;;
+            *) echo "unknown suite: $SUITE" >&2; exit 1 ;;
           esac
-          python -m pytest tests/test_agent_integration.py -s -v -rs -k "$K"
+          python -m pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"
       - name: Assert the suite really ran (no silent skips)
         run: test -s llm-logs/smoke.jsonl
       - name: Upload agent run logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openrouter-smoke-logs
           path: llm-logs/
-          if-no-files-found: ignore
+          if-no-files-found: warn
+          retention-days: 14
 
   berkeley-protocol:
     # Replays the two Berkeley talk eval cells per model — the hard build and
@@ -111,19 +121,26 @@ jobs:
     runs-on: ubuntu-latest
     environment: Openrouter
     timeout-minutes: 90
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || vars.OPENROUTER_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install dependencies
-        run: python -m pip install --upgrade pip pytest requests
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Preflight OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python tests/ci_llm_gate.py preflight
       - name: Run Berkeley protocol cells
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODELS: ${{ inputs.models || 'google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b' }}
           PROVIDER: ${{ inputs.provider || 'auto' }}
           TRIALS: ${{ inputs.trials || '1' }}
@@ -160,8 +177,10 @@ jobs:
             --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
       - name: Upload bench logs and summaries
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: berkeley-protocol-logs
           path: bench-logs/
-          if-no-files-found: ignore
+          if-no-files-found: warn
+          retention-days: 14
+

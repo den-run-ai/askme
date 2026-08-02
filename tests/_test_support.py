@@ -116,7 +116,7 @@ def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
 
     # Reload module-level config
     import askme
-    old_config = {
+    old_config: dict[str, object] = {
         "LLM_BACKEND": askme.LLM_BACKEND,
         "API": askme.API,
         "MODEL": askme.MODEL,
@@ -142,5 +142,5 @@ def or_run(user_prompt, work_dir, max_replans=INT_MAX_REPLANS,
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        for key, value in old_config.items():
-            setattr(askme, key, value)
+        for config_key, config_value in old_config.items():
+            setattr(askme, config_key, config_value)

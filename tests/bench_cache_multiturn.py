@@ -258,7 +258,6 @@ def summarize(all_results, label, n_trials):
     print(f"\nTotal wall (median): {total_wall:.2f}s")
 
     if has_timings and len(summary_rows) > 1:
-        first_prompt_n = summary_rows[0]["prompt_n"]
         # Check executor requests (indices 1+)
         executor_rows = [r for r in summary_rows if r["name"].startswith("step")]
         if executor_rows:

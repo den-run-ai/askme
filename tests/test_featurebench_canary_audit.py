@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 MODULE_PATH = Path(__file__).parent / "featurebench" / "canary_audit.py"
 SPEC = importlib.util.spec_from_file_location("askme_featurebench_canary_audit", MODULE_PATH)
 canary_audit = importlib.util.module_from_spec(SPEC)
@@ -996,3 +995,4 @@ def test_cli_requires_run_revision_and_writes_structured_output(
 
     with pytest.raises(SystemExit):
         canary_audit.parse_args([str(paths["root"])])
+

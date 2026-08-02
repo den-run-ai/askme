@@ -1,4 +1,5 @@
 """Shared pytest fixtures and skip markers for agent tests."""
+import os
 import sys
 from pathlib import Path
 
@@ -38,7 +39,6 @@ def _llm_available():
 def _openrouter_available():
     """Check if OpenRouter API is accessible with a valid key."""
     try:
-        import os
         import requests
         env_path = Path(__file__).parent.parent / ".env"
         if env_path.exists():
@@ -57,8 +57,14 @@ def _openrouter_available():
         return False
 
 
+live_llm_enabled = os.environ.get("ASKME_RUN_LIVE_LLM_TESTS") == "1"
+
 skip_no_llm = pytest.mark.skipif(
-    not _llm_available(), reason="llama-server not running on :8080")
+    not live_llm_enabled or not _llm_available(),
+    reason="live LLM tests not enabled or llama-server not running on :8080",
+)
 
 skip_no_openrouter = pytest.mark.skipif(
-    not _openrouter_available(), reason="OpenRouter API not available")
+    not live_llm_enabled or not _openrouter_available(),
+    reason="live LLM tests not enabled or OpenRouter API not available",
+)

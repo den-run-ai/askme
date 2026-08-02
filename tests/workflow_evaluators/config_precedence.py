@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path.cwd()
 PROGRAM = ROOT / "config_cli.py"
 EXPECTED_ERROR = "error: timeout must be a positive integer\n"

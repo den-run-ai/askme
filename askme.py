@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex, hashlib, bisect
+import argparse
+import bisect
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
+from typing import Any
+
+import requests
 
 
 def log(msg):
@@ -126,7 +140,7 @@ PROBE_PKG_MANAGERS = ["brew", "apt-get", "dnf", "pacman", "apk"]
 def preflight_probe(working_dir="."):
     """Deterministic environment probe. Returns structured dict for planner state."""
     import platform
-    env = {
+    env: dict[str, Any] = {
         "platform": platform.system().lower(),  # "darwin", "linux", "windows"
         "arch": platform.machine(),              # "arm64", "x86_64"
         "working_dir": str(Path(working_dir).resolve()),
@@ -659,8 +673,8 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
                 # Typed classification for the caller (issue #7): output that
                 # hit the token budget is a transport failure of the action
                 # envelope, not model noise — the recovery differs.
-                parse_err.malformed_action = True
-                parse_err.response_truncated = finish_reason == "length"
+                setattr(parse_err, "malformed_action", True)
+                setattr(parse_err, "response_truncated", finish_reason == "length")
                 raise
 
 
@@ -722,7 +736,7 @@ def summarize_errors(errors):
     Preserves [type] prefixes from classify_error, groups by type, deduplicates."""
     if not errors:
         return []
-    summarized = {}
+    summarized: dict[str, list[str]] = {}
     for err in errors:
         etype, msg = _extract_error_type(err)
         if etype not in summarized:
@@ -1444,7 +1458,7 @@ def _expects_failure(task):
                 and not _EXPECTED_FAILURE_NEG_RE.search(task))
 
 
-_COMPILE_REPAIR_PATTERNS = [
+_COMPILE_REPAIR_PATTERNS: list[dict[str, Any]] = [
     {
         "diagnostic_re": re.compile(
             r"implicit declaration of function '(printf|puts|fprintf|scanf)'|"
@@ -1922,7 +1936,7 @@ def execute(action, working_dir="."):
             if not base.is_dir():
                 return {"ok": False, "output": f"Directory not found: {base.name}",
                         "error_type": "missing_file"}
-            walk_errors = []
+            walk_errors: list[OSError] = []
             files = list(_iter_repo_files(
                 base, SEARCH_MAX_FILES + 1, on_error=walk_errors.append))
             file_limited = len(files) > SEARCH_MAX_FILES
@@ -1991,7 +2005,7 @@ def execute(action, working_dir="."):
             if not base.is_dir():
                 return {"ok": False, "output": f"Directory not found: {base.name}",
                         "error_type": "missing_file"}
-            entries = []
+            entries: list[str] = []
             depth_limited = False
             walk_errors = []
             root_depth = len(base.parts)
@@ -2904,7 +2918,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                               "deterministic": False})
                 else:
                     state["validation_recheck_needed"] = False
-                    log(f"  Validation passed.")
+                    log("  Validation passed.")
                     _run_log({"event": "validation", "valid": True,
                               "deterministic": bool(vresult and vresult.get("deterministic"))})
             if state.get("validation_recheck_needed"):

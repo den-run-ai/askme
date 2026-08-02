@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 MODULE_PATH = Path(__file__).parent / "featurebench" / "askme_adapter.py"
 SPEC = importlib.util.spec_from_file_location("askme_featurebench_adapter", MODULE_PATH)
 adapter = importlib.util.module_from_spec(SPEC)

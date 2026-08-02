@@ -3,7 +3,6 @@ import json
 
 import ci_llm_gate
 
-
 # --- fixtures ---
 
 def _summary(model="google/gemma-4-26b-a4b-it", suite="hard",
@@ -176,7 +175,6 @@ class TestReportGate:
         ci_llm_gate.main(["report", path])
         out = capsys.readouterr().out
         assert "auto → SiliconFlow" in out
-
     def test_effort_pinned_cells_stay_distinguishable(self, tmp_path, capsys):
         """Two gpt-oss-20b cells differing only by reasoning effort must show
         distinct model labels and both count toward --expect-cells."""

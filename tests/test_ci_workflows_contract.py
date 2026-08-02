@@ -5,11 +5,13 @@ test_talk_deck_contract.py: pin the properties that keep CI safe —
 the unit matrix stays credential-free, and the paid LLM workflow always
 preflights, gates, and stays opt-in for pull requests.
 """
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 UNIT_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LLM_WORKFLOW = ROOT / ".github" / "workflows" / "llm.yml"
+PYPROJECT = ROOT / "pyproject.toml"
 
 
 def test_unit_workflow_stays_hermetic():
@@ -21,15 +23,66 @@ def test_unit_workflow_stays_hermetic():
     assert "environment:" not in text
 
 
+def test_unit_workflow_gates_quality_compatibility_and_coverage():
+    text = UNIT_WORKFLOW.read_text(encoding="utf-8")
+    assert "python -m ruff check askme.py tests" in text
+    assert "python -m mypy" in text
+    assert 'python-version: ["3.10", "3.14"]' in text
+    assert "--cov=askme" in text
+    assert "--cov-report=xml" in text
+    assert "requirements-dev.txt" in text
+    assert text.count("cache: pip") == 2
+    assert text.count("cache-dependency-path:") == 2
+    assert text.count("persist-credentials: false") == 2
+    assert "permissions:" in text
+    assert "contents: read" in text
+    assert "concurrency:" in text
+    assert "cancel-in-progress: true" in text
+    assert "fail_under = 90" in PYPROJECT.read_text(encoding="utf-8")
+
+
+def test_workflows_pin_third_party_actions():
+    for workflow in (UNIT_WORKFLOW, LLM_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        external_actions = re.findall(
+            r"^\s*-\s+uses:\s+([^#\s]+)", text, flags=re.MULTILINE
+        )
+        assert external_actions
+        for action in external_actions:
+            assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", action), action
+
+
+def test_workflows_do_not_persist_checkout_credentials():
+    text = (
+        UNIT_WORKFLOW.read_text(encoding="utf-8")
+        + LLM_WORKFLOW.read_text(encoding="utf-8")
+    )
+    assert text.count("persist-credentials: false") == text.count(
+        "actions/checkout@"
+    )
+
+
 def test_llm_workflow_uses_the_openrouter_environment():
-    """Both paid jobs must bind the 'Openrouter' deployment environment and
-    accept the key from either an environment secret or variable — it lives
-    as an environment secret today; the variable fallback keeps the older
-    setup working and is why the fork guard below is load-bearing."""
+    """Both paid jobs use a protected environment and secret-only credential."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert text.count("environment: Openrouter") == 2
+    assert "vars.OPENROUTER_API_KEY" not in text
     assert text.count(
-        "${{ secrets.OPENROUTER_API_KEY || vars.OPENROUTER_API_KEY }}") == 2
+        "OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}"
+    ) == 4
+
+    smoke, berkeley = _paid_job_sections(text)
+    for section in (smoke, berkeley):
+        assert not re.search(r"^    env:", section, flags=re.MULTILINE)
+        assert section.index("Install dependencies") < section.index(
+            "OPENROUTER_API_KEY:"
+        )
+
+
+def _paid_job_sections(text: str) -> tuple[str, str]:
+    smoke_and_after = text.split("  openrouter-smoke:", 1)[1]
+    smoke, berkeley = smoke_and_after.split("  berkeley-protocol:", 1)
+    return smoke, berkeley
 
 
 def test_llm_workflow_preflights_before_spending():
@@ -37,11 +90,15 @@ def test_llm_workflow_preflights_before_spending():
     (conftest's skip markers would otherwise turn a bad credential into a
     green run)."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    assert text.count("ci_llm_gate.py preflight") == 2  # once per paid job
-    first_preflight = text.index("ci_llm_gate.py preflight")
-    assert first_preflight < text.index(
-        "python -m pytest tests/test_agent_integration.py")
-    assert first_preflight < text.index("python tests/bench_harness.py")
+    smoke, berkeley = _paid_job_sections(text)
+    assert smoke.count("ci_llm_gate.py preflight") == 1
+    assert berkeley.count("ci_llm_gate.py preflight") == 1
+    assert smoke.index("ci_llm_gate.py preflight") < smoke.index(
+        "python -m pytest tests/test_agent_integration.py"
+    )
+    assert berkeley.index("ci_llm_gate.py preflight") < berkeley.index(
+        "python tests/bench_harness.py"
+    )
 
 
 def test_llm_workflow_guards_against_silent_skips():
@@ -49,6 +106,8 @@ def test_llm_workflow_guards_against_silent_skips():
     # pytest reports skip reasons, and the smoke job asserts the agent
     # actually logged run events.
     assert "-rs" in text
+    assert "ASKME_RUN_LIVE_LLM_TESTS: \"1\"" in text
+    assert "-m live_llm" in text
     assert "test -s llm-logs/smoke.jsonl" in text
 
 
@@ -62,15 +121,21 @@ def test_llm_workflow_gates_bench_results():
 
 
 def test_llm_workflow_is_opt_in_for_pull_requests():
-    """PRs need the 'llm-tests' label AND a same-repo head branch. GitHub
-    withholds secrets from fork PR runs, but not configuration variables —
-    and the workflow honors a vars fallback — so a labeled fork PR must be
-    rejected by the guard itself, never reach checkout with a key in scope."""
+    """PRs need the 'llm-tests' label and a same-repository head branch."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     guard = ("github.event.pull_request.head.repo.full_name == github.repository"
              " && contains(github.event.pull_request.labels.*.name, 'llm-tests')")
     assert text.count(guard) == 2  # both paid jobs: same-repo AND label
     assert text.count("github.event_name != 'pull_request'") == 2
+
+
+def test_llm_workflow_tracks_dependency_changes_and_uses_cache():
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    push_block = text.split("  push:", 1)[1].split("  pull_request:", 1)[0]
+    for path in ("pyproject.toml", "requirements.txt", "requirements-dev.txt"):
+        assert f"- {path}" in push_block
+    assert text.count("cache: pip") == 2
+    assert text.count("cache-dependency-path:") == 2
 
 
 def test_llm_workflow_supports_effort_pinned_cells():

@@ -21,7 +21,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-
 SCHEMA_VERSION = 1
 REASONING_POLICIES = ("gated", "off")
 FINAL_VALIDATE_VALUES = ("0", "auto", "always")
@@ -332,6 +331,7 @@ def evaluate_workflow(
         # copytree requires the destination not to exist.
         workspace_path.rmdir()
     else:
+        assert workspace is not None
         workspace_path = Path(workspace).resolve()
     if workspace_path.exists():
         raise FileExistsError(f"workspace already exists: {workspace_path}")
@@ -456,7 +456,7 @@ def evaluate_workflow(
             shutil.rmtree(workspace_path, ignore_errors=True)
 
 
-def _noop_agent(_prompt: str, _workspace: Path) -> dict[str, str]:
+def _noop_agent(_prompt: str, _workspace: Path) -> Mapping[str, Any]:
     return {"status": "exhausted"}
 
 
@@ -697,13 +697,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     manifest = load_manifest(args.manifest)
     if args.agent == "askme":
-        def callback(prompt: str, workspace: Path) -> Mapping[str, Any]:
+        def askme_callback(prompt: str, workspace: Path) -> Mapping[str, Any]:
             return _askme_agent(
                 prompt,
                 workspace,
                 reasoning_policy=args.reasoning_policy,
                 agent_limits=manifest["agent_limits"],
             )
+        callback: AgentCallback = askme_callback
     else:
         callback = _noop_agent
     result = evaluate_workflow(

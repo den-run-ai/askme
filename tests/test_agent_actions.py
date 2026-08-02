@@ -7,16 +7,23 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import askme
-from askme import (execute, _run_loop, _validate_action_contract,
-                   READ_CHARS, READ_LIMIT_MAX,
-                   SEARCH_MAX_MATCHES, SEARCH_MAX_FILES,
-                   TREE_MAX_ENTRIES,
-                   OBSERVE_STATE_CHARS, STEP_WRITE_TOKENS)
+from askme import (
+    OBSERVE_STATE_CHARS,
+    READ_CHARS,
+    READ_LIMIT_MAX,
+    SEARCH_MAX_FILES,
+    SEARCH_MAX_MATCHES,
+    STEP_WRITE_TOKENS,
+    TREE_MAX_ENTRIES,
+    _run_loop,
+    _validate_action_contract,
+    execute,
+)
 
 
 def _big_file(work_dir, name="big.py", lines=200):
@@ -255,8 +262,8 @@ class TestSearchAction:
         assert "narrow the pattern/path" in result["output"]
         assert "matches" in result["truncation_reasons"]
         assert len(result["output"]) <= OBSERVE_STATE_CHARS
-        body_lines = [l for l in result["output"].splitlines()
-                      if l.startswith("many.txt:")]
+        body_lines = [line for line in result["output"].splitlines()
+                      if line.startswith("many.txt:")]
         assert len(body_lines) == SEARCH_MAX_MATCHES
 
     def test_exact_match_cap_is_complete(self, work_dir):
@@ -610,7 +617,7 @@ class TestTruncationBudget:
                 askme.ask_llm([{"role": "user", "content": "hi"}], max_retries=0)
         finally:
             askme.RUN_LOG_PATH = old
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         tokens = [e for e in events if e["event"] == "tokens"]
         assert tokens and tokens[0]["finish_reason"] == "stop"
 
@@ -865,7 +872,7 @@ class TestReadMetadata:
         finally:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reads = [e for e in events if e["event"] == "step" and e["action"] == "read"]
         assert reads
         assert reads[0]["sha256"]
@@ -966,7 +973,7 @@ class TestStepAccounting:
         assert st["selected_steps"] == 3
         assert st["executed_steps"] == 1
         assert st["skipped_steps"] == 1
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         skips = [e for e in events if e["event"] == "step_skipped"]
         assert len(skips) == 1
         assert skips[0]["reason"] == "duplicate_read"
@@ -997,7 +1004,7 @@ class TestStepAccounting:
         assert st["selected_steps"] == 3
         assert st["executed_steps"] == 1
         assert st["skipped_steps"] == 2
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert reasons == ["duplicate_read", "stuck_read"]
 
@@ -1328,7 +1335,7 @@ class TestTruncatedWriteContinuation:
         assert result["status"] == "complete"
         assert Path(tmp_path, "impl.py").read_text() == "ok\n"
         assert result["state"]["skipped_steps"] == 1
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert reasons == ["truncated_write_empty"]
 
@@ -1462,7 +1469,7 @@ class TestWriteForcingPolicy:
         assert result["status"] == "exhausted"
         assert any("observation steps exhausted without a write" in e
                    for e in result["state"]["errors"])
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert reasons == ["observe_tail_reserved", "observe_tail_exhausted"]
 
@@ -1855,7 +1862,7 @@ class TestValidateAfterWrite:
         assert result["status"] == "complete"
         # The fourth consecutive full write is damped, not executed.
         assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" in reasons
 
@@ -1881,7 +1888,7 @@ class TestValidateAfterWrite:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
         assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
     def test_target_key_resolves_parent_symlinks_but_not_leaf(self, tmp_path):
@@ -1940,7 +1947,7 @@ class TestValidateAfterWrite:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
         assert (real / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
     @pytest.mark.parametrize("truncated_content", [
@@ -2033,7 +2040,7 @@ class TestValidateAfterWrite:
         assert referent.read_text() == "OLD\n"
         assert not leaf.is_symlink()
         assert leaf.read_text() == "GOOD\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "append_after_empty_overwrite"
                    for e in events)
 
@@ -2079,7 +2086,7 @@ class TestValidateAfterWrite:
         assert leaf.read_text() == "GOOD\n"
         assert referent.read_text() == "OLD\nTAIL\n"
         assert result["state"]["pending_empty_writes"] == {}
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "append_after_empty_overwrite"
                    for e in events)
 
@@ -2235,7 +2242,7 @@ class TestValidateAfterWrite:
         assert new_target.read_text() == "NEW\nNEWTAIL\n"
         assert result["state"]["pending_empty_writes"] == {}
         assert surfaced == [str(old_target), str(new_target)]
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done"
                    for e in events)
 
@@ -2423,7 +2430,7 @@ class TestValidateAfterWrite:
         assert not leaf.is_symlink()
         assert leaf.read_text() == "GOOD\n"
         assert result["state"]["pending_empty_writes"] == {}
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert sum(e.get("reason") == "append_after_empty_overwrite"
                    for e in events) == 2
 
@@ -2463,7 +2470,7 @@ class TestValidateAfterWrite:
         assert moved.read_text() == "OLD\n"
         assert new_target.read_text() == "NEW\nTAIL\n"
         assert result["state"]["pending_empty_writes"]
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done"
                    for e in events)
 
@@ -2494,7 +2501,7 @@ class TestValidateAfterWrite:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
         assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
     @patch("askme.replan_task", return_value="finish big.py")
@@ -2520,7 +2527,7 @@ class TestValidateAfterWrite:
         assert result["status"] == "complete"
         assert mock_replan.call_count == 1
         assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
     @patch("askme.replan_task", return_value=None)
@@ -2549,7 +2556,7 @@ class TestValidateAfterWrite:
         assert result["status"] == "complete"
         assert mock_replan.call_count == 1
         assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
     @patch("askme.replan_task", return_value=None)
@@ -2759,7 +2766,7 @@ class TestValidateAfterWrite:
         # The clean restart after repeated truncations must execute.
         assert (tmp_path / "big.py").read_text() == "final\nversion\n"
         assert all("Do NOT write the whole file again" not in s for s in seen)
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" not in reasons
 
@@ -2796,7 +2803,7 @@ class TestValidateAfterWrite:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
         assert (tmp_path / "big.py").read_text() == "final\nversion\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" not in reasons
 
@@ -2833,7 +2840,7 @@ class TestValidateAfterWrite:
             askme.RUN_LOG_PATH = old
         assert result["status"] == "complete"
         assert (tmp_path / "big.py").read_text() == "final\nversion\n"
-        events = [json.loads(l) for l in log_path.read_text().splitlines()]
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "truncated_write_empty" in reasons
         assert "rewrite_loop" not in reasons

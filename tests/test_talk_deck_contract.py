@@ -3,7 +3,6 @@
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 TALK = ROOT / "talks" / "berkeley-agentic-ai-summit-2026"
 SLIDES = TALK / "slides.md"

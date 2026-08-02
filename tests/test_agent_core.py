@@ -1,16 +1,25 @@
 """Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization, transport hardening."""
 import json
-import requests as req_lib
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
 
-from askme import (execute, ask_llm, run, _run_loop, LLMTransportError,
-                   LLM_TIMEOUT, _repair_json, _STRICT_JSON_SUFFIX,
-                   _validate_action_contract, _parse_reasoning_effort,
-                   READ_CHARS)
+import pytest
+import requests as req_lib
 from _test_support import mock_response, mock_response_raw
 
+from askme import (
+    _STRICT_JSON_SUFFIX,
+    LLM_TIMEOUT,
+    READ_CHARS,
+    LLMTransportError,
+    _parse_reasoning_effort,
+    _repair_json,
+    _run_loop,
+    _validate_action_contract,
+    ask_llm,
+    execute,
+    run,
+)
 
 # --- execute() tests ---
 
@@ -583,8 +592,6 @@ class TestLLMTransport:
     def test_transport_error_in_planner_consumes_attempt(self, tmp_path):
         """LLMTransportError in get_plan() should consume a plan attempt, not crash."""
         plan_calls = {"n": 0}
-        original_get_plan = None
-
         def mock_get_plan(user_prompt, state):
             plan_calls["n"] += 1
             if plan_calls["n"] == 1:
@@ -841,3 +848,4 @@ class TestTieredRetryContract:
         assert mock_post.call_args_list[0][1]["json"]["reasoning"]["effort"] == "medium"
         assert mock_post.call_args_list[1][1]["json"]["reasoning"]["effort"] == "high"
         assert mock_post.call_args_list[2][1]["json"]["reasoning"] == {"enabled": False}
+

@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 AGENT_DIR = Path(__file__).parent.parent
 
@@ -54,7 +55,7 @@ def discover_tests(suite, backend):
         k_expr = "TestIntegration and not Medium and not Hard"
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_agent_integration.py",
-         "--collect-only", "-q", "-k", k_expr],
+         "--collect-only", "-q", "-m", "live_llm", "-k", k_expr],
         capture_output=True, text=True, cwd=str(AGENT_DIR),
     )
     tests = []
@@ -76,7 +77,11 @@ def run_single_test(test_name, suite, backend, log_path, model=None, provider=No
         k_expr = f"TestIntegration and not Medium and not Hard and {test_name}"
     else:
         k_expr = f"{class_name} and {test_name}"
-    env = {**os.environ, "AGENT_RUN_LOG": str(log_path)}
+    env = {
+        **os.environ,
+        "AGENT_RUN_LOG": str(log_path),
+        "ASKME_RUN_LIVE_LLM_TESTS": "1",
+    }
     if backend == "openrouter":
         if model:
             env["OPENROUTER_MODEL"] = model
@@ -90,7 +95,7 @@ def run_single_test(test_name, suite, backend, log_path, model=None, provider=No
     t0 = time.time()
     result = subprocess.run(
         [sys.executable, "-m", "pytest",
-         "tests/test_agent_integration.py", "-s", "-v", "-k", k_expr],
+         "tests/test_agent_integration.py", "-s", "-v", "-m", "live_llm", "-k", k_expr],
         capture_output=True, text=True, cwd=str(AGENT_DIR), env=env,
         timeout=1200,
     )
@@ -115,7 +120,9 @@ def parse_log(log_path):
         return None
 
     run_end = next((e for e in events if e["event"] == "run_end"), None)
-    run_start = next((e for e in events if e["event"] == "run_start"), {})
+    run_start: dict[str, Any] = next(
+        (e for e in events if e["event"] == "run_start"), {}
+    )
     plans = [e for e in events if e["event"] == "plan"]
     plan_errors = [e for e in events if e["event"] == "plan_error"]
     steps = [e for e in events if e["event"] == "step"]
@@ -326,7 +333,7 @@ def main():
     print(f"Tests: {tests}")
     print(f"Logs:  {log_dir}")
 
-    all_results = {}
+    all_results: dict[str, list[dict[str, Any]]] = {}
     t_total = time.time()
 
     for test_name in tests:
@@ -342,7 +349,7 @@ def main():
                     reasoning_effort)
             except subprocess.TimeoutExpired:
                 passed, wall = False, 1200.0
-                print(f" TIMEOUT", flush=True)
+                print(" TIMEOUT", flush=True)
                 metrics = parse_log(log_path)
                 all_results[test_name].append({
                     "passed": False, "wall_s": wall, "metrics": metrics,
@@ -412,3 +419,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

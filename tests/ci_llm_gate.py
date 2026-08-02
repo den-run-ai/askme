@@ -25,6 +25,7 @@ import json
 import os
 import statistics
 import sys
+from typing import Any
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
@@ -60,7 +61,7 @@ def check_openrouter_key(env=None, get=None):
 
 def load_summaries(paths):
     """Return a list of (path, summary_dict_or_None, error_or_None)."""
-    loaded = []
+    loaded: list[tuple[str, dict[str, Any] | None, str | None]] = []
     for path in paths:
         try:
             with open(path, encoding="utf-8") as fh:
@@ -177,3 +178,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+

@@ -28,10 +28,11 @@ built for Gemma 4 E4B on `llama-server` and also supports OpenRouter.
 
 ## Quick Start
 
-With Python, `requests`, and a [local model](docs/gemma4-setup.md) ready, run
-AskMe from this repository on a project you can safely edit:
+With Python 3.10+ and a [local model](docs/gemma4-setup.md) ready, install the
+runtime dependency and run AskMe on a project you can safely edit:
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 askme.py --working-dir /path/to/project "Fix the failing tests"
 ```
 
@@ -91,16 +92,26 @@ run logging, context budgets, and the automation/evaluation CLI — lives in
 ## Tests
 
 ```bash
-# Unit tests (mocked, no LLM needed)
-python3 -m pytest tests/ -v -k "not Integration and not ServerConfig and not (OpenRouter and not ThinkingRetry and not PlannerReasoning) and not PlannerReasoningOpenRouter"
+# Install pinned direct runtime and development dependencies
+python3 -m pip install -r requirements-dev.txt
+
+# Fast local quality checks
+python3 -m ruff check askme.py tests
+python3 -m mypy
+
+# Deterministic suite (live LLM tests are opt-in and skip by default)
+python3 -m pytest tests/ -q
+
+# CI-equivalent, branch-aware coverage gate
+python3 -m pytest tests/ --cov=askme --cov-report=term-missing --cov-report=xml
 
 # Integration — local (requires llama-server on :8080)
-python3 -m pytest tests/test_agent_integration.py -s -v -k "TestIntegration and not Medium and not Hard"
-python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationMedium"
-python3 -m pytest tests/test_agent_integration.py -s -v -k "IntegrationHard"
+ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestIntegration and not Medium and not Hard"
+ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/test_agent_integration.py -s -v -m live_llm -k "IntegrationMedium"
+ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/test_agent_integration.py -s -v -m live_llm -k "IntegrationHard"
 
 # Integration — OpenRouter (requires OPENROUTER_API_KEY in .env)
-python3 -m pytest tests/test_agent_integration.py -s -v -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
+ASKME_RUN_LIVE_LLM_TESTS=1 python3 -m pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 
 # Multi-trial benchmark harness (reports median + range across N trials)
 python3 tests/bench_harness.py          # 3 trials, easy, local
@@ -113,24 +124,26 @@ python3 tests/workflow_eval.py \
   tests/workflows/config_precedence/manifest.json --agent noop
 ```
 
-Backend-dependent integration tests skip automatically when their server or
-credential is unavailable. Dated run matrices and suite-size snapshots live in
+Live integration tests require `ASKME_RUN_LIVE_LLM_TESTS=1` and skip when their
+server or credential is unavailable. Ordinary test and coverage commands never
+opt into paid model calls. Dated run matrices and suite-size snapshots live in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ### LLM tests in CI
 
 Two GitHub Actions workflows split hermetic from live-model testing:
 
-- [`ci.yml`](.github/workflows/ci.yml) — unit tests on every push/PR. It
-  deliberately has no OpenRouter credential, so backend-gated suites
-  auto-skip (guarded by `tests/test_ci_workflows_contract.py`).
+- [`ci.yml`](.github/workflows/ci.yml) — Ruff, mypy, Python 3.10/3.14
+  tests, and a 90% branch-aware coverage floor on every push/PR. It deliberately
+  has no OpenRouter credential, so backend-gated suites auto-skip (guarded by
+  `tests/test_ci_workflows_contract.py`).
 - [`llm.yml`](.github/workflows/llm.yml) — OpenRouter-backed tests, using the
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
-  (stored as an environment secret; a variable of the same name is honored
-  as a fallback). Runs on push to `main` touching agent/test code, weekly on
-  schedule, on manual dispatch (choose suite, models, provider, trials), and
-  on pull requests only when labeled `llm-tests` — the job guard also
-  requires the PR head branch to live in this repository, so labeled fork
+  as an environment secret. The key is scoped only to preflight and live-model
+  execution steps. Runs on push to `main` touching agent/test/dependency code,
+  weekly on schedule, on manual dispatch (choose suite, models, provider,
+  trials), and on pull requests only when labeled `llm-tests` — the job guard
+  also requires the PR head branch to live in this repository, so labeled fork
   PRs are rejected before any credential is in scope.
 
 `llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
@@ -160,3 +173,4 @@ default matrix measured about $0.01 in OpenRouter credits per run.
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) — active experiment backlog
 - [docs/SECURITY.md](docs/SECURITY.md) — threat boundary and safe-use guidance
 - [CLAUDE.md](CLAUDE.md) — guidance for AI agents working in this directory
+

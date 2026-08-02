@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from workflow_eval import (
     ManifestError,
     _askme_agent,
@@ -11,7 +10,6 @@ from workflow_eval import (
     evaluate_workflow,
     load_manifest,
 )
-
 
 MANIFEST = Path(__file__).parent / "workflows" / "config_precedence" / "manifest.json"
 

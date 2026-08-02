@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 RESULT_PATH = (
     Path(__file__).parent
     / "featurebench"
@@ -55,3 +54,4 @@ def test_published_canary_result_is_internally_consistent():
         "causal estimate",
     ):
         assert unsupported_claim in interpretation
+

@@ -1,14 +1,22 @@
 """Integration tests: local LLM + OpenRouter (easy/medium/hard) + planner reasoning."""
-from pathlib import Path
-
-from conftest import skip_no_llm, skip_no_openrouter
+import pytest
 from _test_support import (
-    INT_MAX_REPLANS, INT_MAX_TASKS, INT_MAX_STEPS,
-    MED_MAX_REPLANS, MED_MAX_TASKS, MED_MAX_STEPS,
-    HARD_MAX_REPLANS, HARD_MAX_TASKS, HARD_MAX_STEPS,
-    log, int_run, assert_file, assert_executable_output, assert_command_output, or_run,
+    HARD_MAX_REPLANS,
+    HARD_MAX_STEPS,
+    HARD_MAX_TASKS,
+    MED_MAX_REPLANS,
+    MED_MAX_STEPS,
+    MED_MAX_TASKS,
+    assert_command_output,
+    assert_executable_output,
+    assert_file,
+    int_run,
+    log,
+    or_run,
 )
+from conftest import skip_no_llm, skip_no_openrouter
 
+pytestmark = pytest.mark.live_llm
 
 # --- Local integration tests (require llama-server on :8080) ---
 
@@ -58,7 +66,7 @@ class TestIntegrationMedium:
         broken = tmp_path / "greet.py"
         broken.write_text('print("hello"\n')
         result = int_run(
-            f"Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
             str(tmp_path),
             max_replans=MED_MAX_REPLANS, max_tasks=MED_MAX_TASKS, max_steps=MED_MAX_STEPS,
         )
@@ -129,7 +137,7 @@ class TestIntegrationHard:
         )
         assert_file(tmp_path / "today.txt")
         text = (tmp_path / "today.txt").read_text()
-        assert len(text.strip()) > 0, f"today.txt is empty"
+        assert len(text.strip()) > 0, "today.txt is empty"
         plan_events = [e for e in result["log"] if e["event"] == "plan"]
         if len(plan_events) >= 2:
             log(f"VERIFIED: {len(plan_events)} plan attempts (replan exercised)")
@@ -202,7 +210,7 @@ class TestOpenRouterMedium:
         broken = tmp_path / "greet.py"
         broken.write_text('print("hello"\n')
         result = or_run(
-            f"Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
             str(tmp_path),
             max_replans=MED_MAX_REPLANS, max_tasks=MED_MAX_TASKS, max_steps=MED_MAX_STEPS,
         )
@@ -259,7 +267,7 @@ class TestOpenRouterHard:
         assert_executable_output(tmp_path / "main", "REPLAN_OK")
 
     def test_replan_fix_wrong_command(self, tmp_path):
-        result = or_run(
+        or_run(
             f"In {tmp_path}: get the current date and save it to {tmp_path}/today.txt. "
             f"First try using the command 'datex' (which doesn't exist). "
             f"When that fails, replan and use the correct 'date' command instead.",
@@ -278,7 +286,7 @@ class TestOpenRouterHard:
             '    cfg = json.load(f)\n'
             'print("APP_" + cfg["status"])\n'
         )
-        result = or_run(
+        or_run(
             f"Run 'python3 {script}'. It will fail because config.json doesn't exist in {tmp_path}. "
             f"Create {tmp_path}/config.json with content '{{\"status\": \"SUCCESS\"}}', then run the script again.",
             str(tmp_path),
@@ -362,7 +370,7 @@ class TestPlannerReasoningIntegration:
         broken = tmp_path / "greet.py"
         broken.write_text('print("hello"\n')
         result = int_run(
-            f"Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
             str(tmp_path),
             max_replans=MED_MAX_REPLANS, max_tasks=MED_MAX_TASKS, max_steps=MED_MAX_STEPS,
         )

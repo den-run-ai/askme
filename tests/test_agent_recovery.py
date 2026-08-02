@@ -1,17 +1,22 @@
 """Recovery tests: duplicate guard, cache workaround, failure classification,
 error summarization, completion semantics, final validation."""
 import json
-import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-import askme
-from askme import (execute, ask_llm, get_plan, get_step, run, _run_loop,
-                   _should_validate, _validate_completion, LLMTransportError)
 from _test_support import mock_response
 
+import askme
+from askme import (
+    LLMTransportError,
+    _run_loop,
+    ask_llm,
+    execute,
+    get_plan,
+    get_step,
+    run,
+)
 
 # --- Duplicate action guard tests ---
 

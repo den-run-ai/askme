@@ -86,7 +86,7 @@ def main():
 
     # Cache reuse analysis
     if has_timings:
-        print(f"\n--- Cache Reuse Analysis ---")
+        print("\n--- Cache Reuse Analysis ---")
         for label, summary in [(label_a, a["summary"]), (label_b, b["summary"])]:
             exec_rows = [r for r in summary if r["name"].startswith("step")]
             if len(exec_rows) >= 2:
@@ -101,7 +101,7 @@ def main():
 
     # Decode speed comparison
     if has_timings:
-        print(f"\n--- Decode Speed ---")
+        print("\n--- Decode Speed ---")
         for label, summary in [(label_a, a["summary"]), (label_b, b["summary"])]:
             speeds = [r.get("decode_tok_s", 0) for r in summary if r.get("decode_tok_s", 0) > 0]
             if speeds:
@@ -112,3 +112,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

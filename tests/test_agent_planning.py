@@ -1,12 +1,13 @@
 """Planning tests: planner reasoning, preflight probe, execution policy,
 command-aware timeouts, server config."""
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from askme import get_plan, get_step, run, replan_task, LLMTransportError, TASK_REPLAN_MAX_TOKENS
+import pytest
 from _test_support import mock_response
 from conftest import skip_no_llm
 
+from askme import TASK_REPLAN_MAX_TOKENS, LLMTransportError, get_plan, get_step, replan_task, run
 
 # --- Planner reasoning tests ---
 
@@ -29,7 +30,7 @@ class TestPlannerReasoning:
 
     def test_replan_has_thinking(self):
         """Replan (state has errors) should pass think=True and extended timeout."""
-        from askme import PLANNER_MAX_TOKENS, LLM_TIMEOUT_REPLAN
+        from askme import LLM_TIMEOUT_REPLAN, PLANNER_MAX_TOKENS
         captured = {}
         def capture_llm(messages, max_tokens=256, think=False, **kwargs):
             captured.update(max_tokens=max_tokens, think=think, timeout=kwargs.get("timeout"))
@@ -43,7 +44,7 @@ class TestPlannerReasoning:
 
     def test_replan_with_completed_tasks_has_thinking(self):
         """Partial completion replan should still use think=True and extended timeout."""
-        from askme import PLANNER_MAX_TOKENS, LLM_TIMEOUT_REPLAN
+        from askme import LLM_TIMEOUT_REPLAN, PLANNER_MAX_TOKENS
         captured = {}
         def capture_llm(messages, max_tokens=256, think=False, **kwargs):
             captured.update(max_tokens=max_tokens, think=think, timeout=kwargs.get("timeout"))
@@ -163,10 +164,11 @@ class TestPreflightProbe:
 
     def test_probe_uses_shutil_which(self):
         """Probe should use shutil.which (cross-platform), not subprocess which."""
-        from askme import preflight_probe
         import shutil
+
+        from askme import preflight_probe
         with patch.object(shutil, "which", return_value="/usr/bin/python3") as mock_which:
-            env = preflight_probe("/tmp")
+            preflight_probe("/tmp")
         assert mock_which.call_count > 0
         tool_calls = [c[0][0] for c in mock_which.call_args_list]
         assert "python3" in tool_calls
@@ -280,22 +282,22 @@ class TestCommandAwareTimeout:
     """Verify longer timeouts for install/build commands."""
 
     def test_default_timeout(self):
-        from askme import _get_shell_timeout, SHELL_TIMEOUT
+        from askme import SHELL_TIMEOUT, _get_shell_timeout
         assert _get_shell_timeout("echo hello") == SHELL_TIMEOUT
 
     def test_install_timeout(self):
-        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG
+        from askme import SHELL_TIMEOUT_LONG, _get_shell_timeout
         assert _get_shell_timeout("brew install go") == SHELL_TIMEOUT_LONG
         assert _get_shell_timeout("apt-get install python3") == SHELL_TIMEOUT_LONG
         assert _get_shell_timeout("pip install requests") == SHELL_TIMEOUT_LONG
 
     def test_build_timeout(self):
-        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG
+        from askme import SHELL_TIMEOUT_LONG, _get_shell_timeout
         assert _get_shell_timeout("cmake --build .") == SHELL_TIMEOUT_LONG
         assert _get_shell_timeout("cargo build") == SHELL_TIMEOUT_LONG
 
     def test_model_hint_timeout(self):
-        from askme import _get_shell_timeout, SHELL_TIMEOUT_MAX
+        from askme import SHELL_TIMEOUT_MAX, _get_shell_timeout
         assert _get_shell_timeout("some cmd", hint=60) == 60
         assert _get_shell_timeout("some cmd", hint=999) == SHELL_TIMEOUT_MAX
         assert _get_shell_timeout("some cmd", hint=1) == 5  # minimum 5s
@@ -318,7 +320,7 @@ class TestCommandAwareTimeout:
 
     def test_timeout_retry_bumps_timeout(self):
         """After a timeout, the retry should inject a bumped timeout into the action."""
-        from askme import _get_shell_timeout, SHELL_TIMEOUT_LONG, SHELL_TIMEOUT_MAX
+        from askme import SHELL_TIMEOUT_LONG, SHELL_TIMEOUT_MAX, _get_shell_timeout
         action = {"action": "shell", "arg": "some_slow_cmd"}
         default_timeout = _get_shell_timeout(action["arg"])
         assert default_timeout == 30
@@ -360,6 +362,7 @@ class TestCommandAwareTimeout:
 # --- Server config tests ---
 
 @skip_no_llm
+@pytest.mark.live_llm
 class TestServerConfig:
     """Verify llama-server is running with optimized agentic configuration.
     These are fast (no LLM inference), just HTTP checks against the server."""
