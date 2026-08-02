@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal self-contained agent. Takes a user prompt, plans, executes, replans on failure.
 Requires: requests. Expects llama-server on localhost:8080."""
-import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex, hashlib
+import argparse, sys, json, subprocess, requests, re, time, os, tempfile, shutil, shlex, hashlib, bisect
 from pathlib import Path
 
 
@@ -176,7 +176,7 @@ def _is_write_shaped(task):
 # surface for app development; they get their own bounded windows so large repos
 # stay navigable without blowing up executor state.
 READ_LINES = 60           # max lines per read window
-READ_CHARS = 1200         # max chars per read window
+READ_CHARS = 1200         # max Unicode code points per read page
 READ_LIMIT_MAX = 200      # hard cap on model-specified read limit
 SEARCH_MAX_MATCHES = 15   # bounded literal search results
 SEARCH_MAX_CHARS = 1500   # bounded search output
@@ -257,7 +257,8 @@ Rules:
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
 Actions: shell, write, edit, read, search, tree, done, fail.
-read: may take "offset"/"limit" (lines); if output says "continue: offset=N", read that offset for more
+read: initial pages take "offset"/"limit" (1-based lines); continuation pages must echo
+      the output's "cursor", "limit", and "sha256". Cursors count Unicode code points.
 search: literal pattern in "arg", optional "path" (default "."); bounded matches
 tree: directory in "arg" (default "."); bounded listing
 write: whole file; add "append":true to append the next chunk instead
@@ -325,7 +326,21 @@ def _validate_action_contract(obj):
         return (_valid_nonempty_str(obj.get("arg"))
                 and _valid_nonempty_str(obj.get("find"))
                 and "replace" in obj)
-    if action in ("shell", "read", "search"):
+    if action == "read":
+        if not _valid_nonempty_str(obj.get("arg")):
+            return False
+        if "cursor" not in obj:
+            return True
+        try:
+            cursor = _read_cursor(obj)
+        except ValueError:
+            return False
+        try:
+            _read_continuation_limit(obj)
+        except ValueError:
+            return False
+        return cursor is not None and _valid_nonempty_str(obj.get("sha256"))
+    if action in ("shell", "search"):
         return _valid_nonempty_str(obj.get("arg"))
     return True
 
@@ -610,20 +625,28 @@ def ask_llm(messages, max_tokens=256, think=False, think_level=None,
 
 _KNOWN_ERROR_TYPES = {"timeout", "missing_tool", "permission_denied", "missing_file",
                       "compile_error", "edit_failed", "stuck_loop", "unknown",
-                      "malformed_action", "response_truncated"}
+                      "malformed_action", "response_truncated",
+                      "invalid_read_cursor", "invalid_read_limit",
+                      "read_cursor_hash_required", "stale_read_cursor"}
 
 # E05: Error types where thinking escalation is counterproductive.
 # These are structural failures — the scaffold knows what went wrong and the model
 # needs different information or parameters, not deeper reasoning.
 # Semantic failures (compile_error, unknown) keep thinking escalation.
 _NO_THINK_ERRORS = frozenset({"edit_failed", "missing_file", "timeout",
-                              "missing_tool", "permission_denied"})
+                              "missing_tool", "permission_denied",
+                              "invalid_read_cursor", "invalid_read_limit",
+                              "read_cursor_hash_required", "stale_read_cursor"})
 
 # E06: Short recovery hints injected into step output after typed failures.
 # Tells the model what to do next without needing thinking tokens to rediscover it.
 _RECOVERY_HINTS = {
     "edit_failed": "Read the file first, then retry edit with exact text from the file.",
     "missing_file": "Check the filename. Use shell ls to list directory contents.",
+    "invalid_read_cursor": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
+    "invalid_read_limit": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
+    "read_cursor_hash_required": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
+    "stale_read_cursor": "The file changed. Restart read with offset and limit; do not reuse the old cursor.",
 }
 
 
@@ -1548,10 +1571,10 @@ _REPO_SKIP_DIRS = frozenset({
 })
 
 
-def _iter_repo_files(root, max_files=SEARCH_MAX_FILES):
+def _iter_repo_files(root, max_files=SEARCH_MAX_FILES, on_error=None):
     """Yield visible repo files under root, bounded and deterministic."""
     count = 0
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=on_error):
         dirnames[:] = sorted(
             d for d in dirnames
             if d not in _REPO_SKIP_DIRS and not d.startswith(".")
@@ -1565,6 +1588,29 @@ def _iter_repo_files(root, max_files=SEARCH_MAX_FILES):
                 return
 
 
+def _pack_observation_lines(make_header, records, reasons, max_chars):
+    """Pack complete discovery records, including the header, within a cap."""
+    def pack(active_reasons):
+        header = make_header(active_reasons)
+        kept = []
+        used = len(header)
+        for record in records:
+            extra = 1 + len(record)
+            if used + extra > max_chars:
+                break
+            kept.append(record)
+            used += extra
+        output = header + ("\n" + "\n".join(kept) if kept else "")
+        return output, kept
+
+    output, kept = pack(reasons)
+    if len(kept) == len(records):
+        return output, reasons
+    final_reasons = [*reasons, "chars"]
+    output, _ = pack(final_reasons)
+    return output, final_reasons
+
+
 def _read_offset_limit(action):
     """Normalized 1-based read window (offset, limit) from an action dict."""
     try:
@@ -1576,6 +1622,69 @@ def _read_offset_limit(action):
     except (TypeError, ValueError):
         limit = READ_LINES
     return offset, limit
+
+
+def _read_cursor(action):
+    """Normalized 0-based Unicode-code-point cursor, or None for a line read."""
+    if "cursor" not in action:
+        return None
+    raw = action.get("cursor")
+    if isinstance(raw, bool):
+        raise ValueError("read cursor must be a non-negative integer")
+    if isinstance(raw, int):
+        cursor = raw
+    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
+        cursor = int(raw.strip())
+    else:
+        raise ValueError("read cursor must be a non-negative integer")
+    if cursor < 0:
+        raise ValueError("read cursor must be a non-negative integer")
+    return cursor
+
+
+def _read_continuation_limit(action):
+    """Strict line limit echoed by an action-ready cursor continuation."""
+    raw = action.get("limit")
+    if isinstance(raw, bool):
+        raise ValueError("read continuation limit must be an integer")
+    if isinstance(raw, int):
+        limit = raw
+    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
+        limit = int(raw.strip())
+    else:
+        raise ValueError("read continuation limit must be an integer")
+    if not 1 <= limit <= READ_LIMIT_MAX:
+        raise ValueError("read continuation limit is out of range")
+    return limit
+
+
+def _read_key(action):
+    """Identity for duplicate-read detection, including every range field."""
+    arg = action.get("arg", "")
+    try:
+        cursor = _read_cursor(action)
+    except ValueError:
+        return (arg, "invalid_cursor", repr(action.get("cursor")),
+                action.get("sha256") or "")
+    if cursor is not None:
+        try:
+            limit = _read_continuation_limit(action)
+        except ValueError:
+            return (arg, "invalid_cursor_limit", cursor,
+                    repr(action.get("limit")), action.get("sha256") or "")
+        return (arg, "cursor", cursor, limit, action.get("sha256") or "")
+    offset, limit = _read_offset_limit(action)
+    return (arg, "lines", offset, limit)
+
+
+def _read_continuation_hint(continuation):
+    """Render an action-ready continuation for the executor prompt."""
+    if isinstance(continuation, dict):
+        return (f"cursor={continuation['cursor']}, "
+                f"limit={continuation['limit']}, "
+                f"sha256={continuation['sha256']}")
+    # Compatibility with run state created by the revision-2 line contract.
+    return f"offset={continuation}"
 
 
 def execute(action, working_dir="."):
@@ -1652,37 +1761,114 @@ def execute(action, working_dir="."):
             p = Path(action["arg"])
             if not p.is_absolute():
                 p = Path(working_dir) / p
-            text = p.read_text()
-            lines = text.splitlines()
+            raw = p.read_bytes()
+            text = raw.decode("utf-8")
+            lines = text.splitlines(keepends=True)
             total = len(lines)
             offset, limit = _read_offset_limit(action)
-            # Structured continuation metadata (issue #7): totals and a content
-            # hash let the harness audit reads and detect files changing
-            # between windows. Not sent to the model — header stays compact.
+            # Hash the exact bytes whose decoded text is paged. Continuation
+            # cursors count Python Unicode code points, not UTF-8 bytes or
+            # grapheme clusters, and are valid only for this source hash.
             meta = {"total_lines": total,
-                    "total_bytes": len(text.encode("utf-8", errors="replace")),
-                    "sha256": hashlib.sha256(
-                        text.encode("utf-8", errors="replace")).hexdigest()[:12]}
-            if offset > total:
+                    "total_bytes": len(raw),
+                    "total_chars": len(text),
+                    "sha256": hashlib.sha256(raw).hexdigest()[:12]}
+            try:
+                cursor = _read_cursor(action)
+            except ValueError:
+                return {"ok": False, "truncated": False, "content": "",
+                        "continuation": None,
+                        "output": (f"[{p.name}: read cursor must be a "
+                                   "non-negative integer]"),
+                        "error_type": "invalid_read_cursor", **meta}
+            if cursor is not None:
+                try:
+                    limit = _read_continuation_limit(action)
+                except ValueError:
+                    return {"ok": False, "truncated": False, "content": "",
+                            "continuation": None,
+                            "output": (f"[{p.name}: read continuation limit "
+                                       f"must be an integer from 1 to "
+                                       f"{READ_LIMIT_MAX}]"),
+                            "error_type": "invalid_read_limit", **meta}
+            expected_hash = action.get("sha256")
+            if cursor is not None and not expected_hash:
+                return {"ok": False, "truncated": False, "content": "",
+                        "continuation": None,
+                        "output": (f"[{p.name}: read cursor requires the source "
+                                   "sha256 from its continuation]"),
+                        "error_type": "read_cursor_hash_required", **meta}
+            if cursor is not None and expected_hash and expected_hash != meta["sha256"]:
+                return {"ok": False, "truncated": False, "content": "",
+                        "continuation": None,
+                        "output": (f"[{p.name}: stale read cursor; source changed "
+                                   f"({expected_hash} -> {meta['sha256']})]"),
+                        "error_type": "stale_read_cursor", **meta}
+            if cursor is None and offset > total:
                 return {"ok": True, "truncated": False,
+                        "content": "", "continuation": None,
                         "output": f"[{p.name}: offset {offset} past end of file ({total} lines)]",
                         **meta}
-            window = lines[offset - 1: offset - 1 + limit]
-            body = "\n".join(window)
-            end = offset + len(window) - 1
-            truncated = False
-            header = f"[{p.name}: lines {offset}-{end} of {total}"
-            if len(body) > READ_CHARS:
-                body = body[:READ_CHARS]
-                truncated = True
-                header += f", cut at {READ_CHARS} chars"
-            if end < total:
-                truncated = True
-                header += f"; continue: offset={end + 1}"
-            header += "]"
-            return {"ok": True, "output": f"{header}\n{body}",
+            if cursor is not None and cursor > len(text):
+                return {"ok": True, "truncated": False,
+                        "content": "", "continuation": None,
+                        "output": (f"[{p.name}: cursor {cursor} past end of file "
+                                   f"({len(text)} chars)]"), **meta}
+            if cursor is not None and cursor == len(text):
+                return {"ok": True, "truncated": False,
+                        "content": "", "continuation": None,
+                        "output": f"[{p.name}: cursor {cursor} at end of file]",
+                        **meta}
+
+            starts = []
+            pos = 0
+            for line in lines:
+                starts.append(pos)
+                pos += len(line)
+            if cursor is None:
+                start = starts[offset - 1]
+                start_line_index = offset - 1
+            else:
+                start = cursor
+                start_line_index = max(0, bisect.bisect_right(starts, start) - 1)
+            window_end_index = min(total, start_line_index + limit)
+            window_end = (starts[window_end_index]
+                          if window_end_index < total else len(text))
+            page_cap = READ_CHARS
+            while True:
+                page_end = min(start + page_cap, window_end)
+                body = text[start:page_end]
+                last_line_index = max(
+                    start_line_index,
+                    bisect.bisect_right(starts, max(start, page_end - 1)) - 1,
+                )
+                end = last_line_index + 1
+                continuation = None
+                if page_end < len(text):
+                    next_line_index = max(
+                        0, bisect.bisect_right(starts, page_end) - 1)
+                    continuation = {"cursor": page_end,
+                                    "offset": next_line_index + 1,
+                                    "limit": limit,
+                                    "sha256": meta["sha256"]}
+                header = f"[{p.name}: lines {start_line_index + 1}-{end} of {total}"
+                if page_end < window_end:
+                    header += f", cut at {len(body)} chars"
+                if continuation:
+                    header += (f"; continue: cursor={continuation['cursor']}, "
+                               f"limit={continuation['limit']}, "
+                               f"sha256={continuation['sha256']}")
+                header += "]"
+                output = f"{header}\n{body}"
+                overflow = len(output) - OBSERVE_STATE_CHARS
+                if overflow <= 0 or page_cap == 1:
+                    break
+                page_cap = max(1, page_cap - overflow)
+            truncated = continuation is not None
+            return {"ok": True, "output": output,
                     "truncated": truncated,
-                    "continuation": end + 1 if end < total else None,
+                    "content": body,
+                    "continuation": continuation,
                     **meta}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
@@ -1699,31 +1885,64 @@ def execute(action, working_dir="."):
             if not base.is_dir():
                 return {"ok": False, "output": f"Directory not found: {base.name}",
                         "error_type": "missing_file"}
+            walk_errors = []
+            files = list(_iter_repo_files(
+                base, SEARCH_MAX_FILES + 1, on_error=walk_errors.append))
+            file_limited = len(files) > SEARCH_MAX_FILES
             matches = []
-            for f in _iter_repo_files(base):
+            snippets_limited = False
+            unreadable = 0
+            for f in files[:SEARCH_MAX_FILES]:
                 try:
                     text = f.read_text(errors="replace")
                 except OSError:
+                    unreadable += 1
                     continue
                 if "\0" in text[:2048]:
                     continue  # skip binary files
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if pattern in line:
-                        matches.append(f"{f.relative_to(base)}:{lineno}: {line.strip()[:100]}")
-                        if len(matches) >= SEARCH_MAX_MATCHES:
+                        snippet = line.strip()
+                        if len(snippet) > 100:
+                            snippet = snippet[:99] + "…"
+                            snippets_limited = True
+                        matches.append(f"{f.relative_to(base)}:{lineno}: {snippet}")
+                        if len(matches) > SEARCH_MAX_MATCHES:
                             break
-                if len(matches) >= SEARCH_MAX_MATCHES:
+                if len(matches) > SEARCH_MAX_MATCHES:
                     break
-            body = "\n".join(matches)
-            truncated = len(matches) >= SEARCH_MAX_MATCHES or len(body) > SEARCH_MAX_CHARS
-            body = body[:SEARCH_MAX_CHARS]
-            header = f"[{len(matches)}{'+' if truncated else ''} matches for '{pattern[:40]}'"
-            if truncated:
-                header += " — narrow the pattern"
-            header += "]"
+            match_limited = len(matches) > SEARCH_MAX_MATCHES
+            shown = matches[:SEARCH_MAX_MATCHES]
+            reasons = []
+            if match_limited:
+                reasons.append("matches")
+            if file_limited:
+                reasons.append("files")
+            if snippets_limited:
+                reasons.append("snippets")
+            if unreadable:
+                reasons.append("unreadable")
+            if walk_errors:
+                reasons.append("walk_errors")
+
+            def search_header(active_reasons):
+                marker = ("+" if any(r in active_reasons
+                                     for r in ("matches", "files", "chars"))
+                          else "")
+                header = f"[{len(shown)}{marker} matches for '{pattern[:40]}'"
+                if active_reasons:
+                    header += (" — incomplete: " + ", ".join(active_reasons)
+                               + "; narrow the pattern/path or read the file")
+                return header + "]"
+
+            output, reasons = _pack_observation_lines(
+                search_header, shown, reasons,
+                min(SEARCH_MAX_CHARS, OBSERVE_STATE_CHARS))
+            truncated = bool(reasons)
             return {"ok": True,
-                    "output": f"{header}\n{body}" if body else header,
-                    "truncated": truncated}
+                    "output": output,
+                    "truncated": truncated,
+                    "truncation_reasons": reasons}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "search")}
@@ -1736,14 +1955,19 @@ def execute(action, working_dir="."):
                 return {"ok": False, "output": f"Directory not found: {base.name}",
                         "error_type": "missing_file"}
             entries = []
+            depth_limited = False
+            walk_errors = []
             root_depth = len(base.parts)
-            for dirpath, dirnames, filenames in os.walk(base):
+            for dirpath, dirnames, filenames in os.walk(
+                    base, onerror=walk_errors.append):
                 depth = len(Path(dirpath).parts) - root_depth
                 dirnames[:] = sorted(
                     d for d in dirnames
                     if d not in _REPO_SKIP_DIRS and not d.startswith(".")
                 )
                 if depth >= TREE_MAX_DEPTH:
+                    if dirnames:
+                        depth_limited = True
                     dirnames[:] = []
                 rel_dir = Path(dirpath).relative_to(base)
                 prefix = "" if str(rel_dir) == "." else f"{rel_dir}/"
@@ -1752,19 +1976,35 @@ def execute(action, working_dir="."):
                     f"{prefix}{name}" for name in sorted(filenames)
                     if not name.startswith(".")
                 )
-                if len(entries) >= TREE_MAX_ENTRIES:
-                    entries = entries[:TREE_MAX_ENTRIES]
+                if len(entries) > TREE_MAX_ENTRIES:
                     break
-            body = "\n".join(entries)
-            truncated = len(entries) >= TREE_MAX_ENTRIES or len(body) > TREE_MAX_CHARS
-            body = body[:TREE_MAX_CHARS]
-            header = f"[tree of {base.name}: {len(entries)} entries"
-            if truncated:
-                header += f", capped at {TREE_MAX_ENTRIES}"
-            header += "]"
+            entry_limited = len(entries) > TREE_MAX_ENTRIES
+            shown = entries[:TREE_MAX_ENTRIES]
+            reasons = []
+            if entry_limited:
+                reasons.append("entries")
+            if depth_limited:
+                reasons.append("depth")
+            if walk_errors:
+                reasons.append("walk_errors")
+
+            def tree_header(active_reasons):
+                header = f"[tree of {base.name}: {len(shown)} entries"
+                if "entries" in active_reasons:
+                    header += f", capped at {TREE_MAX_ENTRIES}"
+                if active_reasons:
+                    header += (" — incomplete: " + ", ".join(active_reasons)
+                               + "; narrow the path")
+                return header + "]"
+
+            output, reasons = _pack_observation_lines(
+                tree_header, shown, reasons,
+                min(TREE_MAX_CHARS, OBSERVE_STATE_CHARS))
+            truncated = bool(reasons)
             return {"ok": True,
-                    "output": f"{header}\n{body}" if body else header,
-                    "truncated": truncated}
+                    "output": output,
+                    "truncated": truncated,
+                    "truncation_reasons": reasons}
         except Exception as e:
             out = str(e)[:MAX_RESULT]
             return {"ok": False, "output": out, "error_type": classify_error(out, "tree")}
@@ -2262,10 +2502,10 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 _skip_step(i, step, act, action, "stuck_shell")
                                 break
                         elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
-                            # Offset-aware: navigating to a new range of the same
-                            # file is legitimate, not a duplicate.
-                            prev_key = prev.get("_read_key") or (prev.get("arg", ""), 1)
-                            cur_key = (action.get("arg", ""), _read_offset_limit(action)[0])
+                            # Range-aware: new line windows and exact cursor
+                            # continuations are legitimate navigation.
+                            prev_key = prev.get("_read_key") or _read_key(prev)
+                            cur_key = _read_key(action)
                             if prev_key != cur_key:
                                 pass  # different range — execute normally
                             elif prev.get("ok"):
@@ -2279,7 +2519,8 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 _skip_step(i, step, act, action, "duplicate_read")
                                 cont = prev.get("_continuation")
                                 if cont:
-                                    obs = (f"Already read this range. Continue with offset={cont}; "
+                                    obs = ("Already read this range. Continue with "
+                                           f"{_read_continuation_hint(cont)}; "
                                            f"or search, edit, done, or fail.")
                                 else:
                                     obs = "Already read. Use previous content; edit, write, shell, done, or fail."
@@ -2386,8 +2627,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                                 step_entry["_recovery_arg"] = (
                                     _target_recovery_arg(target, working_dir))
                     if act == "read":
-                        step_entry["_read_key"] = (
-                            action.get("arg", ""), _read_offset_limit(action)[0])
+                        step_entry["_read_key"] = _read_key(action)
                         if result.get("continuation"):
                             step_entry["_continuation"] = result["continuation"]
                     state["last_steps"].append(step_entry)
@@ -2408,6 +2648,7 @@ def _run_loop(user_prompt, working_dir, max_replans=MAX_REPLANS,
                         step_log["sha256"] = result["sha256"]
                         step_log["total_lines"] = result.get("total_lines")
                         step_log["total_bytes"] = result.get("total_bytes")
+                        step_log["total_chars"] = result.get("total_chars")
                         step_log["continuation"] = result.get("continuation")
                     _run_log(step_log)
 
