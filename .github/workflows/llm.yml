@@ -118,8 +118,9 @@ jobs:
     # medium repair selectors from talks/berkeley-agentic-ai-summit-2026/
     # evals/README.md — through tests/bench_harness.py, then evaluates the
     # protocol's pass rule (pytest pass + agent complete for every trial).
-    # A one-trial live-model result is advisory on post-merge main pushes, but
-    # remains strict for scheduled drift checks, manual runs, and opt-in PRs.
+    # A valid one-trial live-model result rejection is advisory on post-merge
+    # main pushes, but evidence-integrity failures remain blocking everywhere.
+    # Cell results stay strict for scheduled drift checks, manual runs, and PRs.
     # Same guard as openrouter-smoke: label opt-in AND same-repo head only.
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'llm-tests'))
     runs-on: ubuntu-latest
@@ -178,10 +179,14 @@ jobs:
           done
           echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"
       - name: Gate on protocol pass rule
-        continue-on-error: ${{ github.event_name == 'push' }}
         run: |
+          ADVISORY_ARGS=()
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            ADVISORY_ARGS=(--advisory-cell-failures)
+          fi
           uv run --locked python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
-            --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
+            --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY" \
+            "${ADVISORY_ARGS[@]}"
       - name: Upload bench logs and summaries
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -137,10 +137,11 @@ def test_llm_workflow_gates_bench_results():
     gate = berkeley.split("      - name: Gate on protocol pass rule", 1)[1].split(
         "      - name: Upload bench logs and summaries", 1
     )[0]
-    advisory = "continue-on-error: ${{ github.event_name == 'push' }}"
-    assert advisory not in smoke
-    assert berkeley.count(advisory) == 1
-    assert gate.index(advisory) < gate.index("ci_llm_gate.py report")
+    assert "continue-on-error" not in gate
+    assert "--advisory-cell-failures" not in smoke
+    assert gate.count("--advisory-cell-failures") == 1
+    assert 'if [[ "$GITHUB_EVENT_NAME" == "push" ]]' in gate
+    assert gate.index("--advisory-cell-failures") < gate.index("ci_llm_gate.py report")
     assert "--expect-cells" in gate
     assert "--markdown-out" in gate
 

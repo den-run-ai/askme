@@ -139,10 +139,12 @@ def run_single_test(
     return passed, wall, result.stdout, result.stderr
 
 
-def write_failure_diagnostic(log_dir, test_name, trial, stdout, stderr):
+def write_failure_diagnostic(log_dir, test_name, trial, stdout, stderr, *, timed_out=False):
     """Retain bounded pytest output for a failed synthetic integration trial."""
 
     def stream_tail(label, content):
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", errors="replace")
         content = content or ""
         omitted = max(0, len(content) - PYTEST_DIAGNOSTIC_STREAM_CHARS)
         note = f" ({omitted} earlier characters omitted)" if omitted else ""
@@ -150,8 +152,9 @@ def write_failure_diagnostic(log_dir, test_name, trial, stdout, stderr):
         return f"{label}{note}:\n{tail or '(empty)'}\n"
 
     path = log_dir / f"{test_name}_trial{trial}_pytest.txt"
+    heading = "Pytest timeout diagnostics" if timed_out else "Pytest failure diagnostics"
     path.write_text(
-        "Pytest failure diagnostics (bounded stream tails)\n\n"
+        f"{heading} (bounded stream tails)\n\n"
         + stream_tail("stdout", stdout)
         + "\n"
         + stream_tail("stderr", stderr),
@@ -323,7 +326,7 @@ def print_report(test_name, trial_results):
         print()
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="E01: Multi-trial integration harness")
     parser.add_argument("--suite", choices=["easy", "medium", "hard"], default="easy")
     parser.add_argument("--backend", choices=["local", "openrouter"], default="local")
@@ -353,7 +356,7 @@ def main():
     )
     parser.add_argument("--list", action="store_true", help="List available tests")
     parser.add_argument("--log-dir", help="Directory for JSONL logs (default: auto tmpdir)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.backend != "openrouter" and (
         args.model
@@ -426,6 +429,7 @@ def main():
                 end="",
                 flush=True,
             )
+            timed_out = False
             try:
                 passed, wall, stdout, stderr = run_single_test(
                     test_name,
@@ -438,35 +442,44 @@ def main():
                     args.require_provider_parameters,
                     reasoning_effort,
                 )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 passed, wall = False, 1200.0
+                stdout, stderr = exc.stdout, exc.stderr
+                timed_out = True
                 print(" TIMEOUT", flush=True)
-                metrics = parse_log(log_path)
-                all_results[test_name].append(
-                    {"passed": False, "wall_s": wall, "metrics": metrics, "timed_out": True}
-                )
-                continue
-
-            metrics = parse_log(log_path)
-            status_str = "PASS" if passed else "FAIL"
-            wall_display = metrics["wall_s"] if metrics else wall
-            print(f" {status_str} ({wall_display:.1f}s)", flush=True)
 
             pytest_diagnostic = None
             if not passed:
                 pytest_diagnostic = write_failure_diagnostic(
-                    log_dir, test_name, trial + 1, stdout, stderr
+                    log_dir, test_name, trial + 1, stdout, stderr, timed_out=timed_out
                 )
                 print(f"  pytest diagnostics: {pytest_diagnostic}")
 
-            all_results[test_name].append(
-                {
-                    "passed": passed,
-                    "wall_s": wall,
-                    "metrics": metrics,
-                    "pytest_diagnostic": pytest_diagnostic,
-                }
-            )
+            log_parse_error = None
+            try:
+                metrics = parse_log(log_path)
+            except json.JSONDecodeError as exc:
+                if not timed_out:
+                    raise
+                metrics = None
+                log_parse_error = "{} at line {} column {}".format(exc.msg, exc.lineno, exc.colno)
+                print(f"  partial JSONL: {log_parse_error}")
+
+            if not timed_out:
+                status_str = "PASS" if passed else "FAIL"
+                wall_display = metrics["wall_s"] if metrics else wall
+                print(f" {status_str} ({wall_display:.1f}s)", flush=True)
+
+            result = {
+                "passed": passed,
+                "wall_s": wall,
+                "metrics": metrics,
+                "pytest_diagnostic": pytest_diagnostic,
+                "log_parse_error": log_parse_error,
+            }
+            if timed_out:
+                result["timed_out"] = True
+            all_results[test_name].append(result)
 
     # Summary
     total_wall = time.time() - t_total
@@ -517,6 +530,8 @@ def main():
             "served_models": [m["served_models"] for m in metrics_list],
             "served_providers": [m["served_providers"] for m in metrics_list],
             "pytest_diagnostics": [r.get("pytest_diagnostic") for r in results],
+            "timed_out": [bool(r.get("timed_out")) for r in results],
+            "log_parse_errors": [r.get("log_parse_error") for r in results],
         }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)

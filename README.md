@@ -170,10 +170,11 @@ protocol cells from
 — hard build + medium repair — per model through `tests/bench_harness.py`,
 then `tests/ci_llm_gate.py report` evaluates the protocol pass rule (every
 trial: pytest pass and agent completion) and publishes a summary table. Because
-a single unseeded live-model trial is not a reliability estimate, Berkeley-cell
-failures are advisory on post-merge `main` pushes; scheduled, manual, and opt-in
-PR runs remain strict. JSONL run logs, bounded pytest failure diagnostics, and
-`summary.json` files are uploaded as artifacts. A
+a single unseeded live-model trial is not a reliability estimate, valid
+Berkeley-cell outcome failures are advisory on post-merge `main` pushes;
+malformed or missing evidence remains blocking, and scheduled, manual, and
+opt-in PR runs remain strict. JSONL run logs, bounded pytest failure diagnostics,
+and `summary.json` files are uploaded as artifacts. A
 preflight step fails loudly when the key is missing or rejected, so a bad
 credential can never produce a silently green (all-skipped) run. The full
 default matrix measured about $0.01 in OpenRouter credits per run.

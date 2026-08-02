@@ -13,8 +13,10 @@ Used by .github/workflows/llm.yml. Two subcommands:
               trial must be a pytest pass AND an agent completion (the
               independent acceptance checks are asserted inside the pytest
               tests themselves) — and emit a markdown table suitable for
-              GITHUB_STEP_SUMMARY. Exits nonzero on any failure, malformed
-              input, or a cell-count mismatch against --expect-cells.
+              GITHUB_STEP_SUMMARY. Exits nonzero on any failure by default.
+              --advisory-cell-failures suppresses only valid cell outcome
+              failures; malformed evidence and cell-count mismatches remain
+              blocking.
 
 The pass rule mirrors talks/berkeley-agentic-ai-summit-2026/evals/README.md:
 a reported pass requires pytest success, agent_complete, and the
@@ -84,22 +86,60 @@ def load_summaries(paths):
 
 
 def evaluate(loaded, expect_cells=None):
-    """Apply the pass rule to loaded summaries. Returns (rows, failures)."""
+    """Return report rows plus cell-outcome and evidence-integrity failures."""
+
+    def result_count(result, name, fallback=None):
+        if name in result:
+            value = result[name]
+        elif fallback is not None and fallback in result:
+            value = result[fallback]
+        else:
+            raise ValueError("test result is missing {}".format(name))
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("{} is not an integer".format(name))
+        return value
+
     rows = []
-    failures = []
+    cell_failures = []
+    integrity_failures = []
     for path, data, error in loaded:
         if error is not None:
-            failures.append("{}: {}".format(path, error))
+            integrity_failures.append("{}: {}".format(path, error))
             continue
         for test_name in sorted(data["tests"]):
             result = data["tests"][test_name]
-            total = int(result.get("total", 0))
-            pytest_passed = int(result.get("pytest_passed", result.get("passed", 0)))
-            agent_complete = int(result.get("agent_complete", 0))
-            walls = [w for w in (result.get("wall_s") or []) if w is not None]
-            cost = sum(float(c or 0) for c in (result.get("openrouter_cost") or []))
-            served = sorted({p for trial in (result.get("served_providers") or []) for p in trial})
             cell = "{}/{}".format(data.get("suite", "?"), test_name)
+            try:
+                if not isinstance(result, dict):
+                    raise ValueError("test result is not an object")
+                total = result_count(result, "total")
+                pytest_passed = result_count(result, "pytest_passed", fallback="passed")
+                agent_complete = result_count(result, "agent_complete")
+                if "pytest_passed" in result and "passed" in result:
+                    legacy_passed = result_count(result, "passed")
+                    if legacy_passed != pytest_passed:
+                        raise ValueError("pytest_passed disagrees with passed")
+                if total <= 0:
+                    raise ValueError("total must be positive")
+                if not 0 <= pytest_passed <= total:
+                    raise ValueError("pytest_passed is outside [0, total]")
+                if not 0 <= agent_complete <= total:
+                    raise ValueError("agent_complete is outside [0, total]")
+                log_parse_errors = result.get("log_parse_errors") or []
+                if not isinstance(log_parse_errors, list):
+                    raise ValueError("log_parse_errors is not a list")
+                if len(log_parse_errors) not in (0, total):
+                    raise ValueError("log_parse_errors length does not match total")
+                if any(parse_error is not None for parse_error in log_parse_errors):
+                    raise ValueError("benchmark JSONL contains a parse error")
+                walls = [w for w in (result.get("wall_s") or []) if w is not None]
+                cost = sum(float(c or 0) for c in (result.get("openrouter_cost") or []))
+                served = sorted(
+                    {p for trial in (result.get("served_providers") or []) for p in trial}
+                )
+            except (TypeError, ValueError) as exc:
+                integrity_failures.append("{}: malformed test result: {}".format(cell, exc))
+                continue
             passed = total > 0 and pytest_passed == total and agent_complete == total
             model = data.get("model") or "?"
             # Effort-pinned cells (always-on reasoners like gpt-oss-20b) differ
@@ -121,14 +161,16 @@ def evaluate(loaded, expect_cells=None):
                 }
             )
             if not passed:
-                failures.append(
+                cell_failures.append(
                     "{} [{}]: pytest {}/{}, agent complete {}/{}".format(
                         cell, model, pytest_passed, total, agent_complete, total
                     )
                 )
     if expect_cells is not None and len(rows) != expect_cells:
-        failures.append("expected {} result cell(s), found {}".format(expect_cells, len(rows)))
-    return rows, failures
+        integrity_failures.append(
+            "expected {} result cell(s), found {}".format(expect_cells, len(rows))
+        )
+    return rows, cell_failures, integrity_failures
 
 
 def render_markdown(rows, failures):
@@ -180,6 +222,11 @@ def main(argv=None):
         default="",
         help="append the markdown table to this file (e.g. $GITHUB_STEP_SUMMARY)",
     )
+    report.add_argument(
+        "--advisory-cell-failures",
+        action="store_true",
+        help="return success for valid cell outcome failures; evidence errors still fail",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "preflight":
@@ -187,14 +234,26 @@ def main(argv=None):
         print(("PREFLIGHT OK: " if ok else "PREFLIGHT FAILED: ") + message)
         return 0 if ok else 1
 
-    rows, failures = evaluate(load_summaries(args.summaries), expect_cells=args.expect_cells)
+    rows, cell_failures, integrity_failures = evaluate(
+        load_summaries(args.summaries), expect_cells=args.expect_cells
+    )
+    failures = integrity_failures + cell_failures
     markdown = render_markdown(rows, failures)
     print(markdown)
     if args.markdown_out:
         with open(args.markdown_out, "a", encoding="utf-8") as fh:
             fh.write(markdown)
-    print("LLM GATE: " + ("PASS" if not failures else "FAIL"))
-    return 0 if not failures else 1
+    if integrity_failures:
+        print("LLM GATE: FAIL (evidence integrity)")
+        return 1
+    if cell_failures:
+        if args.advisory_cell_failures:
+            print("LLM GATE: ADVISORY CELL FAILURE")
+            return 0
+        print("LLM GATE: FAIL")
+        return 1
+    print("LLM GATE: PASS")
+    return 0
 
 
 if __name__ == "__main__":
