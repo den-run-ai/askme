@@ -13,10 +13,10 @@ For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITE
 Wiring for [EXPERIMENTS.md E21](EXPERIMENTS.md#e21--gpt-oss-20b-lowmediumhigh-effort-as-the-openrouter-ciprototyping-model)
 landed: `OPENROUTER_REASONING_EFFORT` baseline in `askme.py`,
 `--reasoning-effort` on `bench_harness.py`, `model@effort` cells in the llm.yml
-Berkeley job, and effort-qualified rows in `ci_llm_gate.py`. No live cells have
-run yet (no key in the authoring environment) — the numbers below are from the
-unauthenticated OpenRouter catalog (`/models`, `/models/openai/gpt-oss-20b/endpoints`,
-2026-08-02), recorded so the eventual run can detect pricing/routing drift.
+Berkeley job, and effort-qualified rows in `ci_llm_gate.py`. Catalog numbers
+below are from the unauthenticated OpenRouter API (`/models`,
+`/models/openai/gpt-oss-20b/endpoints`, 2026-08-02), recorded so later runs can
+detect pricing/routing drift; first live cells follow further down.
 
 | Model | Context | Prompt $/M | Completion $/M | Notes |
 |---|---|---|---|---|
@@ -39,17 +39,38 @@ effort with reasoning tokens billed as completion tokens outside any budget
 the harness chose. The baseline knob makes the served effort an explicit,
 logged axis instead.
 
-Comparison matrix to run once a key is available (3 trials each):
+### First live matrix — 2026-08-02, workflow_dispatch, 1 trial/cell
 
-```bash
-python3 tests/bench_harness.py --backend openrouter --suite easy                              # control
-python3 tests/bench_harness.py --backend openrouter --suite easy \
-  --model openai/gpt-oss-20b --reasoning-effort low      # repeat with medium, high
-```
+llm.yml dispatched on the E21 branch with
+`models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`,
+provider auto, trials 1
+([run 30754041735](https://github.com/den-run-ai/askme/actions/runs/30754041735),
+artifact `berkeley-protocol-logs`). Gate: **PASS — 8/8 cells** (pytest pass +
+agent complete on every cell, all four models/efforts).
 
-or dispatch llm.yml with
-`models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`
-(8 Berkeley cells). Decision rule is predeclared in E21.
+| Cell | Model | Wall (s) | Cost ($) |
+|---|---|---|---|
+| hard/build | gemma-4-26b-a4b-it (control) | 60.3 | 0.00191 |
+| medium/repair | gemma-4-26b-a4b-it (control) | 10.9 | 0.00043 |
+| hard/build | gpt-oss-20b@low | 67.8 | 0.00092 |
+| medium/repair | gpt-oss-20b@low | 25.4 | 0.00028 |
+| hard/build | gpt-oss-20b@medium | 42.8 | 0.00064 |
+| medium/repair | gpt-oss-20b@medium | 107.1 | 0.00147 |
+| hard/build | gpt-oss-20b@high | 124.6 | 0.00195 |
+| medium/repair | gpt-oss-20b@high | 125.4 | 0.00131 |
+
+Against the predeclared E21 decision rule (`@low` cost ≤ control and wall ≤
+1.5× control, every cell): cost holds on both `@low` cells (52% and 35%
+cheaper); wall holds on hard/build (1.12×) but fails on medium/repair (25.4s
+vs 10.9s = 2.33×). Single trial — not adoption evidence either way; the rule
+was declared for ≥3 trials. Directional observations: correctness held at
+every effort; `@medium`/`@high` reasoning latency dominates the simple repair
+task (107–125s vs 9–25s for control/`@low`) — effort above `low` buys nothing
+on CI-shaped tasks here; `@medium` beat `@low` on hard/build (42.8 vs 67.8s),
+within single-trial noise. Same-day context: the push-to-main llm.yml run
+failed its Gemma control hard/build cell (pytest 0/1, agent complete 1/1) while
+both branch runs passed it — single-trial control flakiness cuts both ways.
+Next: the 3-trial matrix for the adoption decision.
 
 ## Revision-4 Focused Test Snapshot — 2026-08-02
 

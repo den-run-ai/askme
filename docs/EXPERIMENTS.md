@@ -324,15 +324,16 @@ Moved to [Archived / rejected](#archived--rejected).
   `tests/bench_harness.py`, `tests/ci_llm_gate.py`,
   `.github/workflows/llm.yml`.
 - **Effort.** S.
-- **Status.** Running (2026-08-02). Wiring + unit coverage landed; live cells
-  pending an `OPENROUTER_API_KEY` run:
-  `python3 tests/bench_harness.py --backend openrouter --suite easy --model openai/gpt-oss-20b --reasoning-effort low`
-  (repeat per effort, plus the control without `--reasoning-effort`), or
-  dispatch llm.yml with
-  `models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`.
-  Decision rule: adopt for CI smoke only if every `@low` cell passes at cost
-  ≤ the Gemma control and wall time ≤ 1.5× control; otherwise keep Gemma as
-  default and retain the effort axis for experiments.
+- **Status.** Running (2026-08-02). Wiring + unit coverage landed. First live
+  matrix (llm.yml dispatch, 1 trial/cell, provider auto) passed the gate 8/8 —
+  every effort correct on both Berkeley cells; `@low` cheaper than the Gemma
+  control on both cells but 2.33× control wall on medium/repair, so the
+  decision rule is unresolved at 1 trial. Results table in
+  [PERFORMANCE.md](PERFORMANCE.md#e21-gpt-oss-20b-effort-cell-wiring--2026-08-02).
+  Decision rule (unchanged, needs the ≥3-trial run): adopt for CI smoke only
+  if every `@low` cell passes at cost ≤ the Gemma control and wall time
+  ≤ 1.5× control; otherwise keep Gemma as default and retain the effort axis
+  for experiments.
 
 ### E12 — Split planner vs executor retry budgets
 
