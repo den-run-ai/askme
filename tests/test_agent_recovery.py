@@ -108,7 +108,7 @@ class TestDuplicateGuard:
         user_msg = mock_llm.call_args_list[-1][0][0][1]["content"]
         assert "Already ran successfully" in user_msg
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_shell_same_success_repeated_is_stuck_not_done(self, mock_replan, tmp_path):
         """A third identical successful shell is a stuck loop for the
         replanner, not task acceptance."""
@@ -245,7 +245,7 @@ class TestDuplicateGuard:
         assert ok is True
         assert f.read_text() == "AAA\nBBB"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_edit_same_find_different_replace_not_auto_done(self, mock_replan, tmp_path, capsys):
         """A different replacement is a new edit attempt, not an auto-done duplicate."""
         f = tmp_path / "f.txt"
@@ -890,7 +890,7 @@ class TestExpectedFailureRemoval:
             {"tasks": ["compile to observe the initial failure"]},
             {"action": "shell", "arg": "cc main.c"},
         ]
-        with patch("askme.replan_task", return_value=None):
+        with patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown")):
             result = _run_loop(
                 "observe the failure", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1
             )
@@ -924,7 +924,7 @@ class TestExpectedFailureRemoval:
         assert result["status"] == "complete"
         assert any(s["action"] == "shell" and not s["ok"] for s in result["state"]["all_steps"])
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch(
         "askme.execute",
         return_value={
@@ -994,7 +994,7 @@ class TestCompileRepairTemplates:
             assert askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c") is None
         assert src.read_text() == original
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.execute")
     @patch("askme.ask_llm")
     def test_flag_off_arm_surfaces_the_compile_error_unrepaired(
@@ -1035,7 +1035,7 @@ class TestCompileRepairTemplates:
         assert run_start["event"] == "run_start"
         assert run_start["compile_repair"] is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_run_start_records_the_default_repair_arm(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [{"tasks": ["say hi"]}, {"action": "done"}]
@@ -1139,7 +1139,7 @@ class TestCompileRepairTemplates:
         ]
         log_path = tmp_path / "run.jsonl"
         with (
-            patch("askme.replan_task", return_value=None),
+            patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown")),
             patch.object(askme, "RUN_LOG_PATH", str(log_path)),
         ):
             result = _run_loop(
@@ -1280,7 +1280,7 @@ class TestDeterministicValidation:
         }
         assert askme._deterministic_check("run the program", state, str(tmp_path)) is None
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_exhaustion_never_reconciles_to_complete(self, mock_llm, mock_replan, tmp_path):
         """Issue #68: a successful last shell can no longer convert an
@@ -1293,7 +1293,7 @@ class TestDeterministicValidation:
         assert result["status"] == "exhausted"
         assert result["state"]["completed_tasks"] == []
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_exhausted_stays_exhausted_when_inconclusive(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -1385,7 +1385,7 @@ class TestFinalValidation:
         assert ok is True
         assert validate_called[0] is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_validate_runs_on_replan(self, mock_replan, tmp_path):
         """replan > 0 → validation runs."""
         responses = [
@@ -1605,7 +1605,7 @@ class TestFinalValidation:
         finally:
             askme.FINAL_VALIDATE = old
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_validate_disabled(self, mock_replan, tmp_path):
         """AGENT_FINAL_VALIDATE=0 skips validation."""
         import askme

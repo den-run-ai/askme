@@ -262,7 +262,7 @@ class TestRunOutcome:
         assert result["status"] == "complete_unverified"
         assert result["outcome"]["validation"] == "unavailable"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_exhausted_outcome_records_pending_validation_failure(self, mock_replan, tmp_path):
         responses = [
             {"tasks": ["fix app.py"]},
@@ -282,7 +282,7 @@ class TestRunOutcome:
         assert outcome["validation"] == "failed"
         assert result["state"]["validation_recheck_needed"] is True
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_exhausted_event_keeps_the_historical_error_shape(
         self, mock_llm, mock_replan, tmp_path

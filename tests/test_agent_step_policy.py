@@ -101,7 +101,7 @@ class TestObservationStall:
             {"action": "tree", "arg": "sub"},
         ]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_heuristic_arm_blocks_the_observation_tail(self, mock_replan, tmp_path):
         events = []
         client = ScriptedClient(self._observation_script(tmp_path))
@@ -117,7 +117,7 @@ class TestObservationStall:
         assert "observe_tail_exhausted" in reasons
         assert result["state"]["executed_steps"] == 3
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     def test_lifecycle_arm_pressures_without_tail_blocking(self, mock_replan, tmp_path):
         """The lifecycle arm replaces tail blocking with prompt pressure:
         the stall still fails, but as honest budget exhaustion with every

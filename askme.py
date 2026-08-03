@@ -1620,18 +1620,6 @@ class TaskReplanResult(NamedTuple):
     reject_reason: str | None
 
 
-def _coerce_task_replan(result):
-    """Normalize the replan seam's return to :class:`TaskReplanResult`.
-
-    Tests that script ``askme.replan_task`` with the legacy ``str | None``
-    stand-in keep working; a bare falsy return carries no typed reason."""
-    if isinstance(result, TaskReplanResult):
-        return result
-    if isinstance(result, tuple) and len(result) == 2:
-        return TaskReplanResult(*result)
-    return TaskReplanResult(result, None if result else "unknown")
-
-
 _PASSIVE_TASK_RE = re.compile(r"^\s*(read|inspect|view|open|list|check|examine)\b", re.I)
 _ACTION_TASK_RE = re.compile(
     r"\b(fix|edit|add|insert|include|compile|build|run|create|write|update|replace|execute|remove)\b",
@@ -3860,17 +3848,15 @@ class _RunController:
             if task_attempt < self.guards.max_task_local_replans:
                 saved_errors = list(self.state["errors"])
                 t_lr = self._clock()
-                replan = _coerce_task_replan(
-                    replan_task(
-                        task,
-                        self.state["errors"],
-                        self.state["completed_tasks"],
-                        self.state,
-                        self.goal_context,
-                        goal_context_chars=self.goal_context_chars,
-                        max_tokens=self._budgets["task_replan_max_tokens"],
-                        **self._llm_kwargs(),
-                    )
+                replan = replan_task(
+                    task,
+                    self.state["errors"],
+                    self.state["completed_tasks"],
+                    self.state,
+                    self.goal_context,
+                    goal_context_chars=self.goal_context_chars,
+                    max_tokens=self._budgets["task_replan_max_tokens"],
+                    **self._llm_kwargs(),
                 )
                 replacement = replan.task
                 lr_wall = self._clock() - t_lr

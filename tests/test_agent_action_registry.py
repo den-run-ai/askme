@@ -144,7 +144,7 @@ class TestTypedDispatchErrors:
         assert result["error_type"] == "invalid_read_cursor"
         assert result["sha256"]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_unknown_action_is_rejected_before_consuming_a_step(
         self, mock_llm, mock_replan, tmp_path
@@ -163,7 +163,7 @@ class TestTypedDispatchErrors:
         assert result["state"]["executed_steps"] == 0
         assert result["state"]["all_steps"] == []
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_cross_type_envelope_is_rejected_before_consuming_a_step(
         self, mock_llm, mock_replan, tmp_path
@@ -261,7 +261,7 @@ class TestDispatchParity:
 
 
 class TestRecorderCounterSemantics:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_selected_equals_executed_plus_skipped_plus_control(
         self, mock_llm, mock_replan, tmp_path
@@ -282,7 +282,7 @@ class TestRecorderCounterSemantics:
         # The accepted done closes the identity documented on StepRecorder.
         assert state["selected_steps"] == state["executed_steps"] + state["skipped_steps"] + 1
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_corrective_observations_stay_out_of_the_structured_record(
         self, mock_llm, mock_replan, tmp_path
@@ -350,7 +350,7 @@ class TestRecorderJsonlProjection:
             event.pop("ts", None)
         return result, events
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_step_and_skip_events_share_one_record_path(self, mock_llm, mock_replan, tmp_path):
         Path(tmp_path, "f.txt").write_text("hello\n")

@@ -22,8 +22,6 @@ from askme import (
     RunConfig,
     RunDependencies,
     RunWorkspace,
-    TaskReplanResult,
-    _coerce_task_replan,
     run,
     run_result,
 )
@@ -537,20 +535,11 @@ class TestInjectedDependencies:
 
 
 class TestTaskReplanContract:
-    def test_coerce_passes_structured_results_through(self):
-        replan = TaskReplanResult("finish app.py", None)
-        assert _coerce_task_replan(replan) is replan
+    """The replan seam speaks TaskReplanResult only (issue #69): the legacy
+    str/None/tuple coercion shim and its test-only shapes are removed."""
 
-    def test_coerce_accepts_a_bare_pair(self):
-        assert _coerce_task_replan(("finish app.py", None)) == TaskReplanResult(
-            "finish app.py", None
-        )
-
-    def test_coerce_accepts_legacy_string_stand_in(self):
-        assert _coerce_task_replan("finish app.py") == TaskReplanResult("finish app.py", None)
-
-    def test_coerce_marks_legacy_none_as_untyped(self):
-        assert _coerce_task_replan(None) == TaskReplanResult(None, "unknown")
+    def test_coercion_shim_is_gone(self):
+        assert not hasattr(askme, "_coerce_task_replan")
 
     def test_reject_reason_reaches_the_run_log_event(self, tmp_path):
         """The typed rejection travels by return value into the JSONL record."""

@@ -168,7 +168,7 @@ class TestConfigResolution:
         assert result["outcome"]["validation"] == "skipped"
         assert not client.replies
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.execute")
     @patch("askme.ask_llm")
     def test_pinned_compile_repair_off_disables_the_repair_arm(
