@@ -513,7 +513,11 @@ class TestInjectedDependencies:
             "output": "main.c:1:13: error: implicit declaration of function 'printf'",
             "error_type": "compile_error",
         }
-        mock_execute.side_effect = [dict(compile_error), dict(compile_error)]
+        mock_execute.side_effect = [
+            dict(compile_error),  # model shell
+            {"ok": True, "output": "Wrote main.c"},  # dispatched repair write
+            dict(compile_error),  # deterministic retry
+        ]
         lines = []
         result = run_result(
             "compile main.c",
@@ -523,8 +527,12 @@ class TestInjectedDependencies:
         )
         assert result["status"] == "exhausted"
         assert any(line.startswith("  -> FAIL deterministic retry:") for line in lines)
-        # Repair receipt and failed retry both recorded through the one recorder.
-        assert [s["action"] for s in result["state"]["all_steps"]] == ["shell", "edit", "shell"]
+        # Repair action dispatched through the seam (issue #41), and repair
+        # plus failed retry both recorded through the one recorder.
+        repair_dispatch = mock_execute.call_args_list[1][0][0]
+        assert repair_dispatch["action"] == "write"
+        assert "#include <stdio.h>" in repair_dispatch["content"]
+        assert [s["action"] for s in result["state"]["all_steps"]] == ["shell", "write", "shell"]
         assert any("[compile_error]" in e for e in result["state"]["errors"])
 
 

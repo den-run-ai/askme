@@ -866,17 +866,27 @@ class StepReceipt:
         return cls(entry, action, action=action, result=result, truncated_write=truncated_write)
 
     @classmethod
-    def deterministic_repair(cls, file_name, description):
-        """Receipt for the tracked C-header repair exception (issue #41)."""
+    def deterministic_repair(cls, action, result):
+        """Receipt for the #41 compile-repair rule's dispatched action.
+
+        The rule proposes a normal action and the controller dispatches it
+        through the action executor, so ``ok`` reflects the real dispatch
+        result. A successful receipt keeps the human description (the
+        action's ``reasoning``) that downstream task matching reads; a
+        refused dispatch keeps its actionable error output instead."""
+        if result.ok:
+            output = action.get("reasoning", "") or result.output[:100]
+        else:
+            output = result.output[:100]
         entry = {
-            "action": "edit",
-            "arg": file_name,
-            "ok": True,
-            "output": description,
+            "action": action.get("action", ""),
+            "arg": action.get("arg", ""),
+            "ok": result.ok,
+            "output": output,
             "deterministic_repair": True,
         }
         # No model action produced this step: history shows the entry itself.
-        return cls(entry, entry, deterministic="repair")
+        return cls(entry, entry, action=action, result=result, deterministic="repair")
 
     @classmethod
     def deterministic_retry(cls, action, result):
@@ -914,6 +924,7 @@ class StepReceipt:
                 "kind": "compile_include",
                 "file": self.entry["arg"],
                 "description": self.entry["output"],
+                "ok": self.entry["ok"],
             }
         record = {
             "event": "step",

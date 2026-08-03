@@ -9,6 +9,7 @@ import pytest
 
 import askme
 from askme import (
+    ActionExecutor,
     LLMTransportError,
     _run_loop,
     execute,
@@ -945,17 +946,33 @@ class TestExpectedFailureRemoval:
 
 
 class TestCompileRepairTemplates:
-    """E18: narrow deterministic C include repairs."""
+    """E18/issue #41: the narrow C include repair rule proposes a normal
+    action; the workspace mutation happens only through the action executor."""
 
-    def test_try_compile_repair_adds_stdio(self, tmp_path):
+    def test_repair_rule_proposes_a_write_action_without_mutating(self, tmp_path):
+        src = tmp_path / "main.c"
+        original = 'int main(){ printf("hi"); return 0; }\n'
+        src.write_text(original)
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        action = askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c")
+        assert action["action"] == "write"
+        assert action["arg"] == "main.c"
+        assert action["reasoning"] == "Auto-inserted #include <stdio.h>"
+        assert action["content"].startswith("#include <stdio.h>\n")
+        # The rule itself never touches the workspace (issue #41).
+        assert src.read_text() == original
+
+    def test_proposed_action_is_executor_valid_and_repairs_the_file(self, tmp_path):
         src = tmp_path / "main.c"
         src.write_text('int main(){ printf("hi"); return 0; }\n')
         output = "main.c:1:13: error: implicit declaration of function 'printf'"
-        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c")
-        assert repair == ("main.c", "Auto-inserted #include <stdio.h>")
+        action = askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c")
+        result = ActionExecutor(str(tmp_path)).dispatch(action)
+        assert result.ok
         assert src.read_text().startswith("#include <stdio.h>\n")
+        assert 'int main(){ printf("hi"); return 0; }' in src.read_text()
 
-    def test_try_compile_repair_handles_truncated_clang_tail(self, tmp_path):
+    def test_repair_rule_handles_truncated_clang_tail(self, tmp_path):
         src = tmp_path / "fix_me.c"
         src.write_text('int main(){ printf("hi"); return 0; }\n')
         output = (
@@ -963,18 +980,18 @@ class TestCompileRepairTemplates:
             "fix_me.c:1:14: note: include the header <stdio.h> or explicitly provide a declaration for 'printf'\n"
             "1 error generated."
         )
-        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o fix_me fix_me.c")
-        assert repair == ("fix_me.c", "Auto-inserted #include <stdio.h>")
-        assert src.read_text().startswith("#include <stdio.h>\n")
+        action = askme._compile_repair_action(output, str(tmp_path), "cc -o fix_me fix_me.c")
+        assert action["arg"] == "fix_me.c"
+        assert action["content"].startswith("#include <stdio.h>\n")
 
-    def test_flag_disables_repair_before_any_mutation(self, tmp_path):
+    def test_flag_disables_repair_before_any_proposal(self, tmp_path):
         """AGENT_COMPILE_REPAIR=0 is the ablation off arm (issue #41)."""
         src = tmp_path / "main.c"
         original = 'int main(){ printf("hi"); return 0; }\n'
         src.write_text(original)
         output = "main.c:1:13: error: implicit declaration of function 'printf'"
         with patch.object(askme, "COMPILE_REPAIR_ENABLED", False):
-            assert askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c") is None
+            assert askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c") is None
         assert src.read_text() == original
 
     @patch("askme.replan_task", return_value=None)
@@ -1029,39 +1046,44 @@ class TestCompileRepairTemplates:
         run_start = json.loads(log_path.read_text().splitlines()[0])
         assert run_start["compile_repair"] is True
 
-    def test_try_compile_repair_skips_existing_include(self, tmp_path):
+    def test_repair_rule_skips_existing_include(self, tmp_path):
         src = tmp_path / "main.c"
         src.write_text('#include <stdio.h>\nint main(){ printf("hi"); }\n')
         output = "main.c:2:13: error: implicit declaration of function 'printf'"
-        assert askme._try_compile_repair(output, str(tmp_path), "cc -o main main.c") is None
+        assert askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c") is None
 
-    def test_try_compile_repair_skips_non_c_targets(self, tmp_path):
+    def test_repair_rule_skips_non_c_targets(self, tmp_path):
         (tmp_path / "app.py").write_text("print('hi')\n")
         output = "app.py:1: error: implicit declaration of function 'printf'"
-        assert askme._try_compile_repair(output, str(tmp_path), "python3 app.py") is None
+        assert askme._compile_repair_action(output, str(tmp_path), "python3 app.py") is None
 
-    def test_try_compile_repair_skips_ambiguous_sources(self, tmp_path):
+    def test_repair_rule_skips_ambiguous_sources(self, tmp_path):
         (tmp_path / "a.c").write_text("int main(){return 0;}\n")
         (tmp_path / "b.c").write_text("int main(){return 0;}\n")
         output = "error: implicit declaration of function 'printf'"
-        assert askme._try_compile_repair(output, str(tmp_path), "cc -o app") is None
+        assert askme._compile_repair_action(output, str(tmp_path), "cc -o app") is None
 
-    def test_try_compile_repair_prefers_diagnostic_filename(self, tmp_path):
+    def test_repair_rule_prefers_diagnostic_filename(self, tmp_path):
         a = tmp_path / "a.c"
         b = tmp_path / "b.c"
         a.write_text("int a(void){return 0;}\n")
         b.write_text('int b(void){ printf("hi"); return 0; }\n')
         output = "b.c:1:14: error: implicit declaration of function 'printf'"
-        repair = askme._try_compile_repair(output, str(tmp_path), "cc -o app a.c")
-        assert repair == ("b.c", "Auto-inserted #include <stdio.h>")
+        action = askme._compile_repair_action(output, str(tmp_path), "cc -o app a.c")
+        assert action["arg"] == "b.c"
+        assert action["content"].startswith("#include <stdio.h>\n")
         assert "#include <stdio.h>" not in a.read_text()
-        assert b.read_text().startswith("#include <stdio.h>\n")
 
     @patch("askme.execute")
     @patch("askme.ask_llm")
-    def test_run_loop_records_repair_and_retry(self, mock_llm, mock_execute, tmp_path):
+    def test_run_loop_dispatches_repair_through_the_action_seam(
+        self, mock_llm, mock_execute, tmp_path
+    ):
+        """The repair write and the scaffold retry both flow through the
+        execute() seam and the one recorder; nothing bypasses it (issue #41)."""
         src = tmp_path / "main.c"
-        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        original = 'int main(){ printf("hi"); return 0; }\n'
+        src.write_text(original)
         mock_llm.side_effect = [
             {"tasks": ["compile main.c"]},
             {"action": "shell", "arg": "cc -o main main.c"},
@@ -1073,14 +1095,123 @@ class TestCompileRepairTemplates:
                 "output": "main.c:1:13: error: implicit declaration of function 'printf'",
                 "error_type": "compile_error",
             },
+            {"ok": True, "output": "Wrote main.c"},
             {"ok": True, "output": "(no output)"},
         ]
         result = _run_loop("compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
         assert result["status"] == "complete"
-        assert src.read_text().startswith("#include <stdio.h>\n")
+        # With the seam mocked, no direct mutation may reach the workspace.
+        assert src.read_text() == original
+        repair_dispatch = mock_execute.call_args_list[1][0][0]
+        assert repair_dispatch["action"] == "write"
+        assert repair_dispatch["arg"] == "main.c"
+        assert repair_dispatch["content"].startswith("#include <stdio.h>\n")
         all_steps = result["state"]["all_steps"]
-        assert any(s.get("deterministic_repair") for s in all_steps)
+        repair_steps = [s for s in all_steps if s.get("deterministic_repair")]
+        assert [s["action"] for s in repair_steps] == ["write"]
+        assert repair_steps[0]["ok"] is True
+        assert repair_steps[0]["output"] == "Auto-inserted #include <stdio.h>"
         assert any(s.get("deterministic_retry") and s.get("ok") for s in all_steps)
+
+    @patch("askme.execute")
+    @patch("askme.ask_llm")
+    def test_refused_repair_dispatch_records_a_failed_receipt(
+        self, mock_llm, mock_execute, tmp_path, capsys
+    ):
+        """A repair whose dispatched write fails mutates nothing and triggers
+        no retry, but the failed dispatch is recorded with its real error;
+        the original typed compile error stands."""
+        src = tmp_path / "main.c"
+        original = 'int main(){ printf("hi"); return 0; }\n'
+        src.write_text(original)
+        mock_llm.side_effect = [
+            {"tasks": ["compile main.c"]},
+            {"action": "shell", "arg": "cc -o main main.c"},
+            {"action": "fail", "reasoning": "cannot compile"},
+        ]
+        mock_execute.side_effect = [
+            {
+                "ok": False,
+                "output": "main.c:1:13: error: implicit declaration of function 'printf'",
+                "error_type": "compile_error",
+            },
+            {"ok": False, "output": "disk full", "error_type": "unknown"},
+        ]
+        log_path = tmp_path / "run.jsonl"
+        with (
+            patch("askme.replan_task", return_value=None),
+            patch.object(askme, "RUN_LOG_PATH", str(log_path)),
+        ):
+            result = _run_loop(
+                "compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3
+            )
+        out = capsys.readouterr().out
+        assert result["status"] == "exhausted"
+        assert "Deterministic repair failed" in out
+        all_steps = result["state"]["all_steps"]
+        failed_repairs = [s for s in all_steps if s.get("deterministic_repair")]
+        assert [s["ok"] for s in failed_repairs] == [False]
+        assert failed_repairs[0]["output"] == "disk full"
+        assert not any(s.get("deterministic_retry") for s in all_steps)
+        assert any(e.startswith("[compile_error]") for e in result["state"]["errors"])
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        repair_events = [e for e in events if e["event"] == "deterministic_repair"]
+        assert [e["ok"] for e in repair_events] == [False]
+        assert repair_events[0]["description"] == "disk full"
+
+    def test_repair_targets_the_referent_of_a_leaf_symlink(self, tmp_path):
+        """The proposed write must land on the symlink's referent — where the
+        legacy through-symlink write landed — so the repository's symlink
+        layout survives the repair."""
+        (tmp_path / "src").mkdir()
+        real = tmp_path / "src" / "main.c"
+        real.write_text('int main(){ printf("hi"); return 0; }\n')
+        link = tmp_path / "main.c"
+        link.symlink_to(Path("src") / "main.c")
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        action = askme._compile_repair_action(output, str(tmp_path), "cc -o main main.c")
+        assert action["arg"] == str(Path("src") / "main.c")
+        result = ActionExecutor(str(tmp_path)).dispatch(action)
+        assert result.ok
+        assert link.is_symlink()
+        assert real.read_text().startswith("#include <stdio.h>\n")
+
+    def test_repair_skips_a_broken_symlink_candidate(self, tmp_path):
+        """A dangling leaf symlink cannot be repaired at a referent."""
+        link = tmp_path / "main.c"
+        link.symlink_to(Path("src") / "main.c")
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        assert askme._compile_repair_action(output, str(tmp_path), "cc main.c") is None
+
+    def test_repair_skips_an_undecodable_candidate(self, tmp_path):
+        """A non-UTF-8 candidate is skipped, never crashed on."""
+        (tmp_path / "main.c").write_bytes(b"\xff\xfe int main(){}\n")
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        assert askme._compile_repair_action(output, str(tmp_path), "cc main.c") is None
+
+    def test_repair_inserts_after_existing_includes(self, tmp_path):
+        """A candidate with other includes gets the fix appended to that
+        block, not prepended above it."""
+        (tmp_path / "main.c").write_text(
+            '#include <string.h>\nint main(){ printf("hi"); return 0; }\n'
+        )
+        output = "main.c:2:13: error: implicit declaration of function 'printf'"
+        action = askme._compile_repair_action(output, str(tmp_path), "cc main.c")
+        assert action["content"].startswith("#include <string.h>\n#include <stdio.h>\n")
+
+    def test_repair_referent_outside_the_workspace_keeps_an_absolute_arg(self, tmp_path):
+        """A referent outside the workspace cannot be spelled relative."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        real = outside / "real.c"
+        real.write_text('int main(){ printf("hi"); return 0; }\n')
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "main.c").symlink_to(real)
+        output = "main.c:1:13: error: implicit declaration of function 'printf'"
+        action = askme._compile_repair_action(output, str(work), "cc main.c")
+        assert action["arg"] == str(real)
+        assert action["content"].startswith("#include <stdio.h>\n")
 
     @patch("askme.execute")
     @patch("askme.ask_llm")
@@ -1105,6 +1236,7 @@ class TestCompileRepairTemplates:
                 "output": "fix_me.c:1:13: error: implicit declaration of function 'printf'",
                 "error_type": "compile_error",
             },
+            {"ok": True, "output": "Wrote fix_me.c"},
             {"ok": True, "output": "(no output)"},
         ]
         result = _run_loop(

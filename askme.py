@@ -1989,11 +1989,17 @@ def _compile_repair_candidates(error_output, cmd, working_dir):
     return c_files if len(c_files) == 1 else []
 
 
-def _try_compile_repair(error_output, working_dir, cmd, enabled=None):
-    """Apply a narrow deterministic source repair. Returns (file, desc) or None.
+def _compile_repair_action(error_output, working_dir, cmd, enabled=None):
+    """Propose a normal write action for a known C include diagnostic, or None.
 
-    ``enabled`` is the run's resolved #41 ablation arm; None keeps the
-    module-level compatibility surface."""
+    The #41 repair-rule boundary: this function never mutates the workspace.
+    It inspects the unique candidate source and, when a known
+    missing-include diagnostic matches, returns an ordinary full-file write
+    action — workspace-relative ``arg``, repaired ``content``, and the human
+    description in ``reasoning`` — for the controller to dispatch through
+    the action executor and record like any other step. ``enabled`` is the
+    run's resolved ablation arm; None keeps the module-level compatibility
+    surface."""
     if not (COMPILE_REPAIR_ENABLED if enabled is None else enabled):
         return None
     for pattern in _COMPILE_REPAIR_PATTERNS:
@@ -2007,7 +2013,21 @@ def _try_compile_repair(error_output, working_dir, cmd, enabled=None):
         if len(candidates) != 1:
             return None
         f = candidates[0]
-        text = f.read_text()
+        if f.is_symlink():
+            # The atomic write replaces the named leaf, so a symlinked
+            # candidate must be repaired at its referent — exactly where the
+            # legacy through-symlink write landed — or the repository's
+            # symlink layout would be silently destroyed.
+            try:
+                f = f.resolve(strict=True)
+            except OSError:
+                return None
+        try:
+            text = f.read_text()
+        except (OSError, UnicodeDecodeError):
+            # An unreadable or non-UTF-8 candidate cannot be repaired; the
+            # compile error surfaces to the model as a typed failure.
+            return None
         include = pattern["fix_include"]
         if include in text:
             return None
@@ -2017,8 +2037,16 @@ def _try_compile_repair(error_output, working_dir, cmd, enabled=None):
             if line.startswith("#include"):
                 insert_idx = j + 1
         lines.insert(insert_idx, include)
-        f.write_text("\n".join(lines))
-        return (f.name, f"Auto-inserted {include}")
+        try:
+            arg = str(f.relative_to(working_dir))
+        except ValueError:
+            arg = str(f)
+        return {
+            "action": "write",
+            "arg": arg,
+            "content": "\n".join(lines),
+            "reasoning": f"Auto-inserted {include}",
+        }
     return None
 
 
@@ -3558,42 +3586,58 @@ class _RunController:
         action, act = ctx.action, ctx.act
         etype = result.error_type or "unknown"
         if act == "shell" and etype == "compile_error":
-            repair = _try_compile_repair(
+            repair_action = _compile_repair_action(
                 result.output, self.working_dir, action.get("arg", ""), enabled=self.compile_repair
             )
-            if repair:
-                # The deterministic source edit is a successful targeted fix,
-                # so it breaks an armed rewrite streak just like a
-                # model-selected edit.
-                self.run_state.break_rewrite_streak()
-                self._emit(f"  Deterministic repair: {repair[1]} in {repair[0]}")
-                # The repair mutated the workspace outside the action
-                # handlers (the tracked #41 exception); its receipt and the
-                # scaffold retry still go through the one recorder.
-                attempt.steps.append(
+            if repair_action is not None:
+                # The repair rule only proposes an action (issue #41); the
+                # mutation happens through the ordinary action seam and the
+                # one recorder, exactly like a model-selected step.
+                repair_result = self._dispatch(repair_action)
+                if repair_result.ok:
+                    # The deterministic source fix is a successful targeted
+                    # repair, so it breaks an armed rewrite streak just like
+                    # a model-selected edit.
+                    self.run_state.break_rewrite_streak()
+                    self._emit(
+                        f"  Deterministic repair: {repair_action['reasoning']} "
+                        f"in {Path(repair_action['arg']).name}"
+                    )
+                    attempt.steps.append(
+                        self.recorder.record(
+                            StepReceipt.deterministic_repair(repair_action, repair_result),
+                            ctx.task_index,
+                            ctx.step,
+                        )
+                    )
+
+                    retry_result = self._dispatch(action)
+                    retry_entry = self.recorder.record(
+                        StepReceipt.deterministic_retry(action, retry_result),
+                        ctx.task_index,
+                        ctx.step,
+                        wall_s=round(self._clock() - ctx.started, 2),
+                    )
+                    if retry_result.ok:
+                        self._emit(f"  -> OK deterministic retry: {retry_result.output[:80]}")
+                        attempt.steps.append(retry_entry)
+                        attempt.use_think = False
+                        attempt.reasoning_trigger = "executor"
+                        return _StepFlow.NEXT_STEP
+                    self._emit(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
+                    result = retry_result
+                    etype = result.error_type or "unknown"
+                else:
+                    # A refused repair dispatch mutated nothing, but the
+                    # attempt itself is recorded with its real failed result
+                    # so history/JSONL show the dispatch; the original typed
+                    # compile error stands for recovery.
+                    self._emit(f"  Deterministic repair failed: {repair_result.output[:80]}")
                     self.recorder.record(
-                        StepReceipt.deterministic_repair(repair[0], repair[1]),
+                        StepReceipt.deterministic_repair(repair_action, repair_result),
                         ctx.task_index,
                         ctx.step,
                     )
-                )
-
-                retry_result = self._dispatch(action)
-                retry_entry = self.recorder.record(
-                    StepReceipt.deterministic_retry(action, retry_result),
-                    ctx.task_index,
-                    ctx.step,
-                    wall_s=round(self._clock() - ctx.started, 2),
-                )
-                if retry_result.ok:
-                    self._emit(f"  -> OK deterministic retry: {retry_result.output[:80]}")
-                    attempt.steps.append(retry_entry)
-                    attempt.use_think = False
-                    attempt.reasoning_trigger = "executor"
-                    return _StepFlow.NEXT_STEP
-                self._emit(f"  -> FAIL deterministic retry: {retry_result.output[:80]}")
-                result = retry_result
-                etype = result.error_type or "unknown"
 
         err_output = result.output[:100]
         hint = _RECOVERY_HINTS.get(etype)
