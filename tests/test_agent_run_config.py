@@ -10,6 +10,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from _test_support import mock_response, mock_response_raw
 
 import askme
 from askme import (
@@ -126,6 +127,70 @@ class TestConfigResolution:
         config = RunConfig.from_env({"AGENT_FINAL_VALIDATE": "always", "AGENT_COMPILE_REPAIR": "0"})
         assert config.final_validate == "always"
         assert config.compile_repair is False
+
+    @pytest.mark.parametrize(
+        ("override", "message"),
+        [
+            ({"timeout": 0}, "timeout"),
+            ({"timeout": True}, "timeout"),
+            ({"replan_timeout": 0}, "replan_timeout"),
+            ({"replan_timeout": False}, "replan_timeout"),
+            ({"max_retries": -1}, "max_retries"),
+            ({"max_retries": True}, "max_retries"),
+            ({"step_token_budget": 0}, "step_token_budget"),
+            ({"step_write_tokens": False}, "step_write_tokens"),
+            ({"reasoning_token_floors": (1, 2)}, "reasoning_token_floors"),
+            ({"reasoning_token_floors": (1, 2, 0)}, "reasoning_token_floors"),
+            ({"reasoning_token_floors": (1, 2, True)}, "reasoning_token_floors"),
+        ],
+    )
+    def test_invalid_resolved_llm_request_policy_is_rejected(self, tmp_path, override, message):
+        with pytest.raises(ValueError, match=message):
+            askme._RunController(
+                "greet", str(tmp_path), config=RunConfig(llm=_settings(**override))
+            )
+
+    @pytest.mark.parametrize(
+        "name", ["PLANNER_MAX_TOKENS", "TASK_REPLAN_MAX_TOKENS", "VALIDATION_MAX_TOKENS"]
+    )
+    def test_invalid_module_capability_budget_is_rejected(self, tmp_path, name):
+        with patch.object(askme, name, 0):
+            with pytest.raises(ValueError, match=name.lower()):
+                askme._RunController("greet", str(tmp_path))
+
+    @pytest.mark.parametrize(
+        ("source", "provenance"),
+        [
+            ("pinned", "pinned_config"),
+            ("injected", "injected_client_settings"),
+        ],
+    )
+    def test_selected_llm_settings_ignore_invalid_module_fallback(
+        self, tmp_path, source, provenance
+    ):
+        settings = _settings(
+            timeout=30,
+            replan_timeout=60,
+            max_retries=1,
+            step_token_budget=256,
+            step_write_tokens=512,
+            reasoning_token_floors=(1024, 1536, 2048),
+        )
+        kwargs = {"config": RunConfig(llm=settings)}
+        if source == "injected":
+            client = ScriptedClient([])
+            client.settings = settings
+            kwargs = {"dependencies": _quiet_deps(llm_client=client)}
+
+        with (
+            patch.object(askme, "LLM_TIMEOUT", 0),
+            patch.object(askme, "STEP_TOKENS", 0),
+        ):
+            metadata = askme._RunController("greet", str(tmp_path), **kwargs).config_metadata()
+
+        assert metadata["llm_provenance"] == provenance
+        assert metadata["timeout_s"] == 30
+        assert metadata["budgets"]["step_tokens"] == 256
 
     def test_pinned_final_validate_runs_without_touching_globals(self, tmp_path):
         """conftest disables validation globally; the pinned run still runs it."""
@@ -309,6 +374,71 @@ class TestConfigHash:
         assert changed["api"] == override.get("api", base["api"])
         assert changed["timeout_s"] == override.get("timeout", base["timeout_s"])
 
+    @pytest.mark.parametrize(
+        ("override", "section", "key", "expected"),
+        [
+            ({"replan_timeout": 45}, "timeouts_s", "planner_replan", 45),
+            ({"max_retries": 4}, "retry_budgets", "planner", 4),
+            ({"step_token_budget": 333}, "budgets", "step_tokens", 333),
+            ({"step_write_tokens": 777}, "budgets", "step_write_tokens", 777),
+            (
+                {"reasoning_token_floors": (111, 222, 333)},
+                "budgets",
+                "reasoning_token_floors",
+                {"low": 111, "medium": 222, "high": 333},
+            ),
+        ],
+    )
+    def test_request_policy_and_capability_budgets_reach_hash(
+        self, tmp_path, override, section, key, expected
+    ):
+        base = self._metadata(tmp_path, config=RunConfig(llm=_settings()))
+        changed = self._metadata(tmp_path, config=RunConfig(llm=_settings(**override)))
+        assert changed[section][key] == expected
+        assert changed["config_hash"] != base["config_hash"]
+
+    def test_reasoning_floor_is_recorded_and_applied_to_http_budget(self, tmp_path):
+        settings = _settings(
+            backend="openrouter",
+            api="https://example.test/v1/chat/completions",
+            model="vendor/reasoner",
+            provider="ProviderA",
+            reasoning_effort="low",
+            step_token_budget=16,
+            reasoning_token_floors=(111, 222, 333),
+        )
+        bodies = []
+
+        def post(url, json=None, headers=None, timeout=None):
+            bodies.append(json)
+            reply = {"tasks": ["greet"]} if len(bodies) == 1 else {"action": "done"}
+            return mock_response(reply)
+
+        with patch("askme.requests.post", side_effect=post):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                config=RunConfig(llm=settings, final_validate="0"),
+                dependencies=_quiet_deps(),
+            )
+
+        assert result["status"] == "complete"
+        assert bodies[1]["max_tokens"] == 111  # requested step budget 16, low floor 111
+        assert result["config"]["budgets"]["reasoning_token_floors"] == {
+            "low": 111,
+            "medium": 222,
+            "high": 333,
+        }
+
+    def test_final_validation_budget_reaches_hash(self, tmp_path):
+        base = self._metadata(tmp_path)
+        with patch.object(askme, "VALIDATION_MAX_TOKENS", askme.VALIDATION_MAX_TOKENS + 1):
+            changed = self._metadata(tmp_path)
+        assert changed["budgets"]["final_validation_max_tokens"] == (
+            base["budgets"]["final_validation_max_tokens"] + 1
+        )
+        assert changed["config_hash"] != base["config_hash"]
+
     def test_llm_provenance_marks_opaque_injected_clients(self, tmp_path):
         """PR #72 review: a duck-typed client without settings cannot borrow
         the module snapshot's identity silently — the payload labels it."""
@@ -433,3 +563,138 @@ class TestConfigClosure:
         assert by_expect["plan"] == original["planner"]
         assert by_expect["action"] == original["step"]
         assert by_expect["task_replan"] == original["replan"]
+
+    def test_default_run_freezes_transport_policy_and_all_call_budgets(self, tmp_path):
+        """The compatibility facade uses one construction-time snapshot.
+
+        Mutating every public LLM global after the first HTTP request cannot
+        redirect or resize later requests, and the recorded config describes
+        the values that actually reached the transport.
+        """
+        frozen = {
+            "api": "https://frozen.example/v1/chat/completions",
+            "model": "vendor/model-a",
+            "provider": "ProviderA",
+            "api_key": "key-a",
+            "timeout": 31,
+            "replan_timeout": 47,
+            "max_retries": 1,
+            "step_tokens": 91,
+            "step_write_tokens": 93,
+            "planner_tokens": 95,
+            "task_replan_tokens": 97,
+            "validation_tokens": 99,
+        }
+        replies = [
+            mock_response({"tasks": ["greet"]}),
+            mock_response_raw("not json"),  # executor retry proves its budget stayed at one
+            mock_response({"action": "fail", "reasoning": "cannot"}),
+            mock_response({"task": ""}),  # rejected task-local replan
+            mock_response({"tasks": ["create greeting in hi.txt"]}),
+            mock_response({"action": "write", "arg": "hi.txt", "content": "hi"}),
+            mock_response({"action": "done"}),
+            mock_response({"valid": True}),
+        ]
+        calls = []
+
+        def post(url, json=None, headers=None, timeout=None):
+            calls.append(
+                {
+                    "url": url,
+                    "model": json["model"],
+                    "provider": json.get("provider"),
+                    "authorization": (headers or {}).get("Authorization"),
+                    "timeout": timeout,
+                    "max_tokens": json["max_tokens"],
+                }
+            )
+            if len(calls) == 1:
+                # These mutations happen after run_start/config hashing but
+                # before every executor/replanner/validator request.
+                askme.API = "https://mutated.example/v1/chat/completions"
+                askme.MODEL = "vendor/model-b"
+                askme.OPENROUTER_PROVIDER = "ProviderB"
+                askme.OPENROUTER_API_KEY = "key-b"
+                askme.OPENROUTER_ALLOW_FALLBACKS = True
+                askme.OPENROUTER_REQUIRE_PARAMETERS = False
+                askme.LLM_TIMEOUT = 1
+                askme.LLM_TIMEOUT_REPLAN = 2
+                askme.MAX_LLM_RETRIES = 0
+                askme.STEP_TOKENS = 1
+                askme.STEP_WRITE_TOKENS = 1
+                askme.PLANNER_MAX_TOKENS = 1
+                askme.TASK_REPLAN_MAX_TOKENS = 1
+                askme.VALIDATION_MAX_TOKENS = 1
+            return replies.pop(0)
+
+        with (
+            patch.multiple(
+                askme,
+                LLM_BACKEND="openrouter",
+                API=frozen["api"],
+                MODEL=frozen["model"],
+                OPENROUTER_PROVIDER=frozen["provider"],
+                OPENROUTER_API_KEY=frozen["api_key"],
+                OPENROUTER_ALLOW_FALLBACKS=False,
+                OPENROUTER_REQUIRE_PARAMETERS=True,
+                OPENROUTER_REASONING_EFFORT="",
+                LLM_TIMEOUT=frozen["timeout"],
+                LLM_TIMEOUT_REPLAN=frozen["replan_timeout"],
+                MAX_LLM_RETRIES=frozen["max_retries"],
+                STEP_TOKENS=frozen["step_tokens"],
+                STEP_WRITE_TOKENS=frozen["step_write_tokens"],
+                PLANNER_MAX_TOKENS=frozen["planner_tokens"],
+                TASK_REPLAN_MAX_TOKENS=frozen["task_replan_tokens"],
+                VALIDATION_MAX_TOKENS=frozen["validation_tokens"],
+            ),
+            patch("askme.requests.post", side_effect=post),
+        ):
+            result = run_result(
+                "implement greeting",
+                working_dir=str(tmp_path),
+                config=RunConfig(
+                    reasoning_policy="off",
+                    final_validate="always",
+                    max_replans=2,
+                    max_steps=2,
+                ),
+            )
+
+        assert result["status"] == "complete"
+        assert not replies
+        assert {call["url"] for call in calls} == {frozen["api"]}
+        assert {call["model"] for call in calls} == {frozen["model"]}
+        assert {call["authorization"] for call in calls} == {f"Bearer {frozen['api_key']}"}
+        assert {tuple(call["provider"]["order"]) for call in calls} == {(frozen["provider"],)}
+        assert all(call["provider"]["allow_fallbacks"] is False for call in calls)
+        assert all(call["provider"]["require_parameters"] is True for call in calls)
+        assert [call["timeout"] for call in calls] == [31, 31, 31, 31, 47, 31, 31, 31]
+        assert [call["max_tokens"] for call in calls] == [95, 91, 91, 97, 95, 91, 91, 99]
+
+        config = result["config"]
+        assert config["api"] == frozen["api"]
+        assert config["model"] == frozen["model"]
+        assert config["provider"] == frozen["provider"]
+        assert config["timeouts_s"] == {
+            "planner_initial": 31,
+            "planner_replan": 47,
+            "executor": 31,
+            "task_replan": 31,
+            "final_validation": 31,
+        }
+        assert config["retry_budgets"] == {
+            "planner": 1,
+            "executor": 1,
+            "task_replan": 0,
+            "final_validation": 0,
+        }
+        assert config["budgets"] == {
+            "step_tokens": 91,
+            "step_write_tokens": 93,
+            "planner_max_tokens": 95,
+            "task_replan_max_tokens": 97,
+            "final_validation_max_tokens": 99,
+            "llm_max_retries": 1,
+            "reasoning_token_floors": {"low": 1024, "medium": 1536, "high": 2048},
+        }
+        assert frozen["api_key"] not in json.dumps(config)
