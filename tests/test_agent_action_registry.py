@@ -304,13 +304,14 @@ class TestRecorderCounterSemantics:
                 "output": "main.c:1:13: error: implicit declaration of function 'printf'",
                 "error_type": "compile_error",
             },
+            {"ok": True, "output": "Wrote main.c"},  # dispatched repair write
             {"ok": True, "output": "(no output)"},
         ]
         result = _run_loop("compile main.c", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
         state = result["state"]
         assert result["status"] == "complete"
         # One model shell dispatched; repair + retry receipts recorded on top.
-        assert [s["action"] for s in state["all_steps"]] == ["shell", "edit", "shell"]
+        assert [s["action"] for s in state["all_steps"]] == ["shell", "write", "shell"]
         assert state["selected_steps"] == 2  # shell + done
         assert state["executed_steps"] == 1
         assert state["skipped_steps"] == 0
@@ -377,6 +378,7 @@ class TestRecorderJsonlProjection:
                 "output": "main.c:1:13: error: implicit declaration of function 'printf'",
                 "error_type": "compile_error",
             },
+            {"ok": True, "output": "Wrote main.c"},  # dispatched repair write
             {"ok": True, "output": "(no output)"},
         ]
         result, events = self._events(
@@ -393,6 +395,7 @@ class TestRecorderJsonlProjection:
                 "kind": "compile_include",
                 "file": "main.c",
                 "description": "Auto-inserted #include <stdio.h>",
+                "ok": True,
             }
         ]
         retries = [e for e in events if e["event"] == "step" and e.get("deterministic_retry")]
