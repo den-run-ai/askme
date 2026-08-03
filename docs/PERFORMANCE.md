@@ -6,7 +6,68 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 **Assertion caveat (2026-07-10).** Historical integration runs below used the assertions present at the time. Several build/repair tests verified file content without requiring `agent_complete` and independently executing the final artifact. Those tests now require both completion and a deterministic execution postcondition. Treat older pytest pass counts as harness-history signals, not strict end-to-end success rates.
 
+**Build caveat (2026-08-03).** All local (M1) entries below through 2026-05-03 were measured on llama.cpp build `a702f395` (2026-04-25). The machine has been running build 9618 (`c34b92235`, master 2026-06-13) since 2026-06-12 — it adds the #23468 cache-reuse reliability fix and Gemma 4 MTP support. The E23 entry below is the first benchmark on the current stack and the new local reference; treat all older local numbers as pre-b9618 history.
+
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
+
+## E23 QAT Baseline — 2026-08-03, Local (build 9618, official E4B QAT Q4_0)
+
+First local benchmark on the current stack (E23): build 9618 `c34b92235`, official post-refresh **QAT Q4_0** (`google/gemma-4-E4B-it-qat-q4_0-gguf`, 5.15 GB, downloaded 2026-08-03), flags per gemma4-setup.md incl. `--reasoning off`, MTP off, default (heuristic) step policy. 3 trials per test via `bench_harness.py`. Logs: `/tmp/bench_qat_{easy,medium,hard}_20260803/`.
+
+**Reasoning probe (pre-bench).** Even the fresh post-refresh QAT template is detected as `thinking = 1` under `--reasoning auto`. A trivial JSON prompt stayed clean, but a planner-style prompt emitted 371 chars of `reasoning_content` (152 completion tokens consumed). `--reasoning off` is a **permanent requirement** for AskMe, not a stale-GGUF artifact.
+
+### Easy (3 trials each, vs 2026-04-26 Q4_K_M baseline on `a702f395`)
+
+| Test | Pass | Wall (median) | Apr baseline | Replans | Notes |
+|---|---|---|---|---|---|
+| `create_and_read_file` | **1/3** | 95.5s (15.0–137.4) | 33.7s, 3/3 | 2 full in each failed trial | Both failures: all steps succeeded, deliverable correct, model never emitted `done` — duplicate-action loops (5–6 skips) until exhaustion |
+| `shell_and_write` | 3/3 | 15.8s (15.4–17.9) | 20.1s | 0 | −21%, clean |
+| `multi_step_build` | 3/3 | 43.8s (35.6–53.7) | 118.7s | **0** (baseline: 1 every trial) | −63%, zero replans, zero thinking retries |
+
+### Medium (3 trials each, vs 2026-04-26 Q4_K_M baseline)
+
+| Test | Pytest | Agent | Wall (median) | Apr baseline | Replans | Notes |
+|---|---|---|---|---|---|---|
+| `fix_python_syntax_error` | **0/3** | 3/3 complete | 43.8s (42.9–52.8) | 124.8s, 3/3 | 0 | **Content drift, not agent failure**: fixed the syntax but rewrote `print("hello"` → `print("Hello")` in all 3 trials; program runs, case-sensitive postcondition (`"hello" in stdout`) fails. Root cause: whole-file `write` rewrite instead of minimal `edit` on first pass |
+| `fix_missing_include` | 3/3 | 3/3 | **15.7s** (15.68–15.71) | **609.1s** | 0 | **39× faster than the historical local bottleneck.** 2 steps, 4 LLM calls, zero failed edits, zero thinking retries, near-zero variance |
+| `create_missing_file_then_use` | 3/3 | 3/3 | 13.3s (13.2–226.6) | 29.0s | 1 in outlier trial | Trial 1 outlier (226.6s) shows the same done-emission loop pattern before recovering |
+
+### Hard (3 trials each, vs 2026-05-03 Q4_K_M baseline)
+
+| Test | Pass | Wall (median) | May baseline | Replans (full) | Local replans | Thinking retries |
+|---|---|---|---|---|---|---|
+| `replan_build_with_dependency` | 3/3 | **376.9s** (303.3–422.3) | 903.7s | 0 (0–2) | 2 per trial, **6/6 ok** | 2 (0–3) vs 6–7 |
+| `replan_fix_wrong_command` | 3/3 | **26.9s** (17.0–36.1) | 79.6s | 0 (0–1) | 0–1 | 0 |
+| `replan_multi_step_recovery` | 3/3 | **54.8s** (34.3–116.9) | 88.0s | 0 (0–1) | 0–1 | 0 |
+
+**Hard: 9/9 pytest, 9/9 agent complete** — same pass rate as the May baseline at −38% to −66% wall time. E11 local replans went 6/6 on `build_with_dependency`. Thinking retries collapsed from 6–7 per `build_with_dependency` trial to 0–3.
+
+### Findings
+
+1. **QAT transforms error-recovery tests.** `fix_missing_include` collapses 609s → 15.7s with zero recovery machinery invoked; `multi_step_build` loses its every-trial replan. The bad-edit-JSON/bad-planning failure classes that E03/E05/E06/E11 were built to absorb largely do not fire on QAT weights (0 thinking retries anywhere in easy+medium).
+2. **New dominant failure class: done-emission loops.** 3 of 5 pytest failures are "work done correctly, `done` never emitted, duplicate-skip until exhausted" — and it extends beyond edits to reads/writes. Recorded as dated evidence on the E20 and E07 dispositions; per the issue #68 design (repetition is never acceptance, exhaustion is terminal) these runs correctly stay `exhausted`, and the sanctioned lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`) — this bench ran the default heuristic arm.
+3. **New failure class: content drift on rewrite.** QAT prefers whole-file `write` over minimal `edit` for the first fix and takes liberties with content (capitalization). Systematic (3/3). An agent asked to fix an error should preserve program semantics — a genuine model-behavior regression; motivates a prompt nudge toward `edit` for fixes and the goal-output arm of E07.
+4. Suite scorecard: easy 7/9, medium 6/9, hard 9/9 pytest (agent-complete 25/27). The Apr/May Q4_K_M baseline was 27/27 — but at 1.6–39× the wall time on the tests that matter.
+
+### Verdict
+
+**QAT Q4_0 promoted to primary model (2026-08-03).** Every one of the 5 pytest failures is one of the two identified behavioral quirks, both recorded in EXPERIMENTS.md dispositions (E20/E07) and ARCHITECTURE.md Current Constraints, while the wall-time and reliability gains on agentic workloads are 1.6–39×. Q4_K_M stays on disk as legacy fallback.
+
+## MTP + Reasoning-Default Smoke Test — 2026-08-03, Local (build 9618 `c34b92235`)
+
+Three-prompt, single-pass smoke test of Gemma 4 MTP self-speculation: E4B Q4_K_M + official 98.7 MB assistant GGUF (`--spec-type draft-mtp`), 4K ctx, q4_0 KV. Not an AskMe evaluation — it establishes that the drafter loads and runs on b9618, and prices the current speedup.
+
+| Configuration | Decode | vs baseline |
+|---|---|---|
+| No MTP | 13.61 tok/s | baseline |
+| MTP `--spec-draft-n-max 1` | 11.84 tok/s | −13.0% |
+| MTP `--spec-draft-n-max 3` | 13.24 tok/s | −2.7% |
+
+MTP is currently a small loss on M1: draft verification runs at exactly the batch sizes (4–16) where the Metal mul_mat path is unoptimized (llama.cpp [#25250](https://github.com/ggml-org/llama.cpp/issues/25250), ~2x headroom), and there is no adaptive n-max yet ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768)). Keep MTP off; revisit via E24 when either lands. (The 13.61 tok/s baseline vs the ~7 tok/s cited elsewhere reflects 4K-ctx smoke-test conditions vs 16K agentic load — not a contradiction.)
+
+**New failure mode — reasoning auto-detection.** b9618's `--reasoning` flag defaults to `auto` and detects the installed 2026-04-06 GGUF's old chat template as thinking-capable. With AskMe-sized token budgets (~192 for actions), the allowance frequently drained into `reasoning_content`, returning empty or truncated final JSON — a server-side confound on top of every local scaffold metric. Mitigation: `--reasoning off` (now in gemma4-setup.md's launch command). Root-fix hope disproven same day: the post-refresh QAT GGUF also triggers `thinking = 1` under `auto` (see the E23 QAT Baseline entry above) — the flag is permanent.
+
+Offline unit suite on the same date: 448 passed, 31 deselected in 35.1s.
 
 ## E21 gpt-oss-20b Effort-Cell Wiring — 2026-08-02
 

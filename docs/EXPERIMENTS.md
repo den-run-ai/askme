@@ -32,6 +32,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | Run | ID  | Experiment                                              | Wave | Priority | Effort | Status   |
 |-----|-----|---------------------------------------------------------|------|----------|--------|----------|
 | 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
+| —   | E23 | Local revision-3 baseline: QAT Q4_0, `--reasoning off`  | 1    | P0       | S      | done     |
 | —   | E21 | gpt-oss-20b low/med/high effort as CI/prototyping model | 1    | P1       | S      | running  |
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
 | 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | done     |
@@ -45,16 +46,28 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | done     |
 | 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | done     |
 | 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | removed  |
-| 13  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
+| 13  | E09 | Model-swap trials: 12B QAT, Q8_0 (QAT Q4_0 done in E23) | 3    | P1       | S      | planned  |
 | 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
 | 15  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
 | 16  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
 | —   | E22 | C-header compile-repair ablation (issue #41)            | 4    | P1       | S      | planned  |
 | 17  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
 | 18  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
+| —   | E24 | MTP A/B on E4B (gated on upstream Metal fixes)          | 4    | P2       | S      | planned  |
 | 19  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
+
+Updated 2026-08-03 after the upstream/status audit and the E23 QAT bench (see [gemma4-setup.md](gemma4-setup.md)). Prior updates: 2026-05-03 (experience.md qualitative runs), 2026-04-26 (E05/E06 rerun analysis).
+
+2026-08-03 changes:
+
+- **E23 executed (P0, Wave 1) — new local reference established.** The local binary had silently changed on 2026-06-12 (`a702f395` → `c34b92235` b9618, adding the #23468 cache fix and MTP support) and the installed GGUF (2026-04-06) predated Google's 2026-07-15 weight refresh, so no valid local baseline existed for the revision-3 scaffold. E23 benched the official post-refresh QAT Q4_0 across all three suites — QAT is now the primary model. `--reasoning off` is verified permanent: even the post-refresh template auto-detects as thinking-capable and drains ~192-token action budgets into `reasoning_content`.
+- **E02 repriced down.** Its hypothesis assumed #21468 kept every system-prompt token re-processing on every call. Cache reuse has been solid since #23468 (in b9618): warm calls reuse the prefix, so prompt-shrink saves mostly cold-call and completion-side tokens plus planner-budget headroom (the E14 gate). Still worth doing, but the "linear speedup across every call" claim is dead.
+- **E03 approach confirmed by upstream inaction.** #22396 (`--json-schema` broken for Gemma 4) was stale-closed 2026-07-05 without a fix, with a re-regression reported in May. Client-side JSON repair remains the durable approach. Retest grammar-based output only after a rebuild past the master PEG overhaul (#24869 et al.).
+- **E09 narrowed.** QAT Q4_0 was candidate 1 and is consumed by E23; remaining candidates are Gemma 4 12B Unified QAT (~6.98 GB, strongest quality option on 16 GB) and Q8_0. No small-MoE Gemma 4 exists; 26B-A4B remains off the 16 GB shortlist.
+- **QAT shifts the failure mix.** The recovery machinery (E03/E05/E06/E11) barely fires on QAT weights; the dominant local failure class is now done-emission loops (correct deliverable, no `done`, duplicate skips to exhaustion) plus a new content-drift class on whole-file rewrites. Dated evidence recorded on the E20 and E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal — the sanctioned lever to A/B against this class is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`), which steers unverified rewrites and premature `done` toward verification.
+- **E24 added (Wave 4, gated).** MTP self-speculation measured −13% (n-max=1) / −2.7% (n-max=3) on an M1 smoke test — currently a loss, mechanistically explained by llama.cpp #25250 (Metal small-batch mul_mat gap at exactly the draft-verification batch sizes) and #24768 (no adaptive n-max). Gated on either landing.
 
 Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions against local E4B, 2026-04-26/27). Prior update: 2026-04-26 E05/E06 rerun analysis.
 
@@ -94,11 +107,21 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Effort.** S.
 - **Status.** Done (2026-04-26). Harness discovers tests via `pytest --collect-only`, runs N trials as subprocesses with per-trial `AGENT_RUN_LOG`, parses JSONL, reports median+range for wall time, pytest pass, agent completion status, full/local replans, steps, thinking retries, LLM calls, and tokens. Saves `summary.json` for programmatic comparison. Documented in README.md and CLAUDE.md.
 
+### E23 — Local revision-3 baseline (QAT Q4_0, `--reasoning off`)
+
+- **Context.** Added and executed 2026-08-03. Three things had invalidated all prior local numbers: (1) the llama.cpp binary changed 2026-06-12 (`a702f395` → b9618 `c34b92235`, adding the #23468 cache-reliability fix and MTP support) with no benchmark run since; (2) the installed GGUF (2026-04-06) predated Google's 2026-07-15 weight refresh; (3) b9618's `--reasoning auto` detects the GGUF template as thinking-capable and drains ~192-token action budgets into `reasoning_content`, producing empty/truncated JSON on top of every scaffold metric. Meanwhile the revision-3 scaffold had only OpenRouter/FeatureBench validation.
+- **Change.** Pulled the official post-refresh QAT Q4_0 (E09 candidate 1), launched b9618 with the gemma4-setup.md flags including `--reasoning off`, MTP off, and ran all three suites under the E01 harness, 3 trials each. Probed `--reasoning auto` behavior on the fresh template first.
+- **Result (2026-08-03).** Done — **QAT Q4_0 promoted to primary local model.** Pytest 22/27, agent-complete 25/27 vs the Apr/May Q4_K_M baseline's 27/27, but at 1.6–39× lower wall time on the agentic workloads: hard 9/9 at −38–66%, `fix_missing_include` 609s → 15.7s, `multi_step_build` replans eliminated, thinking retries 6–7 → 0–3 on `build_with_dependency`. All 5 pytest failures trace to two behavioral quirks: done-emission loops (evidence on the E20 disposition) and content drift on whole-file rewrites (evidence on the E07 disposition). `--reasoning auto` probe: the post-refresh template still triggers thinking — `--reasoning off` is permanent. Full tables: [PERFORMANCE.md E23 entry](PERFORMANCE.md#e23-qat-baseline--2026-08-03-local-build-9618-official-e4b-qat-q4_0). Bench ran the default heuristic step policy; a lifecycle-arm A/B on the done-emission class is the natural follow-up.
+- **Code.** `gemma4-setup.md` (model path + flags), no `askme.py` change.
+- **Effort.** S.
+- **Status.** Done (2026-08-03).
+
 ## Prompts / output format
 
 ### E02 — Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%
 
 - **Hypothesis.** While `--cache-reuse` is broken for Gemma 4 iSWA ([#21468](https://github.com/ggml-org/llama.cpp/issues/21468)), every token in the system prompt is re-processed on every `ask_llm` call. Shrinking them yields a linear speedup across every call in every test.
+- **Repriced (2026-08-03).** The premise is stale: #21468 was fixed in April and cache reuse became fully reliable with #23468 (build ~9484; local b9618 includes it). Warm calls now reuse the system-prompt prefix, so the expected yield drops to cold/invalidated-call savings plus planner-token-budget headroom (which E14 is gated on). Keep, but expect single-digit-% wall-time impact, not 10-20%.
 - **Change.** Compress policy/rule prose into terse symbolic bullets. Drop filler like "No markdown, no explanation" where grammar/format retries already handle it.
 - **Metric.** Total test time, per-call prompt eval tokens (from `usage.prompt_tokens`).
 - **Upside.** Medium-test time is dominated by prompt eval overhead — 10-20% reduction plausible.
@@ -127,6 +150,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Code.** `askme.py:205` (`_repair_json`), `askme.py:228` (`_STRICT_JSON_SUFFIX`), `askme.py:231` (`ask_llm` — retry ladder + repair).
 - **Effort.** S.
 - **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness. Follow-up fix for required-field validation not yet implemented.
+- **Upstream status (2026-08-03).** [#22396](https://github.com/ggml-org/llama.cpp/issues/22396) was stale-closed 2026-07-05 without a fix (a re-regression was reported 2026-05-20 on builds 9244/9253 and got no response). Client-side repair confirmed as the durable approach. Master's grammar/PEG overhaul (#24869/#24839/#24835, post-b9618) is worth a `--json-schema` retest after any rebuild.
 
 ## Tools / action model
 
@@ -232,6 +256,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   never task acceptance. The duplicate-edit skip and its corrective
   observation remain; completion requires the model's own `done`, and a
   repeated no-op is reported as `stuck`, not success.
+- **Evidence (2026-08-03, E23 QAT bench — post-removal frequency data).** On the promoted QAT Q4_0 weights this failure class is now the dominant local one, and it extends beyond edits: 3 of 5 E23 pytest failures were "all steps succeeded, deliverable correct on disk, `done` never emitted, duplicate *read/write* skips until exhausted" (`create_and_read_file` 2/3 trials, `create_missing_file_then_use` 226s outlier). Under the #68 design these runs correctly stay `exhausted`; the sanctioned counter-lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`), which steers repetition toward verification instead of acceptance — the E23 bench ran the default heuristic arm, so a lifecycle A/B on this failure class is the natural follow-up.
 
 ### E17 — Expected-failure task completion semantics
 
@@ -307,6 +332,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   landed and then removed by the issue #68 cleanup: exhaustion is terminal,
   and a correct-but-exhausted deliverable is for independent held-out
   acceptance to surface, not a broad in-harness heuristic.
+- **Evidence (2026-08-03, E23 QAT bench).** Both lying directions recur on QAT weights. `create_and_read_file` exhausted twice with a correct deliverable on disk (per #68, terminal — held-out acceptance's job to surface). More dangerous is the false *pass*: `fix_python_syntax_error` completed 3/3 while the deliverable's runtime output drifted (`hello` → `Hello` on a whole-file rewrite) — the LLM validator passed a semantically changed program. A goal-output deterministic check (expected output substring from the goal text vs actual shell output) is the still-open E07 arm this motivates.
 
 ## Performance / runtime
 
@@ -314,16 +340,18 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 
 Moved to [Archived / rejected](#archived--rejected).
 
-### E09 — Q8_0 model trial
+### E09 — Model-swap trials (12B QAT, Q8_0)
 
-- **Hypothesis.** `gemma4-setup.md:22` notes Q8_0 (8 GB) is viable and "higher quality." Parse retries likely drop with better token probabilities. On a 16 GB M1 with q4_0 KV the memory headroom exists.
-- **Evidence (2026-04-26).** Local E4B generates bad edit JSON ~60% of first attempts (vs near-zero on OpenRouter 26B). Q8_0 could reduce this underlying failure rate. However, the E05/E06 rerun shows parse-retry thinking inflation is the largest remaining scaffold-addressable bottleneck — run E03 first.
-- **Change.** Download Q8_0 GGUF, launch with same flags, run easy + medium integration under E01's harness.
-- **Metric.** Parse-retry count, total test time, especially on `fix_missing_include` (currently 609s median).
-- **Upside.** Reduces root-cause edit failure rate. After E05/E06, repeated edit failures are cheaper but still cause replans; model quality remains a separate lever.
-- **Risk.** Low. Model is a swap; reverts trivially. Decode throughput may drop — measure both axes.
+- **Hypothesis.** Better weights reduce the root-cause bad-JSON/bad-edit rate; model quality is the lever the scaffold can't reach.
+- **Evidence (2026-08-03, E23).** Candidate 1 (official E4B QAT Q4_0) is done and promoted to primary: `fix_missing_include` 609s → 15.7s, hard 9/9 at −38–66% wall, thinking retries near-zero. The pre-QAT evidence line ("bad edit JSON ~60% of first attempts") no longer describes the primary model — remaining candidates are quality plays, benchmarked against the E23 reference.
+- **Candidates.**
+  1. **Gemma 4 12B Unified QAT** ([google/gemma-4-12B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf), ~6.98 GB) — strongest quality candidate that fits 16 GB; dense, so decode will be slower than E4B. Test at 16K ctx, q4_0 KV, no projector.
+  2. **E4B Q8_0** (~8 GB) — original candidate, now behind 12B QAT.
+- **Change.** For each candidate: download, launch with the E23-validated flags (`--reasoning off`, MTP off), run easy + medium under E01's harness, compare against the E23 reference.
+- **Metric.** Parse-retry count, edit-failure rate, done-emission-loop rate, content-drift incidents, agent_complete rate, total test time; decode tok/s as a guard metric (especially for 12B).
+- **Risk.** Low. Model swaps revert trivially. For 12B: decode-speed regression may outweigh quality gains for the agent loop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
-- **Effort.** S.
+- **Effort.** S per candidate.
 
 ### E21 — gpt-oss-20b low/medium/high effort as the OpenRouter CI/prototyping model
 
@@ -400,6 +428,18 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Risk.** Medium. Any local thinking path can inflate wall time. Abort if p95 local-replan wall exceeds ~10s.
 - **Code.** `askme.py:replan_task()`, `tests/bench_harness.py` local-replan correlation metrics.
 - **Effort.** S.
+
+### E24 — MTP speculative decoding A/B on E4B **[gated on upstream Metal fixes]**
+
+- **Context.** Added 2026-08-03. Native Gemma 4 MTP landed upstream ([#23398](https://github.com/ggml-org/llama.cpp/pull/23398), [#24282](https://github.com/ggml-org/llama.cpp/pull/24282), both in b9618); the official E4B drafter (98.7 MB) is downloaded. A 2026-08-03 smoke test measured **−13% decode at `--spec-draft-n-max 1` and −2.7% at n-max 3** vs 13.61 tok/s baseline — MTP is currently a small loss on M1.
+- **Hypothesis.** The loss is upstream-mechanical, not architectural: draft verification runs at batch sizes 4–16, exactly where Metal's mul_mat path has ~2x headroom ([#25250](https://github.com/ggml-org/llama.cpp/issues/25250)), and there is no adaptive n-max ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768)). When either lands, MTP should flip positive for the agent's long JSON generations.
+- **Change.** After the gate lands: A/B `--spec-type draft-mtp --spec-draft-n-max {1,3}` vs no-MTP on easy + medium under the E01 harness, against the E23 reference. Measure end-to-end task success and wall time, not just decode tok/s. Verify JSON quality — [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) reports format corruption specifically under MTP.
+- **Metric.** Wall time, agent_complete rate, parse-retry count, decode tok/s.
+- **Upside.** Potentially the largest local decode lever if the Metal small-batch gap closes (~2x headroom documented upstream).
+- **Risk.** Low — server-flag A/B, trivially revertible. Format-corruption risk (#25072) is why agent-level metrics gate adoption, not raw tok/s.
+- **Code.** `gemma4-setup.md` (server flags), no `askme.py` change.
+- **Effort.** S.
+- **Status.** Planned, **gated** on #25250 or #24768.
 
 ## Planning
 
