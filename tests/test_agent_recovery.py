@@ -90,15 +90,41 @@ class TestDuplicateGuard:
             run("write and fix")
         assert (tmp_path / "f.txt").read_text() == "v2"
 
-    def test_shell_same_success_triggers_auto_done(self, tmp_path):
-        """Same shell + ok -> auto-done (true duplicate)."""
+    def test_shell_same_success_skips_without_completing(self, tmp_path):
+        """Same shell + ok -> suppressed as a no-op; completion still requires
+        the model's own done (issue #68: repetition is never acceptance)."""
         responses = [
             {"tasks": ["run echo"]},
             {"action": "shell", "arg": "echo hi"},
+            {"action": "shell", "arg": "echo hi"},  # duplicate -- skip, never done
+            {"action": "done"},
+        ]
+        with patch("askme.ask_llm", side_effect=responses) as mock_llm:
+            ok = run("run echo", working_dir=str(tmp_path))
+        assert ok is True
+        assert mock_llm.call_count == 4
+        # The executor saw corrective feedback instead of implicit completion.
+        user_msg = mock_llm.call_args_list[-1][0][0][1]["content"]
+        assert "Already ran successfully" in user_msg
+
+    @patch("askme.replan_task", return_value=None)
+    def test_shell_same_success_repeated_is_stuck_not_done(self, mock_replan, tmp_path):
+        """A third identical successful shell is a stuck loop for the
+        replanner, not task acceptance."""
+        responses = [
+            {"tasks": ["run echo"]},
             {"action": "shell", "arg": "echo hi"},
+            {"action": "shell", "arg": "echo hi"},  # skip 1
+            {"action": "shell", "arg": "echo hi"},  # stuck -- auto-fail
         ]
         with patch("askme.ask_llm", side_effect=responses):
-            run("run echo")
+            result = _run_loop("run echo", str(tmp_path), max_replans=1, max_tasks=1, max_steps=5)
+        assert result["status"] == "exhausted"
+        assert result["state"]["completed_tasks"] == []
+        assert any(
+            e.startswith("[stuck_loop] shell") and "repeated" in e
+            for e in result["state"]["errors"]
+        )
 
     def test_shell_same_failure_triggers_auto_fail(self, tmp_path):
         """Same shell + fail twice -> auto-fail, error recorded for replan."""
@@ -178,37 +204,30 @@ class TestDuplicateGuard:
             ok = run("fix include", working_dir=str(tmp_path))
         assert ok is True
 
-    def test_edit_duplicate_after_success_auto_done(self, tmp_path, capsys):
-        """Two duplicate edit skips after a successful edit force task completion."""
+    def test_edit_duplicate_after_success_never_auto_completes(self, tmp_path, capsys):
+        """Re-emitting an already-applied edit is suppressed as a no-op, but
+        completion still requires the model's own done (issue #68)."""
         f = tmp_path / "main.c"
         f.write_text('#include "msg.h"\nint main(){return 0;}')
+        duplicate_edit = {
+            "action": "edit",
+            "arg": str(f),
+            "find": '#include "msg.h"',
+            "replace": '#include <stdio.h>\n#include "msg.h"',
+        }
         responses = [
             {"tasks": ["fix include"]},
-            {
-                "action": "edit",
-                "arg": str(f),
-                "find": '#include "msg.h"',
-                "replace": '#include <stdio.h>\n#include "msg.h"',
-            },
-            {
-                "action": "edit",
-                "arg": str(f),
-                "find": '#include "msg.h"',
-                "replace": '#include <stdio.h>\n#include "msg.h"',
-            },  # skip 1
-            {
-                "action": "edit",
-                "arg": str(f),
-                "find": '#include "msg.h"',
-                "replace": '#include <stdio.h>\n#include "msg.h"',
-            },  # skip 2 -- auto-done
+            dict(duplicate_edit),
+            dict(duplicate_edit),  # skip 1
+            dict(duplicate_edit),  # skip 2 -- still only a skip
+            {"action": "done"},
         ]
         with patch("askme.ask_llm", side_effect=responses) as mock_llm:
             ok = run("fix include", working_dir=str(tmp_path))
         out = capsys.readouterr().out
         assert ok is True
-        assert "auto-done (edit already succeeded" in out
-        assert mock_llm.call_count == 4
+        assert "auto-done" not in out
+        assert mock_llm.call_count == 5
 
     def test_edit_different_find_allowed(self, tmp_path):
         """Same file + different find -> allowed (different edit, not a duplicate)."""
@@ -850,19 +869,10 @@ class TestCompletionSemantics:
 # --- Final validation tests ---
 
 
-class TestExpectedFailureCompletion:
-    """E17: observing an expected failure can complete that task."""
-
-    def test_expected_failure_phrases(self):
-        assert askme._expects_failure("compile to observe the initial failure")
-        assert askme._expects_failure("run to confirm the bug")
-        assert askme._expects_failure("check the broken program error")
-
-    def test_expected_failure_negative_phrases(self):
-        assert not askme._expects_failure("fix the compile error")
-        assert not askme._expects_failure("create and compile the file")
-        assert not askme._expects_failure("verify no error")
-        assert not askme._expects_failure("verify the error is fixed")
+class TestExpectedFailureRemoval:
+    """Issue #68: a task-text regex can no longer convert a failing command
+    into completion. Expected-failure evidence reaches the model as an
+    ordinary typed error, and only an explicit done claims the task."""
 
     @patch(
         "askme.execute",
@@ -873,16 +883,45 @@ class TestExpectedFailureCompletion:
         },
     )
     @patch("askme.ask_llm")
-    def test_expected_failure_shell_completes_task(self, mock_llm, mock_execute, tmp_path):
+    def test_expected_failure_phrasing_does_not_complete(self, mock_llm, mock_execute, tmp_path):
+        """The exact phrasing that used to auto-complete now stays a failure."""
         mock_llm.side_effect = [
             {"tasks": ["compile to observe the initial failure"]},
             {"action": "shell", "arg": "cc main.c"},
         ]
+        with patch("askme.replan_task", return_value=None):
+            result = _run_loop(
+                "observe the failure", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1
+            )
+        assert result["status"] == "exhausted"
+        assert result["state"]["completed_tasks"] == []
+        assert any(e.startswith("[compile_error]") for e in result["state"]["errors"])
+        assert not any(s.get("expected_failure") for s in result["state"]["all_steps"])
+
+    @patch(
+        "askme.execute",
+        return_value={
+            "ok": False,
+            "output": "main.c:1: error: expected failure",
+            "error_type": "compile_error",
+        },
+    )
+    @patch("askme.ask_llm")
+    def test_observed_failure_completes_only_by_explicit_done(
+        self, mock_llm, mock_execute, tmp_path
+    ):
+        """The model still can claim an observation task after seeing the
+        failure — through done, with the typed failure kept as evidence."""
+        mock_llm.side_effect = [
+            {"tasks": ["compile to observe the initial failure"]},
+            {"action": "shell", "arg": "cc main.c"},
+            {"action": "done"},
+        ]
         result = _run_loop(
-            "observe the failure", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1
+            "observe the failure", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3
         )
         assert result["status"] == "complete"
-        assert result["state"]["completed_step_groups"][0][0]["expected_failure"] is True
+        assert any(s["action"] == "shell" and not s["ok"] for s in result["state"]["all_steps"])
 
     @patch("askme.replan_task", return_value=None)
     @patch(
@@ -1111,15 +1150,16 @@ class TestDeterministicValidation:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_exhausted_reconciles_to_complete_on_confident_pass(
-        self, mock_llm, mock_replan, tmp_path
-    ):
+    def test_exhaustion_never_reconciles_to_complete(self, mock_llm, mock_replan, tmp_path):
+        """Issue #68: a successful last shell can no longer convert an
+        exhausted step budget into completion — no task ever finished."""
         mock_llm.side_effect = [
             {"tasks": ["run check"]},
             {"action": "shell", "arg": "true"},
         ]
         result = _run_loop("run check", str(tmp_path), max_replans=1, max_tasks=1, max_steps=1)
-        assert result["status"] == "complete"
+        assert result["status"] == "exhausted"
+        assert result["state"]["completed_tasks"] == []
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
@@ -1279,7 +1319,8 @@ class TestFinalValidation:
         assert call_count[0] > 3
 
     def test_validate_transport_error_returns_success(self, tmp_path):
-        """Transport error → fail-open, return success."""
+        """Transport error → completion stands (run() success), typed as
+        complete_unverified on the structured result — never a claimed pass."""
         ok, _ = self._simple_run(
             "compile and run program",
             tmp_path,
@@ -1288,13 +1329,64 @@ class TestFinalValidation:
         assert ok is True
 
     def test_validate_parse_error_returns_success(self, tmp_path):
-        """Garbage output → fail-open, return success."""
+        """Garbage output → completion stands (run() success), typed as
+        complete_unverified on the structured result — never a claimed pass."""
         ok, _ = self._simple_run(
             "compile and run program",
             tmp_path,
             validate_response=json.JSONDecodeError("bad", "", 0),
         )
         assert ok is True
+
+    def test_validate_unavailable_is_complete_unverified(self, tmp_path, capsys):
+        """Issue #68: an unavailable first verdict must not log
+        "Validation passed"; the run completes with the typed
+        complete_unverified status and a valid=None validation event."""
+        responses = [
+            {"tasks": ["build program"]},
+            {"action": "write", "arg": str(tmp_path / "program.txt"), "content": "built"},
+            {"action": "done"},
+        ]
+        call_count = [0]
+
+        def mock_ask_llm(messages, **kwargs):
+            if messages and "completion validator" in messages[0].get("content", ""):
+                raise LLMTransportError("connection refused")
+            resp = responses[call_count[0]]
+            call_count[0] += 1
+            return resp
+
+        log_path = tmp_path / "run.jsonl"
+        import askme
+
+        old = askme.FINAL_VALIDATE
+        askme.FINAL_VALIDATE = "always"
+        try:
+            with (
+                patch.object(askme, "RUN_LOG_PATH", str(log_path)),
+                patch("askme.ask_llm", side_effect=mock_ask_llm),
+            ):
+                result = _run_loop("build program", str(tmp_path), max_replans=1)
+        finally:
+            askme.FINAL_VALIDATE = old
+
+        out = capsys.readouterr().out
+        assert result["status"] == "complete_unverified"
+        assert "Validation passed" not in out
+        assert "completing unverified" in out
+        events = [json.loads(line) for line in log_path.read_text().splitlines()]
+        validation = [e for e in events if e["event"] == "validation"]
+        assert validation == [
+            {
+                "ts": validation[0]["ts"],
+                "event": "validation",
+                "valid": None,
+                "reason": "validator unavailable",
+                "deterministic": False,
+            }
+        ]
+        run_end = [e for e in events if e["event"] == "run_end"]
+        assert run_end[-1]["status"] == "complete_unverified"
 
     def test_validate_recheck_capped_after_recovery(self, tmp_path):
         """Two failed validation verdicts leave completion blocked."""

@@ -1753,23 +1753,6 @@ def _has_new_validation_evidence(state):
     )
 
 
-_EXPECTED_FAILURE_POS_RE = re.compile(
-    r"\b(observe|confirm|verify|check)\b.*\b(fail|error|bug|broken)\b"
-    r"|\b(will fail|should fail|expect.*(fail|error)|initial failure|read the error)\b",
-    re.I,
-)
-_EXPECTED_FAILURE_NEG_RE = re.compile(
-    r"\b(no|not|without)\s+(fail|failure|error|bug|crash|broken)\b"
-    r"|\b(error|failure|bug)\b.{0,20}\b(fixed|resolved|gone)\b"
-    r"|\b(fix|repair|resolve)\b.*\b(error|failure|bug)\b",
-    re.I,
-)
-
-
-def _expects_failure(task):
-    return bool(_EXPECTED_FAILURE_POS_RE.search(task) and not _EXPECTED_FAILURE_NEG_RE.search(task))
-
-
 _COMPILE_REPAIR_PATTERNS: list[dict[str, Any]] = [
     {
         "diagnostic_re": re.compile(
@@ -1986,11 +1969,6 @@ class StepRecorder:
         self._event(receipt.jsonl_event(task_index, step, wall_s))
         return entry
 
-    def annotate_last(self, key, value):
-        """Set a controller annotation on the newest recorded step."""
-        self.state["last_steps"][-1][key] = value
-        self.state["all_steps"][-1][key] = value
-
     def append_recovery_hint(self, hint):
         """Suffix the newest recorded step's output with a recovery hint."""
         for steps in (self.state["last_steps"], self.state["all_steps"]):
@@ -2019,7 +1997,6 @@ class TaskAttemptState:
     use_think: bool = False
     reasoning_trigger: str = "executor"
     dup_skip_count: int = 0
-    last_successful_edit: tuple[str, str, str] | None = None
     observe_executed: int = 0
     commit_executed: int = 0
     observe_blocked: int = 0
@@ -3000,18 +2977,6 @@ class _RunController:
                     entry["_find"] = action.get("find", "")
                     entry["_replace"] = action.get("replace", "")
                 self.recorder.note(entry)
-                if act == "edit" and attempt.last_successful_edit and attempt.dup_skip_count >= 2:
-                    edit_key = (
-                        action.get("arg", ""),
-                        action.get("find", ""),
-                        action.get("replace", ""),
-                    )
-                    if edit_key == attempt.last_successful_edit:
-                        self._emit(
-                            f"  [{ctx.step + 1}] auto-done (edit already succeeded, model re-emitting)"
-                        )
-                        attempt.done = True
-                        return _StepFlow.END_ATTEMPT
                 # Defer thinking escalation: first duplicate skip gets a
                 # corrective observation only; escalate on 2+ consecutive skips.
                 # Saves ~10s of thinking time on harmless first-time duplicates.
@@ -3021,12 +2986,34 @@ class _RunController:
                 return _StepFlow.NEXT_STEP
         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
             if prev.get("ok"):
-                self._emit(f"  [{ctx.step + 1}] auto-done (duplicate successful shell)")
-                self.recorder.skip(
-                    ctx.task_index, ctx.step, act, action, "duplicate_shell_auto_done"
+                # Repetition is never completion evidence (issue #68): the
+                # duplicate is suppressed as a no-op once, and repeating it
+                # again is a stuck loop for the replanner — task acceptance
+                # still requires an explicit done.
+                attempt.dup_skip_count += 1
+                if attempt.dup_skip_count >= 2:
+                    self._emit(
+                        f"  [{ctx.step + 1}] auto-fail (same successful shell repeated on {action.get('arg', '')[:40]})"
+                    )
+                    self.state["errors"].append(
+                        f"[stuck_loop] shell {action.get('arg', '')[:60]}: same successful command repeated"
+                    )
+                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell_repeat")
+                    return _StepFlow.END_ATTEMPT
+                self._emit(f"  [{ctx.step + 1}] skip (duplicate successful shell)")
+                self.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_shell")
+                self.recorder.note(
+                    {
+                        "action": act,
+                        "arg": action.get("arg", ""),
+                        "ok": True,
+                        "output": (
+                            "Already ran successfully — use the earlier output. "
+                            "Take the next action, or emit done/fail."
+                        ),
+                    }
                 )
-                attempt.done = True
-                return _StepFlow.END_ATTEMPT
+                return _StepFlow.NEXT_STEP
             elif prev.get("error_type") == "timeout":
                 # Bump timeout for retry: read actual timeout from previous step,
                 # not from fresh action (which won't have prior bumps)
@@ -3151,34 +3138,21 @@ class _RunController:
         )
 
         if not result.ok:
-            return self._recover_failed_step(ctx, attempt, result, step_entry)
+            return self._recover_failed_step(ctx, attempt, result)
         attempt.use_think = False
         attempt.reasoning_trigger = "executor"
         attempt.steps.append(step_entry)
-        if act == "edit":
-            attempt.last_successful_edit = (
-                action.get("arg", ""),
-                action.get("find", ""),
-                action.get("replace", ""),
-            )
         return None
 
-    def _recover_failed_step(self, ctx, attempt, result, step_entry):
-        """Expected-failure evidence, deterministic repair, or typed error."""
+    def _recover_failed_step(self, ctx, attempt, result):
+        """Deterministic repair or typed error; a failure never completes.
+
+        The former task-text expected-failure regex completion is removed
+        (issue #68): a failing command is typed evidence for the model and
+        the replanner, and only an explicit ``done`` can claim the task.
+        """
         action, act = ctx.action, ctx.act
         etype = result.error_type or "unknown"
-        if (
-            act == "shell"
-            and etype in ("compile_error", "unknown")
-            and _expects_failure(attempt.task)
-        ):
-            self._emit("  Expected failure observed; completing task with evidence")
-            step_entry["expected_failure"] = True
-            self.recorder.annotate_last("expected_failure", True)
-            attempt.steps.append(step_entry)
-            attempt.done = True
-            return _StepFlow.END_ATTEMPT
-
         if act == "shell" and etype == "compile_error":
             repair = _try_compile_repair(result.output, self.working_dir, action.get("arg", ""))
             if repair:
@@ -3227,6 +3201,7 @@ class _RunController:
 
     def _try_finish(self, replan):
         """Validate an all-done pass; a result dict ends the run."""
+        status = "complete"
         wants_validation = _should_validate(replan, self.history, self.state, self.user_prompt)
         first_validation = self.state.get("validation_attempts", 0) == 0
         recheck_validation = (
@@ -3264,8 +3239,7 @@ class _RunController:
                 )
                 return None  # replan
             elif vresult is None and recheck_validation:
-                # A first optional validator failure remains fail-open, but
-                # once validation explicitly failed, an unavailable second
+                # Once validation explicitly failed, an unavailable second
                 # verdict cannot erase that known failure.
                 self._emit("  Validation recheck produced no verdict; failure remains pending.")
                 self._event(
@@ -3276,6 +3250,21 @@ class _RunController:
                         "deterministic": False,
                     }
                 )
+            elif vresult is None:
+                # An unavailable or malformed first verdict is not a pass
+                # (issue #68): the completed tasks stand, but the run is
+                # typed ``complete_unverified`` instead of claiming
+                # "Validation passed" from missing evidence.
+                status = "complete_unverified"
+                self._emit("  Validation produced no verdict; completing unverified.")
+                self._event(
+                    {
+                        "event": "validation",
+                        "valid": None,
+                        "reason": "validator unavailable",
+                        "deterministic": False,
+                    }
+                )
             else:
                 self.state["validation_recheck_needed"] = False
                 self._emit("  Validation passed.")
@@ -3283,7 +3272,7 @@ class _RunController:
                     {
                         "event": "validation",
                         "valid": True,
-                        "deterministic": bool(vresult and vresult.get("deterministic")),
+                        "deterministic": bool(vresult.get("deterministic")),
                     }
                 )
         if self.state.get("validation_recheck_needed"):
@@ -3303,7 +3292,7 @@ class _RunController:
         self._event(
             {
                 "event": "run_end",
-                "status": "complete",
+                "status": status,
                 "replans": replan,
                 "wall_s": round(total_wall, 2),
                 "completed_tasks": len(self.state["completed_tasks"]),
@@ -3314,33 +3303,17 @@ class _RunController:
                 },
             }
         )
-        return {"status": "complete", "state": self.state, "log": self.history}
+        return {"status": status, "state": self.state, "log": self.history}
 
     def _finish_after_exhaustion(self):
-        """Deterministic reconciliation, then the exhausted result."""
-        total_wall = self.run_state.elapsed()
-        deterministic = _deterministic_check(self.user_prompt, self.state, self.working_dir)
-        if deterministic is True and not self.state.get("validation_recheck_needed"):
-            self._emit(
-                f"Deterministic reconciliation passed after exhaustion. ({total_wall:.1f}s total)"
-            )
-            self._emit(f"Output in: {self.working_dir}")
-            self._event(
-                {
-                    "event": "run_end",
-                    "status": "complete_deterministic_after_exhausted",
-                    "replans": self.max_replans,
-                    "wall_s": round(total_wall, 2),
-                    "completed_tasks": len(self.state["completed_tasks"]),
-                    "steps": {
-                        "selected": self.state["selected_steps"],
-                        "executed": self.state["executed_steps"],
-                        "skipped": self.state["skipped_steps"],
-                    },
-                }
-            )
-            return {"status": "complete", "state": self.state, "log": self.history}
+        """Exhaustion is terminal: no shell-success reconciliation (issue #68).
 
+        The former deterministic pass could convert an exhausted budget into
+        ``complete`` from a broad "latest shell succeeded" heuristic even
+        though the plan never finished; that is evaluation-contaminating
+        false success, so the run now reports ``exhausted`` unconditionally.
+        """
+        total_wall = self.run_state.elapsed()
         self._emit(f"Exhausted {self.max_replans} replan attempts. ({total_wall:.1f}s total)")
         self._emit(f"Errors: {self.state['errors']}")
         self._emit(f"Output in: {self.working_dir}")
@@ -3417,12 +3390,21 @@ def _run_loop(
     )
 
 
+# Terminal statuses under which every planned task finished (issue #68).
+# "complete_unverified" marks a completed run whose wanted final validation
+# produced no verdict: completion stands, but it is never reported as a
+# verified pass. "exhausted" is the only failure status.
+COMPLETE_STATUSES = ("complete", "complete_unverified")
+
+
 def run(user_prompt, working_dir=None):
     """Public API: run agent and return True (success) or False (failure).
 
     Compatibility wrapper over run_result(); an isolated temporary
-    directory is created per run unless the caller provides one."""
-    return run_result(user_prompt, working_dir=working_dir)["status"] == "complete"
+    directory is created per run unless the caller provides one. Success
+    means the run completed, verified or not; the structured statuses stay
+    on run_result()."""
+    return run_result(user_prompt, working_dir=working_dir)["status"] in COMPLETE_STATUSES
 
 
 def _positive_int(value):
@@ -3513,7 +3495,7 @@ def _main(argv=None):
             Path(args.result_json).write_text(json.dumps(result, indent=2, default=str) + "\n")
         except OSError as e:
             parser.error(f"cannot write --result-json: {e}")
-    return 0 if result["status"] == "complete" else 1
+    return 0 if result["status"] in COMPLETE_STATUSES else 1
 
 
 if __name__ == "__main__":
