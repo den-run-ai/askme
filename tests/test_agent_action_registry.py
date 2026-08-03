@@ -84,7 +84,7 @@ class TestActionRegistry:
             assert _validate_action_contract(action) is True
             for required in spec.requires:
                 broken = dict(action)
-                broken[required] = "  "
+                broken[required] = None if required in ("content", "replace") else "  "
                 assert _validate_action_contract(broken) is False, (name, required)
 
 
@@ -113,7 +113,6 @@ class TestTypedDispatchErrors:
         write without content must not create an empty file."""
         cases = [
             {"action": "write", "arg": "x"},
-            {"action": "write", "arg": "x", "content": "  "},
             {"action": "edit", "arg": "x", "find": "a"},
             {"action": "edit", "arg": "x", "find": "", "replace": "b"},
             {"action": "shell", "arg": " "},
@@ -136,13 +135,12 @@ class TestTypedDispatchErrors:
             assert result["error_type"] == "malformed_action", bad_name
         assert list(tmp_path.iterdir()) == []
 
-    def test_dispatch_leaves_runtime_read_cursor_errors_to_the_handler(self, tmp_path):
-        """Cursor rules are decode + handler concerns: the handler's richer
-        typed errors (with source metadata) must not be pre-empted."""
+    def test_dispatch_reuses_parser_for_invalid_read_cursor(self, tmp_path):
+        """The same parser rejects an invalid cursor before file access."""
         (tmp_path / "f.txt").write_text("hello\n")
         result = execute({"action": "read", "arg": "f.txt", "cursor": -1}, str(tmp_path))
         assert result["error_type"] == "invalid_read_cursor"
-        assert result["sha256"]
+        assert "between 0" in result["output"]
 
     @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")

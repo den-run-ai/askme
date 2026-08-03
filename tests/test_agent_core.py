@@ -214,7 +214,7 @@ class TestExecuteDoneFail:
     def test_missing_action_key(self, work_dir):
         result = execute({}, work_dir)
         assert result["ok"] is False
-        assert result["error_type"] == "unknown_action"
+        assert result["error_type"] == "malformed_action"
 
 
 # --- ask_llm() tests ---
@@ -686,13 +686,11 @@ class TestJsonRepair:
 
     def test_truncated_key(self):
         result = _repair_json('{"action": "done", "reas')
-        assert result == {"action": "done"}
+        assert result is None
 
     def test_truncated_value(self):
         result = _repair_json('{"action": "edit", "arg": "main.c", "find": "old tex')
-        assert result is not None
-        assert result["action"] == "edit"
-        assert result["arg"] == "main.c"
+        assert result is None
 
     def test_valid_json_passthrough(self):
         result = _repair_json('{"action": "done"}')
@@ -738,7 +736,7 @@ class TestActionContractValidation:
             {"action": "write", "arg": "items.json", "content": [1, 2]}
         )
         assert not _validate_action_contract({"action": "write", "arg": "cli.py"})
-        assert not _validate_action_contract({"action": "write", "arg": "cli.py", "content": ""})
+        assert _validate_action_contract({"action": "write", "arg": "cli.py", "content": ""})
         assert not _validate_action_contract({"action": "write", "arg": "", "content": "x"})
 
     def test_edit_contract(self):

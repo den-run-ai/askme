@@ -418,6 +418,25 @@ class TestInjectedDependencies:
         )
         assert result["status"] == "complete"
 
+    def test_injected_builtin_executor_receives_strict_shell_envelope(self, tmp_path):
+        client = ScriptedClient(
+            [
+                {"tasks": ["run greeting"]},
+                {"action": "shell", "arg": "printf hello"},
+                {"action": "done"},
+            ]
+        )
+        executor = ActionExecutor(str(tmp_path))
+        result = run_result(
+            "run greeting",
+            working_dir=str(tmp_path),
+            dependencies=_quiet_deps(llm_client=client, action_executor=executor),
+        )
+        assert result["status"] == "complete"
+        shell_step = result["state"]["all_steps"][0]
+        assert shell_step["action"] == "shell"
+        assert shell_step["ok"] is True
+
     def test_mismatched_executor_never_leaks_a_temporary_workspace(self):
         created = []
         real_mkdtemp = tempfile.mkdtemp
