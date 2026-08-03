@@ -1969,11 +1969,6 @@ class StepRecorder:
         self._event(receipt.jsonl_event(task_index, step, wall_s))
         return entry
 
-    def annotate_last(self, key, value):
-        """Set a controller annotation on the newest recorded step."""
-        self.state["last_steps"][-1][key] = value
-        self.state["all_steps"][-1][key] = value
-
     def append_recovery_hint(self, hint):
         """Suffix the newest recorded step's output with a recovery hint."""
         for steps in (self.state["last_steps"], self.state["all_steps"]):
