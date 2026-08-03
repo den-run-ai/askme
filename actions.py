@@ -1,12 +1,13 @@
 """Action layer for the AskMe agent (issue #36).
 
-One registry defines every action's name, category, decode-time contract, and
-handler. ActionExecutor groups the handlers behind a single dispatch seam with
-shared workspace-path resolution, error classification, atomic writes, and
-bounded observation packing. ActionResult and StepReceipt are the typed result
-and receipt structures the controller consumes. done/fail stay controller
-concerns in askme.py, which also keeps the execute() compatibility facade and
-re-exports this module's public names.
+One registry defines every action's name, category, fields, and handler, while
+``parse_action_envelope`` is the pure semantic boundary shared by decode,
+controller intake, and dispatch. ActionExecutor groups the handlers behind a
+single dispatch seam with shared workspace-path resolution, error
+classification, atomic writes, and bounded observation packing. ActionResult
+and StepReceipt are the typed result and receipt structures the controller
+consumes. done/fail stay controller concerns in askme.py, which also keeps the
+execute() compatibility facade and re-exports this module's public names.
 
 This layer is not a sandbox: handlers run with the launching user's host
 permissions, and workspace-relative paths organize files without confining
@@ -14,13 +15,14 @@ shell commands, absolute paths, or traversal.
 """
 
 import bisect
+import copy
 import hashlib
 import json
 import os
 import re
 import shlex
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,6 +56,12 @@ _LONG_TIMEOUT_PATTERNS = [
 SHELL_TIMEOUT = 30  # default
 SHELL_TIMEOUT_LONG = 120  # for install/build commands
 SHELL_TIMEOUT_MAX = 300  # hard cap for model-specified timeout
+
+# Model-controlled read positions are bounded even though Python integers are
+# unbounded.  The cap is intentionally much larger than an executor-visible
+# workspace is expected to need; its purpose is to make the wire contract
+# finite and deterministic rather than to constrain ordinary navigation.
+READ_POSITION_MAX = 2_147_483_647
 
 
 def _get_shell_timeout(cmd, hint=None):
@@ -188,73 +196,132 @@ def classify_error(output, action="shell", cmd=""):
 
 
 def _read_offset_limit(action):
-    """Normalized 1-based read window (offset, limit) from an action dict."""
-    try:
-        offset = max(1, int(action.get("offset") or 1))
-    except (TypeError, ValueError):
-        offset = 1
-    try:
-        limit = max(1, min(int(action.get("limit") or READ_LINES), READ_LIMIT_MAX))
-    except (TypeError, ValueError):
-        limit = READ_LINES
-    return offset, limit
+    """Read window from an action already normalized by the wire parser."""
+    return action.get("offset", 1), action.get("limit", READ_LINES)
 
 
 def _read_cursor(action):
-    """Normalized 0-based Unicode-code-point cursor, or None for a line read."""
-    if "cursor" not in action:
-        return None
-    raw = action.get("cursor")
-    if isinstance(raw, bool):
-        raise ValueError("read cursor must be a non-negative integer")
-    if isinstance(raw, int):
-        cursor = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        cursor = int(raw.strip())
-    else:
-        raise ValueError("read cursor must be a non-negative integer")
-    if cursor < 0:
-        raise ValueError("read cursor must be a non-negative integer")
-    return cursor
+    """Parsed 0-based Unicode-code-point cursor, or None for a line read."""
+    return action.get("cursor")
 
 
 def _read_continuation_limit(action):
-    """Strict line limit echoed by an action-ready cursor continuation."""
-    raw = action.get("limit")
-    if isinstance(raw, bool):
-        raise ValueError("read continuation limit must be an integer")
-    if isinstance(raw, int):
-        limit = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        limit = int(raw.strip())
-    else:
-        raise ValueError("read continuation limit must be an integer")
-    if not 1 <= limit <= READ_LIMIT_MAX:
-        raise ValueError("read continuation limit is out of range")
-    return limit
+    """Parsed line limit echoed by an action-ready cursor continuation."""
+    return action["limit"]
 
 
 def _read_key(action):
     """Identity for duplicate-read detection, including every range field."""
     arg = action.get("arg", "")
-    try:
-        cursor = _read_cursor(action)
-    except ValueError:
-        return (arg, "invalid_cursor", repr(action.get("cursor")), action.get("sha256") or "")
+    cursor = _read_cursor(action)
     if cursor is not None:
-        try:
-            limit = _read_continuation_limit(action)
-        except ValueError:
-            return (
-                arg,
-                "invalid_cursor_limit",
-                cursor,
-                repr(action.get("limit")),
-                action.get("sha256") or "",
-            )
+        limit = _read_continuation_limit(action)
         return (arg, "cursor", cursor, limit, action.get("sha256") or "")
     offset, limit = _read_offset_limit(action)
     return (arg, "lines", offset, limit)
+
+
+@dataclass(frozen=True)
+class ActionProtocolError:
+    """A precise, non-throwing rejection at the model-action boundary."""
+
+    error_type: str
+    message: str
+    field: str | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class ActionEnvelope(Mapping[str, Any]):
+    """Immutable normalized model action.
+
+    Values are copied while parsing, and the outer action cannot be mutated.
+    ``to_dict`` is the explicit compatibility projection for legacy callers
+    and JSON records.  Controller transformations create a new parsed
+    envelope with :meth:`with_updates` instead of changing the selected
+    action in place.
+    """
+
+    _items: tuple[tuple[str, Any], ...]
+
+    @property
+    def name(self):
+        return self["action"]
+
+    def __getitem__(self, key):
+        for item_key, value in self._items:
+            if item_key == key:
+                # Never leak a nested dict/list retained by the frozen
+                # envelope.  Callers may mutate the compatibility value they
+                # receive, but cannot thereby mutate the parsed action.
+                return copy.deepcopy(value)
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _value in self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __eq__(self, other):
+        if isinstance(other, Mapping):
+            return self.to_dict() == dict(other)
+        return NotImplemented
+
+    def to_dict(self):
+        return {key: copy.deepcopy(value) for key, value in self._items}
+
+    def with_updates(self, **updates):
+        candidate = self.to_dict()
+        candidate.update(updates)
+        parsed = parse_action_envelope(candidate)
+        if isinstance(parsed, ActionProtocolError):
+            raise ValueError(parsed.message)
+        return parsed
+
+
+@dataclass(frozen=True)
+class ActionTransport:
+    """Provider/decoder facts that a model action cannot set."""
+
+    content_truncated: bool = False
+
+
+@dataclass(frozen=True, eq=False)
+class DecodedAction(Mapping[str, Any]):
+    """A normalized action plus transport metadata.
+
+    The mapping view preserves the historical ``ask_llm`` result shape.  In
+    particular, a recovered partial sentinel write still exposes the legacy
+    ``content_truncated`` key to direct compatibility callers, while the key
+    is not part of :attr:`envelope` and therefore cannot be model-spoofed.
+    """
+
+    envelope: ActionEnvelope
+    transport: ActionTransport = ActionTransport()
+
+    def __getitem__(self, key):
+        if key == "content_truncated" and self.transport.content_truncated:
+            return True
+        return self.envelope[key]
+
+    def __iter__(self) -> Iterator[str]:
+        yield from self.envelope
+        if self.transport.content_truncated:
+            yield "content_truncated"
+
+    def __len__(self):
+        return len(self.envelope) + int(self.transport.content_truncated)
+
+    def __eq__(self, other):
+        if isinstance(other, Mapping):
+            return self.to_dict() == dict(other)
+        return NotImplemented
+
+    def to_dict(self):
+        projected = self.envelope.to_dict()
+        if self.transport.content_truncated:
+            projected["content_truncated"] = True
+        return projected
 
 
 @dataclass
@@ -300,23 +367,19 @@ class ActionResult:
 
 @dataclass(frozen=True)
 class ActionSpec:
-    """One action's contract: category, required fields, and handler.
+    """One action's registry entry.
 
-    ``requires`` lists fields that must be non-empty strings; it is enforced
-    at decode time and again at dispatch. ``contract`` adds decode-time
-    checks beyond that; ``dispatch_contract`` names the subset of those that
-    dispatch re-enforces before the handler runs (read's continuation syntax
-    is deliberately not in it — the read handler revalidates cursors at
-    runtime with richer typed errors and no side effects). Control actions
-    carry no handler — the run controller resolves them before dispatch.
+    ``allowed`` and ``requires`` feed :func:`parse_action_envelope`, the one
+    semantic contract used by decode, controller intake, and dispatch.
+    Control actions carry no handler because the run controller resolves
+    them before dispatch.
     """
 
     name: str
     category: str  # "observe" | "mutate" | "control"
-    handler: Callable[["ActionExecutor", dict[str, Any]], ActionResult] | None = None
+    handler: Callable[["ActionExecutor", Mapping[str, Any]], ActionResult] | None = None
     requires: tuple[str, ...] = ()
-    contract: Callable[[dict[str, Any]], bool] | None = None
-    dispatch_contract: Callable[[dict[str, Any]], bool] | None = None
+    allowed: tuple[str, ...] = ()
 
 
 class ActionExecutor:
@@ -333,32 +396,35 @@ class ActionExecutor:
         self.working_dir = working_dir
 
     def dispatch(self, action):
-        act = action.get("action", "")
-        if not isinstance(act, str):
-            return ActionResult(
-                False, "malformed action: non-string action name", "malformed_action"
-            )
-        spec = ACTION_SPECS.get(act)
-        if spec is None:
-            return ActionResult(False, f"unknown action: {act}", "unknown_action")
+        parsed = parse_action_envelope(action)
+        if isinstance(parsed, ActionProtocolError):
+            error_type = parsed.error_type
+            try:
+                attempted = action.get("action") if isinstance(action, Mapping) else None
+            except Exception:
+                # A hostile or structurally forged Mapping may fail both
+                # copying and diagnostic lookup; dispatch must still return
+                # the parser's typed error rather than raise.
+                attempted = None
+            if attempted == "read":
+                error_type = {
+                    "cursor": "invalid_read_cursor",
+                    "limit": "invalid_read_limit",
+                    "offset": "invalid_read_offset",
+                    "sha256": "read_cursor_hash_required",
+                }.get(parsed.field, error_type)
+            elif attempted == "shell" and parsed.field == "timeout":
+                error_type = "invalid_timeout"
+            return ActionResult(False, parsed.message, error_type)
+        act = parsed.name
+        spec = ACTION_SPECS[act]
         if spec.handler is None:
             return ActionResult(
                 False,
                 f"control action '{act}' is resolved by the run controller",
                 "control_action",
             )
-        # Malformed actions fail before any side effect. The run loop never
-        # reaches this arm — decode enforces the same registry contract — so
-        # this hardens direct execute()/dispatch() callers.
-        if not all(_valid_nonempty_str(action.get(name)) for name in spec.requires) or (
-            spec.dispatch_contract is not None and not spec.dispatch_contract(action)
-        ):
-            return ActionResult(
-                False,
-                f"malformed {act} action: missing or invalid required fields",
-                "malformed_action",
-            )
-        return spec.handler(self, action)
+        return spec.handler(self, parsed)
 
     def _resolve(self, arg):
         """Resolve a model-supplied path against the working directory."""
@@ -505,34 +571,10 @@ class ActionExecutor:
                 details = {"truncated": False, "content": "", "continuation": None, **meta}
                 return ActionResult(ok, output, error_type, details)
 
-            try:
-                cursor = _read_cursor(action)
-            except ValueError:
-                return empty_page(
-                    False,
-                    f"[{p.name}: read cursor must be a non-negative integer]",
-                    "invalid_read_cursor",
-                )
+            cursor = _read_cursor(action)
             if cursor is not None:
-                try:
-                    limit = _read_continuation_limit(action)
-                except ValueError:
-                    return empty_page(
-                        False,
-                        (
-                            f"[{p.name}: read continuation limit "
-                            f"must be an integer from 1 to "
-                            f"{READ_LIMIT_MAX}]"
-                        ),
-                        "invalid_read_limit",
-                    )
+                limit = _read_continuation_limit(action)
             expected_hash = action.get("sha256")
-            if cursor is not None and not expected_hash:
-                return empty_page(
-                    False,
-                    f"[{p.name}: read cursor requires the source sha256 from its continuation]",
-                    "read_cursor_hash_required",
-                )
             if cursor is not None and expected_hash and expected_hash != meta["sha256"]:
                 return empty_page(
                     False,
@@ -742,58 +784,200 @@ class ActionExecutor:
             return self._exception_result(e, "tree")
 
 
-def _write_contract(obj):
-    content = obj.get("content")
-    return _valid_nonempty_str(content) or isinstance(content, (dict, list))
-
-
-def _edit_contract(obj):
-    return "replace" in obj
-
-
-def _read_contract(obj):
-    if "cursor" not in obj:
-        return True
-    try:
-        cursor = _read_cursor(obj)
-        _read_continuation_limit(obj)
-    except ValueError:
-        return False
-    return cursor is not None and _valid_nonempty_str(obj.get("sha256"))
-
-
-# One source of truth for action names, categories, decode-time contracts, and
-# handlers (issue #36). Control actions have no handler: the run controller
-# owns done/fail, and the executor refuses to dispatch them.
+# One source of truth for action names, categories, allowed/required fields,
+# and handlers (issues #36/#79). Control actions have no handler: the run
+# controller owns done/fail, and the executor refuses to dispatch them.
 ACTION_SPECS: dict[str, ActionSpec] = {
     spec.name: spec
     for spec in (
-        ActionSpec("shell", "mutate", ActionExecutor._shell, requires=("arg",)),
+        ActionSpec(
+            "shell",
+            "mutate",
+            ActionExecutor._shell,
+            requires=("arg",),
+            allowed=("action", "arg", "timeout", "reasoning"),
+        ),
         ActionSpec(
             "write",
             "mutate",
             ActionExecutor._write,
-            requires=("arg",),
-            contract=_write_contract,
-            dispatch_contract=_write_contract,
+            requires=("arg", "content"),
+            allowed=("action", "arg", "content", "append", "reasoning"),
         ),
         ActionSpec(
             "edit",
             "mutate",
             ActionExecutor._edit,
-            requires=("arg", "find"),
-            contract=_edit_contract,
-            dispatch_contract=_edit_contract,
+            requires=("arg", "find", "replace"),
+            allowed=("action", "arg", "find", "replace", "reasoning"),
         ),
         ActionSpec(
-            "read", "observe", ActionExecutor._read, requires=("arg",), contract=_read_contract
+            "read",
+            "observe",
+            ActionExecutor._read,
+            requires=("arg",),
+            allowed=("action", "arg", "offset", "limit", "cursor", "sha256", "reasoning"),
         ),
-        ActionSpec("search", "observe", ActionExecutor._search, requires=("arg",)),
-        ActionSpec("tree", "observe", ActionExecutor._tree),
-        ActionSpec("done", "control"),
-        ActionSpec("fail", "control"),
+        ActionSpec(
+            "search",
+            "observe",
+            ActionExecutor._search,
+            requires=("arg",),
+            allowed=("action", "arg", "path", "reasoning"),
+        ),
+        ActionSpec(
+            "tree",
+            "observe",
+            ActionExecutor._tree,
+            allowed=("action", "arg", "reasoning"),
+        ),
+        ActionSpec(
+            "done",
+            "control",
+            allowed=("action", "arg", "reasoning"),
+        ),
+        ActionSpec(
+            "fail",
+            "control",
+            allowed=("action", "arg", "reasoning"),
+        ),
     )
 }
+
+
+_RESERVED_ACTION_FIELDS = frozenset(
+    {
+        "content_truncated",
+        "finish_reason",
+        "transport",
+        "truncated_write",
+    }
+)
+
+
+def _action_error(message, field=None, error_type="malformed_action"):
+    return ActionProtocolError(error_type=error_type, message=message, field=field)
+
+
+def _require_string(obj, field, *, nonempty=True):
+    value = obj[field]
+    if not isinstance(value, str):
+        return _action_error(f"field '{field}' must be a string", field)
+    if nonempty and not value.strip():
+        return _action_error(f"field '{field}' must be a non-empty string", field)
+    return None
+
+
+def _require_int(obj, field, minimum, maximum):
+    value = obj[field]
+    if isinstance(value, bool) or not isinstance(value, int):
+        return _action_error(f"field '{field}' must be an integer", field)
+    if not minimum <= value <= maximum:
+        return _action_error(f"field '{field}' must be between {minimum} and {maximum}", field)
+    return None
+
+
+def parse_action_envelope(obj):
+    """Parse one model action without mutation or side effects.
+
+    This is the executable action contract for reply decode, controller
+    intake, and defensive dispatch.  It owns allowed names, field types and
+    ranges, reserved metadata, and cross-field continuation rules.  Every
+    malformed value returns :class:`ActionProtocolError`; it never raises.
+    """
+    if isinstance(obj, DecodedAction):
+        obj = obj.envelope
+    if not isinstance(obj, Mapping):
+        return _action_error("action envelope must be an object")
+
+    try:
+        raw = {key: copy.deepcopy(value) for key, value in obj.items()}
+    except Exception:
+        return _action_error("action envelope could not be copied safely")
+    action_name = raw.get("action")
+    if not isinstance(action_name, str) or not action_name.strip():
+        return _action_error("field 'action' must be a known non-empty string", "action")
+    spec = ACTION_SPECS.get(action_name)
+    if spec is None:
+        return _action_error(
+            f"unknown action: {action_name}", "action", error_type="unknown_action"
+        )
+
+    # Deliberate legacy normalization: optional JSON null means the field was
+    # omitted for free-form reasoning and for the optional arg on tree/control
+    # actions.  Required command/path/search args remain strictly typed.
+    if "reasoning" in raw and raw["reasoning"] is None:
+        raw.pop("reasoning")
+    if action_name in ("tree", "done", "fail") and "arg" in raw and raw["arg"] is None:
+        raw.pop("arg")
+
+    reserved = sorted(
+        key
+        for key in raw
+        if isinstance(key, str) and (key.startswith("_") or key in _RESERVED_ACTION_FIELDS)
+    )
+    if reserved:
+        field = reserved[0]
+        return _action_error(f"field '{field}' is reserved for controller metadata", field)
+    non_string_keys = [key for key in raw if not isinstance(key, str)]
+    if non_string_keys:
+        return _action_error("action field names must be strings")
+    extras = sorted(set(raw) - set(spec.allowed))
+    if extras:
+        field = extras[0]
+        return _action_error(f"field '{field}' is not allowed for action '{action_name}'", field)
+    for field in spec.requires:
+        if field not in raw:
+            return _action_error(f"action '{action_name}' requires field '{field}'", field)
+
+    string_fields = ("arg", "find", "replace", "path", "sha256", "reasoning")
+    for field in string_fields:
+        if field not in raw:
+            continue
+        optional_arg = field == "arg" and action_name in ("tree", "done", "fail")
+        nonempty = field not in ("replace", "reasoning") and not optional_arg
+        error = _require_string(raw, field, nonempty=nonempty)
+        if error is not None:
+            return error
+
+    if action_name == "write":
+        content = raw["content"]
+        if not isinstance(content, (str, dict, list)):
+            return _action_error("field 'content' must be a string, object, or list", "content")
+        if "append" in raw and not isinstance(raw["append"], bool):
+            return _action_error("field 'append' must be a boolean", "append")
+    if "timeout" in raw:
+        error = _require_int(raw, "timeout", 5, SHELL_TIMEOUT_MAX)
+        if error is not None:
+            return error
+    if "offset" in raw:
+        error = _require_int(raw, "offset", 1, READ_POSITION_MAX)
+        if error is not None:
+            return error
+    if "limit" in raw:
+        error = _require_int(raw, "limit", 1, READ_LIMIT_MAX)
+        if error is not None:
+            return error
+    if "cursor" in raw:
+        error = _require_int(raw, "cursor", 0, READ_POSITION_MAX)
+        if error is not None:
+            return error
+
+    if action_name == "read":
+        has_cursor = "cursor" in raw
+        if has_cursor:
+            for field in ("limit", "sha256"):
+                if field not in raw:
+                    return _action_error(f"read cursor requires field '{field}'", field)
+        elif "sha256" in raw:
+            return _action_error("field 'sha256' requires a read cursor", "sha256")
+
+    # Registry order gives stable compatibility projections regardless of
+    # the model's object-key order.  Values were deep-copied above, so the
+    # returned envelope does not alias the raw response object.
+    normalized = tuple((field, raw[field]) for field in spec.allowed if field in raw)
+    return ActionEnvelope(normalized)
+
 
 OBSERVE_ACTIONS = frozenset(
     name for name, spec in ACTION_SPECS.items() if spec.category == "observe"
@@ -889,7 +1073,14 @@ class StepReceipt:
             entry["_read_key"] = _read_key(action)
             if result.get("continuation"):
                 entry["_continuation"] = result.get("continuation")
-        return cls(entry, action, action=action, result=result, truncated_write=truncated_write)
+        history_action = action.to_dict() if isinstance(action, ActionEnvelope) else dict(action)
+        return cls(
+            entry,
+            history_action,
+            action=action,
+            result=result,
+            truncated_write=truncated_write,
+        )
 
     @classmethod
     def deterministic_repair(cls, action, result):

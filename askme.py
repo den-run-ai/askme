@@ -27,8 +27,12 @@ from actions import (
     OBSERVE_STATE_CHARS,
     SHELL_TIMEOUT_LONG,
     SHELL_TIMEOUT_MAX,
+    ActionEnvelope,
     ActionExecutor,
+    ActionProtocolError,
     ActionResult,
+    ActionTransport,
+    DecodedAction,
     SkippedStep,
     StepReceipt,
     _get_shell_timeout,
@@ -37,6 +41,7 @@ from actions import (
     _step_path,
     _target_recovery_arg,
     _valid_nonempty_str,
+    parse_action_envelope,
 )
 
 # Compatibility re-exports (issue #36): the action layer lives in actions.py;
@@ -439,34 +444,66 @@ MAX_LLM_RETRIES = 2
 
 
 def _repair_json(text):
-    """Try to salvage broken JSON from truncation artifacts. Returns dict or None."""
+    """Return a semantics-preserving JSON object repair, or ``None``.
+
+    Safe trailing prose extraction and insertion-only container completion
+    are allowed.  A partial key/value, string, or scalar is never deleted,
+    defaulted, or rewritten to make an action executable (issue #79).
+    """
     if not text or "{" not in text:
         return None
-    # Strip trailing prose after a complete JSON object (model commentary after })
-    # Find the last } and discard everything after it
-    last_brace = text.rfind("}")
-    if last_brace >= 0 and last_brace < len(text) - 1:
-        candidate = text[: last_brace + 1]
-        try:
-            obj = json.loads(candidate)
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            pass  # fall through to other repairs
-    # Strip trailing incomplete key-value pair (truncation mid-field)
-    text = re.sub(r',\s*"[^"]*$', "", text)
-    # Strip trailing incomplete value after a key (e.g. "key": "val...)
-    text = re.sub(r',\s*"[^"]*":\s*"?[^"}\]]*$', "", text)
-    # Strip trailing commas before close
-    text = re.sub(r",\s*}", "}", text)
-    # Close missing braces
-    opens = text.count("{") - text.count("}")
-    if opens > 0:
-        text = text + "}" * opens
-    elif opens < 0:
-        return None
+    candidate = text[text.index("{") :].strip()
     try:
-        obj = json.loads(text)
+        obj, end = json.JSONDecoder().raw_decode(candidate)
+        remainder = candidate[end:].lstrip()
+        if isinstance(obj, dict) and (not remainder or remainder[0] not in '{}[],:"'):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    # A trailing comma is syntax only; removing exactly that delimiter does
+    # not remove or default an action field.
+    without_trailing_comma = re.sub(r",(\s*})\s*$", r"\1", candidate)
+    if without_trailing_comma != candidate:
+        try:
+            # The candidate begins at its first ``{``, so any successful
+            # parse is necessarily an object; there is no scalar/list arm.
+            return json.loads(without_trailing_comma)
+        except json.JSONDecodeError:
+            pass
+
+    stack = []
+    in_string = False
+    escaped = False
+    pairs = {"}": "{", "]": "["}
+    for char in candidate:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(char)
+        elif char in "}]":
+            if not stack or stack.pop() != pairs[char]:
+                return None
+    if in_string or escaped or not stack:
+        return None
+    if candidate.rstrip().endswith((",", ":")):
+        return None
+    # A number at EOF may itself be truncated (``12`` vs ``120``).  Only
+    # close a container after a value token with an unambiguous terminator:
+    # string, true/false, null, object, or list.
+    if candidate.rstrip()[-1] not in {'"', "e", "l", "}", "]"}:
+        return None
+    suffix = "".join("}" if opener == "{" else "]" for opener in reversed(stack))
+    try:
+        obj = json.loads(candidate + suffix)
         return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
         return None
@@ -479,25 +516,28 @@ def _validate_action_contract(obj):
     #36). Unknown actions pass here so the run loop can record them as an
     executed step with a typed dispatch error, not a decode failure.
     """
+    typed = isinstance(obj, (ActionEnvelope, DecodedAction))
+    if not typed and (not isinstance(obj, dict) or "action" not in obj):
+        return True
+    parsed = parse_action_envelope(obj)
+    if isinstance(parsed, ActionProtocolError) and parsed.error_type == "unknown_action":
+        return True
+    return isinstance(parsed, ActionEnvelope)
+
+
+def _accept_or_raise(obj, text, transport=None):
     if not isinstance(obj, dict) or "action" not in obj:
-        return True
-    act = obj.get("action", "")
-    if not isinstance(act, str):
-        # Valid JSON can carry an unhashable action name ({"action": []});
-        # reject it as malformed instead of letting the registry lookup raise.
-        return False
-    spec = ACTION_SPECS.get(act)
-    if spec is None:
-        return True
-    if not all(_valid_nonempty_str(obj.get(name)) for name in spec.requires):
-        return False
-    return spec.contract(obj) if spec.contract else True
-
-
-def _accept_or_raise(obj, text):
-    if _validate_action_contract(obj):
         return obj
-    raise json.JSONDecodeError("Incomplete action JSON", text, 0)
+    parsed = parse_action_envelope(obj)
+    if isinstance(parsed, ActionEnvelope):
+        return DecodedAction(parsed, transport or ActionTransport())
+    if parsed.error_type == "unknown_action":
+        # Preserve the historical permissive decoder; the action response
+        # schema supplies the typed unknown_action classification.
+        return obj
+    error = json.JSONDecodeError(f"Incomplete action: {parsed.message}", text, 0)
+    setattr(error, "action_protocol_error", parsed)
+    raise error
 
 
 # --- Response-specific schemas and records (issue #68) ---
@@ -520,19 +560,11 @@ def _action_envelope_error(obj):
     validator reply at the action seam) are ``malformed_action``; a
     well-formed envelope naming an unknown action is ``unknown_action``.
     """
-    if not isinstance(obj, dict) or not obj:
+    typed = isinstance(obj, (ActionEnvelope, DecodedAction))
+    if not typed and (not isinstance(obj, dict) or not obj):
         return "malformed_action"
-    act = obj.get("action")
-    if not _valid_nonempty_str(act):
-        return "malformed_action"
-    spec = ACTION_SPECS.get(act)
-    if spec is None:
-        return "unknown_action"
-    if not all(_valid_nonempty_str(obj.get(name)) for name in spec.requires):
-        return "malformed_action"
-    if spec.contract is not None and not spec.contract(obj):
-        return "malformed_action"
-    return None
+    parsed = parse_action_envelope(obj)
+    return parsed.error_type if isinstance(parsed, ActionProtocolError) else None
 
 
 @dataclass(frozen=True)
@@ -807,9 +839,10 @@ def _decode_action_reply(text, finish_reason):
     (obj, cleaned_text, repaired). Raises json.JSONDecodeError carrying a
     .cleaned_text attribute when no valid object can be recovered; retry
     policy and typed classification stay with the caller."""
-    # The strip chain below removes a trailing newline; remember it so a
-    # truncated sentinel block can keep its last complete line.
-    ends_with_newline = text.endswith("\n")
+    # Split framing before removing reasoning wrappers: sentinel payload is
+    # raw file content, so tags that look like <think> or local channel
+    # markers inside it must survive byte-for-character (issue #79).
+    text, block, block_closed = _split_content_block(text)
     # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
@@ -819,24 +852,40 @@ def _decode_action_reply(text, finish_reason):
     # Strip markdown code fences if present
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    # Sentinel content block (issue #15): content rides outside the JSON.
-    text, block, block_closed = _split_content_block(text)
     # Try to extract JSON object from anywhere in the text
     if not text.startswith("{") and "{" in text:
         text = text[text.index("{") :]
 
     def _attach_block(obj):
-        if block is not None and isinstance(obj, dict):
-            content = block
-            if not block_closed and finish_reason == "length":
-                obj["content_truncated"] = True
-                # The cutoff landed on a line boundary: the last line is
-                # complete, not partial — restore the stripped newline so
-                # the run loop's partial-line trim keeps it.
-                if ends_with_newline:
-                    content += "\n"
-            obj["content"] = content
-        return obj
+        if block is None or not isinstance(obj, dict):
+            return obj, ActionTransport()
+        if obj.get("action") != "write":
+            error = json.JSONDecodeError(
+                "sentinel content is valid only for write actions", text, 0
+            )
+            setattr(error, "cleaned_text", text)
+            raise error
+        if "content" in obj:
+            error = json.JSONDecodeError(
+                "write action cannot combine JSON content with sentinel content", text, 0
+            )
+            setattr(error, "cleaned_text", text)
+            raise error
+        if not block_closed and finish_reason != "length":
+            error = json.JSONDecodeError(
+                "sentinel content must close unless finish_reason is length", text, 0
+            )
+            setattr(error, "cleaned_text", text)
+            raise error
+        if not block_closed and not block:
+            error = json.JSONDecodeError(
+                "truncated sentinel content contains no recoverable bytes", text, 0
+            )
+            setattr(error, "cleaned_text", text)
+            raise error
+        attached = dict(obj)
+        attached["content"] = block
+        return attached, ActionTransport(content_truncated=not block_closed)
 
     try:
         parsed = json.loads(text)
@@ -844,14 +893,20 @@ def _decode_action_reply(text, finish_reason):
             raise json.JSONDecodeError(
                 "Expected JSON object, got " + type(parsed).__name__, text, 0
             )
-        return _accept_or_raise(_attach_block(parsed), text), text, False
+        attached, transport = _attach_block(parsed)
+        return _accept_or_raise(attached, text, transport), text, False
     except json.JSONDecodeError as parse_err:
-        # E03: attempt mechanical repair before burning a retry
-        repaired = _repair_json(text)
+        # A length-truncated JSON header must retry; the one executable
+        # partial-response exception is a valid header plus sentinel payload,
+        # handled above.  Other replies may use insertion-only repair.
+        repaired = None if finish_reason == "length" else _repair_json(text)
         if repaired is not None:
             try:
-                return _accept_or_raise(_attach_block(repaired), text), text, True
-            except json.JSONDecodeError:
+                attached, transport = _attach_block(repaired)
+                return _accept_or_raise(attached, text, transport), text, True
+            except json.JSONDecodeError as repaired_err:
+                if hasattr(repaired_err, "action_protocol_error"):
+                    setattr(parse_err, "action_protocol_error", repaired_err.action_protocol_error)
                 pass
         setattr(parse_err, "cleaned_text", text)
         raise
@@ -1123,6 +1178,8 @@ _KNOWN_ERROR_TYPES = {
     "response_truncated",
     "invalid_read_cursor",
     "invalid_read_limit",
+    "invalid_read_offset",
+    "invalid_timeout",
     "read_cursor_hash_required",
     "stale_read_cursor",
 }
@@ -1140,6 +1197,8 @@ _NO_THINK_ERRORS = frozenset(
         "permission_denied",
         "invalid_read_cursor",
         "invalid_read_limit",
+        "invalid_read_offset",
+        "invalid_timeout",
         "read_cursor_hash_required",
         "stale_read_cursor",
     }
@@ -1152,6 +1211,8 @@ _RECOVERY_HINTS = {
     "missing_file": "Check the filename. Use shell ls to list directory contents.",
     "invalid_read_cursor": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
     "invalid_read_limit": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
+    "invalid_read_offset": "Use a positive integer offset within the supported range.",
+    "invalid_timeout": "Use an integer timeout from 5 to 300 seconds.",
     "read_cursor_hash_required": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
     "stale_read_cursor": "The file changed. Restart read with offset and limit; do not reuse the old cursor.",
 }
@@ -2232,8 +2293,9 @@ class _StepContext:
     task_index: int
     step: int
     started: float
-    action: dict[str, Any]
+    action: ActionEnvelope
     act: str
+    transport: ActionTransport = field(default_factory=ActionTransport)
     truncated_write: bool = False
     logical_write_target: str | None = None
     operation_write_target: str | None = None
@@ -2733,7 +2795,8 @@ class StepPolicy:
                 # not from fresh action (which won't have prior bumps)
                 prev_timeout = prev.get("_timeout", _get_shell_timeout(action.get("arg", "")))
                 bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
-                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
+                action = action.with_updates(timeout=min(bumped, SHELL_TIMEOUT_MAX))
+                ctx.action = action
                 controller._emit(
                     f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)"
                 )
@@ -3119,7 +3182,7 @@ class WriteObligations:
         # Sentinel transport truncation (issue #15): keep the complete lines
         # that arrived and steer the model to finish the file with chunked
         # append instead of failing the step.
-        ctx.truncated_write = act == "write" and action.pop("content_truncated", False)
+        ctx.truncated_write = act == "write" and ctx.transport.content_truncated
         ctx.logical_write_target = (
             _mutation_target_key({"arg": action.get("arg", "")}, controller.working_dir)
             if act == "write"
@@ -3236,7 +3299,8 @@ class WriteObligations:
                     }
                 )
                 return _StepFlow.NEXT_STEP
-            action["content"] = kept
+            action = action.with_updates(content=kept)
+            ctx.action = action
         return None
 
     def note_successful_write(self, ctx, action):
@@ -3667,8 +3731,27 @@ class _RunController:
         injected executor when provided, else the patchable execute()."""
         if self._action_executor is None:
             raw = execute(action, self.working_dir)
-        else:
+        elif isinstance(self._action_executor, ActionExecutor):
+            # A supplied built-in executor is still part of the strict typed
+            # boundary; subclasses inherit the same parser-first dispatch.
             raw = self._action_executor.dispatch(action).to_dict()
+        else:
+            # RunDependencies' injected-executor seam predates typed actions
+            # and documents the controller's legacy optional-string
+            # projection.  Keep it only at this trusted compatibility seam;
+            # model decode and the built-in ActionExecutor both receive the
+            # strict envelope, so cross-action fields remain rejected.
+            # Deterministic recovery also enters through this seam with an
+            # ordinary mapping. Normalize it through the same strict parser
+            # before projecting, rather than assuming a typed envelope or
+            # forwarding an unvalidated mapping to a duck-typed executor.
+            normalized = parse_action_envelope(action)
+            if isinstance(normalized, ActionProtocolError):
+                return ActionResult(False, normalized.message, normalized.error_type)
+            projected = normalized.to_dict()
+            for field_name in ("arg", "content", "reasoning", "find", "replace"):
+                projected.setdefault(field_name, "")
+            raw = self._action_executor.dispatch(projected).to_dict()
         return ActionResult.from_dict(raw)
 
     def config_metadata(self):
@@ -4000,28 +4083,35 @@ class _RunController:
                 }
             )
             return None
-        # Normalize None → "" for optional string fields (models emit "arg": null)
-        for _k in ("arg", "content", "reasoning", "find", "replace"):
-            if action.get(_k) is None:
-                action[_k] = ""
-        act = action.get("action", "")
-        envelope = _action_envelope_error(action)
-        if envelope is not None:
+        transport = ActionTransport()
+        candidate = action
+        if isinstance(action, DecodedAction):
+            transport = action.transport
+            candidate = action.envelope
+        else:
+            # Patched/injected clients historically represented trusted
+            # decoder metadata as a dictionary key.  Preserve that test and
+            # dependency-injection seam while the real model decoder rejects
+            # the same key and returns DecodedAction instead.
+            if isinstance(candidate, dict) and "content_truncated" in candidate:
+                candidate = dict(candidate)
+                legacy_truncated = candidate.pop("content_truncated")
+                if legacy_truncated is True and candidate.get("action") == "write":
+                    transport = ActionTransport(content_truncated=True)
+                else:
+                    candidate["content_truncated"] = legacy_truncated
+        parsed_action = parse_action_envelope(candidate)
+        if isinstance(parsed_action, ActionProtocolError):
             # Response-schema rejection before controller accounting (issue
             # #68): an empty, cross-type, or unknown-action envelope never
             # consumes an execution step. The live decode path enforces the
             # same schema with retries; this arm covers injected clients and
             # patched facades.
-            label = act if _valid_nonempty_str(act) else "(no action)"
-            detail = (
-                "not a known action"
-                if envelope == "unknown_action"
-                else "reply is not a dispatchable action envelope"
-            )
+            raw_name = candidate.get("action") if isinstance(candidate, dict) else None
+            label = raw_name if _valid_nonempty_str(raw_name) else "(no action)"
+            envelope = parsed_action.error_type
             self._emit(f"  [{step + 1}] rejected [{envelope}]: {label}")
-            self.state["errors"].append(
-                f"[{envelope}] {label} {action.get('arg', '')[:60]}: {detail}"
-            )
+            self.state["errors"].append(f"[{envelope}] {label}: {parsed_action.message}")
             self._event(
                 {
                     "event": "step_error",
@@ -4031,9 +4121,17 @@ class _RunController:
                 }
             )
             return None
+        act = parsed_action.name
         self.recorder.selected()
-        self._emit(f"  [{step + 1}] {act}: {action['arg'][:80]}")
-        return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
+        self._emit(f"  [{step + 1}] {act}: {parsed_action.get('arg', '')[:80]}")
+        return _StepContext(
+            task_index=i,
+            step=step,
+            started=t_step,
+            action=parsed_action,
+            act=act,
+            transport=transport,
+        )
 
     def _decide_step(self, ctx, attempt):
         """Sequence the shared invariants and the policy arm; None dispatches.

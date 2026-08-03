@@ -323,7 +323,7 @@ class TestDecodeActionReply:
         assert repaired is True
 
     def test_contract_invalid_action_raises_even_when_parseable(self):
-        with pytest.raises(json.JSONDecodeError, match="Incomplete action"):
+        with pytest.raises(json.JSONDecodeError, match="Incomplete action:.*requires field 'arg'"):
             _decode_action_reply('{"action":"shell"}', "stop")
 
     def test_garbage_raises_with_cleaned_text(self):
@@ -347,11 +347,10 @@ class TestDecodeActionReply:
         # partial-line trim keeps line2.
         assert obj["content"] == "line1\nline2\n"
 
-    def test_unclosed_sentinel_without_length_is_not_truncated(self):
+    def test_unclosed_sentinel_without_length_is_rejected(self):
         text = '{"action":"write","arg":"f.py","reasoning":"w"}\n<<<CONTENT\nline1\nline2'
-        obj, _, _ = _decode_action_reply(text, "stop")
-        assert obj["content"] == "line1\nline2"
-        assert "content_truncated" not in obj
+        with pytest.raises(json.JSONDecodeError, match="sentinel content must close"):
+            _decode_action_reply(text, "stop")
 
 
 # --- Client-local settings and injected dependencies (issue #37) ---

@@ -118,7 +118,7 @@ class TestActionEnvelope:
         [
             {"action": "shell"},
             {"action": "write", "arg": "f.py"},
-            {"action": "write", "arg": "f.py", "content": "  "},
+            {"action": "write", "arg": "f.py", "content": 7},
             {"action": "edit", "arg": "f.py", "find": "x"},
             {"action": "read", "arg": ""},
         ],

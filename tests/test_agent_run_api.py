@@ -418,6 +418,25 @@ class TestInjectedDependencies:
         )
         assert result["status"] == "complete"
 
+    def test_injected_builtin_executor_receives_strict_shell_envelope(self, tmp_path):
+        client = ScriptedClient(
+            [
+                {"tasks": ["run greeting"]},
+                {"action": "shell", "arg": "printf hello"},
+                {"action": "done"},
+            ]
+        )
+        executor = ActionExecutor(str(tmp_path))
+        result = run_result(
+            "run greeting",
+            working_dir=str(tmp_path),
+            dependencies=_quiet_deps(llm_client=client, action_executor=executor),
+        )
+        assert result["status"] == "complete"
+        shell_step = result["state"]["all_steps"][0]
+        assert shell_step["action"] == "shell"
+        assert shell_step["ok"] is True
+
     def test_mismatched_executor_never_leaks_a_temporary_workspace(self):
         created = []
         real_mkdtemp = tempfile.mkdtemp
@@ -532,6 +551,91 @@ class TestInjectedDependencies:
         assert "#include <stdio.h>" in repair_dispatch["content"]
         assert [s["action"] for s in result["state"]["all_steps"]] == ["shell", "write", "shell"]
         assert any("[compile_error]" in e for e in result["state"]["errors"])
+
+    def test_injected_executor_survives_successful_deterministic_repair(self, tmp_path):
+        """Generated repair actions use the same injected dispatch seam."""
+        source = 'int main(){ printf("hi"); return 0; }\n'
+        (tmp_path / "main.c").write_text(source)
+        client = ScriptedClient(
+            [
+                {"tasks": ["compile main.c"]},
+                {"action": "shell", "arg": "cc -o main main.c"},
+                {"action": "done"},
+            ]
+        )
+        compile_error = {
+            "ok": False,
+            "output": "main.c:1:13: error: implicit declaration of function 'printf'",
+            "error_type": "compile_error",
+        }
+
+        class RepairExecutor:
+            def __init__(self):
+                self.dispatched = []
+                self.results = [
+                    ActionResult.from_dict(compile_error),
+                    ActionResult(ok=True, output="Wrote main.c"),
+                    ActionResult(ok=True, output="compiled"),
+                ]
+
+            def dispatch(self, action):
+                self.dispatched.append(dict(action))
+                return self.results.pop(0)
+
+        executor = RepairExecutor()
+        result = run_result(
+            "compile main.c",
+            working_dir=str(tmp_path),
+            config=RunConfig(max_tasks=1, max_steps=2),
+            dependencies=_quiet_deps(llm_client=client, action_executor=executor),
+        )
+
+        assert result["status"] == "complete"
+        assert [action["action"] for action in executor.dispatched] == [
+            "shell",
+            "write",
+            "shell",
+        ]
+        repair = executor.dispatched[1]
+        assert repair["arg"] == "main.c"
+        assert repair["content"] == f"#include <stdio.h>\n{source}"
+        assert executor.results == []
+
+    def test_invalid_generated_repair_is_rejected_before_injected_executor(self, tmp_path):
+        """A malformed repair proposal fails closed at the action boundary."""
+        client = ScriptedClient(
+            [
+                {"tasks": ["compile main.c"]},
+                {"action": "shell", "arg": "cc -o main main.c"},
+                {"task": ""},  # task-local replan rejected: empty
+            ]
+        )
+
+        class CompileErrorExecutor:
+            def __init__(self):
+                self.dispatched = []
+
+            def dispatch(self, action):
+                self.dispatched.append(dict(action))
+                return ActionResult(
+                    ok=False,
+                    output="main.c:1:13: error: implicit declaration of function 'printf'",
+                    error_type="compile_error",
+                )
+
+        executor = CompileErrorExecutor()
+        invalid_repair = {"action": "write", "arg": "main.c"}  # missing content
+        with patch("askme._compile_repair_action", return_value=invalid_repair):
+            result = run_result(
+                "compile main.c",
+                working_dir=str(tmp_path),
+                config=RunConfig(max_replans=1, max_tasks=1, max_steps=1),
+                dependencies=_quiet_deps(llm_client=client, action_executor=executor),
+            )
+
+        assert result["status"] == "exhausted"
+        assert [action["action"] for action in executor.dispatched] == ["shell"]
+        assert any("[compile_error]" in error for error in result["state"]["errors"])
 
 
 class TestTaskReplanContract:

@@ -106,21 +106,20 @@ class TestRangedRead:
         assert result["continuation"]["offset"] == 11
         assert result["continuation"]["limit"] == 10
 
-    def test_limit_capped(self, work_dir):
+    def test_limit_above_wire_bound_is_rejected(self, work_dir):
         Path(work_dir, "short.txt").write_text("x\n" * (READ_LIMIT_MAX + 50))
         result = execute({"action": "read", "arg": "short.txt", "limit": 99999}, work_dir)
-        assert f"lines 1-{READ_LIMIT_MAX}" in result["output"]
-        assert result["continuation"]["offset"] == READ_LIMIT_MAX + 1
-        assert result["continuation"]["limit"] == READ_LIMIT_MAX
+        assert result["ok"] is False
+        assert result["error_type"] == "invalid_read_limit"
 
-    def test_invalid_offset_and_limit_clamped(self, work_dir):
+    def test_invalid_offset_and_limit_are_rejected(self, work_dir):
         _big_file(work_dir)
         for bad in ("abc", -5, 0, None):
             result = execute(
                 {"action": "read", "arg": "big.py", "offset": bad, "limit": bad}, work_dir
             )
-            assert result["ok"] is True
-            assert result["output"].startswith("[big.py: lines 1-")
+            assert result["ok"] is False
+            assert result["error_type"] in {"invalid_read_offset", "invalid_read_limit"}
 
     def test_long_single_line_reconstructs_exactly(self, work_dir):
         text = "x" * (READ_CHARS * 2 + 17)
@@ -548,7 +547,7 @@ class TestActionContract:
             _validate_action_contract(
                 {"action": "read", "arg": "f.py", "cursor": "10", "limit": "60", "sha256": "abc123"}
             )
-            is True
+            is False
         )
         assert (
             _validate_action_contract(
@@ -978,12 +977,14 @@ class TestTypedParseFailures:
         [
             "invalid_read_cursor",
             "invalid_read_limit",
+            "invalid_read_offset",
+            "invalid_timeout",
             "read_cursor_hash_required",
             "stale_read_cursor",
         ],
     )
-    def test_read_cursor_errors_survive_summary_without_thinking(self, error_type):
-        error = f"[{error_type}] read app.py: bad continuation"
+    def test_structural_field_errors_survive_summary_with_recovery(self, error_type):
+        error = f"[{error_type}] action: invalid field"
         assert askme._extract_error_type(error)[0] == error_type
         assert askme.summarize_errors([error])[0].startswith(f"[{error_type}]")
         assert error_type in askme._NO_THINK_ERRORS
@@ -1157,14 +1158,16 @@ class TestSentinelTransport:
         assert result["content"] == code
         assert "content_truncated" not in result
 
-    def test_block_overrides_header_content(self):
+    def test_block_and_header_content_are_ambiguous(self):
         text = '{"action":"write","arg":"a.py","content":"stub"}\n<<<CONTENT\nreal\nCONTENT>>>'
         response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
         with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == "real"
+            with pytest.raises(json.JSONDecodeError):
+                askme.ask_llm(
+                    [{"role": "user", "content": "hi"}],
+                    max_retries=0,
+                    reasoning_policy="off",
+                )
 
     def test_unclosed_block_at_length_marks_truncated(self):
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\nline3 par'
@@ -1176,17 +1179,16 @@ class TestSentinelTransport:
         assert result["content"] == "line1\nline2\nline3 par"
         assert result["content_truncated"] is True
 
-    def test_unclosed_block_at_stop_is_complete(self):
-        # A model that forgot the closing sentinel but stopped on its own
-        # emitted everything it meant to — accept the content as complete.
+    def test_unclosed_block_at_stop_is_rejected(self):
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2'
         response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
         with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == "line1\nline2"
-        assert "content_truncated" not in result
+            with pytest.raises(json.JSONDecodeError):
+                askme.ask_llm(
+                    [{"role": "user", "content": "hi"}],
+                    max_retries=0,
+                    reasoning_policy="off",
+                )
 
     def test_unclosed_block_at_length_keeps_last_complete_line(self):
         # Cutoff on a line boundary: the response's trailing newline is the
@@ -1217,10 +1219,12 @@ class TestSentinelTransport:
         text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nexample:\n    CONTENT>>>'
         response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
         with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == "example:\n    CONTENT>>>"
+            with pytest.raises(json.JSONDecodeError):
+                askme.ask_llm(
+                    [{"role": "user", "content": "hi"}],
+                    max_retries=0,
+                    reasoning_policy="off",
+                )
 
     def test_empty_block_at_length_retries_with_payload_budget(self):
         cut = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n'
@@ -2612,7 +2616,7 @@ class TestValidateAfterWrite:
 
     @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
-    def test_rewrite_streak_ignores_model_internal_target(self, mock_llm, mock_replan, tmp_path):
+    def test_model_internal_target_is_rejected(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
             {"tasks": ["create big.py"]},
             {"action": "write", "arg": "big.py", "content": "v1\n", "_target": "spoof-1"},
@@ -2630,10 +2634,10 @@ class TestValidateAfterWrite:
             )
         finally:
             askme.RUN_LOG_PATH = old
-        assert result["status"] == "complete"
-        assert (tmp_path / "big.py").read_text() == "v3\n"
-        events = [json.loads(line) for line in log_path.read_text().splitlines()]
-        assert any(e.get("reason") == "rewrite_loop" for e in events)
+        assert result["status"] == "exhausted"
+        assert not (tmp_path / "big.py").exists()
+        assert result["state"]["selected_steps"] == 0
+        assert any("'_target' is reserved" in error for error in result["state"]["errors"])
 
     @patch("askme.replan_task", return_value=askme.TaskReplanResult("finish big.py", None))
     @patch("askme.ask_llm")
