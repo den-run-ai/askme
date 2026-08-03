@@ -29,6 +29,7 @@ from actions import (
     SHELL_TIMEOUT_MAX,
     ActionExecutor,
     ActionResult,
+    SkippedStep,
     StepReceipt,
     _get_shell_timeout,
     _mutation_target_key,
@@ -607,11 +608,16 @@ class ValidationResponse:
 
 
 # Decode-time response schemas by expected type: True accepts the envelope.
+# Each schema receives the caller's ``expect_context`` so per-run limits (for
+# example the plan's configured max_tasks) shape validation exactly like the
+# consuming call site will.
 RESPONSE_SCHEMAS = {
-    "plan": lambda obj: PlanResponse.parse(obj, MAX_TASKS) is not None,
-    "action": lambda obj: _action_envelope_error(obj) is None,
-    "task_replan": lambda obj: TaskReplanResponse.parse(obj) is not None,
-    "validation": lambda obj: ValidationResponse.parse(obj) is not None,
+    "plan": lambda obj, context: (
+        PlanResponse.parse(obj, (context or {}).get("max_tasks", MAX_TASKS)) is not None
+    ),
+    "action": lambda obj, context: _action_envelope_error(obj) is None,
+    "task_replan": lambda obj, context: TaskReplanResponse.parse(obj) is not None,
+    "validation": lambda obj, context: ValidationResponse.parse(obj) is not None,
 }
 
 
@@ -928,6 +934,7 @@ class LLMClient:
         reasoning_policy=DEFAULT_REASONING_POLICY,
         reasoning_trigger="unspecified",
         expect=None,
+        expect_context=None,
     ):
         """Call the backend and decode one plan/action/validator reply.
 
@@ -937,7 +944,9 @@ class LLMClient:
         malformed_action/response_truncated). ``expect`` names the response
         schema this call site accepts (issue #68): a decoded envelope of the
         wrong type — empty, cross-type, or an unknown action — is retried
-        like any parse failure and raises typed after the retry budget."""
+        like any parse failure and raises typed after the retry budget.
+        ``expect_context`` passes the call site's per-run limits (for example
+        the plan's configured max_tasks) into that schema."""
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
         if expect is not None and expect not in RESPONSE_SCHEMAS:
@@ -1047,7 +1056,7 @@ class LLMClient:
                 raise
             if repaired:
                 self._log(f"  JSON repaired on attempt {attempt}")
-            if expect is not None and not RESPONSE_SCHEMAS[expect](obj):
+            if expect is not None and not RESPONSE_SCHEMAS[expect](obj, expect_context):
                 if attempt < max_retries:
                     self._log(f"  [retry {attempt + 1}] reply failed the {expect} schema")
                     continue
@@ -1074,15 +1083,16 @@ def ask_llm(
     reasoning_policy=DEFAULT_REASONING_POLICY,
     reasoning_trigger="unspecified",
     expect=None,
+    expect_context=None,
 ):
     """Call the configured backend and decode one plan/action/validator reply.
 
     Compatibility facade over LLMClient: snapshots the module-level
     configuration for this call and delegates. Retry/backoff policy, the
-    parse-retry budget escalation, response-schema enforcement (``expect``),
-    and the typed errors callers rely on (LLMTransportError, KeyError for
-    API-error bodies, json.JSONDecodeError with
-    malformed_action/response_truncated) live in LLMClient.ask."""
+    parse-retry budget escalation, response-schema enforcement (``expect`` /
+    ``expect_context``), and the typed errors callers rely on
+    (LLMTransportError, KeyError for API-error bodies, json.JSONDecodeError
+    with malformed_action/response_truncated) live in LLMClient.ask."""
     return LLMClient().ask(
         messages,
         max_tokens=max_tokens,
@@ -1094,6 +1104,7 @@ def ask_llm(
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
         expect=expect,
+        expect_context=expect_context,
     )
 
 
@@ -1432,7 +1443,7 @@ def _write_visibility_flag(task_steps):
     return {"unvalidated_write": Path(arg).name if arg else True}
 
 
-def get_plan(user_prompt, state, client=None):
+def get_plan(user_prompt, state, client=None, max_tokens=None, max_tasks=None):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
     # model, and raw step payloads (write contents) never reach the planner —
@@ -1490,12 +1501,15 @@ def get_plan(user_prompt, state, client=None):
                 "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}",
             },
         ],
-        max_tokens=PLANNER_MAX_TOKENS,
+        max_tokens=PLANNER_MAX_TOKENS if max_tokens is None else max_tokens,
         think=is_replan,
         timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
         reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
         reasoning_trigger="planner_replan" if is_replan else "initial_plan",
         expect="plan",
+        # The decode-time schema truncates exactly like the consuming call
+        # site (PR #75 review): the run's task limit, not the module default.
+        expect_context={"max_tasks": MAX_TASKS if max_tasks is None else max_tasks},
     )
 
 
@@ -1518,6 +1532,7 @@ def get_step(
     write_pressure=False,
     validate_pressure=None,
     client=None,
+    step_tokens=None,
 ):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
@@ -1575,11 +1590,15 @@ def get_step(
             "file again. Next action MUST be shell (verify it), edit (targeted fix), "
             "or done."
         )
-    # A pinned per-run client's step budget follows that client's backend
-    # (issues #15/#40); the module facade keeps the patchable global.
+    # The run's resolved budget wins (issue #69); otherwise a pinned
+    # client's budget follows that client's backend (issues #15/#40), and
+    # the module facade keeps the patchable global.
     ask = ask_llm if client is None else client.ask
     settings = getattr(client, "settings", None)
-    step_budget = STEP_TOKENS if settings is None else settings.step_tokens()
+    if step_tokens is not None:
+        step_budget = step_tokens
+    else:
+        step_budget = STEP_TOKENS if settings is None else settings.step_tokens()
     return ask(
         [{"role": "system", "content": SYSTEM_STEP}, {"role": "user", "content": user_msg}],
         max_tokens=step_budget,
@@ -1612,18 +1631,6 @@ class TaskReplanResult(NamedTuple):
 
     task: str | None
     reject_reason: str | None
-
-
-def _coerce_task_replan(result):
-    """Normalize the replan seam's return to :class:`TaskReplanResult`.
-
-    Tests that script ``askme.replan_task`` with the legacy ``str | None``
-    stand-in keep working; a bare falsy return carries no typed reason."""
-    if isinstance(result, TaskReplanResult):
-        return result
-    if isinstance(result, tuple) and len(result) == 2:
-        return TaskReplanResult(*result)
-    return TaskReplanResult(result, None if result else "unknown")
 
 
 _PASSIVE_TASK_RE = re.compile(r"^\s*(read|inspect|view|open|list|check|examine)\b", re.I)
@@ -1716,6 +1723,7 @@ def replan_task(
     user_prompt,
     goal_context_chars=GOAL_CONTEXT_CHARS,
     client=None,
+    max_tokens=None,
 ):
     """Mini-planner: generate a replacement for one failed task.
 
@@ -1758,7 +1766,7 @@ def replan_task(
                     "content": f"GOAL:\n{user_prompt[:goal_context_chars]}\n\nSTATE:\n{json.dumps(replan_state)}",
                 },
             ],
-            max_tokens=TASK_REPLAN_MAX_TOKENS,
+            max_tokens=TASK_REPLAN_MAX_TOKENS if max_tokens is None else max_tokens,
             think=False,
             max_retries=0,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
@@ -2150,16 +2158,14 @@ class StepRecorder:
     def skip(self, task_index, step, act, action, reason):
         """Record a selected-but-not-dispatched action in run metrics + log."""
         self.state["skipped_steps"] += 1
-        self._event(
-            {
-                "event": "step_skipped",
-                "task_index": task_index,
-                "step": step,
-                "action": act,
-                "arg": action.get("arg", "")[:120],
-                "reason": reason,
-            }
+        record = SkippedStep(
+            task_index=task_index,
+            step=step,
+            action=act,
+            arg=action.get("arg", ""),
+            reason=reason,
         )
+        self._event(record.jsonl_event())
 
     def note(self, entry):
         """Model-visible corrective observation: enters the sliding window
@@ -2441,7 +2447,12 @@ class RunDependencies:
     ``log``, ``_run_log``, and ``time.time`` — resolved at call time, so
     patch-based tests keep intercepting them. An injected ``llm_client``
     (an :class:`LLMClient` or any object with a compatible ``ask``) handles
-    every planner, executor, validator, and task-replanner call. An injected
+    every planner, executor, validator, and task-replanner call; its ``ask``
+    must accept the keyword arguments :meth:`LLMClient.ask` accepts —
+    including ``expect``/``expect_context`` — so duck-typed clients should
+    take ``**kwargs`` (the protocol tracks the client, issue #68). A client
+    without a ``settings`` attribute is recorded as ``injected_opaque`` in
+    the hashed config provenance. An injected
     ``action_executor`` receives every dispatch, including deterministic
     retries; when it names a ``working_dir`` it must be the run's workspace,
     and the run is rejected otherwise. Sinks capture controller-owned
@@ -2582,6 +2593,204 @@ class StepPolicy:
 
     def guard_action(self, ctx, attempt):
         """Pre-dispatch discipline for a non-control action; None dispatches."""
+        return None
+
+    def guard_duplicate(self, ctx, attempt):
+        """Shared per-action-type loop protection (issue #68): duplicates and
+        stuck repeats are suppressed or reported, never converted into
+        completion. One implementation serves every arm; an arm may override
+        only to tighten it."""
+        controller = self.controller
+        action, act = ctx.action, ctx.act
+        last = controller.state["last_steps"][-1:] if controller.state["last_steps"] else []
+        if not last or last[0]["action"] != act:
+            return None
+        prev = last[0]
+        same_mutation_target = False
+        if act in ("write", "edit"):
+            current_target_step = {
+                "arg": action.get("arg", ""),
+            }
+            if act == "write" and action.get("append"):
+                current_target_step["append"] = True
+            current_target = _mutation_target_key(current_target_step, controller.working_dir)
+            same_mutation_target = (
+                current_target is not None
+                and _mutation_target_key(prev, controller.working_dir) == current_target
+            )
+        if act in ("write", "edit") and same_mutation_target:
+            # write: same content = duplicate; edit: same find+replace = duplicate
+            is_dup = False
+            if act == "write" and action.get("append"):
+                # Chunked append is never a no-op — an identical consecutive
+                # chunk is a stuck loop, not a duplicate.
+                if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
+                    controller._emit(
+                        f"  [{ctx.step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
+                    )
+                    controller.state["errors"].append(
+                        f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
+                    )
+                    controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_append")
+                    return _StepFlow.END_ATTEMPT
+            elif (
+                act == "write"
+                and not ctx.truncated_write
+                and prev.get("ok")
+                and not prev.get("_truncated_write")
+                and not prev.get("_append")
+                and prev.get("_content", "") == action.get("content", "")
+            ):
+                is_dup = True
+            elif (
+                act == "edit"
+                and prev.get("ok")
+                and prev.get("_find", "") == action.get("find", "")
+                and prev.get("_replace", "") == action.get("replace", "")
+            ):
+                is_dup = True
+            # Consecutive identical failed edit → stuck; bail to replan
+            elif (
+                act == "edit"
+                and not prev.get("ok")
+                and prev.get("_find", "") == action.get("find", "")
+            ):
+                controller._emit(
+                    f"  [{ctx.step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
+                )
+                controller.state["errors"].append(
+                    f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
+                )
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_edit")
+                return _StepFlow.END_ATTEMPT
+            if is_dup:
+                attempt.dup_skip_count += 1
+                controller._emit(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
+                if prev.get("_truncated_write"):
+                    dup_msg = (
+                        "File is incomplete — the earlier write was truncated. "
+                        "Continue with append:true for the rest."
+                    )
+                else:
+                    dup_msg = "Already done — file unchanged. Move to next action or emit done."
+                entry = {
+                    "action": act,
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": dup_msg,
+                }
+                # Preserve match metadata so guard still detects duplicates on subsequent turns
+                if act == "write":
+                    entry["_content"] = action.get("content", "")
+                    if prev.get("_truncated_write"):
+                        entry["_truncated_write"] = True
+                elif act == "edit":
+                    entry["_find"] = action.get("find", "")
+                    entry["_replace"] = action.get("replace", "")
+                controller.recorder.note(entry)
+                # Defer thinking escalation: first duplicate skip gets a
+                # corrective observation only; escalate on 2+ consecutive skips.
+                # Saves ~10s of thinking time on harmless first-time duplicates.
+                if attempt.dup_skip_count >= 2:
+                    attempt.use_think = True
+                    attempt.reasoning_trigger = "duplicate_action"
+                return _StepFlow.NEXT_STEP
+        elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+            if prev.get("ok"):
+                # Repetition is never completion evidence (issue #68): the
+                # duplicate is suppressed as a no-op once, and repeating it
+                # again is a stuck loop for the replanner — task acceptance
+                # still requires an explicit done.
+                attempt.dup_skip_count += 1
+                if attempt.dup_skip_count >= 2:
+                    controller._emit(
+                        f"  [{ctx.step + 1}] auto-fail (same successful shell repeated on {action.get('arg', '')[:40]})"
+                    )
+                    controller.state["errors"].append(
+                        f"[stuck_loop] shell {action.get('arg', '')[:60]}: same successful command repeated"
+                    )
+                    controller.recorder.skip(
+                        ctx.task_index, ctx.step, act, action, "stuck_shell_repeat"
+                    )
+                    return _StepFlow.END_ATTEMPT
+                controller._emit(f"  [{ctx.step + 1}] skip (duplicate successful shell)")
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_shell")
+                controller.recorder.note(
+                    {
+                        "action": act,
+                        "arg": action.get("arg", ""),
+                        "ok": True,
+                        "output": (
+                            "Already ran successfully — use the earlier output. "
+                            "Take the next action, or emit done/fail."
+                        ),
+                    }
+                )
+                return _StepFlow.NEXT_STEP
+            elif prev.get("error_type") == "timeout":
+                # Bump timeout for retry: read actual timeout from previous step,
+                # not from fresh action (which won't have prior bumps)
+                prev_timeout = prev.get("_timeout", _get_shell_timeout(action.get("arg", "")))
+                bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
+                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
+                controller._emit(
+                    f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)"
+                )
+            else:
+                controller._emit(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
+                controller.state["errors"].append(
+                    f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
+                )
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell")
+                return _StepFlow.END_ATTEMPT
+        elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
+            # Range-aware: new line windows and exact cursor continuations
+            # are legitimate navigation.
+            prev_key = prev.get("_read_key") or _read_key(prev)
+            cur_key = _read_key(action)
+            if prev_key != cur_key:
+                pass  # different range — execute normally
+            elif prev.get("ok"):
+                attempt.dup_skip_count += 1
+                if attempt.dup_skip_count >= 2:
+                    controller._emit(
+                        f"  [{ctx.step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
+                    )
+                    controller.state["errors"].append(
+                        f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
+                    )
+                    controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read")
+                    return _StepFlow.END_ATTEMPT
+                controller._emit(f"  [{ctx.step + 1}] skip (duplicate read)")
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
+                cont = prev.get("_continuation")
+                if cont:
+                    obs = (
+                        "Already read this range. Continue with "
+                        f"{_read_continuation_hint(cont)}; "
+                        f"or search, edit, done, or fail."
+                    )
+                else:
+                    obs = "Already read. Use previous content; edit, write, shell, done, or fail."
+                entry = {
+                    "action": "read",
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": obs,
+                    "_read_key": cur_key,
+                }
+                if cont:
+                    entry["_continuation"] = cont
+                controller.recorder.note(entry)
+                return _StepFlow.NEXT_STEP
+            else:
+                controller._emit(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
+                controller.state["errors"].append(
+                    f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
+                )
+                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read_failed")
+                return _StepFlow.END_ATTEMPT
         return None
 
     def note_result(self, ctx, attempt, result):
@@ -2850,6 +3059,399 @@ _STEP_POLICY_ARMS = {
 }
 
 
+class WriteObligations:
+    """Typed owner of incomplete-write obligations for one run (issue #69).
+
+    Truncation classification, zero-byte obligation records, append-safety
+    and recovery-order decisions, the completion refusal, resume anchors,
+    and obligation clearing all live here — a shared invariant every policy
+    arm runs under. The ``pending_empty_writes`` dictionary stays projected
+    into run state because the structured result and replanner visibility
+    read it there; that projection is the documented boundary.
+    """
+
+    def __init__(self, controller):
+        self.controller = controller
+
+    def completion_blocker(self):
+        """The most actionable open obligation, or None (see
+        :func:`_completion_blocker`)."""
+        return _completion_blocker(self.controller.state, self.controller.working_dir)
+
+    def refuse_done(self, ctx):
+        """Skip a ``done`` claim while any obligation is unresolved."""
+        controller = self.controller
+        blocker = self.completion_blocker()
+        if blocker is None:
+            return None
+        incomplete_name, recovery_arg, append_allowed = blocker
+        if append_allowed:
+            recovery = (
+                "Retry that exact target with append:true if it "
+                "still identifies the intended file, or restart "
+                "it with a complete append:false write."
+            )
+        else:
+            recovery = (
+                "Resend a shorter write to that exact target with "
+                "append:false before using append:true."
+            )
+        controller._emit(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
+        controller.recorder.skip(
+            ctx.task_index, ctx.step, ctx.act, ctx.action, "incomplete_write_done"
+        )
+        controller.recorder.note(
+            {
+                "action": "done",
+                "arg": "",
+                "ok": True,
+                "output": (
+                    f"Cannot finish: {incomplete_name} is incomplete at {recovery_arg}. {recovery}"
+                ),
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def prepare(self, ctx):
+        """Classify write truncation and enforce zero-byte recovery order."""
+        controller = self.controller
+        action, act = ctx.action, ctx.act
+        # Sentinel transport truncation (issue #15): keep the complete lines
+        # that arrived and steer the model to finish the file with chunked
+        # append instead of failing the step.
+        ctx.truncated_write = act == "write" and action.pop("content_truncated", False)
+        ctx.logical_write_target = (
+            _mutation_target_key({"arg": action.get("arg", "")}, controller.working_dir)
+            if act == "write"
+            else None
+        )
+        ctx.operation_write_target = (
+            _mutation_target_key(
+                {
+                    "arg": action.get("arg", ""),
+                    "append": bool(action.get("append")),
+                },
+                controller.working_dir,
+            )
+            if act == "write"
+            else None
+        )
+        pending_recovery = _pending_empty_recovery(
+            controller.state["pending_empty_writes"],
+            ctx.logical_write_target,
+            ctx.operation_write_target,
+            bool(action.get("append")),
+        )
+        if (
+            act == "write"
+            and action.get("append")
+            and pending_recovery
+            and not pending_recovery.get("append_allowed", False)
+        ):
+            controller._emit(
+                f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)"
+            )
+            controller.recorder.skip(
+                ctx.task_index, ctx.step, act, action, "append_after_empty_overwrite"
+            )
+            controller.recorder.note(
+                {
+                    "action": act,
+                    "arg": action.get("arg", ""),
+                    "ok": True,
+                    "output": (
+                        "The replacement's first chunk wrote no bytes. "
+                        "Resend a shorter write with append:false before "
+                        "using append:true."
+                    ),
+                }
+            )
+            return _StepFlow.NEXT_STEP
+        if ctx.truncated_write:
+            kept = action.get("content", "")
+            kept = kept[: kept.rfind("\n") + 1]
+            if not kept:
+                controller._emit(
+                    f"  [{ctx.step + 1}] skip (write truncated before a complete line)"
+                )
+                controller.recorder.skip(
+                    ctx.task_index, ctx.step, act, action, "truncated_write_empty"
+                )
+                # The recovery instruction asks for a clean resend; disarm
+                # rewrite damping before that resend even though this empty
+                # partial attempt wrote no bytes.
+                controller.run_state.disarm_rewrite_damping()
+                # Empty append attempts are obligations on the referent
+                # observed at dispatch time. Key them by that operation
+                # target so retargeting a leaf symlink cannot overwrite an
+                # older obligation.
+                pending_target = (
+                    ctx.operation_write_target if action.get("append") else ctx.logical_write_target
+                )
+                recovery_arg = action.get("arg", "") or "file"
+                if pending_target is not None:
+                    existing = controller.state["pending_empty_writes"].get(pending_target)
+                    append_allowed = bool(action.get("append"))
+                    if isinstance(existing, dict):
+                        append_allowed = existing.get("append_allowed", False) and append_allowed
+                    append_target = _mutation_target_key(
+                        {
+                            "arg": action.get("arg", ""),
+                            "append": True,
+                        },
+                        controller.working_dir,
+                    )
+                    append_targets = list(_pending_append_targets(existing))
+                    if append_target is not None and append_target not in append_targets:
+                        append_targets.append(append_target)
+                    recovery_arg = _target_recovery_arg(pending_target, controller.working_dir)
+                    controller.state["pending_empty_writes"][pending_target] = {
+                        "name": Path(action.get("arg", "") or "file").name,
+                        "append_allowed": append_allowed,
+                        "append_targets": append_targets,
+                        "recovery_arg": recovery_arg,
+                    }
+                # Nothing was written: the first dispatched chunk must stay a
+                # non-append write (append would land on a stale existing
+                # file), only later chunks may append.
+                if action.get("append"):
+                    obs = (
+                        "Append truncated before a complete line. "
+                        "Resend a smaller append:true chunk at the "
+                        f"exact target {recovery_arg}."
+                    )
+                else:
+                    obs = (
+                        "Write truncated before a complete line. Resend the "
+                        f"write (no append) to the exact target {recovery_arg} "
+                        "with a shorter first chunk, then continue with "
+                        "append:true chunks."
+                    )
+                controller.recorder.note(
+                    {
+                        "action": act,
+                        "arg": action.get("arg", ""),
+                        "ok": True,
+                        "output": obs,
+                    }
+                )
+                return _StepFlow.NEXT_STEP
+            action["content"] = kept
+        return None
+
+    def note_successful_write(self, ctx, action):
+        """A complete write clears the obligations it satisfies."""
+        _clear_pending_empty_writes(
+            self.controller.state["pending_empty_writes"],
+            ctx.logical_write_target,
+            ctx.operation_write_target,
+            bool(action.get("append")),
+        )
+
+    def append_resume_anchor(self, ctx, action, result):
+        """Suffix a truncated write's output with its exact resume point.
+
+        The executor is stateless per step: without a resume anchor the
+        model cannot know where the write stopped. The kept content is
+        exactly what :meth:`prepare` trimmed to the last complete line."""
+        kept = action.get("content", "")
+        anchor = kept.splitlines()[-1][-80:]
+        recovery_arg = _target_recovery_arg(ctx.operation_write_target, self.controller.working_dir)
+        result.output += (
+            f" (truncated after {kept.count(chr(10))} lines; "
+            f"last written line: {anchor!r}; continue with "
+            f"append:true at {recovery_arg} starting after "
+            "that line)"
+        )
+
+
+class ValidationState:
+    """Typed owner of run-scoped validation state (issue #69).
+
+    Projects through the structured state keys the result schema already
+    carries (``validated_once``, ``validation_attempts``,
+    ``validation_recheck_needed``, ``validated_step_count``); that
+    dictionary projection is the documented boundary.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    @property
+    def attempts(self):
+        return self.data.get("validation_attempts", 0)
+
+    @property
+    def recheck_needed(self):
+        return bool(self.data.get("validation_recheck_needed"))
+
+    def note_attempt(self):
+        self.data["validated_once"] = True
+        self.data["validation_attempts"] = self.attempts + 1
+
+    def mark_failed(self):
+        """An explicit rejection blocks completion until new evidence."""
+        self.data["validation_recheck_needed"] = True
+        self.data["validated_step_count"] = len(self.data.get("all_steps", []))
+
+    def clear_failure(self):
+        self.data["validation_recheck_needed"] = False
+
+    def has_new_evidence(self):
+        """New successful mutation or shell evidence since the failure."""
+        return _has_new_validation_evidence(self.data)
+
+
+class CompletionPolicy:
+    """Terminal policy for one run (issue #69): validation gating, verdict
+    handling, the evidence-gated recheck, and the typed terminal outcome
+    for both completion and exhaustion. The controller sequences planning
+    and attempts; this class decides how a run may end. Verdict semantics
+    follow issue #68: no verdict is never a pass, an explicit rejection
+    cannot be erased without new evidence, and exhaustion never reconciles
+    to success."""
+
+    def __init__(self, controller):
+        self.controller = controller
+        self.validation = ValidationState(controller.state)
+
+    def try_finish(self, replan):
+        """Validate an all-done pass; a :class:`RunOutcome` ends the run."""
+        controller = self.controller
+        status, validation = "complete", "skipped"
+        wants_validation = _should_validate(
+            replan,
+            controller.history,
+            controller.state,
+            controller.user_prompt,
+            final_validate=controller.final_validate,
+        )
+        first_validation = self.validation.attempts == 0
+        recheck_validation = (
+            self.validation.recheck_needed
+            and self.validation.attempts < 2
+            and self.validation.has_new_evidence()
+        )
+        if wants_validation and (first_validation or recheck_validation):
+            self.validation.note_attempt()
+            validate_kwargs = controller._llm_kwargs()
+            if controller._log_sink is not None:
+                validate_kwargs["log_sink"] = controller._log_sink
+            vresult = _validate_completion(
+                controller.user_prompt,
+                controller.state,
+                controller.working_dir,
+                **validate_kwargs,
+            )
+            if vresult is not None and vresult.valid is False:
+                reason = vresult.reason or "validation failed"
+                missing = list(vresult.missing)
+                error_msg = f"[validation_failed] {reason}"
+                if missing:
+                    error_msg += f" missing: {', '.join(missing)}"
+                controller.state["errors"].append(error_msg)
+                self.validation.mark_failed()
+                controller._emit(f"  Validation failed: {reason}")
+                controller._event(
+                    {
+                        "event": "validation",
+                        "valid": False,
+                        "reason": reason,
+                        "missing": missing,
+                        "deterministic": vresult.deterministic,
+                    }
+                )
+                return None  # replan
+            elif vresult is None and recheck_validation:
+                # Once validation explicitly failed, an unavailable second
+                # verdict cannot erase that known failure.
+                controller._emit(
+                    "  Validation recheck produced no verdict; failure remains pending."
+                )
+                controller._event(
+                    {
+                        "event": "validation",
+                        "valid": None,
+                        "reason": "recheck produced no verdict",
+                        "deterministic": False,
+                    }
+                )
+            elif vresult is None:
+                # An unavailable or malformed first verdict is not a pass
+                # (issue #68): the completed tasks stand, but the run is
+                # typed ``complete_unverified`` instead of claiming
+                # "Validation passed" from missing evidence.
+                status, validation = "complete_unverified", "unavailable"
+                controller._emit("  Validation produced no verdict; completing unverified.")
+                controller._event(
+                    {
+                        "event": "validation",
+                        "valid": None,
+                        "reason": "validator unavailable",
+                        "deterministic": False,
+                    }
+                )
+            else:
+                validation = "deterministic" if vresult.deterministic else "passed"
+                self.validation.clear_failure()
+                controller._emit("  Validation passed.")
+                controller._event(
+                    {
+                        "event": "validation",
+                        "valid": True,
+                        "deterministic": vresult.deterministic,
+                    }
+                )
+        if self.validation.recheck_needed:
+            if self.validation.attempts >= 2:
+                reason = "validation remains failed after the maximum checks"
+            else:
+                reason = (
+                    "completion after failed validation requires new write, edit, or shell evidence"
+                )
+            controller.state["errors"].append(f"[validation_failed] {reason}")
+            controller._emit(f"  Completion refused: {reason}")
+            controller._event({"event": "validation_pending", "reason": reason})
+            return None
+        outcome = self._build_outcome(status, validation, replan)
+        controller._emit(f"All tasks complete. ({outcome.wall_s:.1f}s total)")
+        controller._emit(f"Output in: {controller.working_dir}")
+        return outcome
+
+    def exhausted(self):
+        """Exhaustion is terminal: no shell-success reconciliation (issue #68).
+
+        The former deterministic pass could convert an exhausted budget into
+        ``complete`` from a broad "latest shell succeeded" heuristic even
+        though the plan never finished; that is evaluation-contaminating
+        false success, so the run now reports ``exhausted`` unconditionally.
+        """
+        controller = self.controller
+        validation = "failed" if self.validation.recheck_needed else "skipped"
+        outcome = self._build_outcome("exhausted", validation, controller.max_replans)
+        controller._emit(
+            f"Exhausted {controller.max_replans} replan attempts. ({outcome.wall_s:.1f}s total)"
+        )
+        controller._emit(f"Errors: {controller.state['errors']}")
+        controller._emit(f"Output in: {controller.working_dir}")
+        return outcome
+
+    def _build_outcome(self, status, validation, replans):
+        """Snapshot the terminal record from the run-scoped state."""
+        state = self.controller.state
+        return RunOutcome(
+            status=status,
+            validation=validation,
+            replans=replans,
+            wall_s=round(self.controller.run_state.elapsed(), 2),
+            completed_tasks=len(state["completed_tasks"]),
+            selected_steps=state["selected_steps"],
+            executed_steps=state["executed_steps"],
+            skipped_steps=state["skipped_steps"],
+            errors=tuple(state["errors"][-5:]) if status == "exhausted" else (),
+        )
+
+
 class _RunController:
     """Thin coordinator over planning, task attempts, step decisions, and
     finalization (issue #31).
@@ -2932,6 +3534,18 @@ class _RunController:
             self._llm_meta = client_settings
         else:
             self._llm_meta = cfg.llm if cfg.llm is not None else LLMSettings.current()
+        # Provenance of the hashed LLM identity (PR #72 review): an injected
+        # duck-typed client without settings leaves the payload describing
+        # the module snapshot, so the record must say the identity is opaque
+        # rather than combining unlike runs under one hash.
+        if deps.llm_client is not None:
+            self._llm_provenance = (
+                "injected_client_settings" if client_settings is not None else "injected_opaque"
+            )
+        elif cfg.llm is not None:
+            self._llm_provenance = "pinned_config"
+        else:
+            self._llm_provenance = "module_snapshot"
         self._policy = {
             "allow_system_installs": (
                 ALLOW_SYSTEM_INSTALLS
@@ -2979,11 +3593,18 @@ class _RunController:
         meta = self._llm_meta
         self._config_payload = {
             "backend": meta.backend,
+            # The endpoint identity and request deadline are outcome-affecting
+            # (PR #72 review): two local servers or two timeouts must not share
+            # a hash. `api` is operator-supplied endpoint configuration; the
+            # Authorization credential never rides in it.
+            "api": meta.api,
             "model": meta.model,
             "provider": meta.provider if meta.backend == "openrouter" else "",
             "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
             "allow_provider_fallbacks": meta.allow_fallbacks,
             "require_provider_parameters": meta.require_parameters,
+            "timeout_s": meta.timeout,
+            "llm_provenance": self._llm_provenance,
             "policy": dict(self._policy),
             "reasoning_policy": self.reasoning_policy,
             "final_validate": self.final_validate,
@@ -2995,6 +3616,7 @@ class _RunController:
                 "step_write_tokens": meta.write_retry_tokens(),
                 "planner_max_tokens": PLANNER_MAX_TOKENS,
                 "task_replan_max_tokens": TASK_REPLAN_MAX_TOKENS,
+                "llm_max_retries": MAX_LLM_RETRIES,
             },
             "limits": {
                 "max_replans": self.max_replans,
@@ -3004,6 +3626,10 @@ class _RunController:
             },
         }
         self.config_hash = _config_hash(self._config_payload)
+        # Resolved token budgets are threaded into every LLM-backed helper
+        # call so no outcome-affecting module global is read after run
+        # construction (issue #69).
+        self._budgets = self._config_payload["budgets"]
         self.run_state = RunState(
             reasoning_policy,
             goal_context_chars,
@@ -3015,10 +3641,13 @@ class _RunController:
         self.state = self.run_state.data
         self.history = self.run_state.history
         self.recorder = self.run_state.recorder
-        # The pressure/completion policy arm is constructed last so it can
-        # hold run-scoped state over the same run_state/guards the
-        # controller uses (issue #31).
+        # The policy components are constructed last so they can hold
+        # run-scoped state over the same run_state/guards the controller
+        # sequences (issues #31/#69): the selected pressure arm, the shared
+        # incomplete-write obligations, and the terminal/validation policy.
         self.step_policy = _STEP_POLICY_ARMS[step_policy](self)
+        self.obligations = WriteObligations(self)
+        self.completion = CompletionPolicy(self)
 
     def _emit(self, msg):
         """Console line through the injected sink, defaulting to log()."""
@@ -3066,11 +3695,11 @@ class _RunController:
             if tasks is None:
                 continue  # consumes a plan attempt
             if self._execute_tasks(tasks):
-                outcome = self._try_finish(replan)
+                outcome = self.completion.try_finish(replan)
                 if outcome is not None:
                     break
         if outcome is None:
-            outcome = self._finish_after_exhaustion()
+            outcome = self.completion.exhausted()
         self._event(outcome.run_end_event())
         return {
             "status": outcome.status,
@@ -3078,20 +3707,6 @@ class _RunController:
             "log": self.history,
             "outcome": outcome.describe(),
         }
-
-    def _build_outcome(self, status, validation, replans):
-        """Snapshot the terminal record from the run-scoped state."""
-        return RunOutcome(
-            status=status,
-            validation=validation,
-            replans=replans,
-            wall_s=round(self.run_state.elapsed(), 2),
-            completed_tasks=len(self.state["completed_tasks"]),
-            selected_steps=self.state["selected_steps"],
-            executed_steps=self.state["executed_steps"],
-            skipped_steps=self.state["skipped_steps"],
-            errors=tuple(self.state["errors"][-5:]) if status == "exhausted" else (),
-        )
 
     def _log_run_start(self):
         self._emit(f"Prompt: {self.user_prompt}")
@@ -3127,7 +3742,13 @@ class _RunController:
         self._emit(f"Planning (attempt {replan + 1}/{self.max_replans})...")
         self.state["planning_attempt"] = replan
         try:
-            plan = get_plan(self.user_prompt, self.state, **self._llm_kwargs())
+            plan = get_plan(
+                self.user_prompt,
+                self.state,
+                max_tokens=self._budgets["planner_max_tokens"],
+                max_tasks=self.max_tasks,
+                **self._llm_kwargs(),
+            )
         except (LLMTransportError, KeyError) as e:
             self._emit(f"  Planner transport error: {e}")
             self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
@@ -3183,7 +3804,7 @@ class _RunController:
             self.state["task_start_step_count"] = len(self.state["all_steps"])
             task, task_done, task_steps = self._run_task(i, task, tasks, prev_last)
             if task_done:
-                blocker = _completion_blocker(self.state, self.working_dir)
+                blocker = self.obligations.completion_blocker()
                 if blocker is not None:
                     incomplete_name, recovery_arg, _append_allowed = blocker
                     self.state["errors"].append(
@@ -3265,16 +3886,15 @@ class _RunController:
             if task_attempt < self.guards.max_task_local_replans:
                 saved_errors = list(self.state["errors"])
                 t_lr = self._clock()
-                replan = _coerce_task_replan(
-                    replan_task(
-                        task,
-                        self.state["errors"],
-                        self.state["completed_tasks"],
-                        self.state,
-                        self.goal_context,
-                        goal_context_chars=self.goal_context_chars,
-                        **self._llm_kwargs(),
-                    )
+                replan = replan_task(
+                    task,
+                    self.state["errors"],
+                    self.state["completed_tasks"],
+                    self.state,
+                    self.goal_context,
+                    goal_context_chars=self.goal_context_chars,
+                    max_tokens=self._budgets["task_replan_max_tokens"],
+                    **self._llm_kwargs(),
                 )
                 replacement = replan.task
                 lr_wall = self._clock() - t_lr
@@ -3345,6 +3965,7 @@ class _RunController:
                 goal_context_chars=self.goal_context_chars,
                 write_pressure=self.step_policy.write_pressure(attempt),
                 validate_pressure=self.step_policy.validate_pressure(attempt),
+                step_tokens=self._budgets["step_tokens"],
                 **self._llm_kwargs(),
             )
         except LLMTransportError as e:
@@ -3415,11 +4036,12 @@ class _RunController:
         return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
 
     def _decide_step(self, ctx, attempt):
-        """Run the shared invariants and the policy arm; None dispatches.
+        """Sequence the shared invariants and the policy arm; None dispatches.
 
         Order: write-truncation/obligation preparation and the completion
         blocker are shared invariants; the policy arm's discipline runs
-        next; duplicate/stuck loop protection guards every arm last.
+        next; duplicate/stuck loop protection guards every arm last. The
+        individual algorithms live on the components, not here (issue #69).
         """
         if ctx.act == "done":
             return self._handle_done(ctx, attempt)
@@ -3428,360 +4050,22 @@ class _RunController:
             self._emit(f"  FAIL ({self._clock() - ctx.started:.1f}s): {reason}")
             self.state["errors"].append(f"Task '{attempt.task}': {reason}")
             return _StepFlow.END_ATTEMPT
-        flow = self._prepare_write(ctx)
+        flow = self.obligations.prepare(ctx)
         if flow is None:
             flow = self.step_policy.guard_action(ctx, attempt)
         if flow is None:
-            flow = self._duplicate_guard(ctx, attempt)
+            flow = self.step_policy.guard_duplicate(ctx, attempt)
         return flow
 
     def _handle_done(self, ctx, attempt):
         """Accept ``done`` only past the shared blocker and the policy arm."""
-        blocker = _completion_blocker(self.state, self.working_dir)
-        if blocker is not None:
-            incomplete_name, recovery_arg, append_allowed = blocker
-            if append_allowed:
-                recovery = (
-                    "Retry that exact target with append:true if it "
-                    "still identifies the intended file, or restart "
-                    "it with a complete append:false write."
-                )
-            else:
-                recovery = (
-                    "Resend a shorter write to that exact target with "
-                    "append:false before using append:true."
-                )
-            self._emit(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
-            self.recorder.skip(
-                ctx.task_index, ctx.step, ctx.act, ctx.action, "incomplete_write_done"
-            )
-            self.recorder.note(
-                {
-                    "action": "done",
-                    "arg": "",
-                    "ok": True,
-                    "output": (
-                        f"Cannot finish: {incomplete_name} is incomplete "
-                        f"at {recovery_arg}. {recovery}"
-                    ),
-                }
-            )
-            return _StepFlow.NEXT_STEP
-        flow = self.step_policy.guard_done(ctx, attempt)
+        flow = self.obligations.refuse_done(ctx)
+        if flow is None:
+            flow = self.step_policy.guard_done(ctx, attempt)
         if flow is not None:
             return flow
         attempt.done = True
         return _StepFlow.END_ATTEMPT
-
-    def _prepare_write(self, ctx):
-        """Classify write truncation and enforce zero-byte recovery order."""
-        action, act = ctx.action, ctx.act
-        # Sentinel transport truncation (issue #15): keep the complete lines
-        # that arrived and steer the model to finish the file with chunked
-        # append instead of failing the step.
-        ctx.truncated_write = act == "write" and action.pop("content_truncated", False)
-        ctx.logical_write_target = (
-            _mutation_target_key({"arg": action.get("arg", "")}, self.working_dir)
-            if act == "write"
-            else None
-        )
-        ctx.operation_write_target = (
-            _mutation_target_key(
-                {
-                    "arg": action.get("arg", ""),
-                    "append": bool(action.get("append")),
-                },
-                self.working_dir,
-            )
-            if act == "write"
-            else None
-        )
-        pending_recovery = _pending_empty_recovery(
-            self.state["pending_empty_writes"],
-            ctx.logical_write_target,
-            ctx.operation_write_target,
-            bool(action.get("append")),
-        )
-        if (
-            act == "write"
-            and action.get("append")
-            and pending_recovery
-            and not pending_recovery.get("append_allowed", False)
-        ):
-            self._emit(f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)")
-            self.recorder.skip(
-                ctx.task_index, ctx.step, act, action, "append_after_empty_overwrite"
-            )
-            self.recorder.note(
-                {
-                    "action": act,
-                    "arg": action.get("arg", ""),
-                    "ok": True,
-                    "output": (
-                        "The replacement's first chunk wrote no bytes. "
-                        "Resend a shorter write with append:false before "
-                        "using append:true."
-                    ),
-                }
-            )
-            return _StepFlow.NEXT_STEP
-        if ctx.truncated_write:
-            kept = action.get("content", "")
-            kept = kept[: kept.rfind("\n") + 1]
-            if not kept:
-                self._emit(f"  [{ctx.step + 1}] skip (write truncated before a complete line)")
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "truncated_write_empty")
-                # The recovery instruction asks for a clean resend; disarm
-                # rewrite damping before that resend even though this empty
-                # partial attempt wrote no bytes.
-                self.run_state.disarm_rewrite_damping()
-                # Empty append attempts are obligations on the referent
-                # observed at dispatch time. Key them by that operation
-                # target so retargeting a leaf symlink cannot overwrite an
-                # older obligation.
-                pending_target = (
-                    ctx.operation_write_target if action.get("append") else ctx.logical_write_target
-                )
-                recovery_arg = action.get("arg", "") or "file"
-                if pending_target is not None:
-                    existing = self.state["pending_empty_writes"].get(pending_target)
-                    append_allowed = bool(action.get("append"))
-                    if isinstance(existing, dict):
-                        append_allowed = existing.get("append_allowed", False) and append_allowed
-                    append_target = _mutation_target_key(
-                        {
-                            "arg": action.get("arg", ""),
-                            "append": True,
-                        },
-                        self.working_dir,
-                    )
-                    append_targets = list(_pending_append_targets(existing))
-                    if append_target is not None and append_target not in append_targets:
-                        append_targets.append(append_target)
-                    recovery_arg = _target_recovery_arg(pending_target, self.working_dir)
-                    self.state["pending_empty_writes"][pending_target] = {
-                        "name": Path(action.get("arg", "") or "file").name,
-                        "append_allowed": append_allowed,
-                        "append_targets": append_targets,
-                        "recovery_arg": recovery_arg,
-                    }
-                # Nothing was written: the first dispatched chunk must stay a
-                # non-append write (append would land on a stale existing
-                # file), only later chunks may append.
-                if action.get("append"):
-                    obs = (
-                        "Append truncated before a complete line. "
-                        "Resend a smaller append:true chunk at the "
-                        f"exact target {recovery_arg}."
-                    )
-                else:
-                    obs = (
-                        "Write truncated before a complete line. Resend the "
-                        f"write (no append) to the exact target {recovery_arg} "
-                        "with a shorter first chunk, then continue with "
-                        "append:true chunks."
-                    )
-                self.recorder.note(
-                    {
-                        "action": act,
-                        "arg": action.get("arg", ""),
-                        "ok": True,
-                        "output": obs,
-                    }
-                )
-                return _StepFlow.NEXT_STEP
-            action["content"] = kept
-        return None
-
-    def _duplicate_guard(self, ctx, attempt):
-        """Per-action-type loop detection against the previous step."""
-        action, act = ctx.action, ctx.act
-        last = self.state["last_steps"][-1:] if self.state["last_steps"] else []
-        if not last or last[0]["action"] != act:
-            return None
-        prev = last[0]
-        same_mutation_target = False
-        if act in ("write", "edit"):
-            current_target_step = {
-                "arg": action.get("arg", ""),
-            }
-            if act == "write" and action.get("append"):
-                current_target_step["append"] = True
-            current_target = _mutation_target_key(current_target_step, self.working_dir)
-            same_mutation_target = (
-                current_target is not None
-                and _mutation_target_key(prev, self.working_dir) == current_target
-            )
-        if act in ("write", "edit") and same_mutation_target:
-            # write: same content = duplicate; edit: same find+replace = duplicate
-            is_dup = False
-            if act == "write" and action.get("append"):
-                # Chunked append is never a no-op — an identical consecutive
-                # chunk is a stuck loop, not a duplicate.
-                if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
-                    self._emit(
-                        f"  [{ctx.step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
-                    )
-                    self.state["errors"].append(
-                        f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
-                    )
-                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_append")
-                    return _StepFlow.END_ATTEMPT
-            elif (
-                act == "write"
-                and not ctx.truncated_write
-                and prev.get("ok")
-                and not prev.get("_truncated_write")
-                and not prev.get("_append")
-                and prev.get("_content", "") == action.get("content", "")
-            ):
-                is_dup = True
-            elif (
-                act == "edit"
-                and prev.get("ok")
-                and prev.get("_find", "") == action.get("find", "")
-                and prev.get("_replace", "") == action.get("replace", "")
-            ):
-                is_dup = True
-            # Consecutive identical failed edit → stuck; bail to replan
-            elif (
-                act == "edit"
-                and not prev.get("ok")
-                and prev.get("_find", "") == action.get("find", "")
-            ):
-                self._emit(
-                    f"  [{ctx.step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
-                )
-                self.state["errors"].append(
-                    f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
-                )
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_edit")
-                return _StepFlow.END_ATTEMPT
-            if is_dup:
-                attempt.dup_skip_count += 1
-                self._emit(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
-                if prev.get("_truncated_write"):
-                    dup_msg = (
-                        "File is incomplete — the earlier write was truncated. "
-                        "Continue with append:true for the rest."
-                    )
-                else:
-                    dup_msg = "Already done — file unchanged. Move to next action or emit done."
-                entry = {
-                    "action": act,
-                    "arg": action.get("arg", ""),
-                    "ok": True,
-                    "output": dup_msg,
-                }
-                # Preserve match metadata so guard still detects duplicates on subsequent turns
-                if act == "write":
-                    entry["_content"] = action.get("content", "")
-                    if prev.get("_truncated_write"):
-                        entry["_truncated_write"] = True
-                elif act == "edit":
-                    entry["_find"] = action.get("find", "")
-                    entry["_replace"] = action.get("replace", "")
-                self.recorder.note(entry)
-                # Defer thinking escalation: first duplicate skip gets a
-                # corrective observation only; escalate on 2+ consecutive skips.
-                # Saves ~10s of thinking time on harmless first-time duplicates.
-                if attempt.dup_skip_count >= 2:
-                    attempt.use_think = True
-                    attempt.reasoning_trigger = "duplicate_action"
-                return _StepFlow.NEXT_STEP
-        elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
-            if prev.get("ok"):
-                # Repetition is never completion evidence (issue #68): the
-                # duplicate is suppressed as a no-op once, and repeating it
-                # again is a stuck loop for the replanner — task acceptance
-                # still requires an explicit done.
-                attempt.dup_skip_count += 1
-                if attempt.dup_skip_count >= 2:
-                    self._emit(
-                        f"  [{ctx.step + 1}] auto-fail (same successful shell repeated on {action.get('arg', '')[:40]})"
-                    )
-                    self.state["errors"].append(
-                        f"[stuck_loop] shell {action.get('arg', '')[:60]}: same successful command repeated"
-                    )
-                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell_repeat")
-                    return _StepFlow.END_ATTEMPT
-                self._emit(f"  [{ctx.step + 1}] skip (duplicate successful shell)")
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_shell")
-                self.recorder.note(
-                    {
-                        "action": act,
-                        "arg": action.get("arg", ""),
-                        "ok": True,
-                        "output": (
-                            "Already ran successfully — use the earlier output. "
-                            "Take the next action, or emit done/fail."
-                        ),
-                    }
-                )
-                return _StepFlow.NEXT_STEP
-            elif prev.get("error_type") == "timeout":
-                # Bump timeout for retry: read actual timeout from previous step,
-                # not from fresh action (which won't have prior bumps)
-                prev_timeout = prev.get("_timeout", _get_shell_timeout(action.get("arg", "")))
-                bumped = max(SHELL_TIMEOUT_LONG, prev_timeout * 2)
-                action["timeout"] = min(bumped, SHELL_TIMEOUT_MAX)
-                self._emit(f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)")
-            else:
-                self._emit(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
-                self.state["errors"].append(
-                    f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
-                )
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell")
-                return _StepFlow.END_ATTEMPT
-        elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
-            # Range-aware: new line windows and exact cursor continuations
-            # are legitimate navigation.
-            prev_key = prev.get("_read_key") or _read_key(prev)
-            cur_key = _read_key(action)
-            if prev_key != cur_key:
-                pass  # different range — execute normally
-            elif prev.get("ok"):
-                attempt.dup_skip_count += 1
-                if attempt.dup_skip_count >= 2:
-                    self._emit(
-                        f"  [{ctx.step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
-                    )
-                    self.state["errors"].append(
-                        f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
-                    )
-                    self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read")
-                    return _StepFlow.END_ATTEMPT
-                self._emit(f"  [{ctx.step + 1}] skip (duplicate read)")
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
-                cont = prev.get("_continuation")
-                if cont:
-                    obs = (
-                        "Already read this range. Continue with "
-                        f"{_read_continuation_hint(cont)}; "
-                        f"or search, edit, done, or fail."
-                    )
-                else:
-                    obs = "Already read. Use previous content; edit, write, shell, done, or fail."
-                entry = {
-                    "action": "read",
-                    "arg": action.get("arg", ""),
-                    "ok": True,
-                    "output": obs,
-                    "_read_key": cur_key,
-                }
-                if cont:
-                    entry["_continuation"] = cont
-                self.recorder.note(entry)
-                return _StepFlow.NEXT_STEP
-            else:
-                self._emit(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
-                self.state["errors"].append(
-                    f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
-                )
-                self.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read_failed")
-                return _StepFlow.END_ATTEMPT
-        return None
 
     def _execute_step(self, ctx, attempt):
         """Dispatch through the action seam and record the receipt."""
@@ -3794,31 +4078,14 @@ class _RunController:
         # runs on the typed result.
         result = self._dispatch(action)
         if result.ok and act == "write":
-            _clear_pending_empty_writes(
-                self.state["pending_empty_writes"],
-                ctx.logical_write_target,
-                ctx.operation_write_target,
-                bool(action.get("append")),
-            )
+            self.obligations.note_successful_write(ctx, action)
         if act not in OBSERVE_ACTIONS and result.ok:
             # Counted only on success (Codex P2, PR #16): a failed mutation
             # must not disarm write pressure or the observation tail reserve.
             attempt.commit_executed += 1
         self.step_policy.note_result(ctx, attempt, result)
         if ctx.truncated_write and result.ok:
-            # The executor is stateless per step: without a resume anchor
-            # the model cannot know where the write stopped. The kept
-            # content is exactly what _prepare_write trimmed to the last
-            # complete line.
-            kept = action.get("content", "")
-            anchor = kept.splitlines()[-1][-80:]
-            recovery_arg = _target_recovery_arg(ctx.operation_write_target, self.working_dir)
-            result.output += (
-                f" (truncated after {kept.count(chr(10))} lines; "
-                f"last written line: {anchor!r}; continue with "
-                f"append:true at {recovery_arg} starting after "
-                "that line)"
-            )
+            self.obligations.append_resume_anchor(ctx, action, result)
         ok_str = "OK" if result.ok else "FAIL"
         self._emit(f"  -> {ok_str} ({self._clock() - ctx.started:.1f}s): {result.output[:80]}")
 
@@ -3830,7 +4097,14 @@ class _RunController:
         )
 
         if not result.ok:
-            return self._recover_failed_step(ctx, attempt, result)
+            flow = self._recover_failed_step(ctx, attempt, result)
+            if flow is None:
+                # The typed failure is task evidence (PR #70 review): a task
+                # the model completes after observing a failure must carry
+                # that observation into completed_step_groups so the final
+                # validator sees what the task actually observed.
+                attempt.steps.append(step_entry)
+            return flow
         attempt.use_think = False
         attempt.reasoning_trigger = "executor"
         attempt.steps.append(step_entry)
@@ -3913,116 +4187,6 @@ class _RunController:
         attempt.use_think = etype not in _NO_THINK_ERRORS
         attempt.reasoning_trigger = f"execution_error:{etype}"
         return None
-
-    def _try_finish(self, replan):
-        """Validate an all-done pass; a :class:`RunOutcome` ends the run."""
-        status, validation = "complete", "skipped"
-        wants_validation = _should_validate(
-            replan, self.history, self.state, self.user_prompt, final_validate=self.final_validate
-        )
-        first_validation = self.state.get("validation_attempts", 0) == 0
-        recheck_validation = (
-            self.state.get("validation_recheck_needed")
-            and self.state.get("validation_attempts", 0) < 2
-            and _has_new_validation_evidence(self.state)
-        )
-        if wants_validation and (first_validation or recheck_validation):
-            self.state["validated_once"] = True
-            self.state["validation_attempts"] = self.state.get("validation_attempts", 0) + 1
-            validate_kwargs = self._llm_kwargs()
-            if self._log_sink is not None:
-                validate_kwargs["log_sink"] = self._log_sink
-            vresult = _validate_completion(
-                self.user_prompt, self.state, self.working_dir, **validate_kwargs
-            )
-            if vresult is not None and vresult.valid is False:
-                reason = vresult.reason or "validation failed"
-                missing = list(vresult.missing)
-                error_msg = f"[validation_failed] {reason}"
-                if missing:
-                    error_msg += f" missing: {', '.join(missing)}"
-                self.state["errors"].append(error_msg)
-                self.state["validation_recheck_needed"] = True
-                self.state["validated_step_count"] = len(self.state.get("all_steps", []))
-                self._emit(f"  Validation failed: {reason}")
-                self._event(
-                    {
-                        "event": "validation",
-                        "valid": False,
-                        "reason": reason,
-                        "missing": missing,
-                        "deterministic": vresult.deterministic,
-                    }
-                )
-                return None  # replan
-            elif vresult is None and recheck_validation:
-                # Once validation explicitly failed, an unavailable second
-                # verdict cannot erase that known failure.
-                self._emit("  Validation recheck produced no verdict; failure remains pending.")
-                self._event(
-                    {
-                        "event": "validation",
-                        "valid": None,
-                        "reason": "recheck produced no verdict",
-                        "deterministic": False,
-                    }
-                )
-            elif vresult is None:
-                # An unavailable or malformed first verdict is not a pass
-                # (issue #68): the completed tasks stand, but the run is
-                # typed ``complete_unverified`` instead of claiming
-                # "Validation passed" from missing evidence.
-                status, validation = "complete_unverified", "unavailable"
-                self._emit("  Validation produced no verdict; completing unverified.")
-                self._event(
-                    {
-                        "event": "validation",
-                        "valid": None,
-                        "reason": "validator unavailable",
-                        "deterministic": False,
-                    }
-                )
-            else:
-                validation = "deterministic" if vresult.deterministic else "passed"
-                self.state["validation_recheck_needed"] = False
-                self._emit("  Validation passed.")
-                self._event(
-                    {
-                        "event": "validation",
-                        "valid": True,
-                        "deterministic": vresult.deterministic,
-                    }
-                )
-        if self.state.get("validation_recheck_needed"):
-            if self.state.get("validation_attempts", 0) >= 2:
-                reason = "validation remains failed after the maximum checks"
-            else:
-                reason = (
-                    "completion after failed validation requires new write, edit, or shell evidence"
-                )
-            self.state["errors"].append(f"[validation_failed] {reason}")
-            self._emit(f"  Completion refused: {reason}")
-            self._event({"event": "validation_pending", "reason": reason})
-            return None
-        outcome = self._build_outcome(status, validation, replan)
-        self._emit(f"All tasks complete. ({outcome.wall_s:.1f}s total)")
-        self._emit(f"Output in: {self.working_dir}")
-        return outcome
-
-    def _finish_after_exhaustion(self):
-        """Exhaustion is terminal: no shell-success reconciliation (issue #68).
-
-        The former deterministic pass could convert an exhausted budget into
-        ``complete`` from a broad "latest shell succeeded" heuristic even
-        though the plan never finished; that is evaluation-contaminating
-        false success, so the run now reports ``exhausted`` unconditionally.
-        """
-        validation = "failed" if self.state.get("validation_recheck_needed") else "skipped"
-        outcome = self._build_outcome("exhausted", validation, self.max_replans)
-        self._emit(f"Exhausted {self.max_replans} replan attempts. ({outcome.wall_s:.1f}s total)")
-        self._emit(f"Errors: {self.state['errors']}")
-        self._emit(f"Output in: {self.working_dir}")
-        return outcome
 
 
 def run_result(user_prompt, working_dir=None, config=None, dependencies=None):

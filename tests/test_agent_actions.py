@@ -675,7 +675,7 @@ class TestTruncationBudget:
 
 
 class TestReadDupGuardOffsets:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_different_offsets_are_not_duplicates(self, mock_llm, mock_replan, capsys, tmp_path):
         """Ranged navigation of one file must not trip the duplicate-read guard."""
@@ -695,7 +695,7 @@ class TestReadDupGuardOffsets:
         assert reads[0]["_read_key"] == ("big.py", "lines", 1, 60)
         assert reads[1]["_read_key"] == ("big.py", "lines", 61, 60)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_different_limits_are_not_duplicates(self, mock_llm, mock_replan, capsys, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -709,7 +709,7 @@ class TestReadDupGuardOffsets:
         assert result["status"] == "complete"
         assert "skip (duplicate read)" not in capsys.readouterr().out
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_same_range_skip_points_at_continuation(self, mock_llm, mock_replan, capsys, tmp_path):
         """Re-reading the same truncated range gets a typed continuation hint."""
@@ -736,7 +736,7 @@ class TestReadDupGuardOffsets:
         assert "skip (duplicate read)" in out
         assert any("Continue with cursor=1200, limit=60, sha256=" in o for o in captured)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_cursor_pages_in_same_line_are_not_duplicates(
         self, mock_llm, mock_replan, capsys, tmp_path
@@ -756,7 +756,7 @@ class TestReadDupGuardOffsets:
         assert result["status"] == "complete"
         assert "skip (duplicate read)" not in capsys.readouterr().out
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_cursor_reads_with_different_limits_are_not_duplicates(
         self, mock_llm, mock_replan, capsys, tmp_path
@@ -775,7 +775,7 @@ class TestReadDupGuardOffsets:
 
 
 class TestAppendStuckGuard:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_same_chunk_appended_twice_auto_fails(self, mock_llm, mock_replan, capsys, tmp_path):
         mock_llm.side_effect = [
@@ -792,7 +792,7 @@ class TestAppendStuckGuard:
         # The chunk must not have been applied twice
         assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_same_chunk_via_path_alias_auto_fails(self, mock_llm, mock_replan, capsys, tmp_path):
         mock_llm.side_effect = [
@@ -809,7 +809,7 @@ class TestAppendStuckGuard:
         assert "auto-fail (same chunk appended twice" in out
         assert Path(tmp_path, "big.py").read_text() == "x = 1\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_distinct_chunks_not_stuck(self, mock_llm, mock_replan, capsys, tmp_path):
         mock_llm.side_effect = [
@@ -829,7 +829,7 @@ class TestAppendStuckGuard:
 
 
 class TestPlannerStateCurated:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_replan_sees_digest_not_file_contents(self, mock_llm, mock_replan, tmp_path):
         """Full replan gets a step digest; raw write payloads never reach it."""
@@ -897,7 +897,7 @@ class TestReadMetadata:
         r = execute({"action": "read", "arg": "big.py"}, work_dir)
         assert r["sha256"] not in r["output"]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_read_step_log_is_hash_linked(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -954,7 +954,7 @@ class TestTypedParseFailures:
         assert exc.value.malformed_action is True
         assert exc.value.response_truncated is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_loop_records_typed_parse_error(self, mock_llm, mock_replan, tmp_path):
         err = json.JSONDecodeError("boom", "{", 0)
@@ -994,7 +994,7 @@ class TestTypedParseFailures:
 
 
 class TestStepAccounting:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_selected_executed_skipped_counters(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1025,7 +1025,7 @@ class TestStepAccounting:
         run_end = [e for e in events if e["event"] == "run_end"][0]
         assert run_end["steps"] == {"selected": 3, "executed": 1, "skipped": 1}
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_stuck_read_recorded_as_skipped(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1062,7 +1062,7 @@ class TestEndToEndFeatureScale:
     symbol beyond the first read window and land a patch larger than one
     512-token action payload, with the patch reaching real execution."""
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_symbol_beyond_first_chunk_and_multi_kb_patch(self, mock_llm, mock_replan, tmp_path):
         filler = "".join(f"def f{i}():\n    return {i}\n\n" for i in range(120))
@@ -1242,7 +1242,7 @@ class TestSentinelTransport:
 
 
 class TestTruncatedWriteContinuation:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_partial_lines_written_then_append_completes(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -1270,7 +1270,7 @@ class TestTruncatedWriteContinuation:
         assert "continue with append:true" in writes[0]["output"]
         assert writes[0]["_truncated_write"] is True
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_truncated_write_output_carries_resume_anchor(self, mock_llm, mock_replan, tmp_path):
         """The executor is stateless per step: the observation after a
@@ -1309,7 +1309,7 @@ class TestTruncatedWriteContinuation:
         # The anchor must reach the next executor call, not just the log.
         assert "'line2'" in seen[2]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_truncated_write_not_told_to_append(self, mock_llm, mock_replan, tmp_path):
         """No chunk was written: appending would land on the stale existing
@@ -1345,7 +1345,7 @@ class TestTruncatedWriteContinuation:
         assert "Resend the write (no append)" in seen[2]
         assert Path(tmp_path, "impl.py").read_text() == "new\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_truncated_append_chunk_stays_append(self, mock_llm, mock_replan, tmp_path):
         seen = []
@@ -1381,7 +1381,7 @@ class TestTruncatedWriteContinuation:
         assert "Resend a smaller append:true chunk" in seen[3]
         assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_line_boundary_truncation_drops_nothing(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -1405,7 +1405,7 @@ class TestTruncatedWriteContinuation:
         assert result["status"] == "complete"
         assert Path(tmp_path, "impl.py").read_text() == "line1\nline2\nline3\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_no_complete_line_skips_dispatch(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -1439,7 +1439,7 @@ class TestTruncatedWriteContinuation:
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert reasons == ["truncated_write_empty"]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_reemitted_truncated_prefix_is_clean_restart(self, mock_llm, mock_replan, tmp_path):
         """A complete resend of a retained prefix is dispatched, not 'done'."""
@@ -1494,7 +1494,7 @@ class TestBackendAwareBudgets:
 
 
 class TestWriteForcingPolicy:
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_pressure_note_after_three_observations(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1524,7 +1524,7 @@ class TestWriteForcingPolicy:
         assert "MUST be write" in seen[4]
         assert "MUST be write" not in seen[5]  # write executed — pressure off
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_no_pressure_on_observe_shaped_task(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1547,7 +1547,7 @@ class TestWriteForcingPolicy:
         assert result["state"]["skipped_steps"] == 0
         assert all("MUST be write" not in s for s in seen)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_tail_reserve_blocks_observation_then_auto_fails(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1575,7 +1575,7 @@ class TestWriteForcingPolicy:
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert reasons == ["observe_tail_reserved", "observe_tail_exhausted"]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_tail_allows_observation_after_commit(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1590,7 +1590,7 @@ class TestWriteForcingPolicy:
         assert result["status"] == "complete"
         assert result["state"]["skipped_steps"] == 0
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_replan_sees_no_write_executed(self, mock_llm, mock_replan, tmp_path):
         _big_file(str(tmp_path), lines=200)
@@ -1619,7 +1619,7 @@ class TestWriteForcingPolicy:
         assert len(plan_msgs) == 1
         assert '"no_write_executed": true' in plan_msgs[0]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_no_flag_after_successful_write(self, mock_llm, mock_replan, tmp_path):
         plan_msgs = []
@@ -1703,7 +1703,7 @@ class TestWriteForcingPolicy:
         assert "failed_steps" not in replan_state
         assert "prior.py" not in msg
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_replan_flag_scoped_across_tasks(self, mock_llm, mock_replan, tmp_path):
         """Task 1's successful write must not mask task 2's stall."""
@@ -1864,7 +1864,7 @@ class TestValidateAfterWrite:
         assert local_state["incomplete_write_append_allowed"] is False
         assert "no_write_executed" not in local_state
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_truncated_write_replans_as_incomplete(self, mock_llm, mock_replan, tmp_path):
         plan_msgs = []
@@ -1899,7 +1899,7 @@ class TestValidateAfterWrite:
         assert "no_write_executed" not in plan_state
         assert not (tmp_path / "app.py").exists()
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_validate_note_after_two_rewrites(self, mock_llm, mock_replan, tmp_path):
         seen = []
@@ -1928,7 +1928,7 @@ class TestValidateAfterWrite:
         # A successful shell verification clears the pressure.
         assert "Do NOT write the whole file again" not in seen[4]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_rewrite_loop_skip_after_three(self, mock_llm, mock_replan, tmp_path):
         def llm(messages, **kwargs):
@@ -1963,7 +1963,7 @@ class TestValidateAfterWrite:
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" in reasons
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_rewrite_streak_normalizes_alias_paths(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -2016,7 +2016,7 @@ class TestValidateAfterWrite:
             {"arg": "leaf.py", "append": True}, str(work)
         ) == askme._mutation_target_key({"arg": str(referent), "append": True}, str(work))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_rewrite_streak_collapses_symlinked_parent_aliases(
         self, mock_llm, mock_replan, tmp_path
@@ -2050,7 +2050,7 @@ class TestValidateAfterWrite:
             "no complete line",
         ],
     )
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_complete_symlink_alias_clears_incomplete_write(
         self, mock_llm, mock_replan, tmp_path, truncated_content
@@ -2074,7 +2074,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"] == {}
         assert not askme._unresolved_incomplete_writes(result["state"]["all_steps"], str(work))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_append_through_leaf_symlink_resolves_partial_referent(
         self, mock_llm, mock_replan, tmp_path
@@ -2105,7 +2105,7 @@ class TestValidateAfterWrite:
         assert referent.read_text() == "prefix\ntail\n"
         assert not askme._unresolved_incomplete_writes(result["state"]["all_steps"], str(work))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_overwrite_blocks_append_through_leaf_alias(
         self, mock_llm, mock_replan, tmp_path
@@ -2147,7 +2147,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "append_after_empty_overwrite" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_pending_overwrite_wins_across_append_aliases(self, mock_llm, mock_replan, tmp_path):
         work = tmp_path / "work"
@@ -2203,7 +2203,7 @@ class TestValidateAfterWrite:
             ("PART\nmissing tail", "OLD\nPART\nTAIL\n"),
         ],
     )
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_recovery_prioritizes_restrictive_overwrite_obligation(
         self, mock_llm, mock_replan, tmp_path, first_content, expected_old
@@ -2259,7 +2259,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"] == {}
         assert not askme._unresolved_incomplete_writes(result["state"]["all_steps"], str(work))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_append_can_resume_through_physical_alias(self, mock_llm, mock_replan, tmp_path):
         work = tmp_path / "work"
@@ -2290,7 +2290,7 @@ class TestValidateAfterWrite:
         assert referent.read_text() == "OLD\nNEW\n"
         assert result["state"]["pending_empty_writes"] == {}
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_append_obligations_survive_symlink_retarget(
         self, mock_llm, mock_replan, tmp_path
@@ -2366,7 +2366,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_nonempty_append_recovery_hint_survives_symlink_retarget(
         self, mock_llm, mock_replan, tmp_path
@@ -2413,7 +2413,7 @@ class TestValidateAfterWrite:
         assert new_target.read_text() == "NEW\n"
         assert not askme._unresolved_incomplete_writes(result["state"]["all_steps"], str(work))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_recovery_target_survives_working_dir_symlink_retarget(
         self, mock_llm, mock_replan, tmp_path
@@ -2460,7 +2460,7 @@ class TestValidateAfterWrite:
         assert new_target.read_text() == "NEW\n"
         assert result["state"]["pending_empty_writes"] == {}
 
-    @patch("askme.replan_task", return_value="finish app.py")
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult("finish app.py", None))
     @patch("askme.ask_llm")
     def test_task_local_retry_keeps_structured_recovery_target(
         self, mock_llm, mock_replan, tmp_path
@@ -2515,7 +2515,7 @@ class TestValidateAfterWrite:
         assert new_target.read_text() == "NEW\n"
         assert result["state"]["pending_empty_writes"] == {}
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_overwrite_referent_guards_survive_symlink_retarget(
         self, mock_llm, mock_replan, tmp_path
@@ -2569,7 +2569,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert sum(e.get("reason") == "append_after_empty_overwrite" for e in events) == 2
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_append_regular_path_survives_retarget_to_symlink(
         self, mock_llm, mock_replan, tmp_path
@@ -2610,7 +2610,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_rewrite_streak_ignores_model_internal_target(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -2635,7 +2635,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
-    @patch("askme.replan_task", return_value="finish big.py")
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult("finish big.py", None))
     @patch("askme.ask_llm")
     def test_rewrite_streak_survives_task_local_replan(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -2661,7 +2661,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_rewrite_streak_survives_full_replan(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -2689,7 +2689,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "rewrite_loop" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_deterministic_repair_clears_rewrite_streak(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -2738,7 +2738,7 @@ class TestValidateAfterWrite:
         assert shell_calls["count"] == 2
         assert (tmp_path / "main.c").read_text() == "int main(void){ return 4; }\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_append_chunks_do_not_count_as_rewrites(self, mock_llm, mock_replan, tmp_path):
         seen = []
@@ -2764,7 +2764,7 @@ class TestValidateAfterWrite:
         assert (tmp_path / "big.py").read_text() == "a\nb\nc\n"
         assert all("Do NOT write the whole file again" not in s for s in seen)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_failed_mutation_keeps_write_pressure(self, mock_llm, mock_replan, tmp_path):
         # Codex P2 (PR #16): a failed edit must not disarm the pressure note.
@@ -2804,7 +2804,7 @@ class TestValidateAfterWrite:
         assert "MUST be write" in seen[5]
         assert "MUST be write" not in seen[6]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_replan_sees_unvalidated_write(self, mock_llm, mock_replan, tmp_path):
         plan_msgs = []
@@ -2832,7 +2832,7 @@ class TestValidateAfterWrite:
         assert '"unvalidated_write": "app.py"' in plan_msgs[0]
         assert "no_write_executed" not in plan_msgs[0]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_failed_inspection_task_is_not_a_write_stall(self, mock_llm, mock_replan, tmp_path):
         # Codex P2 (PR #16): "create a.py, then inspect b.py" — a failure in
@@ -2868,7 +2868,7 @@ class TestValidateAfterWrite:
         assert "no_write_executed" not in plan_msgs[0]
         assert "unvalidated_write" not in plan_msgs[0]
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_truncated_writes_do_not_advance_rewrite_streak(self, mock_llm, mock_replan, tmp_path):
         # Codex P1 (PR #21): a partial write from a truncated sentinel block
@@ -2914,7 +2914,7 @@ class TestValidateAfterWrite:
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" not in reasons
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_truncated_append_clears_armed_rewrite_streak(self, mock_llm, mock_replan, tmp_path):
         def llm(messages, **kwargs):
@@ -2956,7 +2956,7 @@ class TestValidateAfterWrite:
         reasons = [e["reason"] for e in events if e["event"] == "step_skipped"]
         assert "rewrite_loop" not in reasons
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_truncation_clears_armed_rewrite_streak(self, mock_llm, mock_replan, tmp_path):
         def llm(messages, **kwargs):
@@ -2998,7 +2998,7 @@ class TestValidateAfterWrite:
         assert "truncated_write_empty" in reasons
         assert "rewrite_loop" not in reasons
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_exhaustion_never_accepts_incomplete_write(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -3027,7 +3027,7 @@ class TestValidateAfterWrite:
         state = {"all_steps": steps, "errors": []}
         assert askme._deterministic_check("fix app.py", state, str(tmp_path)) is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_done_is_rejected_after_truncated_write(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -3053,7 +3053,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "incomplete_write_done" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_done_is_rejected_after_empty_truncation(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -3071,7 +3071,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"]
         assert not (tmp_path / "app.py").exists()
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_edit_cannot_clear_empty_truncation(self, mock_llm, mock_replan, tmp_path):
         (tmp_path / "app.py").write_text("OLD\n")
@@ -3091,7 +3091,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"]
         assert (tmp_path / "app.py").read_text() == "CHANGED\n"
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_deterministic_reconciliation_rejects_empty_truncation(
         self, mock_llm, mock_replan, tmp_path
@@ -3111,7 +3111,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"]
         assert askme._deterministic_check("fix app.py", result["state"], str(tmp_path)) is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_armed_streak_allows_truncated_overwrite_then_restart(
         self, mock_llm, mock_replan, tmp_path
@@ -3160,7 +3160,7 @@ class TestValidateAfterWrite:
         assert any("malformed_plan" in error for error in result["state"]["errors"])
         assert result["state"]["completed_tasks"] == []
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_failed_validation_requires_new_evidence(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -3180,7 +3180,7 @@ class TestValidateAfterWrite:
             for error in result["state"]["errors"]
         )
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_overwrite_rejects_append_to_stale_file(self, mock_llm, mock_replan, tmp_path):
         (tmp_path / "app.py").write_text("OLD\n")
@@ -3210,7 +3210,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert any(e.get("reason") == "append_after_empty_overwrite" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_empty_overwrite_recovers_via_partial_then_append(
         self, mock_llm, mock_replan, tmp_path
@@ -3239,7 +3239,7 @@ class TestValidateAfterWrite:
         assert result["state"]["pending_empty_writes"] == {}
         assert not askme._unresolved_incomplete_writes(result["state"]["all_steps"], str(tmp_path))
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_truncated_prefix_matching_prior_write_is_dispatched(
         self, mock_llm, mock_replan, tmp_path
@@ -3271,7 +3271,7 @@ class TestValidateAfterWrite:
         assert not any(e.get("reason") == "duplicate_write" for e in events)
         assert sum(e.get("truncated_write") is True for e in events) == 1
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_complete_restart_matching_truncated_prefix_is_dispatched(
         self, mock_llm, mock_replan, tmp_path
@@ -3302,7 +3302,7 @@ class TestValidateAfterWrite:
         events = [json.loads(line) for line in log_path.read_text().splitlines()]
         assert not any(e.get("reason") == "duplicate_write" for e in events)
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_failed_action_is_not_new_validation_evidence(self, mock_llm, mock_replan, tmp_path):
         mock_llm.side_effect = [
@@ -3321,7 +3321,7 @@ class TestValidateAfterWrite:
         assert result["state"]["validation_recheck_needed"] is True
         assert askme._has_new_validation_evidence(result["state"]) is False
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_duplicate_shell_cannot_hide_incomplete_write(self, mock_llm, mock_replan, tmp_path):
         """A repeated successful shell is only a skip (issue #68), and even an
@@ -3343,7 +3343,7 @@ class TestValidateAfterWrite:
         assert result["state"]["completed_tasks"] == []
         assert askme._unresolved_incomplete_writes(result["state"]["all_steps"])
 
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_exhaustion_reconciliation_cannot_bypass_failed_validation(
         self, mock_llm, mock_replan, tmp_path
@@ -3366,7 +3366,7 @@ class TestValidateAfterWrite:
         assert result["state"]["validation_recheck_needed"] is True
 
     @pytest.mark.parametrize("invalid_verdict", [None, "true"])
-    @patch("askme.replan_task", return_value=None)
+    @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
     def test_invalid_validation_recheck_cannot_erase_known_failure(
         self, mock_llm, mock_replan, tmp_path, invalid_verdict

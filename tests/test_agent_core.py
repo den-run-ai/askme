@@ -627,7 +627,7 @@ class TestLLMTransport:
         """LLMTransportError in get_plan() should consume a plan attempt, not crash."""
         plan_calls = {"n": 0}
 
-        def mock_get_plan(user_prompt, state):
+        def mock_get_plan(user_prompt, state, **kwargs):
             plan_calls["n"] += 1
             if plan_calls["n"] == 1:
                 raise LLMTransportError("connection refused")

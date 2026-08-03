@@ -9,7 +9,7 @@
 ## Task Completion Semantics — DONE (2026-04-07)
 
 - ~~Revisit the executor rule that treats any successful `write` or `shell` in `last_steps` as immediate grounds for `done`.~~ → Replaced with goal-aware completion: executor must satisfy the full task description, not just one successful step. `TestCompletionSemantics` verifies the old rule is gone.
-- Revisit the auto-done fallback after JSON parse failure when the previous step was merely successful, not necessarily task-complete.
+- ~~Revisit the auto-done fallback after JSON parse failure when the previous step was merely successful, not necessarily task-complete.~~ → No such fallback exists anymore: an unrecoverable parse failure always fails the task and replans, and issue #68 removed the remaining repetition-based auto-completion rules (duplicate successful shell/edit) entirely (2026-08-03).
 - Add tests for genuinely multi-step single-task flows to verify the agent does not stop early after one successful action.
 
 ## Test Consistency — DONE (2026-04-08)
@@ -55,7 +55,7 @@
 
 - Validate preflight + policy with live LLM integration tests (both local and OpenRouter).
 - Consider making the tool allowlist configurable via env var or config file.
-- The auto-done fallback after JSON parse failure (when last step was successful) still uses step-level heuristic, not goal-aware completion. This is a known compromise for small LLMs that struggle with JSON output.
+- ~~The auto-done fallback after JSON parse failure (when last step was successful) still uses step-level heuristic, not goal-aware completion.~~ → Stale: the current loop has no auto-done fallback on parse failure — the task fails with a typed error and replans (see the parse-error-as-failure design rule; resolved with the issue #68 completion-semantics cleanup, 2026-08-03).
 - ~~Update `int_run()` to include preflight and policy so integration tests exercise the same path as `run()`.~~ → Done via `_run_loop()` extraction (2026-04-08).
 
 ## Optional Follow-Up

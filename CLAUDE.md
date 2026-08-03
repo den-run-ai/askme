@@ -136,8 +136,10 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 - Validate and normalize actions before side effects. In refactors, centralize
   `done` and `fail` as controller concerns rather than expanding executor ownership.
 - Do not add workspace mutations—including deterministic recovery—that bypass the
-  normal action/recording boundary. The existing C-header exception is tracked in
-  #41; do not copy its direct-write or fabricated-receipt pattern.
+  normal action/recording boundary. The #41 C-header repair rule now only
+  proposes a normal action that is dispatched through the executor and the one
+  recorder; keep that boundary closed. Its enabled/disabled decision remains the
+  preregistered #41 ablation.
 - Preserve the meanings of **selected**, **executed**, and **skipped** steps.
   A failed or guard-suppressed mutation is not a successful commit.
 - Scope task progress (`no_write_executed`, failed steps, validation pressure)
@@ -227,6 +229,10 @@ current issue and code state before implementing:
   run API after the executor/client seams while retaining compatibility wrappers
 - [#41](https://github.com/den-run-ai/askme/issues/41) — preregister an ablation
   before removing or retaining the benchmark-shaped C-header repair path
+- [#69](https://github.com/den-run-ai/askme/issues/69) — the pre-evaluation
+  implementation gate: policy/obligation/completion components, typed records,
+  hash-logged per-run configuration, and offline parity; blocks #63 variants
+  and #64/#66 measurements while #62's task/contract freeze proceeds in parallel
 
 For architecture work, make a behavior-preserving extraction first. Avoid adding
 more disconnected top-level helpers; group related state and behavior around a
