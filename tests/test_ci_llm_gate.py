@@ -3,6 +3,7 @@
 import json
 
 import ci_llm_gate
+import pytest
 
 # --- fixtures ---
 
@@ -155,6 +156,14 @@ class TestReportGate:
         assert "LLM GATE: FAIL" in out
         assert "pytest 0/1" in out
 
+    def test_valid_cell_failure_can_be_advisory(self, tmp_path, capsys):
+        path = _write(tmp_path, "s.json", _summary(pytest_passed=0))
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "LLM GATE: ADVISORY CELL FAILURE" in out
+        assert "pytest 0/1" in out
+
     def test_agent_incomplete_fails_gate_even_when_pytest_passes(self, tmp_path):
         path = _write(tmp_path, "s.json", _summary(agent_complete=0))
         rc = ci_llm_gate.main(["report", path])
@@ -177,19 +186,79 @@ class TestReportGate:
         assert rc == 1
         assert "expected 2 result cell(s), found 1" in capsys.readouterr().out
 
+    def test_advisory_mode_keeps_missing_cells_blocking(self, tmp_path, capsys):
+        path = _write(tmp_path, "s.json", _summary(pytest_passed=0))
+        rc = ci_llm_gate.main(["report", path, "--expect-cells", "2", "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "expected 2 result cell(s), found 1" in out
+
     def test_unreadable_summary_fails_gate(self, tmp_path):
         rc = ci_llm_gate.main(["report", str(tmp_path / "nope.json")])
         assert rc == 1
+
+    def test_advisory_mode_keeps_unreadable_summary_blocking(self, tmp_path, capsys):
+        rc = ci_llm_gate.main(["report", str(tmp_path / "nope.json"), "--advisory-cell-failures"])
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in capsys.readouterr().out
 
     def test_malformed_summary_fails_gate(self, tmp_path):
         path = _write(tmp_path, "bad.json", "{not json")
         rc = ci_llm_gate.main(["report", path])
         assert rc == 1
 
+    def test_advisory_mode_keeps_malformed_summary_blocking(self, tmp_path, capsys):
+        path = _write(tmp_path, "bad.json", "{not json")
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in capsys.readouterr().out
+
     def test_summary_without_tests_fails_gate(self, tmp_path):
         path = _write(tmp_path, "empty.json", {"suite": "hard", "tests": {}})
         rc = ci_llm_gate.main(["report", path])
         assert rc == 1
+
+    def test_advisory_mode_keeps_invalid_counts_blocking(self, tmp_path, capsys):
+        summary = _summary(total=0, wall=(), cost=())
+        path = _write(tmp_path, "invalid-count.json", summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "total must be positive" in out
+
+    def test_advisory_mode_keeps_conflicting_pass_aliases_blocking(self, tmp_path, capsys):
+        summary = _summary()
+        result = summary["tests"]["test_replan_build_with_dependency"]
+        result["passed"] = 0
+        path = _write(tmp_path, "conflicting-counts.json", summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "pytest_passed disagrees with passed" in out
+
+    def test_advisory_mode_keeps_partial_jsonl_blocking(self, tmp_path, capsys):
+        summary = _summary(pytest_passed=0, agent_complete=0)
+        result = summary["tests"]["test_replan_build_with_dependency"]
+        result["log_parse_errors"] = ["Expecting value at line 1 column 10"]
+        path = _write(tmp_path, "partial-log.json", summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "benchmark JSONL contains a parse error" in out
+
+    def test_advisory_mode_does_not_swallow_reporter_crash(self, tmp_path, monkeypatch):
+        path = _write(tmp_path, "s.json", _summary(pytest_passed=0))
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("reporter bug")
+
+        monkeypatch.setattr(ci_llm_gate, "render_markdown", crash)
+        with pytest.raises(RuntimeError, match="reporter bug"):
+            ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
 
     def test_markdown_out_appends(self, tmp_path):
         path = _write(tmp_path, "s.json", _summary())

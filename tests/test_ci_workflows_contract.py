@@ -130,11 +130,20 @@ def test_llm_workflow_guards_against_silent_skips():
 
 def test_llm_workflow_gates_bench_results():
     """bench_harness never exits nonzero on test failures; the gate script
-    is what turns cell failures (or missing cells) into a red job."""
+    evaluates every cell. A one-trial result is advisory only after merge to
+    main; scheduled/manual drift checks and opt-in PR runs stay strict."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    assert "ci_llm_gate.py report" in text
-    assert "--expect-cells" in text
-    assert "--markdown-out" in text
+    smoke, berkeley = _paid_job_sections(text)
+    gate = berkeley.split("      - name: Gate on protocol pass rule", 1)[1].split(
+        "      - name: Upload bench logs and summaries", 1
+    )[0]
+    assert "continue-on-error" not in gate
+    assert "--advisory-cell-failures" not in smoke
+    assert gate.count("--advisory-cell-failures") == 1
+    assert 'if [[ "$GITHUB_EVENT_NAME" == "push" ]]' in gate
+    assert gate.index("--advisory-cell-failures") < gate.index("ci_llm_gate.py report")
+    assert "--expect-cells" in gate
+    assert "--markdown-out" in gate
 
 
 def test_llm_workflow_is_opt_in_for_pull_requests():

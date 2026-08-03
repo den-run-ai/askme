@@ -168,9 +168,13 @@ by default) with automatic provider routing. The Berkeley job replays the two
 protocol cells from
 [the talk's eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
 — hard build + medium repair — per model through `tests/bench_harness.py`,
-then `tests/ci_llm_gate.py report` enforces the protocol pass rule (every
-trial: pytest pass and agent completion) and publishes a summary table.
-JSONL run logs and `summary.json` files are uploaded as artifacts. A
+then `tests/ci_llm_gate.py report` evaluates the protocol pass rule (every
+trial: pytest pass and agent completion) and publishes a summary table. Because
+a single unseeded live-model trial is not a reliability estimate, valid
+Berkeley-cell outcome failures are advisory on post-merge `main` pushes;
+malformed or missing evidence remains blocking, and scheduled, manual, and
+opt-in PR runs remain strict. JSONL run logs, bounded pytest failure diagnostics,
+and `summary.json` files are uploaded as artifacts. A
 preflight step fails loudly when the key is missing or rejected, so a bad
 credential can never produce a silently green (all-skipped) run. The full
 default matrix measured about $0.01 in OpenRouter credits per run.
