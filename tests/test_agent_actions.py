@@ -3323,9 +3323,9 @@ class TestValidateAfterWrite:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_duplicate_shell_auto_done_cannot_hide_incomplete_write(
-        self, mock_llm, mock_replan, tmp_path
-    ):
+    def test_duplicate_shell_cannot_hide_incomplete_write(self, mock_llm, mock_replan, tmp_path):
+        """A repeated successful shell is only a skip (issue #68), and even an
+        explicit done cannot complete while the truncated write is unresolved."""
         mock_llm.side_effect = [
             {"tasks": ["create app.py"]},
             {
@@ -3335,12 +3335,13 @@ class TestValidateAfterWrite:
                 "content_truncated": True,
             },
             {"action": "shell", "arg": "true"},
-            {"action": "shell", "arg": "true"},
+            {"action": "shell", "arg": "true"},  # duplicate -- skip, never done
+            {"action": "done"},  # refused: incomplete write obligation
         ]
-        result = _run_loop("create app.py", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
+        result = _run_loop("create app.py", str(tmp_path), max_replans=1, max_tasks=1, max_steps=4)
         assert result["status"] == "exhausted"
         assert result["state"]["completed_tasks"] == []
-        assert any("incomplete_write" in error for error in result["state"]["errors"])
+        assert askme._unresolved_incomplete_writes(result["state"]["all_steps"])
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
