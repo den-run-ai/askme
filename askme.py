@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from dataclasses import replace as _dataclass_replace
 from enum import Enum
@@ -93,6 +94,11 @@ _EFFORT_RANK = {"low": 0, "medium": 1, "high": 2}
 _EFFORT_TOKEN_FLOOR = {"low": 1024, "medium": 1536, "high": 2048}
 
 
+def _current_reasoning_token_floors():
+    """Tuple form keeps the run snapshot immutable and JSON-independent."""
+    return tuple(_EFFORT_TOKEN_FLOOR[level] for level in ("low", "medium", "high"))
+
+
 def _parse_reasoning_effort(raw):
     effort = (raw or "").strip().lower()
     if effort and effort not in _EFFORT_RANK:
@@ -102,6 +108,7 @@ def _parse_reasoning_effort(raw):
 
 LLM_TIMEOUT = 120  # seconds; covers slow first-token on local LLM
 LLM_TIMEOUT_REPLAN = 180  # replans carry heavier state + thinking
+MAX_LLM_RETRIES = 2
 
 OPENROUTER_CHAT_API = "https://openrouter.ai/api/v1/chat/completions"
 _OPENROUTER_DEFAULT_MODEL = "google/gemma-4-26b-a4b-it"
@@ -135,8 +142,8 @@ class LLMSettings:
     branching; the module-level names below remain the env-derived
     compatibility surface that tests patch and ``ask_llm`` snapshots per
     call (``current``). Distinct settings let two clients share one process
-    without global leakage. Run-level configuration and composition stay
-    with issue #40.
+    without global leakage. Run composition resolves any compatibility
+    defaults into one request-policy snapshot before the first call.
     """
 
     backend: str
@@ -155,6 +162,13 @@ class LLMSettings:
     # per-run capability budgets (issue #68): pin them to freeze a run's
     # output budgets independent of the backend-name heuristic.
     step_token_budget: int | None = None
+    # Run composition resolves these optional compatibility defaults once.
+    # Keeping them on the client settings makes the request policy travel
+    # with a pinned/injected client instead of consulting module globals
+    # after a run has started.
+    replan_timeout: int | None = None
+    max_retries: int | None = None
+    reasoning_token_floors: tuple[int, int, int] | None = None
 
     def write_retry_tokens(self):
         """Decode-retry budget for truncated write/edit payloads."""
@@ -167,6 +181,20 @@ class LLMSettings:
         if self.step_token_budget is not None:
             return self.step_token_budget
         return _step_tokens(self.backend)
+
+    def resolved_reasoning_token_floors(self):
+        """Low/medium/high HTTP completion floors for reasoning requests."""
+        return (
+            _current_reasoning_token_floors()
+            if self.reasoning_token_floors is None
+            else self.reasoning_token_floors
+        )
+
+    def reasoning_token_floor(self, effort):
+        return dict(zip(("low", "medium", "high"), self.resolved_reasoning_token_floors()))[effort]
+
+    def reasoning_token_floor_metadata(self):
+        return dict(zip(("low", "medium", "high"), self.resolved_reasoning_token_floors()))
 
     @classmethod
     def from_env(cls, env=None):
@@ -189,6 +217,9 @@ class LLMSettings:
             require_parameters=e.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1",
             reasoning_effort=_parse_reasoning_effort(e.get("OPENROUTER_REASONING_EFFORT")),
             timeout=LLM_TIMEOUT,
+            replan_timeout=LLM_TIMEOUT_REPLAN,
+            max_retries=MAX_LLM_RETRIES,
+            reasoning_token_floors=_current_reasoning_token_floors(),
         )
 
     @classmethod
@@ -206,6 +237,9 @@ class LLMSettings:
             timeout=LLM_TIMEOUT,
             step_write_tokens=STEP_WRITE_TOKENS,
             step_token_budget=STEP_TOKENS,
+            replan_timeout=LLM_TIMEOUT_REPLAN,
+            max_retries=MAX_LLM_RETRIES,
+            reasoning_token_floors=_current_reasoning_token_floors(),
         )
 
 
@@ -438,9 +472,6 @@ edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasonin
 Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}""".replace(
     "__ACTION_NAMES__", ", ".join(ACTION_SPECS)
 )
-
-
-MAX_LLM_RETRIES = 2
 
 
 def _repair_json(text):
@@ -752,7 +783,7 @@ def _build_llm_request(messages, budget, effective_think_level, strict, settings
                 "enabled": True,
                 "effort": sent_effort,
             }
-            body["max_tokens"] = max(budget, _EFFORT_TOKEN_FLOOR[sent_effort])
+            body["max_tokens"] = max(budget, cfg.reasoning_token_floor(sent_effort))
         else:
             # Some models reason by default. Keep the harness policy model-independent.
             body["reasoning"] = {"enabled": False}
@@ -969,7 +1000,12 @@ class LLMClient:
     """
 
     def __init__(self, settings=None, post=None, sleep=None, log_sink=None, event_sink=None):
-        self.settings = LLMSettings.current() if settings is None else settings
+        resolved_settings = LLMSettings.current() if settings is None else settings
+        if resolved_settings.reasoning_token_floors is None:
+            resolved_settings = _dataclass_replace(
+                resolved_settings, reasoning_token_floors=_current_reasoning_token_floors()
+            )
+        self.settings = resolved_settings
         # None means "resolve the module default at call time" so patched
         # requests.post / log / _run_log stay effective for the facade.
         self._post = post
@@ -1127,6 +1163,9 @@ class LLMClient:
             return obj
 
 
+_RUN_LLM_SETTINGS = ContextVar("askme_run_llm_settings", default=None)
+
+
 def ask_llm(
     messages,
     max_tokens=256,
@@ -1148,7 +1187,7 @@ def ask_llm(
     ``expect_context``), and the typed errors callers rely on
     (LLMTransportError, KeyError for API-error bodies, json.JSONDecodeError
     with malformed_action/response_truncated) live in LLMClient.ask."""
-    return LLMClient().ask(
+    return LLMClient(settings=_RUN_LLM_SETTINGS.get()).ask(
         messages,
         max_tokens=max_tokens,
         think=think,
@@ -1161,6 +1200,25 @@ def ask_llm(
         expect=expect,
         expect_context=expect_context,
     )
+
+
+class _FrozenLLMFacade:
+    """Run-local adapter retaining the patchable ``ask_llm`` seam.
+
+    Production calls use the immutable settings captured by run composition;
+    tests and downstream callers that patch ``ask_llm`` still intercept the
+    same supported facade instead of having to patch ``LLMClient`` internals.
+    """
+
+    def __init__(self, settings):
+        self.settings = settings
+
+    def ask(self, messages, **kwargs):
+        token = _RUN_LLM_SETTINGS.set(self.settings)
+        try:
+            return ask_llm(messages, **kwargs)
+        finally:
+            _RUN_LLM_SETTINGS.reset(token)
 
 
 _KNOWN_ERROR_TYPES = {
@@ -1504,7 +1562,16 @@ def _write_visibility_flag(task_steps):
     return {"unvalidated_write": Path(arg).name if arg else True}
 
 
-def get_plan(user_prompt, state, client=None, max_tokens=None, max_tasks=None):
+def get_plan(
+    user_prompt,
+    state,
+    client=None,
+    max_tokens=None,
+    max_tasks=None,
+    timeout=None,
+    replan_timeout=None,
+    max_retries=None,
+):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
     # model, and raw step payloads (write contents) never reach the planner —
@@ -1554,6 +1621,13 @@ def get_plan(user_prompt, state, client=None, max_tokens=None, max_tasks=None):
     # An injected per-run client (issue #40) replaces the patchable module
     # facade only when the caller supplied one.
     ask = ask_llm if client is None else client.ask
+    request_policy = {}
+    if is_replan:
+        request_policy["timeout"] = LLM_TIMEOUT_REPLAN if replan_timeout is None else replan_timeout
+    elif timeout is not None:
+        request_policy["timeout"] = timeout
+    if max_retries is not None:
+        request_policy["max_retries"] = max_retries
     return ask(
         [
             {"role": "system", "content": SYSTEM_PLAN},
@@ -1564,13 +1638,13 @@ def get_plan(user_prompt, state, client=None, max_tokens=None, max_tasks=None):
         ],
         max_tokens=PLANNER_MAX_TOKENS if max_tokens is None else max_tokens,
         think=is_replan,
-        timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
         reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
         reasoning_trigger="planner_replan" if is_replan else "initial_plan",
         expect="plan",
         # The decode-time schema truncates exactly like the consuming call
         # site (PR #75 review): the run's task limit, not the module default.
         expect_context={"max_tasks": MAX_TASKS if max_tasks is None else max_tasks},
+        **request_policy,
     )
 
 
@@ -1594,6 +1668,8 @@ def get_step(
     validate_pressure=None,
     client=None,
     step_tokens=None,
+    timeout=None,
+    max_retries=None,
 ):
     # Build slim step history from recent steps (current task + carryover from previous)
     steps = state.get("last_steps", [])[-MAX_STEP_HISTORY:]
@@ -1660,6 +1736,11 @@ def get_step(
         step_budget = step_tokens
     else:
         step_budget = STEP_TOKENS if settings is None else settings.step_tokens()
+    request_policy = {}
+    if timeout is not None:
+        request_policy["timeout"] = timeout
+    if max_retries is not None:
+        request_policy["max_retries"] = max_retries
     return ask(
         [{"role": "system", "content": SYSTEM_STEP}, {"role": "user", "content": user_msg}],
         max_tokens=step_budget,
@@ -1667,6 +1748,7 @@ def get_step(
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
         expect="action",
+        **request_policy,
     )
 
 
@@ -1785,6 +1867,8 @@ def replan_task(
     goal_context_chars=GOAL_CONTEXT_CHARS,
     client=None,
     max_tokens=None,
+    timeout=None,
+    max_retries=0,
 ):
     """Mini-planner: generate a replacement for one failed task.
 
@@ -1819,6 +1903,9 @@ def replan_task(
     replan_state["policy"] = state.get("policy", get_policy())
     ask = ask_llm if client is None else client.ask
     try:
+        request_policy = {"max_retries": max_retries}
+        if timeout is not None:
+            request_policy["timeout"] = timeout
         result = ask(
             [
                 {"role": "system", "content": SYSTEM_TASK_REPLAN},
@@ -1829,10 +1916,10 @@ def replan_task(
             ],
             max_tokens=TASK_REPLAN_MAX_TOKENS if max_tokens is None else max_tokens,
             think=False,
-            max_retries=0,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
             reasoning_trigger="task_local_replan",
             expect="task_replan",
+            **request_policy,
         )
         parsed = TaskReplanResponse.parse(result)
         if parsed is None:
@@ -1923,7 +2010,19 @@ def _deterministic_check(user_prompt, state, working_dir):
     return None
 
 
-def _validate_completion(user_prompt, state, working_dir, client=None, log_sink=None):
+VALIDATION_MAX_TOKENS = 768
+
+
+def _validate_completion(
+    user_prompt,
+    state,
+    working_dir,
+    client=None,
+    log_sink=None,
+    max_tokens=None,
+    timeout=None,
+    max_retries=0,
+):
     """Run final validation. Returns a :class:`ValidationResponse` or None.
 
     None means no verdict was available — the validator was unreachable or
@@ -1966,15 +2065,18 @@ def _validate_completion(user_prompt, state, working_dir, client=None, log_sink=
     )
     ask = ask_llm if client is None else client.ask
     try:
+        request_policy = {"max_retries": max_retries}
+        if timeout is not None:
+            request_policy["timeout"] = timeout
         result = ask(
             [{"role": "system", "content": SYSTEM_VALIDATE}, {"role": "user", "content": user_msg}],
-            max_tokens=768,
+            max_tokens=VALIDATION_MAX_TOKENS if max_tokens is None else max_tokens,
             think=True,
             think_level="high",
-            max_retries=0,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
             reasoning_trigger="final_validator",
             expect="validation",
+            **request_policy,
         )
         parsed = ValidationResponse.parse(result)
         if parsed is not None:
@@ -2444,6 +2546,44 @@ def _config_hash(payload):
     the same hash ran the same policy surface (issue #68)."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_run_llm_settings(settings):
+    """Materialize compatibility defaults into one immutable run snapshot."""
+    resolved = _dataclass_replace(
+        settings,
+        step_write_tokens=settings.write_retry_tokens(),
+        step_token_budget=settings.step_tokens(),
+        replan_timeout=(
+            LLM_TIMEOUT_REPLAN if settings.replan_timeout is None else settings.replan_timeout
+        ),
+        max_retries=MAX_LLM_RETRIES if settings.max_retries is None else settings.max_retries,
+        reasoning_token_floors=settings.resolved_reasoning_token_floors(),
+    )
+    for name in ("timeout", "replan_timeout"):
+        value = getattr(resolved, name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+    if (
+        not isinstance(resolved.max_retries, int)
+        or isinstance(resolved.max_retries, bool)
+        or resolved.max_retries < 0
+    ):
+        raise ValueError("max_retries must be a non-negative integer")
+    for name in ("step_token_budget", "step_write_tokens"):
+        value = getattr(resolved, name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+    floors = resolved.reasoning_token_floors
+    if (
+        not isinstance(floors, tuple)
+        or len(floors) != 3
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in floors
+        )
+    ):
+        raise ValueError("reasoning_token_floors must contain three positive integers")
+    return resolved
 
 
 @dataclass(frozen=True)
@@ -3405,6 +3545,9 @@ class CompletionPolicy:
                 controller.user_prompt,
                 controller.state,
                 controller.working_dir,
+                max_tokens=controller._budgets["final_validation_max_tokens"],
+                timeout=controller._timeouts["final_validation"],
+                max_retries=controller._retries["final_validation"],
                 **validate_kwargs,
             )
             if vresult is not None and vresult.valid is False:
@@ -3557,26 +3700,37 @@ class _RunController:
         # Freeze the executor/replanner view once so all policy arms receive the same
         # task context even if module configuration changes while a run is active.
         self.goal_context = user_prompt[:goal_context_chars]
-        # Dependency seams (issue #40): None keeps the patchable module
-        # behavior; a pinned llm config builds this run's own client, and
-        # injected sinks alone snapshot the module configuration into a
-        # run-local client so LLM retry logs and telemetry cannot escape to
-        # the module stdout/JSONL sinks (Codex P2, PR #65). Transport still
-        # resolves requests.post at call time either way.
+        # Select the run's settings source before resolving it: invalid state
+        # in an unused compatibility global must not block a pinned or injected
+        # run. The default path retains the patchable ask_llm facade through a
+        # run-local adapter, but the adapter supplies this one snapshot on every
+        # call instead of re-reading MODEL/API/provider/timeouts.
+        injected_settings = getattr(deps.llm_client, "settings", None)
+        source_settings = (
+            injected_settings
+            if injected_settings is not None
+            else (cfg.llm if cfg.llm is not None else LLMSettings.current())
+        )
+        self._llm_meta = _resolve_run_llm_settings(source_settings)
+        # Dependency seams (issue #40): a pinned llm config builds this run's
+        # own client, and injected sinks own the matching client telemetry.
+        # Transport still resolves requests.post at call time. The ordinary
+        # module facade remains patchable for compatibility, while its settings
+        # no longer change between calls in one run.
         if deps.llm_client is not None:
             self._client = deps.llm_client
         elif cfg.llm is not None:
             self._client = LLMClient(
-                settings=cfg.llm, log_sink=deps.log_sink, event_sink=deps.event_sink
+                settings=self._llm_meta, log_sink=deps.log_sink, event_sink=deps.event_sink
             )
         elif deps.log_sink is not None or deps.event_sink is not None:
             self._client = LLMClient(
-                settings=LLMSettings.current(),
+                settings=self._llm_meta,
                 log_sink=deps.log_sink,
                 event_sink=deps.event_sink,
             )
         else:
-            self._client = None
+            self._client = _FrozenLLMFacade(self._llm_meta)
         # An injected executor that names a workspace must name this run's
         # workspace (Codex P1, PR #65): otherwise actions would mutate one
         # directory while the result identifies another. Scripted stand-ins
@@ -3590,21 +3744,13 @@ class _RunController:
         self._clock = time.time if deps.clock is None else deps.clock
         self._log_sink = deps.log_sink
         self._event_sink = deps.event_sink
-        # Resolved, immutable run metadata for run_start and the structured
-        # result. The module snapshot keeps the default path identical to
-        # the former global reads at run start.
-        client_settings = getattr(self._client, "settings", None)
-        if client_settings is not None:
-            self._llm_meta = client_settings
-        else:
-            self._llm_meta = cfg.llm if cfg.llm is not None else LLMSettings.current()
         # Provenance of the hashed LLM identity (PR #72 review): an injected
         # duck-typed client without settings leaves the payload describing
         # the module snapshot, so the record must say the identity is opaque
         # rather than combining unlike runs under one hash.
         if deps.llm_client is not None:
             self._llm_provenance = (
-                "injected_client_settings" if client_settings is not None else "injected_opaque"
+                "injected_client_settings" if injected_settings is not None else "injected_opaque"
             )
         elif cfg.llm is not None:
             self._llm_provenance = "pinned_config"
@@ -3655,6 +3801,30 @@ class _RunController:
             ),
         )
         meta = self._llm_meta
+        self._timeouts = {
+            "planner_initial": meta.timeout,
+            "planner_replan": meta.replan_timeout,
+            "executor": meta.timeout,
+            "task_replan": meta.timeout,
+            "final_validation": meta.timeout,
+        }
+        self._retries = {
+            "planner": meta.max_retries,
+            "executor": meta.max_retries,
+            # These two deliberately remain single-shot calls.
+            "task_replan": 0,
+            "final_validation": 0,
+        }
+        token_budgets = {
+            "step_tokens": meta.step_tokens(),
+            "step_write_tokens": meta.write_retry_tokens(),
+            "planner_max_tokens": PLANNER_MAX_TOKENS,
+            "task_replan_max_tokens": TASK_REPLAN_MAX_TOKENS,
+            "final_validation_max_tokens": VALIDATION_MAX_TOKENS,
+        }
+        for name, value in token_budgets.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
         self._config_payload = {
             "backend": meta.backend,
             # The endpoint identity and request deadline are outcome-affecting
@@ -3668,6 +3838,8 @@ class _RunController:
             "allow_provider_fallbacks": meta.allow_fallbacks,
             "require_provider_parameters": meta.require_parameters,
             "timeout_s": meta.timeout,
+            "timeouts_s": dict(self._timeouts),
+            "retry_budgets": dict(self._retries),
             "llm_provenance": self._llm_provenance,
             "policy": dict(self._policy),
             "reasoning_policy": self.reasoning_policy,
@@ -3676,11 +3848,12 @@ class _RunController:
             "step_policy": step_policy,
             "guards": self.guards.describe(),
             "budgets": {
-                "step_tokens": meta.step_tokens(),
-                "step_write_tokens": meta.write_retry_tokens(),
-                "planner_max_tokens": PLANNER_MAX_TOKENS,
-                "task_replan_max_tokens": TASK_REPLAN_MAX_TOKENS,
-                "llm_max_retries": MAX_LLM_RETRIES,
+                **token_budgets,
+                "llm_max_retries": meta.max_retries,
+                # OpenRouter reasoning tokens share the HTTP completion
+                # allowance; request construction floors max_tokens by the
+                # selected effort using this frozen table.
+                "reasoning_token_floors": meta.reasoning_token_floor_metadata(),
             },
             "limits": {
                 "max_replans": self.max_replans,
@@ -3830,6 +4003,9 @@ class _RunController:
                 self.state,
                 max_tokens=self._budgets["planner_max_tokens"],
                 max_tasks=self.max_tasks,
+                timeout=self._timeouts["planner_initial"],
+                replan_timeout=self._timeouts["planner_replan"],
+                max_retries=self._retries["planner"],
                 **self._llm_kwargs(),
             )
         except (LLMTransportError, KeyError) as e:
@@ -3977,6 +4153,8 @@ class _RunController:
                     self.goal_context,
                     goal_context_chars=self.goal_context_chars,
                     max_tokens=self._budgets["task_replan_max_tokens"],
+                    timeout=self._timeouts["task_replan"],
+                    max_retries=self._retries["task_replan"],
                     **self._llm_kwargs(),
                 )
                 replacement = replan.task
@@ -4049,6 +4227,8 @@ class _RunController:
                 write_pressure=self.step_policy.write_pressure(attempt),
                 validate_pressure=self.step_policy.validate_pressure(attempt),
                 step_tokens=self._budgets["step_tokens"],
+                timeout=self._timeouts["executor"],
+                max_retries=self._retries["executor"],
                 **self._llm_kwargs(),
             )
         except LLMTransportError as e:

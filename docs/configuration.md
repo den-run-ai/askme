@@ -69,10 +69,12 @@ credential-free metadata keys: `config` (the resolved immutable run
 configuration — backend, endpoint `api` and `timeout_s`, model, provider
 routing, reasoning effort/policy, execution policy, validation mode, the
 #41 compile-repair arm, the #31 `step_policy` arm, guard thresholds, token
-budgets, limits, an `llm_provenance` marker naming where the LLM identity
-came from (`module_snapshot`, `pinned_config`, `injected_client_settings`,
-or `injected_opaque` for a duck-typed client without settings), and a
-`config_hash` over that whole canonical payload; never the API key) and
+budgets (including final validation), per-call `timeouts_s` and
+`retry_budgets`, limits, an `llm_provenance` marker naming where the LLM
+identity came from (`module_snapshot`, `pinned_config`,
+`injected_client_settings`, or `injected_opaque` for a duck-typed client
+without settings), and a `config_hash` over that whole canonical payload;
+never the API key) and
 `workspace` (`path` plus a `created` flag that is true only when AskMe made
 the temporary directory, so callers can clean it up intentionally). Issue
 #68 added `outcome`, the typed terminal record: `status`, the final
@@ -89,3 +91,12 @@ injecting the LLM client, action executor, clock, and log/event sinks;
 `python3 askme.py --help` for the full flag list, and
 [tests/workflows/PROTOCOL.md](../tests/workflows/PROTOCOL.md) for the frozen
 evaluation contract that consumes this interface.
+
+Run composition snapshots the module compatibility settings exactly once.
+Later changes to model, endpoint, provider routing, request deadlines, retry
+limits, or token budgets cannot alter requests in that run. Direct
+`ask_llm(...)` callers keep the historical per-call module snapshot behavior.
+The `budgets.reasoning_token_floors` map records the low/medium/high floors
+that request construction applies when reasoning shares the HTTP completion
+allowance, so the effective `max_tokens` remains derivable from the requested
+call-site budget and selected effort.
