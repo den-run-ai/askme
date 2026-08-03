@@ -800,6 +800,32 @@ OBSERVE_ACTIONS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class SkippedStep:
+    """Typed record of a selected action a guard suppressed (issue #69).
+
+    Skips never dispatch and never enter the model-visible window or the
+    run-wide structured record; their one projection is the ``step_skipped``
+    JSONL event, produced here so the reason taxonomy has a single owner.
+    """
+
+    task_index: Any
+    step: int
+    action: str
+    arg: str
+    reason: str
+
+    def jsonl_event(self):
+        return {
+            "event": "step_skipped",
+            "task_index": self.task_index,
+            "step": self.step,
+            "action": self.action,
+            "arg": self.arg[:120],
+            "reason": self.reason,
+        }
+
+
 class StepReceipt:
     """Internal record of one recorded step (issue #36).
 

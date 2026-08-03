@@ -15,6 +15,7 @@ from askme import (
     OBSERVE_ACTIONS,
     ActionExecutor,
     ActionResult,
+    SkippedStep,
     _run_loop,
     _validate_action_contract,
     execute,
@@ -182,6 +183,21 @@ class TestTypedDispatchErrors:
 
 
 # --- Typed result round-trips at the compatibility seam ---
+
+
+class TestSkippedStepRecord:
+    def test_jsonl_event_shape(self):
+        record = SkippedStep(
+            task_index=1, step=2, action="read", arg="a" * 200, reason="duplicate_read"
+        )
+        assert record.jsonl_event() == {
+            "event": "step_skipped",
+            "task_index": 1,
+            "step": 2,
+            "action": "read",
+            "arg": "a" * 120,
+            "reason": "duplicate_read",
+        }
 
 
 class TestActionResult:

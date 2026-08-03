@@ -318,3 +318,72 @@ class TestConfigHash:
         second = controller.config_metadata()
         assert second["guards"]["rewrite_skip_writes"] == askme.REWRITE_SKIP_WRITES
         assert second["limits"]["max_steps"] == askme.MAX_STEPS
+
+
+class TestConfigClosure:
+    """Issue #69: no outcome-affecting module global is read after run
+    construction — resolved budgets are threaded into every LLM-backed
+    helper call the controller makes."""
+
+    def test_resolved_budgets_reach_every_llm_call_site(self, tmp_path):
+        client = ScriptedClient(
+            [
+                {"tasks": ["greet"]},
+                {"action": "fail", "reasoning": "cannot"},
+                {"task": ""},  # task-local replan rejected: empty
+            ]
+        )
+        result = run_result(
+            "greet",
+            working_dir=str(tmp_path),
+            config=RunConfig(max_replans=1, max_steps=2),
+            dependencies=_quiet_deps(llm_client=client),
+        )
+        assert result["status"] == "exhausted"
+        budgets = result["config"]["budgets"]
+        by_expect = {c.get("expect"): c["max_tokens"] for c in client.calls}
+        assert by_expect["plan"] == budgets["planner_max_tokens"]
+        assert by_expect["action"] == budgets["step_tokens"]
+        assert by_expect["task_replan"] == budgets["task_replan_max_tokens"]
+
+    def test_mid_run_global_mutation_cannot_change_budgets(self, tmp_path):
+        """A hostile mid-run change to the module budget globals must not
+        reach later calls of the same run; only the construction-time
+        resolution (recorded in the hash-logged payload) applies."""
+        original = {
+            "planner": askme.PLANNER_MAX_TOKENS,
+            "step": askme.STEP_TOKENS,
+            "replan": askme.TASK_REPLAN_MAX_TOKENS,
+        }
+
+        class MutatingClient(ScriptedClient):
+            def ask(self, messages, **kwargs):
+                reply = super().ask(messages, **kwargs)
+                askme.PLANNER_MAX_TOKENS = 1
+                askme.STEP_TOKENS = 1
+                askme.TASK_REPLAN_MAX_TOKENS = 1
+                return reply
+
+        client = MutatingClient(
+            [
+                {"tasks": ["greet"]},
+                {"action": "fail", "reasoning": "cannot"},
+                {"task": ""},  # task-local replan rejected: empty
+            ]
+        )
+        with (
+            patch.object(askme, "PLANNER_MAX_TOKENS", askme.PLANNER_MAX_TOKENS),
+            patch.object(askme, "STEP_TOKENS", askme.STEP_TOKENS),
+            patch.object(askme, "TASK_REPLAN_MAX_TOKENS", askme.TASK_REPLAN_MAX_TOKENS),
+        ):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                config=RunConfig(max_replans=1, max_steps=2),
+                dependencies=_quiet_deps(llm_client=client),
+            )
+        assert result["status"] == "exhausted"
+        by_expect = {c.get("expect"): c["max_tokens"] for c in client.calls}
+        assert by_expect["plan"] == original["planner"]
+        assert by_expect["action"] == original["step"]
+        assert by_expect["task_replan"] == original["replan"]
