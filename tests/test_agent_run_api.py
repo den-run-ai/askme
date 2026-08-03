@@ -6,6 +6,7 @@ structured task-replan return value.
 """
 
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ import pytest
 from _test_support import mock_response
 
 import askme
-from actions import ActionResult
+from actions import ActionExecutor, ActionResult
 from askme import (
     PLANNER_MAX_TOKENS,
     LLMClient,
@@ -207,6 +208,31 @@ class TestRunConfigResolution:
                 config=RunConfig(goal_context_chars=0),
             )
 
+    @pytest.mark.parametrize("budget", ["max_replans", "max_tasks", "max_steps"])
+    def test_non_positive_run_budgets_are_rejected(self, tmp_path, budget):
+        """The public config path matches the CLI's positive-budget contract."""
+        with pytest.raises(ValueError, match=budget):
+            run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                config=RunConfig(**{budget: 0}),
+            )
+
+    def test_invalid_config_never_leaks_a_temporary_workspace(self):
+        created = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def spy_mkdtemp(prefix=""):
+            path = real_mkdtemp(prefix=prefix)
+            created.append(path)
+            return path
+
+        with patch("askme.tempfile.mkdtemp", side_effect=spy_mkdtemp):
+            with pytest.raises(ValueError, match="goal_context_chars"):
+                run_result("greet", config=RunConfig(goal_context_chars=0))
+        assert len(created) == 1
+        assert not Path(created[0]).exists()
+
     def test_from_env_derives_llm_policy_and_reasoning(self):
         env = {
             "LLM_BACKEND": "openrouter",
@@ -356,6 +382,150 @@ class TestInjectedDependencies:
         assert transcript[0]["authorization"] == f"Bearer {settings.api_key}"
         assert settings.api_key not in json.dumps(result, default=str)
         assert settings.api_key not in json.dumps(events, default=str)
+
+    def test_injected_sinks_alone_capture_llm_telemetry(self, tmp_path, capsys):
+        """Sinks without a pinned client still own the LLM retry/usage output."""
+        lines = []
+        events = []
+        usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
+        responses = [mock_response(reply, usage=usage) for reply in PLAN_DONE]
+        with patch("askme.requests.post", side_effect=responses):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                dependencies=RunDependencies(log_sink=lines.append, event_sink=events.append),
+            )
+        assert result["status"] == "complete"
+        assert capsys.readouterr().out == ""
+        assert any(line.startswith("  tokens:") for line in lines)
+        event_names = {event["event"] for event in events}
+        assert {"reasoning_decision", "tokens", "run_start", "run_end"} <= event_names
+
+    def test_injected_executor_must_name_the_run_workspace(self, tmp_path):
+        executor = ActionExecutor(str(tmp_path / "elsewhere"))
+        with pytest.raises(ValueError, match="action_executor"):
+            run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                dependencies=RunDependencies(action_executor=executor),
+            )
+
+    def test_injected_executor_matching_the_workspace_is_accepted(self, tmp_path):
+        client = ScriptedClient(list(PLAN_DONE))
+        executor = ActionExecutor(str(tmp_path))
+        result = run_result(
+            "greet",
+            working_dir=str(tmp_path),
+            dependencies=_quiet_deps(llm_client=client, action_executor=executor),
+        )
+        assert result["status"] == "complete"
+
+    def test_mismatched_executor_never_leaks_a_temporary_workspace(self):
+        created = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def spy_mkdtemp(prefix=""):
+            path = real_mkdtemp(prefix=prefix)
+            created.append(path)
+            return path
+
+        executor = ActionExecutor(".")
+        with patch("askme.tempfile.mkdtemp", side_effect=spy_mkdtemp):
+            with pytest.raises(ValueError, match="action_executor"):
+                run_result("greet", dependencies=RunDependencies(action_executor=executor))
+        assert len(created) == 1
+        assert not Path(created[0]).exists()
+
+    def test_preflight_missing_tools_reach_the_injected_log_sink(self, tmp_path):
+        client = ScriptedClient(list(PLAN_DONE))
+        lines = []
+        probe = {
+            "platform": "linux",
+            "arch": "x86_64",
+            "working_dir": str(tmp_path),
+            "available_tools": ["python3"],
+            "missing_tools": ["go", "cargo"],
+            "package_managers": [],
+            "dir_listing": ["(empty)"],
+        }
+        with patch("askme.preflight_probe", return_value=probe):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                dependencies=_quiet_deps(llm_client=client, log_sink=lines.append),
+            )
+        assert result["status"] == "complete"
+        assert "Missing tools: ['go', 'cargo']" in lines
+
+    def test_injected_log_sink_reaches_final_validation(self, tmp_path):
+        lines = []
+        client = ScriptedClient([{"tasks": ["greet"]}, {"action": "done"}, {"valid": True}])
+        with patch.object(askme, "FINAL_VALIDATE", "always"):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                dependencies=_quiet_deps(llm_client=client, log_sink=lines.append),
+            )
+        assert result["status"] == "complete"
+        assert not client.replies  # the validator consumed the scripted verdict
+        assert client.calls[-1]["reasoning_trigger"] == "final_validator"
+        assert "  Validation passed." in lines
+
+    def test_duplicate_failed_read_auto_fails_through_injected_sinks(self, tmp_path):
+        """The stuck-read guard runs unchanged under injected dependencies."""
+        client = ScriptedClient(
+            [
+                {"tasks": ["inspect missing.txt"]},
+                {"action": "read", "arg": "missing.txt"},
+                {"action": "read", "arg": "missing.txt"},
+                {"task": ""},  # task-local replan rejected: empty
+            ]
+        )
+        lines = []
+        result = run_result(
+            "inspect missing.txt",
+            working_dir=str(tmp_path),
+            config=RunConfig(max_replans=1, max_tasks=1, max_steps=3),
+            dependencies=_quiet_deps(llm_client=client, log_sink=lines.append),
+        )
+        assert result["status"] == "exhausted"
+        assert any("auto-fail (same read failed twice)" in line for line in lines)
+        assert any(
+            "[stuck_loop] read missing.txt failed twice" in e for e in result["state"]["errors"]
+        )
+
+    @patch("askme.execute")
+    def test_failed_deterministic_retry_reports_through_injected_sinks(
+        self, mock_execute, tmp_path
+    ):
+        """A compile repair whose retry still fails keeps the typed error."""
+        src = tmp_path / "main.c"
+        src.write_text('int main(){ printf("hi"); return 0; }\n')
+        client = ScriptedClient(
+            [
+                {"tasks": ["compile main.c"]},
+                {"action": "shell", "arg": "cc -o main main.c"},
+                {"task": ""},  # task-local replan rejected: empty
+            ]
+        )
+        compile_error = {
+            "ok": False,
+            "output": "main.c:1:13: error: implicit declaration of function 'printf'",
+            "error_type": "compile_error",
+        }
+        mock_execute.side_effect = [dict(compile_error), dict(compile_error)]
+        lines = []
+        result = run_result(
+            "compile main.c",
+            working_dir=str(tmp_path),
+            config=RunConfig(max_replans=1, max_tasks=1, max_steps=1),
+            dependencies=_quiet_deps(llm_client=client, log_sink=lines.append),
+        )
+        assert result["status"] == "exhausted"
+        assert any(line.startswith("  -> FAIL deterministic retry:") for line in lines)
+        # Repair receipt and failed retry both recorded through the one recorder.
+        assert [s["action"] for s in result["state"]["all_steps"]] == ["shell", "edit", "shell"]
+        assert any("[compile_error]" in e for e in result["state"]["errors"])
 
 
 class TestTaskReplanContract:

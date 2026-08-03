@@ -2178,8 +2178,11 @@ class RunDependencies:
     (an :class:`LLMClient` or any object with a compatible ``ask``) handles
     every planner, executor, validator, and task-replanner call. An injected
     ``action_executor`` receives every dispatch, including deterministic
-    retries, and must target the run's workspace. Sinks cover
-    controller-owned logging and the injected client's telemetry."""
+    retries; when it names a ``working_dir`` it must be the run's workspace,
+    and the run is rejected otherwise. Sinks capture controller-owned
+    logging plus all LLM telemetry: supplying a sink without a client gives
+    the run a client snapshotted from the module configuration so nothing
+    escapes to the module stdout/JSONL sinks."""
 
     llm_client: Any = None
     action_executor: Any = None
@@ -2246,21 +2249,46 @@ class _RunController:
         self.max_replans = MAX_REPLANS if cfg.max_replans is None else cfg.max_replans
         self.max_tasks = MAX_TASKS if cfg.max_tasks is None else cfg.max_tasks
         self.max_steps = MAX_STEPS if cfg.max_steps is None else cfg.max_steps
+        # The public config path enforces the same positive-budget contract
+        # as the CLI's _positive_int (Codex P2, PR #65): a zero budget would
+        # silently report a plausible failure without doing any work.
+        for budget_name in ("max_replans", "max_tasks", "max_steps"):
+            if getattr(self, budget_name) < 1:
+                raise ValueError(f"{budget_name} must be a positive integer")
         self.reasoning_policy = reasoning_policy
         self.goal_context_chars = goal_context_chars
         # Freeze the executor/replanner view once so all policy arms receive the same
         # task context even if module configuration changes while a run is active.
         self.goal_context = user_prompt[:goal_context_chars]
         # Dependency seams (issue #40): None keeps the patchable module
-        # behavior; a pinned llm config builds this run's own client.
+        # behavior; a pinned llm config builds this run's own client, and
+        # injected sinks alone snapshot the module configuration into a
+        # run-local client so LLM retry logs and telemetry cannot escape to
+        # the module stdout/JSONL sinks (Codex P2, PR #65). Transport still
+        # resolves requests.post at call time either way.
         if deps.llm_client is not None:
             self._client = deps.llm_client
         elif cfg.llm is not None:
             self._client = LLMClient(
                 settings=cfg.llm, log_sink=deps.log_sink, event_sink=deps.event_sink
             )
+        elif deps.log_sink is not None or deps.event_sink is not None:
+            self._client = LLMClient(
+                settings=LLMSettings.current(),
+                log_sink=deps.log_sink,
+                event_sink=deps.event_sink,
+            )
         else:
             self._client = None
+        # An injected executor that names a workspace must name this run's
+        # workspace (Codex P1, PR #65): otherwise actions would mutate one
+        # directory while the result identifies another. Scripted stand-ins
+        # without a working_dir attribute stay accepted.
+        executor_dir = getattr(deps.action_executor, "working_dir", None)
+        if executor_dir is not None and Path(executor_dir).resolve() != Path(working_dir).resolve():
+            raise ValueError(
+                "action_executor is bound to a different directory than the run workspace"
+            )
         self._action_executor = deps.action_executor
         self._clock = time.time if deps.clock is None else deps.clock
         self._log_sink = deps.log_sink
@@ -3345,9 +3373,15 @@ def run_result(user_prompt, working_dir=None, config=None, dependencies=None):
     are wrappers over this one path.
     """
     workspace = RunWorkspace.resolve(working_dir)
-    controller = _RunController(
-        user_prompt, workspace.path, config=config, dependencies=dependencies
-    )
+    try:
+        controller = _RunController(
+            user_prompt, workspace.path, config=config, dependencies=dependencies
+        )
+    except BaseException:
+        # Invalid configuration must not leak an undisclosed temporary
+        # directory (Codex P2, PR #65); cleanup never touches a supplied one.
+        workspace.cleanup()
+        raise
     result = controller.run()
     result["config"] = controller.config_metadata()
     result["workspace"] = workspace.describe()

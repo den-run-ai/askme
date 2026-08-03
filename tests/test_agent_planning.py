@@ -1,6 +1,7 @@
 """Planning tests: planner reasoning, preflight probe, execution policy,
 command-aware timeouts, server config."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -469,6 +470,22 @@ class TestReplanTask:
         result = replan_task("do thing", ["error"], [], state, "goal")
         assert result.task is None
         assert result.reject_reason == "transport_error"
+
+    @patch("askme.ask_llm")
+    def test_parse_error_returns_typed_rejection(self, mock_llm):
+        mock_llm.side_effect = json.JSONDecodeError("bad reply", "doc", 0)
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result.task is None
+        assert result.reject_reason == "parse_error"
+
+    @patch("askme.ask_llm")
+    def test_missing_task_key_returns_typed_rejection(self, mock_llm):
+        mock_llm.side_effect = KeyError("API error: no choices")
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result.task is None
+        assert result.reject_reason == "missing_task_key"
 
     @patch("askme.ask_llm")
     def test_empty_response_returns_typed_rejection(self, mock_llm):
