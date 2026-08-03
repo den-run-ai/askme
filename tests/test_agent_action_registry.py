@@ -145,17 +145,40 @@ class TestTypedDispatchErrors:
 
     @patch("askme.replan_task", return_value=None)
     @patch("askme.ask_llm")
-    def test_unknown_action_is_a_typed_executed_error_in_the_loop(
+    def test_unknown_action_is_rejected_before_consuming_a_step(
         self, mock_llm, mock_replan, tmp_path
     ):
+        """Issue #68: an unknown-action envelope is a typed schema rejection
+        at the executor seam — it never reaches the dispatcher, and it never
+        consumes a selected or executed step."""
         mock_llm.side_effect = [
             {"tasks": ["do something"]},
             {"action": "refactor", "arg": "f.txt"},
-            {"action": "fail", "reasoning": "cannot"},
         ]
         result = _run_loop("do something", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
         assert result["status"] == "exhausted"
         assert any(e.startswith("[unknown_action] refactor") for e in result["state"]["errors"])
+        assert result["state"]["selected_steps"] == 0
+        assert result["state"]["executed_steps"] == 0
+        assert result["state"]["all_steps"] == []
+
+    @patch("askme.replan_task", return_value=None)
+    @patch("askme.ask_llm")
+    def test_cross_type_envelope_is_rejected_before_consuming_a_step(
+        self, mock_llm, mock_replan, tmp_path
+    ):
+        """A planner-shaped reply at the executor seam is a malformed_action
+        schema rejection, not a dispatched step."""
+        mock_llm.side_effect = [
+            {"tasks": ["do something"]},
+            {"tasks": ["do something else"]},
+        ]
+        result = _run_loop("do something", str(tmp_path), max_replans=1, max_tasks=1, max_steps=3)
+        assert result["status"] == "exhausted"
+        assert any(e.startswith("[malformed_action]") for e in result["state"]["errors"])
+        assert result["state"]["selected_steps"] == 0
+        assert result["state"]["executed_steps"] == 0
+        assert result["state"]["all_steps"] == []
 
 
 # --- Typed result round-trips at the compatibility seam ---

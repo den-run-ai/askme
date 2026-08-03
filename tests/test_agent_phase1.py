@@ -90,9 +90,9 @@ class TestReasoningPolicy:
         assert mock_llm.call_args.kwargs["think"] is False
 
         with patch("askme.ask_llm", return_value={"valid": True}) as mock_llm:
-            assert askme._validate_completion("deliver artifact", state, tmp_path) == {
-                "valid": True,
-            }
+            assert askme._validate_completion(
+                "deliver artifact", state, tmp_path
+            ) == askme.ValidationResponse(valid=True)
         assert mock_llm.call_args.kwargs["reasoning_policy"] == "off"
         assert mock_llm.call_args.kwargs["reasoning_trigger"] == "final_validator"
         assert mock_llm.call_args.kwargs["think_level"] == "high"

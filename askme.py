@@ -474,6 +474,122 @@ def _accept_or_raise(obj, text):
     raise json.JSONDecodeError("Incomplete action JSON", text, 0)
 
 
+# --- Response-specific schemas and records (issue #68) ---
+#
+# Every LLM call site names the response type it expects; the client rejects
+# an envelope of the wrong type with its normal parse-retry policy, and the
+# call site converts the accepted dict into a typed record before any
+# controller accounting. The permissive shared decoder is thereby split into
+# per-response contracts: a plan cannot reach the executor, a stray action
+# cannot reach the planner, and an unknown action never consumes an
+# execution step.
+
+
+def _action_envelope_error(obj):
+    """Typed rejection reason for a non-dispatchable executor reply.
+
+    Returns None for an action envelope — a known action name whose fields
+    satisfy the registry contract, including the control actions — and the
+    typed error otherwise: empty and cross-type envelopes (a plan or
+    validator reply at the action seam) are ``malformed_action``; a
+    well-formed envelope naming an unknown action is ``unknown_action``.
+    """
+    if not isinstance(obj, dict) or not obj:
+        return "malformed_action"
+    act = obj.get("action")
+    if not _valid_nonempty_str(act):
+        return "malformed_action"
+    spec = ACTION_SPECS.get(act)
+    if spec is None:
+        return "unknown_action"
+    if not all(_valid_nonempty_str(obj.get(name)) for name in spec.requires):
+        return "malformed_action"
+    if spec.contract is not None and not spec.contract(obj):
+        return "malformed_action"
+    return None
+
+
+@dataclass(frozen=True)
+class PlanResponse:
+    """Typed planner reply: a bounded, non-empty task list."""
+
+    tasks: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, obj, max_tasks):
+        """Accept a planner reply, or return None for a malformed envelope.
+
+        Mirrors the historical call-site contract: the list is truncated to
+        ``max_tasks`` first and every kept entry must be a non-empty string.
+        """
+        if not isinstance(obj, dict):
+            return None
+        raw = obj.get("tasks")
+        if not isinstance(raw, list):
+            return None
+        tasks = raw[:max_tasks]
+        if not tasks or any(not _valid_nonempty_str(task) for task in tasks):
+            return None
+        return cls(tasks=tuple(tasks))
+
+
+@dataclass(frozen=True)
+class TaskReplanResponse:
+    """Typed task-replanner reply: one replacement task description."""
+
+    task: str
+
+    @classmethod
+    def parse(cls, obj):
+        """Accept a replan reply, or return None for a malformed envelope."""
+        if not isinstance(obj, dict):
+            return None
+        task = obj.get("task")
+        if not isinstance(task, str) or not task:
+            return None
+        return cls(task=task)
+
+
+@dataclass(frozen=True)
+class ValidationResponse:
+    """Typed final-validation verdict.
+
+    ``valid`` is the verdict; ``deterministic`` marks a verdict derived from
+    the deterministic completion check rather than the LLM validator. An
+    unavailable or malformed validator reply never becomes a
+    ValidationResponse — the caller sees None and must treat the run as
+    unverified, not passed (issue #68)."""
+
+    valid: bool
+    reason: str = ""
+    missing: tuple[str, ...] = ()
+    deterministic: bool = False
+
+    @classmethod
+    def parse(cls, obj):
+        """Accept a validator reply, or return None for a malformed envelope."""
+        if not isinstance(obj, dict) or not isinstance(obj.get("valid"), bool):
+            return None
+        reason = obj.get("reason")
+        missing = obj.get("missing")
+        return cls(
+            valid=obj["valid"],
+            reason=reason if isinstance(reason, str) else "",
+            missing=tuple(m for m in missing if _valid_nonempty_str(m))
+            if isinstance(missing, list)
+            else (),
+        )
+
+
+# Decode-time response schemas by expected type: True accepts the envelope.
+RESPONSE_SCHEMAS = {
+    "plan": lambda obj: PlanResponse.parse(obj, MAX_TASKS) is not None,
+    "action": lambda obj: _action_envelope_error(obj) is None,
+    "task_replan": lambda obj: TaskReplanResponse.parse(obj) is not None,
+    "validation": lambda obj: ValidationResponse.parse(obj) is not None,
+}
+
+
 _STRICT_JSON_SUFFIX = (
     "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
 )
@@ -786,15 +902,21 @@ class LLMClient:
         timeout=None,
         reasoning_policy=DEFAULT_REASONING_POLICY,
         reasoning_trigger="unspecified",
+        expect=None,
     ):
         """Call the backend and decode one plan/action/validator reply.
 
         This loop owns only retry/backoff policy, the parse-retry budget
         escalation, and the typed errors callers rely on (LLMTransportError,
         KeyError for API-error bodies, json.JSONDecodeError with
-        malformed_action/response_truncated)."""
+        malformed_action/response_truncated). ``expect`` names the response
+        schema this call site accepts (issue #68): a decoded envelope of the
+        wrong type — empty, cross-type, or an unknown action — is retried
+        like any parse failure and raises typed after the retry budget."""
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
+        if expect is not None and expect not in RESPONSE_SCHEMAS:
+            raise ValueError(f"expect must be one of {', '.join(sorted(RESPONSE_SCHEMAS))}")
         cfg = self.settings
         budget = max_tokens
         for attempt in range(max_retries + 1):
@@ -900,6 +1022,19 @@ class LLMClient:
                 raise
             if repaired:
                 self._log(f"  JSON repaired on attempt {attempt}")
+            if expect is not None and not RESPONSE_SCHEMAS[expect](obj):
+                if attempt < max_retries:
+                    self._log(f"  [retry {attempt + 1}] reply failed the {expect} schema")
+                    continue
+                schema_err = json.JSONDecodeError(
+                    f"Reply failed the {expect} response schema", _decoded_text or "", 0
+                )
+                setattr(schema_err, "cleaned_text", _decoded_text)
+                setattr(schema_err, "malformed_action", True)
+                setattr(schema_err, "response_truncated", finish_reason == "length")
+                if expect == "action":
+                    setattr(schema_err, "envelope_error", _action_envelope_error(obj))
+                raise schema_err
             return obj
 
 
@@ -913,14 +1048,16 @@ def ask_llm(
     timeout=None,
     reasoning_policy=DEFAULT_REASONING_POLICY,
     reasoning_trigger="unspecified",
+    expect=None,
 ):
     """Call the configured backend and decode one plan/action/validator reply.
 
     Compatibility facade over LLMClient: snapshots the module-level
     configuration for this call and delegates. Retry/backoff policy, the
-    parse-retry budget escalation, and the typed errors callers rely on
-    (LLMTransportError, KeyError for API-error bodies, json.JSONDecodeError
-    with malformed_action/response_truncated) live in LLMClient.ask."""
+    parse-retry budget escalation, response-schema enforcement (``expect``),
+    and the typed errors callers rely on (LLMTransportError, KeyError for
+    API-error bodies, json.JSONDecodeError with
+    malformed_action/response_truncated) live in LLMClient.ask."""
     return LLMClient().ask(
         messages,
         max_tokens=max_tokens,
@@ -931,6 +1068,7 @@ def ask_llm(
         timeout=timeout,
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
+        expect=expect,
     )
 
 
@@ -1332,6 +1470,7 @@ def get_plan(user_prompt, state, client=None):
         timeout=LLM_TIMEOUT_REPLAN if is_replan else None,
         reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
         reasoning_trigger="planner_replan" if is_replan else "initial_plan",
+        expect="plan",
     )
 
 
@@ -1422,6 +1561,7 @@ def get_step(
         think=think,
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
+        expect="action",
     )
 
 
@@ -1598,11 +1738,12 @@ def replan_task(
             max_retries=0,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
             reasoning_trigger="task_local_replan",
+            expect="task_replan",
         )
-        task = result.get("task", "")
-        if not task or not isinstance(task, str):
+        parsed = TaskReplanResponse.parse(result)
+        if parsed is None:
             return TaskReplanResult(None, "empty")
-        task = task.strip()
+        task = parsed.task.strip()
         if len(task) <= 3:
             return TaskReplanResult(None, "too_short")
         if task == failed_task.strip():
@@ -1685,18 +1826,21 @@ def _deterministic_check(user_prompt, state, working_dir):
 
 
 def _validate_completion(user_prompt, state, working_dir, client=None, log_sink=None):
-    """Run LLM-based final validation. Returns dict or None (fail-open)."""
+    """Run final validation. Returns a :class:`ValidationResponse` or None.
+
+    None means no verdict was available — the validator was unreachable or
+    replied outside its schema. Callers must treat that as unverified, never
+    as a pass (issue #68)."""
     emit = log if log_sink is None else log_sink
     deterministic = _deterministic_check(user_prompt, state, working_dir)
     if deterministic is True:
-        return {"valid": True, "deterministic": True}
+        return ValidationResponse(valid=True, deterministic=True)
     if deterministic is False:
-        return {
-            "valid": False,
-            "deterministic": True,
-            "reason": "deterministic completion check failed",
-            "missing": [],
-        }
+        return ValidationResponse(
+            valid=False,
+            deterministic=True,
+            reason="deterministic completion check failed",
+        )
 
     completed = state.get("completed_tasks", [])
     step_groups = state.get("completed_step_groups", [])
@@ -1732,16 +1876,18 @@ def _validate_completion(user_prompt, state, working_dir, client=None, log_sink=
             max_retries=0,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
             reasoning_trigger="final_validator",
+            expect="validation",
         )
-        if isinstance(result, dict) and isinstance(result.get("valid"), bool):
-            return result
+        parsed = ValidationResponse.parse(result)
+        if parsed is not None:
+            return parsed
         emit(f"  Validation returned unexpected format: {result}")
         return None
     except LLMTransportError as e:
-        emit(f"  Validation transport error (fail-open): {e}")
+        emit(f"  Validation transport error (no verdict): {e}")
         return None
     except (json.JSONDecodeError, KeyError) as e:
-        emit(f"  Validation parse error (fail-open): {e}")
+        emit(f"  Validation parse error (no verdict): {e}")
         return None
 
 
@@ -2196,6 +2342,65 @@ class RunWorkspace:
         return {"path": self.path, "created": self.created}
 
 
+@dataclass(frozen=True)
+class RunOutcome:
+    """Typed terminal record for one run (issue #68).
+
+    The controller builds exactly one of these at its terminal site; the
+    JSONL ``run_end`` event and the structured result's ``status`` and
+    ``outcome`` fields are projections of it, so the terminal claim cannot
+    diverge between the log and the returned record. ``validation`` is the
+    final-validation disposition — ``passed``, ``deterministic``,
+    ``unavailable``, ``failed``, or ``skipped`` — kept separate from
+    ``status`` because completion and verification are distinct claims: an
+    agent-reported ``done`` is a claim, and only ``passed`` or
+    ``deterministic`` record an independent verdict.
+    """
+
+    status: str  # "complete" | "complete_unverified" | "exhausted"
+    validation: str
+    replans: int
+    wall_s: float
+    completed_tasks: int
+    selected_steps: int
+    executed_steps: int
+    skipped_steps: int
+    errors: tuple[str, ...] = ()
+
+    def _steps(self):
+        return {
+            "selected": self.selected_steps,
+            "executed": self.executed_steps,
+            "skipped": self.skipped_steps,
+        }
+
+    def run_end_event(self):
+        """The historical ``run_end`` JSONL event shape for this outcome."""
+        event: dict[str, Any] = {
+            "event": "run_end",
+            "status": self.status,
+            "replans": self.replans,
+            "wall_s": self.wall_s,
+        }
+        if self.status == "exhausted":
+            event["errors"] = list(self.errors)
+        else:
+            event["completed_tasks"] = self.completed_tasks
+        event["steps"] = self._steps()
+        return event
+
+    def describe(self):
+        """JSON-ready terminal record for the structured run result."""
+        return {
+            "status": self.status,
+            "validation": self.validation,
+            "replans": self.replans,
+            "wall_s": self.wall_s,
+            "completed_tasks": self.completed_tasks,
+            "steps": self._steps(),
+        }
+
+
 class _RunController:
     """Thin coordinator over planning, task attempts, step decisions, and
     finalization (issue #31).
@@ -2343,18 +2548,45 @@ class _RunController:
         }
 
     def run(self):
-        """Drive planning, task attempts, validation, and finalization."""
+        """Drive planning, task attempts, validation, and finalization.
+
+        The one typed :class:`RunOutcome` built at the terminal site is
+        projected into both the ``run_end`` event and the structured
+        result, so the two records cannot disagree."""
         self._log_run_start()
         self._preflight()
+        outcome = None
         for replan in range(self.max_replans):
             tasks = self._plan(replan)
             if tasks is None:
                 continue  # consumes a plan attempt
             if self._execute_tasks(tasks):
-                result = self._try_finish(replan)
-                if result is not None:
-                    return result
-        return self._finish_after_exhaustion()
+                outcome = self._try_finish(replan)
+                if outcome is not None:
+                    break
+        if outcome is None:
+            outcome = self._finish_after_exhaustion()
+        self._event(outcome.run_end_event())
+        return {
+            "status": outcome.status,
+            "state": self.state,
+            "log": self.history,
+            "outcome": outcome.describe(),
+        }
+
+    def _build_outcome(self, status, validation, replans):
+        """Snapshot the terminal record from the run-scoped state."""
+        return RunOutcome(
+            status=status,
+            validation=validation,
+            replans=replans,
+            wall_s=round(self.run_state.elapsed(), 2),
+            completed_tasks=len(self.state["completed_tasks"]),
+            selected_steps=self.state["selected_steps"],
+            executed_steps=self.state["executed_steps"],
+            skipped_steps=self.state["skipped_steps"],
+            errors=tuple(self.state["errors"][-5:]) if status == "exhausted" else (),
+        )
 
     def _log_run_start(self):
         meta = self._llm_meta
@@ -2404,7 +2636,7 @@ class _RunController:
         self.state["planning_attempt"] = replan
         try:
             plan = get_plan(self.user_prompt, self.state, **self._llm_kwargs())
-        except LLMTransportError as e:
+        except (LLMTransportError, KeyError) as e:
             self._emit(f"  Planner transport error: {e}")
             self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
             self.history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
@@ -2417,9 +2649,13 @@ class _RunController:
                 }
             )
             return None
-        raw_tasks = plan.get("tasks")
-        tasks = raw_tasks[: self.max_tasks] if isinstance(raw_tasks, list) else []
-        if not tasks or any(not _valid_nonempty_str(task) for task in tasks):
+        except json.JSONDecodeError:
+            # The client already retried the plan schema (issue #68); a
+            # persistently malformed reply consumes this planning attempt.
+            parsed = None
+        else:
+            parsed = PlanResponse.parse(plan, self.max_tasks)
+        if parsed is None:
             error = "[malformed_plan] planner returned no valid tasks"
             self.state["errors"].append(error)
             self._emit(f"  Planner contract error: {error}")
@@ -2433,6 +2669,7 @@ class _RunController:
                 }
             )
             return None
+        tasks = list(parsed.tasks)
         self.state["errors"] = []  # reset errors each replan; planner already saw them
         plan_wall = self._clock() - t_plan
         self._emit(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
@@ -2613,9 +2850,12 @@ class _RunController:
             return None
         except (json.JSONDecodeError, KeyError) as e:
             # Typed parse failures (issue #7): the replanner should know
-            # whether the action envelope was truncated at the token budget
-            # or simply malformed.
-            if getattr(e, "response_truncated", False):
+            # whether the action envelope was truncated at the token budget,
+            # of the wrong response type, or simply malformed.
+            envelope = getattr(e, "envelope_error", None)
+            if envelope is not None:
+                etype = envelope
+            elif getattr(e, "response_truncated", False):
                 etype = "response_truncated"
             elif getattr(e, "malformed_action", False):
                 etype = "malformed_action"
@@ -2639,6 +2879,32 @@ class _RunController:
             if action.get(_k) is None:
                 action[_k] = ""
         act = action.get("action", "")
+        envelope = _action_envelope_error(action)
+        if envelope is not None:
+            # Response-schema rejection before controller accounting (issue
+            # #68): an empty, cross-type, or unknown-action envelope never
+            # consumes an execution step. The live decode path enforces the
+            # same schema with retries; this arm covers injected clients and
+            # patched facades.
+            label = act if _valid_nonempty_str(act) else "(no action)"
+            detail = (
+                "not a known action"
+                if envelope == "unknown_action"
+                else "reply is not a dispatchable action envelope"
+            )
+            self._emit(f"  [{step + 1}] rejected [{envelope}]: {label}")
+            self.state["errors"].append(
+                f"[{envelope}] {label} {action.get('arg', '')[:60]}: {detail}"
+            )
+            self._event(
+                {
+                    "event": "step_error",
+                    "task_index": i,
+                    "step": step,
+                    "error_type": envelope,
+                }
+            )
+            return None
         self.recorder.selected()
         self._emit(f"  [{step + 1}] {act}: {action['arg'][:80]}")
         return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
@@ -3200,8 +3466,8 @@ class _RunController:
         return None
 
     def _try_finish(self, replan):
-        """Validate an all-done pass; a result dict ends the run."""
-        status = "complete"
+        """Validate an all-done pass; a :class:`RunOutcome` ends the run."""
+        status, validation = "complete", "skipped"
         wants_validation = _should_validate(replan, self.history, self.state, self.user_prompt)
         first_validation = self.state.get("validation_attempts", 0) == 0
         recheck_validation = (
@@ -3218,9 +3484,9 @@ class _RunController:
             vresult = _validate_completion(
                 self.user_prompt, self.state, self.working_dir, **validate_kwargs
             )
-            if vresult and vresult.get("valid") is False:
-                reason = vresult.get("reason", "validation failed")
-                missing = vresult.get("missing", [])
+            if vresult is not None and vresult.valid is False:
+                reason = vresult.reason or "validation failed"
+                missing = list(vresult.missing)
                 error_msg = f"[validation_failed] {reason}"
                 if missing:
                     error_msg += f" missing: {', '.join(missing)}"
@@ -3234,7 +3500,7 @@ class _RunController:
                         "valid": False,
                         "reason": reason,
                         "missing": missing,
-                        "deterministic": bool(vresult.get("deterministic")),
+                        "deterministic": vresult.deterministic,
                     }
                 )
                 return None  # replan
@@ -3255,7 +3521,7 @@ class _RunController:
                 # (issue #68): the completed tasks stand, but the run is
                 # typed ``complete_unverified`` instead of claiming
                 # "Validation passed" from missing evidence.
-                status = "complete_unverified"
+                status, validation = "complete_unverified", "unavailable"
                 self._emit("  Validation produced no verdict; completing unverified.")
                 self._event(
                     {
@@ -3266,13 +3532,14 @@ class _RunController:
                     }
                 )
             else:
+                validation = "deterministic" if vresult.deterministic else "passed"
                 self.state["validation_recheck_needed"] = False
                 self._emit("  Validation passed.")
                 self._event(
                     {
                         "event": "validation",
                         "valid": True,
-                        "deterministic": bool(vresult.get("deterministic")),
+                        "deterministic": vresult.deterministic,
                     }
                 )
         if self.state.get("validation_recheck_needed"):
@@ -3286,24 +3553,10 @@ class _RunController:
             self._emit(f"  Completion refused: {reason}")
             self._event({"event": "validation_pending", "reason": reason})
             return None
-        total_wall = self.run_state.elapsed()
-        self._emit(f"All tasks complete. ({total_wall:.1f}s total)")
+        outcome = self._build_outcome(status, validation, replan)
+        self._emit(f"All tasks complete. ({outcome.wall_s:.1f}s total)")
         self._emit(f"Output in: {self.working_dir}")
-        self._event(
-            {
-                "event": "run_end",
-                "status": status,
-                "replans": replan,
-                "wall_s": round(total_wall, 2),
-                "completed_tasks": len(self.state["completed_tasks"]),
-                "steps": {
-                    "selected": self.state["selected_steps"],
-                    "executed": self.state["executed_steps"],
-                    "skipped": self.state["skipped_steps"],
-                },
-            }
-        )
-        return {"status": status, "state": self.state, "log": self.history}
+        return outcome
 
     def _finish_after_exhaustion(self):
         """Exhaustion is terminal: no shell-success reconciliation (issue #68).
@@ -3313,25 +3566,12 @@ class _RunController:
         though the plan never finished; that is evaluation-contaminating
         false success, so the run now reports ``exhausted`` unconditionally.
         """
-        total_wall = self.run_state.elapsed()
-        self._emit(f"Exhausted {self.max_replans} replan attempts. ({total_wall:.1f}s total)")
+        validation = "failed" if self.state.get("validation_recheck_needed") else "skipped"
+        outcome = self._build_outcome("exhausted", validation, self.max_replans)
+        self._emit(f"Exhausted {self.max_replans} replan attempts. ({outcome.wall_s:.1f}s total)")
         self._emit(f"Errors: {self.state['errors']}")
         self._emit(f"Output in: {self.working_dir}")
-        self._event(
-            {
-                "event": "run_end",
-                "status": "exhausted",
-                "replans": self.max_replans,
-                "wall_s": round(total_wall, 2),
-                "errors": self.state["errors"][-5:],
-                "steps": {
-                    "selected": self.state["selected_steps"],
-                    "executed": self.state["executed_steps"],
-                    "skipped": self.state["skipped_steps"],
-                },
-            }
-        )
-        return {"status": "exhausted", "state": self.state, "log": self.history}
+        return outcome
 
 
 def run_result(user_prompt, working_dir=None, config=None, dependencies=None):
