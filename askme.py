@@ -3636,16 +3636,16 @@ class _RunController:
         # Freeze the executor/replanner view once so all policy arms receive the same
         # task context even if module configuration changes while a run is active.
         self.goal_context = user_prompt[:goal_context_chars]
-        # Resolve every effective LLM setting before composing a client.
-        # The default path retains the patchable ask_llm facade through a
-        # run-local adapter, but the adapter supplies this one snapshot on
-        # every call instead of re-reading MODEL/API/provider/timeouts.
-        module_settings = _resolve_run_llm_settings(LLMSettings.current())
+        # Select the run's settings source before resolving it: invalid state
+        # in an unused compatibility global must not block a pinned or injected
+        # run. The default path retains the patchable ask_llm facade through a
+        # run-local adapter, but the adapter supplies this one snapshot on every
+        # call instead of re-reading MODEL/API/provider/timeouts.
         injected_settings = getattr(deps.llm_client, "settings", None)
         source_settings = (
             injected_settings
             if injected_settings is not None
-            else (cfg.llm if cfg.llm is not None else module_settings)
+            else (cfg.llm if cfg.llm is not None else LLMSettings.current())
         )
         self._llm_meta = _resolve_run_llm_settings(source_settings)
         # Dependency seams (issue #40): a pinned llm config builds this run's

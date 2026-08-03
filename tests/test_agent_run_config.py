@@ -158,6 +158,40 @@ class TestConfigResolution:
             with pytest.raises(ValueError, match=name.lower()):
                 askme._RunController("greet", str(tmp_path))
 
+    @pytest.mark.parametrize(
+        ("source", "provenance"),
+        [
+            ("pinned", "pinned_config"),
+            ("injected", "injected_client_settings"),
+        ],
+    )
+    def test_selected_llm_settings_ignore_invalid_module_fallback(
+        self, tmp_path, source, provenance
+    ):
+        settings = _settings(
+            timeout=30,
+            replan_timeout=60,
+            max_retries=1,
+            step_token_budget=256,
+            step_write_tokens=512,
+            reasoning_token_floors=(1024, 1536, 2048),
+        )
+        kwargs = {"config": RunConfig(llm=settings)}
+        if source == "injected":
+            client = ScriptedClient([])
+            client.settings = settings
+            kwargs = {"dependencies": _quiet_deps(llm_client=client)}
+
+        with (
+            patch.object(askme, "LLM_TIMEOUT", 0),
+            patch.object(askme, "STEP_TOKENS", 0),
+        ):
+            metadata = askme._RunController("greet", str(tmp_path), **kwargs).config_metadata()
+
+        assert metadata["llm_provenance"] == provenance
+        assert metadata["timeout_s"] == 30
+        assert metadata["budgets"]["step_tokens"] == 256
+
     def test_pinned_final_validate_runs_without_touching_globals(self, tmp_path):
         """conftest disables validation globally; the pinned run still runs it."""
         client = ScriptedClient(
