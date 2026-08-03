@@ -196,70 +196,26 @@ def classify_error(output, action="shell", cmd=""):
 
 
 def _read_offset_limit(action):
-    """Normalized 1-based read window (offset, limit) from an action dict."""
-    try:
-        offset = max(1, int(action.get("offset") or 1))
-    except (TypeError, ValueError):
-        offset = 1
-    try:
-        limit = max(1, min(int(action.get("limit") or READ_LINES), READ_LIMIT_MAX))
-    except (TypeError, ValueError):
-        limit = READ_LINES
-    return offset, limit
+    """Read window from an action already normalized by the wire parser."""
+    return action.get("offset", 1), action.get("limit", READ_LINES)
 
 
 def _read_cursor(action):
-    """Normalized 0-based Unicode-code-point cursor, or None for a line read."""
-    if "cursor" not in action:
-        return None
-    raw = action.get("cursor")
-    if isinstance(raw, bool):
-        raise ValueError("read cursor must be a non-negative integer")
-    if isinstance(raw, int):
-        cursor = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        cursor = int(raw.strip())
-    else:
-        raise ValueError("read cursor must be a non-negative integer")
-    if cursor < 0:
-        raise ValueError("read cursor must be a non-negative integer")
-    return cursor
+    """Parsed 0-based Unicode-code-point cursor, or None for a line read."""
+    return action.get("cursor")
 
 
 def _read_continuation_limit(action):
-    """Strict line limit echoed by an action-ready cursor continuation."""
-    raw = action.get("limit")
-    if isinstance(raw, bool):
-        raise ValueError("read continuation limit must be an integer")
-    if isinstance(raw, int):
-        limit = raw
-    elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw.strip()):
-        limit = int(raw.strip())
-    else:
-        raise ValueError("read continuation limit must be an integer")
-    if not 1 <= limit <= READ_LIMIT_MAX:
-        raise ValueError("read continuation limit is out of range")
-    return limit
+    """Parsed line limit echoed by an action-ready cursor continuation."""
+    return action["limit"]
 
 
 def _read_key(action):
     """Identity for duplicate-read detection, including every range field."""
     arg = action.get("arg", "")
-    try:
-        cursor = _read_cursor(action)
-    except ValueError:
-        return (arg, "invalid_cursor", repr(action.get("cursor")), action.get("sha256") or "")
+    cursor = _read_cursor(action)
     if cursor is not None:
-        try:
-            limit = _read_continuation_limit(action)
-        except ValueError:
-            return (
-                arg,
-                "invalid_cursor_limit",
-                cursor,
-                repr(action.get("limit")),
-                action.get("sha256") or "",
-            )
+        limit = _read_continuation_limit(action)
         return (arg, "cursor", cursor, limit, action.get("sha256") or "")
     offset, limit = _read_offset_limit(action)
     return (arg, "lines", offset, limit)
@@ -443,7 +399,13 @@ class ActionExecutor:
         parsed = parse_action_envelope(action)
         if isinstance(parsed, ActionProtocolError):
             error_type = parsed.error_type
-            attempted = action.get("action") if isinstance(action, Mapping) else None
+            try:
+                attempted = action.get("action") if isinstance(action, Mapping) else None
+            except Exception:
+                # A hostile or structurally forged Mapping may fail both
+                # copying and diagnostic lookup; dispatch must still return
+                # the parser's typed error rather than raise.
+                attempted = None
             if attempted == "read":
                 error_type = {
                     "cursor": "invalid_read_cursor",
@@ -609,34 +571,10 @@ class ActionExecutor:
                 details = {"truncated": False, "content": "", "continuation": None, **meta}
                 return ActionResult(ok, output, error_type, details)
 
-            try:
-                cursor = _read_cursor(action)
-            except ValueError:
-                return empty_page(
-                    False,
-                    f"[{p.name}: read cursor must be a non-negative integer]",
-                    "invalid_read_cursor",
-                )
+            cursor = _read_cursor(action)
             if cursor is not None:
-                try:
-                    limit = _read_continuation_limit(action)
-                except ValueError:
-                    return empty_page(
-                        False,
-                        (
-                            f"[{p.name}: read continuation limit "
-                            f"must be an integer from 1 to "
-                            f"{READ_LIMIT_MAX}]"
-                        ),
-                        "invalid_read_limit",
-                    )
+                limit = _read_continuation_limit(action)
             expected_hash = action.get("sha256")
-            if cursor is not None and not expected_hash:
-                return empty_page(
-                    False,
-                    f"[{p.name}: read cursor requires the source sha256 from its continuation]",
-                    "read_cursor_hash_required",
-                )
             if cursor is not None and expected_hash and expected_hash != meta["sha256"]:
                 return empty_page(
                     False,
@@ -948,9 +886,7 @@ def parse_action_envelope(obj):
     malformed value returns :class:`ActionProtocolError`; it never raises.
     """
     if isinstance(obj, DecodedAction):
-        return obj.envelope
-    if isinstance(obj, ActionEnvelope):
-        return obj
+        obj = obj.envelope
     if not isinstance(obj, Mapping):
         return _action_error("action envelope must be an object")
 

@@ -466,9 +466,9 @@ def _repair_json(text):
     without_trailing_comma = re.sub(r",(\s*})\s*$", r"\1", candidate)
     if without_trailing_comma != candidate:
         try:
-            obj = json.loads(without_trailing_comma)
-            if isinstance(obj, dict):
-                return obj
+            # The candidate begins at its first ``{``, so any successful
+            # parse is necessarily an object; there is no scalar/list arm.
+            return json.loads(without_trailing_comma)
         except json.JSONDecodeError:
             pass
 
@@ -516,9 +516,8 @@ def _validate_action_contract(obj):
     #36). Unknown actions pass here so the run loop can record them as an
     executed step with a typed dispatch error, not a decode failure.
     """
-    if isinstance(obj, (ActionEnvelope, DecodedAction)):
-        return True
-    if not isinstance(obj, dict) or "action" not in obj:
+    typed = isinstance(obj, (ActionEnvelope, DecodedAction))
+    if not typed and (not isinstance(obj, dict) or "action" not in obj):
         return True
     parsed = parse_action_envelope(obj)
     if isinstance(parsed, ActionProtocolError) and parsed.error_type == "unknown_action":
@@ -561,11 +560,8 @@ def _action_envelope_error(obj):
     validator reply at the action seam) are ``malformed_action``; a
     well-formed envelope naming an unknown action is ``unknown_action``.
     """
-    if isinstance(obj, DecodedAction):
-        return None
-    if isinstance(obj, ActionEnvelope):
-        return None
-    if not isinstance(obj, dict) or not obj:
+    typed = isinstance(obj, (ActionEnvelope, DecodedAction))
+    if not typed and (not isinstance(obj, dict) or not obj):
         return "malformed_action"
     parsed = parse_action_envelope(obj)
     return parsed.error_type if isinstance(parsed, ActionProtocolError) else None
@@ -3745,7 +3741,14 @@ class _RunController:
             # projection.  Keep it only at this trusted compatibility seam;
             # model decode and the built-in ActionExecutor both receive the
             # strict envelope, so cross-action fields remain rejected.
-            projected = action.to_dict()
+            # Deterministic recovery also enters through this seam with an
+            # ordinary mapping. Normalize it through the same strict parser
+            # before projecting, rather than assuming a typed envelope or
+            # forwarding an unvalidated mapping to a duck-typed executor.
+            normalized = parse_action_envelope(action)
+            if isinstance(normalized, ActionProtocolError):
+                return ActionResult(False, normalized.message, normalized.error_type)
+            projected = normalized.to_dict()
             for field_name in ("arg", "content", "reasoning", "find", "replace"):
                 projected.setdefault(field_name, "")
             raw = self._action_executor.dispatch(projected).to_dict()
@@ -4084,7 +4087,7 @@ class _RunController:
         candidate = action
         if isinstance(action, DecodedAction):
             transport = action.transport
-            parsed_action = action.envelope
+            candidate = action.envelope
         else:
             # Patched/injected clients historically represented trusted
             # decoder metadata as a dictionary key.  Preserve that test and
@@ -4097,7 +4100,7 @@ class _RunController:
                     transport = ActionTransport(content_truncated=True)
                 else:
                     candidate["content_truncated"] = legacy_truncated
-            parsed_action = parse_action_envelope(candidate)
+        parsed_action = parse_action_envelope(candidate)
         if isinstance(parsed_action, ActionProtocolError):
             # Response-schema rejection before controller accounting (issue
             # #68): an empty, cross-type, or unknown-action envelope never

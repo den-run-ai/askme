@@ -1,6 +1,7 @@
 """Typed action-wire boundary regressions for issue #79."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from actions import (
     SHELL_TIMEOUT_MAX,
     ActionEnvelope,
     ActionProtocolError,
+    ActionTransport,
     DecodedAction,
     parse_action_envelope,
 )
@@ -165,6 +167,122 @@ def test_parsed_action_is_immutable_and_detached_from_input():
         parsed._items = ()  # type: ignore[misc]
 
 
+def test_action_envelope_mapping_protocol_and_invalid_update():
+    raw = {"action": "write", "arg": "f.json", "content": {"enabled": True}}
+    parsed = parse_action_envelope(raw)
+    assert isinstance(parsed, ActionEnvelope)
+
+    assert list(parsed) == ["action", "arg", "content"]
+    assert len(parsed) == 3
+    assert parsed == raw
+    assert parsed.__eq__(object()) is NotImplemented
+    updated = parsed.with_updates(content={"enabled": False})
+    assert updated["content"] == {"enabled": False}
+    with pytest.raises(ValueError, match="not allowed for action 'write'"):
+        parsed.with_updates(timeout=5)
+
+
+def test_decoded_action_projects_transport_through_the_mapping_protocol():
+    envelope = parse_action_envelope({"action": "write", "arg": "f", "content": "body"})
+    assert isinstance(envelope, ActionEnvelope)
+    plain = DecodedAction(envelope)
+    truncated = DecodedAction(envelope, ActionTransport(content_truncated=True))
+
+    assert list(plain) == ["action", "arg", "content"]
+    assert len(plain) == 3
+    assert plain.to_dict() == {"action": "write", "arg": "f", "content": "body"}
+    assert plain == envelope
+    assert plain.__eq__(object()) is NotImplemented
+
+    expected = {
+        "action": "write",
+        "arg": "f",
+        "content": "body",
+        "content_truncated": True,
+    }
+    assert list(truncated) == ["action", "arg", "content", "content_truncated"]
+    assert len(truncated) == 4
+    assert truncated.to_dict() == expected
+    assert truncated == expected
+
+
+class _UncopyableMapping(Mapping):
+    def __getitem__(self, key):
+        if key == "action":
+            return "done"
+        raise KeyError(key)
+
+    def __iter__(self):
+        return iter(("action",))
+
+    def __len__(self):
+        return 1
+
+    def items(self):
+        raise RuntimeError("copy denied")
+
+
+@pytest.mark.parametrize(
+    "candidate,expected_message,expected_field",
+    [
+        (["action", "done"], "action envelope must be an object", None),
+        (_UncopyableMapping(), "action envelope could not be copied safely", None),
+        ({"action": "done", 7: "value"}, "action field names must be strings", None),
+        (
+            {"action": "read", "arg": "f", "sha256": "abc123"},
+            "field 'sha256' requires a read cursor",
+            "sha256",
+        ),
+    ],
+)
+def test_parser_rejects_defensive_boundary_cases(candidate, expected_message, expected_field):
+    parsed = parse_action_envelope(candidate)
+
+    assert isinstance(parsed, ActionProtocolError)
+    assert parsed.message == expected_message
+    assert parsed.field == expected_field
+
+
+def test_typed_and_unknown_actions_keep_legacy_validation_compatibility():
+    envelope = parse_action_envelope({"action": "done"})
+    assert isinstance(envelope, ActionEnvelope)
+    decoded = DecodedAction(envelope)
+
+    assert parse_action_envelope(envelope) == envelope
+    assert parse_action_envelope(decoded) == envelope
+    assert askme._validate_action_contract(envelope) is True
+    assert askme._validate_action_contract(decoded) is True
+    assert askme._validate_action_contract({"action": "future_action"}) is True
+    assert askme._action_envelope_error(envelope) is None
+    assert askme._action_envelope_error(decoded) is None
+
+
+@pytest.mark.parametrize(
+    "forged,error_type",
+    [
+        (ActionEnvelope((("action", "future_action"),)), "unknown_action"),
+        (ActionEnvelope(None), "malformed_action"),  # type: ignore[arg-type]
+        (
+            ActionEnvelope((("action", "write"), ("arg", "forged.txt"))),
+            "malformed_action",
+        ),
+        (
+            DecodedAction(ActionEnvelope((("action", "write"), ("arg", "forged.txt")))),
+            "malformed_action",
+        ),
+    ],
+)
+def test_forged_typed_actions_are_revalidated_before_dispatch(forged, error_type, tmp_path):
+    parsed = parse_action_envelope(forged)
+    assert isinstance(parsed, ActionProtocolError)
+    assert parsed.error_type == error_type
+
+    result = execute(forged, tmp_path)
+    assert result["ok"] is False
+    assert result["error_type"] == error_type
+    assert not (tmp_path / "forged.txt").exists()
+
+
 @pytest.mark.parametrize(
     "action,field",
     [
@@ -224,6 +342,20 @@ def test_missing_brace_repair_preserves_append_semantics(tmp_path):
     result = execute(decoded, tmp_path)
     assert result["ok"] is True
     assert target.read_text() == "OLDNEW"
+
+
+def test_repair_rejects_an_invalid_trailing_comma_without_hiding_other_damage():
+    assert _repair_json('{"action":"done","arg":,}') is None
+
+
+def test_missing_brace_repair_scans_escaped_string_content():
+    raw = r'{"action":"write","arg":"f","content":"quote: \"ok\""'
+
+    assert _repair_json(raw) == {
+        "action": "write",
+        "arg": "f",
+        "content": 'quote: "ok"',
+    }
 
 
 @pytest.mark.parametrize(
@@ -293,3 +425,23 @@ def test_controller_reuses_parser_and_rejects_invalid_append(mock_llm, _mock_rep
     assert result["status"] == "exhausted"
     assert not (tmp_path / "f.txt").exists()
     assert any("field 'append' must be a boolean" in error for error in result["state"]["errors"])
+
+
+@patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
+@patch("askme.ask_llm")
+def test_controller_rejects_spoofed_false_truncation_metadata(mock_llm, _mock_replan, tmp_path):
+    mock_llm.side_effect = [
+        {"tasks": ["write f.txt"]},
+        {
+            "action": "write",
+            "arg": "f.txt",
+            "content": "unsafe",
+            "content_truncated": False,
+        },
+    ]
+
+    result = _run_loop("write f.txt", str(tmp_path), max_replans=1, max_tasks=1, max_steps=2)
+
+    assert result["status"] == "exhausted"
+    assert not (tmp_path / "f.txt").exists()
+    assert any("content_truncated" in error for error in result["state"]["errors"])
