@@ -55,7 +55,7 @@ framework. `askme.py` re-exports the action layer's public names, and
 - `WriteObligations` / `ValidationState` / `CompletionPolicy` — the remaining per-run components (issue #69): incomplete-write invariants (truncation classification, zero-byte obligation records, append-safety and recovery order, the `done` refusal, resume anchors, clearing), the typed owner of validation state (projecting through the existing structured-state keys), and the terminal policy (validation gating, verdict handling, the evidence-gated recheck, and the typed `RunOutcome` for completion and exhaustion). `_RunController` sequences planning, attempts, dispatch, recording, and finalization; the individual algorithms live on these components and the step-policy arm
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`; returns a typed `ValidationResponse` or None when no verdict is available
 - `RunOutcome` — the typed terminal record (issue #68): status, final-validation disposition, replans, wall time, and step counters; the `run_end` JSONL event and the structured result's `status`/`outcome` fields are projections of the same record
-- `GuardThresholds` / `_config_hash` — resolved outcome-affecting configuration (issue #68): validation mode, the #41 compile-repair arm, the #31 step-policy arm, guard thresholds, and capability budgets freeze at run start into one payload whose sha256 `config_hash` is logged at `run_start` and returned in the config metadata (never credentials)
+- `GuardThresholds` / `_config_hash` — resolved outcome-affecting configuration (issue #68): validation mode, the #41 compile-repair arm, the #31 step-policy arm, guard thresholds, per-call request timeouts/retry limits, and capability budgets freeze at run start into one payload whose sha256 `config_hash` is logged at `run_start` and returned in the config metadata (never credentials). The default compatibility path binds that snapshot to `ask_llm` for the whole run; direct facade calls still snapshot per call
 - `run_result(user_prompt, working_dir=None, config=None, dependencies=None)` — the public structured-run API (issue #40): resolves workspace ownership (`RunWorkspace`, with an explicit `created` flag and intentional `cleanup()`), composes `_RunController` from an immutable `RunConfig` (per-run LLM settings, execution policy, reasoning policy, budgets; `None` fields resolve from the module compatibility surface) and injectable `RunDependencies` (LLM client, action executor, clock, log/event sinks), and returns `status`/`state`/`log` plus credential-free `config` metadata and the `workspace` record. A pinned `llm` config gives the run its own `LLMClient` — and backend-shaped step budgets — so differently configured runs coexist in one process
 - `_run_loop(...)` — compatibility seam over `run_result()` and `_RunController`, the structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls. Run-scoped controller data (the structured state dict, rewrite damping, wall clock, the one recorder) lives on `RunState`; attempt-scoped executor state (write pressure, duplicate/observation counters, thinking escalation) lives on `TaskAttemptState`; `done`/`fail` and one shared completion-blocker gate (`_completion_blocker`) remain controller concerns (issue #31)
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper over `run_result()` returning a boolean
@@ -218,12 +218,17 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `MAX_RESULT` | 300 | Chars kept from command output |
 | `MAX_STEP_HISTORY` | 3 | Sliding window of recent steps sent to executor |
 | `MAX_LLM_RETRIES` | 2 | Retries per LLM call on JSON parse failure |
+| `LLM_TIMEOUT` | 120s | Default planner, executor, task-replan, and validator request deadline |
+| `LLM_TIMEOUT_REPLAN` | 180s | Full-planner replan request deadline |
 | `MAX_INPUT` | 300 | Max chars per non-goal field sent to executor |
 | `GOAL_CONTEXT_CHARS` | 300 | Default executor/task-replan goal view; independently configurable and frozen per run |
 | `SHELL_TIMEOUT` | 30s | Default per-command timeout |
 | `SHELL_TIMEOUT_LONG` | 120s | Timeout for install/build commands |
 | `SHELL_TIMEOUT_MAX` | 300s | Hard cap for model-specified timeout hint |
 | `PLANNER_MAX_TOKENS` | 768 | Task list budget; shared with thinking on replans |
+| `TASK_REPLAN_MAX_TOKENS` | 96 | Task-local replacement budget |
+| `VALIDATION_MAX_TOKENS` | 768 | Final completion-validator budget |
+| Reasoning token floors | 1024/1536/2048 | Effective HTTP `max_tokens` floors for low/medium/high effort; frozen and recorded per run |
 | `ALLOW_SYSTEM_INSTALLS` | false | Prompt-visible install policy; not host-level enforcement |
 | `ALLOW_NETWORK` | true | Reserved for future use |
 | Step output | 100 chars | Max output stored per mutating-action step in history |
