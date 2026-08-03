@@ -4,16 +4,14 @@
 [![Coverage](https://codecov.io/gh/den-run-ai/askme/branch/main/graph/badge.svg?precision=2)](https://app.codecov.io/gh/den-run-ai/askme)
 [![LLM Tests](https://github.com/den-run-ai/askme/actions/workflows/llm.yml/badge.svg?branch=main)](https://github.com/den-run-ai/askme/actions/workflows/llm.yml?query=branch%3Amain)
 
-AskMe began with a simple dream: a small open model on my MacBook, through
-`llama.cpp`, helping with real coding work anywhere—even on a plane without
-Wi-Fi. This repository is a progress report toward that fully local coding
+AskMe began with a simple dream: a small open model on my MacBook helping with real coding work anywhere - even on an airplane without internet. This repository is a progress  toward that fully local coding
 agent.
 
 The project explores whether a tight, minimal harness can make small models
 more useful: keep context lean, ask for one structured action at a time,
 execute it, return fresh evidence, preserve completed work, and repair locally
 before replanning broadly. The goal is not to lower the standard for small
-models, but to judge delivered behavior—and to evaluate the model, harness,
+models, but to judge delivered behavior and to evaluate the model, harness,
 task, and evaluator as one system.
 
 I presented this motivation, the design bets, early evidence, and remaining
@@ -73,7 +71,7 @@ flowchart TD
 
 Before planning, the agent probes the environment (platform, available tools,
 package managers). The LLM breaks your prompt into tasks and executes each one
-step-by-step, replanning on failure — a run gets up to three planning attempts.
+step-by-step, replanning on failure - a run gets up to three planning attempts.
 A conditional, fail-open LLM validator may review tentative completion. By
 default AskMe instructs the model not to install software;
 `ALLOW_SYSTEM_INSTALLS=1` relaxes that instruction. Both are prompt policies,
