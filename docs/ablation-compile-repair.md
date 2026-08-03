@@ -8,21 +8,23 @@ requires a new protocol, not a rewritten result.
 
 ## Question
 
-Does the deterministic C-header repair path (`_try_compile_repair`, the
-tracked #41 exception that mutates the workspace outside the #36 action
-handlers) measurably improve benchmark-shaped task acceptance, relative to
-the same revision with the path disabled?
+Does the deterministic C-header repair rule (`_compile_repair_action`, which
+since 2026-08-03 only proposes a normal write action that the controller
+dispatches through the #36 action executor and single recorder) measurably
+improve benchmark-shaped task acceptance, relative to the same revision with
+the rule disabled?
 
 ## Decision rule (fixed before any trial)
 
-- **Remove** the special repair path if the repair arm's held-out acceptance
+- **Remove** the repair rule if the repair arm's held-out acceptance
   advantage over the off arm is ≤ 0 percentage points across the registered
   trial set.
-- **Retain** if the advantage is ≥ 20 percentage points; per the
+- **Retain** if the advantage is ≥ 20 percentage points. Per the
   [#41 coordination comment](https://github.com/den-run-ai/askme/issues/41#issuecomment-5160211863),
-  retention means the rule is converted to emit an ordinary `edit` action
-  through the #36 dispatch-and-record path — never a direct write or
-  fabricated receipt.
+  a retained rule must emit an ordinary action through the #36
+  dispatch-and-record path — never a direct write or fabricated receipt;
+  that boundary conversion landed on 2026-08-03, so retention keeps the
+  landed action-producing rule as-is.
 - An advantage strictly between 0 and 20 points is **inconclusive**: report
   it with per-arm variance, keep the flag, and file the follow-up decision on
   #41 rather than stretching this protocol.
@@ -38,12 +40,12 @@ switch.
 
 | Arm | Setting | Behavior |
 |-----|---------|----------|
-| A (repair on) | `AGENT_COMPILE_REPAIR=1` (default) | Current behavior: guarded `#include` insertion + deterministic shell retry, recorded through the single recorder |
-| B (repair off) | `AGENT_COMPILE_REPAIR=0` | `_try_compile_repair` returns `None` before any mutation; compile errors surface to the model as ordinary typed failures |
+| A (repair on) | `AGENT_COMPILE_REPAIR=1` (default) | Current behavior: the guarded `#include` rule proposes a write action dispatched through the action executor, then the deterministic shell retry; both recorded through the single recorder |
+| B (repair off) | `AGENT_COMPILE_REPAIR=0` | `_compile_repair_action` returns `None` before any proposal; compile errors surface to the model as ordinary typed failures |
 
 Offline qualification of both arms (no model calls) already exists:
 `tests/test_agent_recovery.py::TestCompileRepairTemplates`, including
-`test_flag_disables_repair_before_any_mutation` and
+`test_flag_disables_repair_before_any_proposal` and
 `test_flag_off_arm_surfaces_the_compile_error_unrepaired`.
 
 ## Execution discipline (binding on every paid trial)

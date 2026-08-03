@@ -39,12 +39,12 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 4   | E16 | Compiler-aware shell error classification               | 2    | P1       | S      | done     |
 | 5   | E03 | Tiered retry contract + JSON repair                     | 2    | P1       | S      | done     |
 | 6   | E02 | Shrink `SYSTEM_PLAN` / `SYSTEM_STEP` 25-40%             | 2    | P1       | S      | planned  |
-| 7   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | planned  |
+| 7   | E07 | Deterministic verification before LLM validator         | 2    | P1       | S      | partial  |
 | 8   | E11 | Task-local replan before full replan                    | 3    | P1       | M      | done     |
-| 9   | E17 | Expected-failure task completion semantics              | 3    | P1       | S      | planned  |
-| 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | planned  |
+| 9   | E17 | Expected-failure task completion semantics              | 3    | P1       | S      | removed  |
+| 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | done     |
 | 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | done     |
-| 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | planned  |
+| 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | removed  |
 | 13  | E09 | Q8_0 model trial on medium/hard tests                   | 3    | P1       | S      | planned  |
 | 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
 | 15  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
@@ -227,6 +227,11 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Low. Only fires after a confirmed successful edit followed by duplicates of the same edit. If the edit was wrong, the model would emit a *different* find_string, not the same one.
 - **Code.** `askme.py` duplicate-edit guard area (~askme.py:937), per-task state reset.
 - **Effort.** S.
+- **Disposition (2026-08-03).** Landed as the edit re-emission auto-done and
+  then removed by the issue #68 completion-semantics cleanup: repetition is
+  never task acceptance. The duplicate-edit skip and its corrective
+  observation remain; completion requires the model's own `done`, and a
+  repeated no-op is reported as `stuck`, not success.
 
 ### E17 — Expected-failure task completion semantics
 
@@ -239,6 +244,11 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Medium. Must not mark unexpected failures complete. Limit to tasks whose wording clearly expects failure.
 - **Code.** `askme.py` task loop around failed shell handling and `task_steps` evidence.
 - **Effort.** S.
+- **Disposition (2026-08-03).** Landed as the task-text expected-failure regex
+  completion and then removed by the issue #68 cleanup: a task-text regex must
+  not convert a failing command into completion. The failure evidence stays
+  visible to the model as a typed error, and only an explicit `done` claims an
+  observe-the-failure task with that evidence.
 
 ### E18 — Deterministic compile-repair templates
 
@@ -250,17 +260,23 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Medium. Keep templates narrow and observable; log template application explicitly.
 - **Code.** `askme.py` execute/error-recovery path.
 - **Effort.** M.
+- **Disposition (2026-08-03).** Landed long ago as the narrow stdio/string
+  include rule. The issue #41 boundary work now makes the rule propose a
+  normal write action dispatched through the action executor and the one
+  recorder — no direct mutation, no fabricated receipt. Whether the rule is
+  retained at all remains E22's preregistered decision.
 
 ### E22 — C-header compile-repair ablation (issue #41)
 
 - **Hypothesis.** The landed E18-style `#include` repair path either measurably
-  raises benchmark-shaped acceptance (retain, converting the rule to emit an
-  ordinary `edit` action through the #36 dispatch path) or it does not (remove
-  the special path). Issue #41 requires the decision be preregistered, not
-  argued post hoc.
-- **Change.** None until the decision lands. `AGENT_COMPILE_REPAIR=0` is the
-  off arm; default `1` preserves current behavior. Offline arm coverage is in
-  `tests/test_agent_recovery.py` (`TestCompileRepairTemplates`).
+  raises benchmark-shaped acceptance (retain) or it does not (remove the
+  rule). Issue #41 requires the decision be preregistered, not argued post
+  hoc.
+- **Change.** The #36/#41 boundary conversion landed on 2026-08-03: the rule
+  now proposes a normal action dispatched through the executor, so the
+  remaining decision is retain-vs-remove only. `AGENT_COMPILE_REPAIR=0` is
+  the off arm; default `1` preserves current behavior. Offline arm coverage
+  is in `tests/test_agent_recovery.py` (`TestCompileRepairTemplates`).
 - **Protocol.** [ablation-compile-repair.md](ablation-compile-repair.md) —
   draft until the owner pins revision/model/route and approves OpenRouter
   spend; no outcome-bearing calls before that registration.
@@ -268,7 +284,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   steps, replans, and wall time; gold and harmless controls requalified first.
 - **Risk.** Low. The switch is one guarded early return; both arms are
   offline-tested at the same revision.
-- **Code.** `askme.py` `_try_compile_repair` gate; no controller branches.
+- **Code.** `askme.py` `_compile_repair_action` gate; no controller branches.
 - **Effort.** S (offline prep done; live arms gated on approved spend).
 
 ## Verification
@@ -283,6 +299,14 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Low — keeps LLM validator as fallback.
 - **Code.** `askme.py:471` (`_validate_completion`), `askme.py:447` (`_should_validate`).
 - **Effort.** S.
+- **Disposition (2026-08-03).** Partially landed: `_deterministic_check` runs
+  before the LLM validator (empty-artifact and incomplete-write rejection,
+  confident-pass short-circuit) and evidence-gated re-validation closed the
+  Run 4 single-shot gap. The Run 6-motivated arm — reconciling an
+  `exhausted` run to `complete` from a trailing successful shell — was
+  landed and then removed by the issue #68 cleanup: exhaustion is terminal,
+  and a correct-but-exhausted deliverable is for independent held-out
+  acceptance to surface, not a broad in-harness heuristic.
 
 ## Performance / runtime
 

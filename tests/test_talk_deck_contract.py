@@ -229,7 +229,10 @@ def test_companion_benchmark_shortlist_stays_bounded():
 
     root_readme = _single_line(ROOT_README.read_text(encoding="utf-8"))
     security = _single_line(SECURITY.read_text(encoding="utf-8"))
-    assert "conditional, fail-open LLM validator" in root_readme
+    # Issue #68 removed fail-open-to-passed validation: the README now
+    # describes the typed complete_unverified completion instead.
+    assert "conditional LLM validator" in root_readme
+    assert "complete_unverified" in root_readme
     assert "up to three planning attempts" in root_readme
     assert "Up to 3 replans" not in root_readme
     assert "Prompt-visible install policy; does not enforce host isolation" in root_readme

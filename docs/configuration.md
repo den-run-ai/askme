@@ -19,8 +19,9 @@ settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
-| `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
-| `AGENT_COMPILE_REPAIR` | `1` | Deterministic C-header compile repair (tracked in issue #41). `0` disables it — the preregistered ablation's off arm ([ablation-compile-repair.md](ablation-compile-repair.md)) |
+| `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled). An unavailable or malformed verdict never counts as a pass — the run completes with status `complete_unverified` |
+| `AGENT_COMPILE_REPAIR` | `1` | Deterministic C-header compile repair (tracked in issue #41). `0` disables it — the preregistered ablation's off arm ([ablation-compile-repair.md](ablation-compile-repair.md)). The repair rule proposes a normal write action that is dispatched through the action executor |
+| `AGENT_STEP_POLICY` | `heuristic` | Step/completion-pressure arm (issue #31): `heuristic` is the guard/counter baseline; `lifecycle` is the explicit inspect → modify → verify → finish alternative |
 | `AGENT_REASONING_POLICY` | `gated` | Explicit-reasoning requests: `gated` preserves the recovery policy; `off` suppresses them at every call site |
 | `AGENT_GOAL_CONTEXT_CHARS` | `300` | Goal characters retained for executor and task-local replan context; independent of result/history truncation |
 | `AGENT_RUN_LOG` | (unset) | Path to append JSONL events (`run_start`, `reasoning_decision`, `plan`, `tokens`, `step`, `task_complete`, `task_failed`, `validation`, `run_end`). Disabled when unset. |
@@ -59,13 +60,23 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
 ```
 
 The `--result-json` file is one JSON object whose contract is: a non-empty
-string `status` (`complete`, or `exhausted` on failure; the process exit code
-is `0` exactly when the status is `complete`), the structured `state` dict,
-and the `log` history list. Issue #40 added two credential-free metadata keys:
-`config` (the resolved immutable run configuration — backend, model, provider
-routing, reasoning effort/policy, execution policy, and budgets; never the API
-key) and `workspace` (`path` plus a `created` flag that is true only when
-AskMe made the temporary directory, so callers can clean it up intentionally).
+string `status` — `complete`, `complete_unverified` (all tasks finished but
+the wanted final validation produced no verdict; never reported as a
+verified pass), or `exhausted` on failure; the process exit code is `0`
+exactly when the status is `complete` or `complete_unverified` — the
+structured `state` dict, and the `log` history list. Issue #40 added two
+credential-free metadata keys: `config` (the resolved immutable run
+configuration — backend, model, provider routing, reasoning effort/policy,
+execution policy, validation mode, the #41 compile-repair arm, the #31
+`step_policy` arm, guard thresholds, token budgets, limits, and a
+`config_hash` over that whole canonical payload; never the API key) and
+`workspace` (`path` plus a `created` flag that is true only when AskMe made
+the temporary directory, so callers can clean it up intentionally). Issue
+#68 added `outcome`, the typed terminal record: `status`, the final
+`validation` disposition (`passed`, `deterministic`, `unavailable`,
+`failed`, or `skipped`), `replans`, `wall_s`, `completed_tasks`, and the
+selected/executed/skipped step counters — the same record the `run_end`
+JSONL event is projected from.
 
 The same structured result is available in-process from
 `askme.run_result(prompt, working_dir=None, config=None, dependencies=None)`,

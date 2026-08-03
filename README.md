@@ -66,15 +66,18 @@ flowchart TD
     EX -- task failed --> RE[replan]
     RE --> PL
     EX -- "all done · validation skipped" --> DONE([done])
-    EX -- "all done · risk signals" --> V[fail-open LLM validation]
+    EX -- "all done · risk signals" --> V[final LLM validation]
     V -- valid --> DONE
+    V -- "no verdict" --> UNV([complete_unverified])
     V -- invalid --> RE
 ```
 
 Before planning, the agent probes the environment (platform, available tools,
 package managers). The LLM breaks your prompt into tasks and executes each one
 step-by-step, replanning on failure — a run gets up to three planning attempts.
-A conditional, fail-open LLM validator may review tentative completion. By
+A conditional LLM validator may review tentative completion; when the wanted
+validator produces no verdict, the run completes with the typed
+`complete_unverified` status instead of claiming a verified pass. By
 default AskMe instructs the model not to install software;
 `ALLOW_SYSTEM_INSTALLS=1` relaxes that instruction. Both are prompt policies,
 not host-level enforcement.
