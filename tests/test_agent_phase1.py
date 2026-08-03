@@ -82,10 +82,9 @@ class TestReasoningPolicy:
         assert mock_llm.call_args.kwargs["think"] is True
 
         with patch("askme.ask_llm", return_value={"task": "implement alternative"}) as mock_llm:
-            assert (
-                askme.replan_task("fix behavior", state["errors"], [], state, "goal")
-                == "implement alternative"
-            )
+            assert askme.replan_task(
+                "fix behavior", state["errors"], [], state, "goal"
+            ) == askme.TaskReplanResult("implement alternative", None)
         assert mock_llm.call_args.kwargs["reasoning_policy"] == "off"
         assert mock_llm.call_args.kwargs["reasoning_trigger"] == "task_local_replan"
         assert mock_llm.call_args.kwargs["think"] is False
@@ -221,7 +220,7 @@ class TestPhaseOneCli:
         result_file = tmp_path / "result.json"
         expected = {"status": "complete", "state": {"ok": True}, "log": []}
 
-        with patch("askme._run_loop", return_value=expected) as run_loop:
+        with patch("askme.run_result", return_value=expected) as run_result:
             exit_code = askme._main(
                 [
                     "--prompt-file",
@@ -245,12 +244,18 @@ class TestPhaseOneCli:
 
         assert exit_code == 0
         assert json.loads(result_file.read_text()) == expected
-        run_loop.assert_called_once_with(
+        env_config = askme.RunConfig.from_env()
+        run_result.assert_called_once_with(
             "implement the feature",
-            str(tmp_path),
-            max_replans=2,
-            max_tasks=4,
-            max_steps=6,
-            reasoning_policy="off",
-            goal_context_chars=1200,
+            working_dir=str(tmp_path),
+            config=askme.RunConfig(
+                llm=env_config.llm,
+                allow_system_installs=env_config.allow_system_installs,
+                allow_network=env_config.allow_network,
+                reasoning_policy="off",
+                max_replans=2,
+                max_tasks=4,
+                max_steps=6,
+                goal_context_chars=1200,
+            ),
         )

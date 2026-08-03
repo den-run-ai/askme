@@ -44,6 +44,18 @@ uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failin
 
 For OpenRouter or other options, see [configuration](docs/configuration.md).
 
+### Supported surfaces
+
+- **CLI** — `python3 askme.py [prompt] [--prompt-file F] [--working-dir D]
+  [--result-json R] [--reasoning-policy P] [--max-replans/--max-tasks/--max-steps N]
+  [--goal-context-chars N]`; exit code `0` exactly when the run completes.
+- **Python API** — `run_result(prompt, working_dir=None, config=None,
+  dependencies=None)` returns the structured result (`status`, `state`, `log`,
+  credential-free `config` metadata, and the `workspace` ownership record);
+  `RunConfig` pins immutable per-run settings and `RunDependencies` injects the
+  LLM client, action executor, clock, and log/event sinks. `run(...) -> bool`,
+  `ask_llm(...)`, and `execute(...)` remain compatibility surfaces.
+
 ## How It Works
 
 ```mermaid

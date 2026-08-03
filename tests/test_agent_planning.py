@@ -1,6 +1,7 @@
 """Planning tests: planner reasoning, preflight probe, execution policy,
 command-aware timeouts, server config."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -439,7 +440,8 @@ class TestReplanTask:
             state,
             "compile hello.c",
         )
-        assert result == "fix the include path using relative name"
+        assert result.task == "fix the include path using relative name"
+        assert result.reject_reason is None
         assert mock_llm.called
 
     @patch("askme.ask_llm")
@@ -462,39 +464,57 @@ class TestReplanTask:
         assert "allow_system_installs" in captured["user_msg"]
 
     @patch("askme.ask_llm")
-    def test_transport_error_returns_none(self, mock_llm):
+    def test_transport_error_returns_typed_rejection(self, mock_llm):
         mock_llm.side_effect = LLMTransportError("timeout")
         state = {"environment": {}, "policy": {}}
         result = replan_task("do thing", ["error"], [], state, "goal")
-        assert result is None
+        assert result.task is None
+        assert result.reject_reason == "transport_error"
 
     @patch("askme.ask_llm")
-    def test_empty_response_returns_none(self, mock_llm):
+    def test_parse_error_returns_typed_rejection(self, mock_llm):
+        mock_llm.side_effect = json.JSONDecodeError("bad reply", "doc", 0)
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result.task is None
+        assert result.reject_reason == "parse_error"
+
+    @patch("askme.ask_llm")
+    def test_missing_task_key_returns_typed_rejection(self, mock_llm):
+        mock_llm.side_effect = KeyError("API error: no choices")
+        state = {"environment": {}, "policy": {}}
+        result = replan_task("do thing", ["error"], [], state, "goal")
+        assert result.task is None
+        assert result.reject_reason == "missing_task_key"
+
+    @patch("askme.ask_llm")
+    def test_empty_response_returns_typed_rejection(self, mock_llm):
         mock_llm.return_value = {"task": ""}
         state = {"environment": {}, "policy": {}}
         result = replan_task("do thing", ["error"], [], state, "goal")
-        assert result is None
+        assert result.task is None
+        assert result.reject_reason == "empty"
 
     @patch("askme.ask_llm")
-    def test_short_response_returns_none(self, mock_llm):
+    def test_short_response_returns_typed_rejection(self, mock_llm):
         mock_llm.return_value = {"task": "no"}
         state = {"environment": {}, "policy": {}}
         result = replan_task("do thing", ["error"], [], state, "goal")
-        assert result is None
+        assert result.task is None
+        assert result.reject_reason == "too_short"
 
     @patch("askme.ask_llm")
-    def test_noop_replacement_returns_none(self, mock_llm):
+    def test_noop_replacement_returns_typed_rejection(self, mock_llm):
         """Returning the same task description should be treated as a failed replan."""
         mock_llm.return_value = {"task": "add missing include"}
         state = {"environment": {}, "policy": {}}
         result = replan_task("add missing include", ["error"], [], state, "goal")
-        assert result is None
+        assert result.task is None
+        assert result.reject_reason == "exact_duplicate"
 
     @patch("askme.ask_llm")
-    def test_near_duplicate_replacement_returns_none(self, mock_llm):
+    def test_near_duplicate_replacement_returns_typed_rejection(self, mock_llm):
         """Small wording changes should not count as useful task-local replans."""
-        import askme
-
         mock_llm.return_value = {"task": "Edit fix_me.c to include <stdio.h> and recompile"}
         state = {"environment": {}, "policy": {}}
         result = replan_task(
@@ -504,8 +524,8 @@ class TestReplanTask:
             state,
             "fix missing include",
         )
-        assert result is None
-        assert askme._last_task_replan_reject_reason == "near_duplicate"
+        assert result.task is None
+        assert result.reject_reason == "near_duplicate"
 
     @patch("askme.ask_llm")
     def test_uses_cheap_no_thinking_call(self, mock_llm):
@@ -527,8 +547,6 @@ class TestReplanTask:
     @patch("askme.ask_llm")
     def test_rejects_passive_replacement_for_action_task(self, mock_llm):
         """Do not downgrade an edit/fix task into a read-only prep task."""
-        import askme
-
         mock_llm.return_value = {"task": "Read the contents of fix_me.c to prepare for editing"}
         state = {"environment": {}, "policy": {}}
         result = replan_task(
@@ -538,5 +556,5 @@ class TestReplanTask:
             state,
             "fix the missing include",
         )
-        assert result is None
-        assert askme._last_task_replan_reject_reason == "passive_downgrade"
+        assert result.task is None
+        assert result.reject_reason == "passive_downgrade"

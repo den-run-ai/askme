@@ -39,8 +39,10 @@ Start with:
 ## Repository map
 
 - `askme.py` — CLI, provider calls, planner/executor loop, controller-owned
-  `done`/`fail`, step recording, recovery, validation, structured results, and the
-  compatibility `run(...) -> bool` and `execute(...)` APIs
+  `done`/`fail`, step recording, recovery, validation, the public structured
+  `run_result(...)` API with immutable `RunConfig`/injectable `RunDependencies`
+  and workspace ownership, and the compatibility `run(...) -> bool` and
+  `execute(...)` APIs
 - `actions.py` — action registry (`ACTION_SPECS`), the six handlers behind
   `ActionExecutor`, workspace-path/output policies, error classification, and the
   typed `ActionResult`/`StepReceipt` structures

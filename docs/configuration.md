@@ -58,6 +58,20 @@ python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
   --max-replans 3 --max-tasks 4 --max-steps 10 --goal-context-chars 1200
 ```
 
-See `python3 askme.py --help` for the full flag list, and
+The `--result-json` file is one JSON object whose contract is: a non-empty
+string `status` (`complete`, or `exhausted` on failure; the process exit code
+is `0` exactly when the status is `complete`), the structured `state` dict,
+and the `log` history list. Issue #40 added two credential-free metadata keys:
+`config` (the resolved immutable run configuration — backend, model, provider
+routing, reasoning effort/policy, execution policy, and budgets; never the API
+key) and `workspace` (`path` plus a `created` flag that is true only when
+AskMe made the temporary directory, so callers can clean it up intentionally).
+
+The same structured result is available in-process from
+`askme.run_result(prompt, working_dir=None, config=None, dependencies=None)`,
+with `askme.RunConfig` pinning per-run settings and `askme.RunDependencies`
+injecting the LLM client, action executor, clock, and log/event sinks;
+`run(...) -> bool` remains the compatibility wrapper. See
+`python3 askme.py --help` for the full flag list, and
 [tests/workflows/PROTOCOL.md](../tests/workflows/PROTOCOL.md) for the frozen
 evaluation contract that consumes this interface.
