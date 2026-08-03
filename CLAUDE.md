@@ -229,6 +229,10 @@ current issue and code state before implementing:
   run API after the executor/client seams while retaining compatibility wrappers
 - [#41](https://github.com/den-run-ai/askme/issues/41) — preregister an ablation
   before removing or retaining the benchmark-shaped C-header repair path
+- [#69](https://github.com/den-run-ai/askme/issues/69) — the pre-evaluation
+  implementation gate: policy/obligation/completion components, typed records,
+  hash-logged per-run configuration, and offline parity; blocks #63 variants
+  and #64/#66 measurements while #62's task/contract freeze proceeds in parallel
 
 For architecture work, make a behavior-preserving extraction first. Avoid adding
 more disconnected top-level helpers; group related state and behavior around a
