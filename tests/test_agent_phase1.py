@@ -1,5 +1,6 @@
 """Offline tests for the Phase 1 evaluation-policy and CLI plumbing."""
 
+import dataclasses
 import json
 from unittest.mock import patch
 
@@ -248,10 +249,8 @@ class TestPhaseOneCli:
         run_result.assert_called_once_with(
             "implement the feature",
             working_dir=str(tmp_path),
-            config=askme.RunConfig(
-                llm=env_config.llm,
-                allow_system_installs=env_config.allow_system_installs,
-                allow_network=env_config.allow_network,
+            config=dataclasses.replace(
+                env_config,
                 reasoning_policy="off",
                 max_replans=2,
                 max_tasks=4,
