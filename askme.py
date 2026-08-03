@@ -341,6 +341,23 @@ DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").str
 if DEFAULT_REASONING_POLICY not in REASONING_POLICIES:
     raise ValueError(f"AGENT_REASONING_POLICY must be one of {', '.join(REASONING_POLICIES)}")
 
+# Step-policy arms (issues #31/#68): "heuristic" is today's guard/counter
+# baseline; "lifecycle" is the explicit inspect → modify → verify → finish
+# alternative. The arm is outcome-affecting per-run configuration — it enters
+# the hash-logged config — and only #63/#64 measurements may retire an arm.
+STEP_POLICIES = ("heuristic", "lifecycle")
+
+
+def _validated_step_policy(value):
+    """Normalize an AGENT_STEP_POLICY value or raise on an unknown arm."""
+    policy = value.strip().lower()
+    if policy not in STEP_POLICIES:
+        raise ValueError(f"AGENT_STEP_POLICY must be one of {', '.join(STEP_POLICIES)}")
+    return policy
+
+
+DEFAULT_STEP_POLICY = _validated_step_policy(os.environ.get("AGENT_STEP_POLICY", "heuristic"))
+
 SYSTEM_PLAN = f"""Planner. Propose tasks for the user request.
 Rules:
 - Prefer 1-3 tasks, max {MAX_TASKS}; each is a complete goal, not one command
@@ -2386,6 +2403,7 @@ class RunConfig:
     goal_context_chars: int | None = None
     final_validate: str | None = None
     compile_repair: bool | None = None
+    step_policy: str | None = None
     write_pressure_observations: int | None = None
     observe_tail_reserve: int | None = None
     rewrite_pressure_writes: int | None = None
@@ -2411,6 +2429,7 @@ class RunConfig:
             reasoning_policy=policy,
             final_validate=e.get("AGENT_FINAL_VALIDATE", "auto"),
             compile_repair=e.get("AGENT_COMPILE_REPAIR", "1") == "1",
+            step_policy=e.get("AGENT_STEP_POLICY", "heuristic").strip().lower(),
         )
 
 
@@ -2524,6 +2543,313 @@ class RunOutcome:
         }
 
 
+class StepPolicy:
+    """Pluggable step/completion-pressure policy for one run (issue #31).
+
+    The policy owns how the controller pressures the model toward progress
+    and when it may accept ``done`` beyond the shared invariants: observation
+    discipline, rewrite/verification discipline, and the executor prompt
+    pressure signals. Everything else stays controller-owned and identical
+    across arms — duplicate/stuck loop protection, incomplete-write
+    obligations and the completion blocker, recording and counters, typed
+    errors, and validation. Policies are constructed once per run and may
+    keep run-scoped state.
+    """
+
+    name = "base"
+
+    def __init__(self, controller):
+        self.controller = controller
+
+    def write_pressure(self, attempt):
+        """True when the executor prompt must demand a committing action."""
+        return False
+
+    def validate_pressure(self, attempt):
+        """Basename the executor prompt must steer to verifying, or None."""
+        return None
+
+    def guard_done(self, ctx, attempt):
+        """Extra policy conditions on ``done`` after the shared blocker."""
+        return None
+
+    def allows_deterministic_completion(self):
+        """May a deterministic-repair receipt auto-complete a matching task?
+
+        Automatic completion paths must pass the same policy discipline as a
+        model ``done``; arms with an open verification obligation refuse."""
+        return True
+
+    def guard_action(self, ctx, attempt):
+        """Pre-dispatch discipline for a non-control action; None dispatches."""
+        return None
+
+    def note_result(self, ctx, attempt, result):
+        """Observe one dispatched action's result for policy state."""
+
+    def note_deterministic_repair(self, target):
+        """Observe a dispatched #41 repair mutation."""
+
+    def note_deterministic_retry(self, result):
+        """Observe the scaffold shell retry after a repair."""
+
+
+class HeuristicStepPolicy(StepPolicy):
+    """Today's guard/counter baseline (issues #15/#31, revisions 3-4).
+
+    Keyword write-shaping plus counters: write pressure after observation
+    spending, an observation tail reserve, and same-target rewrite damping
+    with validate pressure. Behavior-preserving extraction of the former
+    controller-inline policy; every log line, skip reason, counter, and
+    threshold is unchanged.
+    """
+
+    name = "heuristic"
+
+    def write_pressure(self, attempt):
+        return attempt.write_pressure()
+
+    def validate_pressure(self, attempt):
+        return self.controller.run_state.validate_pressure_target()
+
+    def guard_action(self, ctx, attempt):
+        flow = self._observe_tail_guard(ctx, attempt)
+        if flow is None:
+            flow = self._rewrite_loop_guard(ctx, attempt)
+        return flow
+
+    def _observe_tail_guard(self, ctx, attempt):
+        """Reserve the final steps of a write-shaped task for commitment."""
+        controller = self.controller
+        # Write-forcing tail reserve (issue #15): on a write-shaped task the
+        # final steps are reserved for committing actions.
+        if not (
+            ctx.act in OBSERVE_ACTIONS
+            and attempt.wants_write
+            and attempt.commit_executed == 0
+            and controller.max_steps - ctx.step <= controller.guards.observe_tail_reserve
+        ):
+            return None
+        attempt.observe_blocked += 1
+        if attempt.observe_blocked >= 2:
+            controller._emit(
+                f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)"
+            )
+            controller.state["errors"].append(
+                f"[stuck_loop] {ctx.act} {ctx.action.get('arg', '')[:60]}: observation steps exhausted without a write"
+            )
+            controller.recorder.skip(
+                ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_exhausted"
+            )
+            return _StepFlow.END_ATTEMPT
+        controller._emit(
+            f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)"
+        )
+        controller.recorder.skip(
+            ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_reserved"
+        )
+        controller.recorder.note(
+            {
+                "action": ctx.act,
+                "arg": ctx.action.get("arg", ""),
+                "ok": True,
+                "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason.",
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def _rewrite_loop_guard(self, ctx, attempt):
+        """Skip a same-target full rewrite once the streak is armed."""
+        controller = self.controller
+        # Rewrite damping (revision 4): after rewrite_skip_writes successful
+        # full writes of the same target with no intervening successful
+        # shell/edit, further full rewrites are skipped — verify, edit, or
+        # finish instead.
+        if not (
+            ctx.act == "write"
+            and not ctx.action.get("append")
+            and not ctx.truncated_write
+            and controller.run_state.rewrite_skip_armed(ctx.logical_write_target)
+        ):
+            return None
+        attempt.dup_skip_count += 1
+        controller._emit(
+            f"  [{ctx.step + 1}] skip (rewrite loop: "
+            f"{ctx.action.get('arg', '')[:40]} already written "
+            f"{controller.run_state.consecutive_target_writes}x)"
+        )
+        controller.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "rewrite_loop")
+        controller.recorder.note(
+            {
+                "action": ctx.act,
+                "arg": ctx.action.get("arg", ""),
+                "ok": True,
+                "output": (
+                    f"Already written {controller.run_state.consecutive_target_writes} times. "
+                    "Do NOT write it again — verify with shell, make a "
+                    "targeted edit, or emit done."
+                ),
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def note_result(self, ctx, attempt, result):
+        run_state = self.controller.run_state
+        if ctx.act == "write" and result.ok:
+            if ctx.truncated_write:
+                # A partial (truncated) write is not a completed rewrite
+                # (Codex P1, PR #21): the file is incomplete, and the
+                # recovery path may legitimately append to it or restart the
+                # write. Reset for truncated append chunks too; otherwise an
+                # armed streak can block the clean restart.
+                run_state.disarm_rewrite_damping()
+            elif not ctx.action.get("append"):
+                run_state.note_successful_full_write(ctx.logical_write_target)
+        elif ctx.act in ("shell", "edit") and result.ok:
+            # Verification or a targeted fix breaks the rewrite streak;
+            # observations do not (the v6 Gemma loop interleaved tree/read
+            # between rewrites).
+            run_state.break_rewrite_streak()
+
+    def note_deterministic_repair(self, target):
+        # The deterministic source fix is a successful targeted repair, so
+        # it breaks an armed rewrite streak just like a model-selected edit.
+        self.controller.run_state.break_rewrite_streak()
+
+
+class LifecycleStepPolicy(StepPolicy):
+    """Explicit inspect → modify → verify → finish arm (issue #31).
+
+    Replaces the tail reserve and the rewrite counters with two phase
+    invariants, run-scoped so a task-local replan cannot silently move the
+    lifecycle backward:
+
+    - a successful mutation marks its target ``needs_verification``; only a
+      later successful shell check clears it (a failed check does not);
+    - while a target needs verification, a same-target full rewrite is
+      steered to verification, and ``done`` is refused with a corrective
+      note — repetition or observation never moves the lifecycle forward.
+
+    The keyword task classification is retained only for the observation
+    write-pressure nudge; incomplete-write obligations, duplicate/stuck
+    protection, and the completion blocker are shared invariants. Any
+    successful shell counts as verification evidence — the same evidence
+    definition as the heuristic arm's ``unvalidated_write`` — so a mutating
+    shell (for example ``sed -i``) is not itself tracked as a mutation;
+    classifying shell intent is deliberately out of scope for this arm and
+    the final validator remains the independent check. This arm is an
+    alternative to measure (#63/#64), not an assumed improvement.
+    """
+
+    name = "lifecycle"
+
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.needs_verification = False
+        self.unverified_target = None
+
+    def write_pressure(self, attempt):
+        return attempt.write_pressure()
+
+    def _target_has_open_obligation(self, target):
+        """True while incomplete-write recovery legitimately rewrites it."""
+        state = self.controller.state
+        if target in state.get("pending_empty_writes", {}):
+            return True
+        return target in _unresolved_incomplete_writes(
+            state.get("all_steps", []), self.controller.working_dir
+        )
+
+    def guard_done(self, ctx, attempt):
+        if not self.needs_verification:
+            return None
+        controller = self.controller
+        name = Path(str(self.unverified_target or "file")).name
+        controller._emit(f"  [{ctx.step + 1}] skip (done before verifying {name})")
+        controller.recorder.skip(
+            ctx.task_index, ctx.step, ctx.act, ctx.action, "lifecycle_unverified_done"
+        )
+        controller.recorder.note(
+            {
+                "action": "done",
+                "arg": "",
+                "ok": True,
+                "output": (
+                    f"Cannot finish: {name} was modified but never verified. "
+                    "Run a shell command that checks it, or fail with a reason."
+                ),
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def guard_action(self, ctx, attempt):
+        if not (
+            ctx.act == "write"
+            and not ctx.action.get("append")
+            and not ctx.truncated_write
+            and self.needs_verification
+            and ctx.logical_write_target == self.unverified_target
+            and not self._target_has_open_obligation(ctx.logical_write_target)
+        ):
+            return None
+        controller = self.controller
+        name = Path(str(self.unverified_target)).name
+        attempt.dup_skip_count += 1
+        controller._emit(f"  [{ctx.step + 1}] skip (rewrite of unverified {name})")
+        controller.recorder.skip(
+            ctx.task_index, ctx.step, ctx.act, ctx.action, "lifecycle_verify_before_rewrite"
+        )
+        controller.recorder.note(
+            {
+                "action": ctx.act,
+                "arg": ctx.action.get("arg", ""),
+                "ok": True,
+                "output": (
+                    f"{name} is already written but unverified. Do NOT rewrite "
+                    "it — verify it with a shell check or make a targeted edit."
+                ),
+            }
+        )
+        return _StepFlow.NEXT_STEP
+
+    def note_result(self, ctx, attempt, result):
+        if not result.ok:
+            # Failures never move the lifecycle: a failed check does not
+            # verify, and a failed mutation creates nothing to verify.
+            return
+        if ctx.act in ("write", "edit"):
+            self.needs_verification = True
+            if ctx.act == "write":
+                self.unverified_target = ctx.logical_write_target
+            else:
+                self.unverified_target = _mutation_target_key(
+                    {"arg": ctx.action.get("arg", "")}, self.controller.working_dir
+                )
+        elif ctx.act == "shell":
+            self.needs_verification = False
+            self.unverified_target = None
+
+    def note_deterministic_repair(self, target):
+        self.needs_verification = True
+        self.unverified_target = target
+
+    def note_deterministic_retry(self, result):
+        if result.ok:
+            self.needs_verification = False
+            self.unverified_target = None
+
+    def allows_deterministic_completion(self):
+        # A repaired-but-unverified target gates the auto-done exactly like
+        # a model done: verify first.
+        return not self.needs_verification
+
+
+_STEP_POLICY_ARMS = {
+    HeuristicStepPolicy.name: HeuristicStepPolicy,
+    LifecycleStepPolicy.name: LifecycleStepPolicy,
+}
+
+
 class _RunController:
     """Thin coordinator over planning, task attempts, step decisions, and
     finalization (issue #31).
@@ -2622,6 +2948,9 @@ class _RunController:
         self.compile_repair = (
             COMPILE_REPAIR_ENABLED if cfg.compile_repair is None else cfg.compile_repair
         )
+        step_policy = DEFAULT_STEP_POLICY if cfg.step_policy is None else cfg.step_policy
+        if step_policy not in _STEP_POLICY_ARMS:
+            raise ValueError(f"step_policy must be one of {', '.join(STEP_POLICIES)}")
         self.guards = GuardThresholds(
             write_pressure_observations=(
                 WRITE_PRESSURE_OBSERVATIONS
@@ -2659,6 +2988,7 @@ class _RunController:
             "reasoning_policy": self.reasoning_policy,
             "final_validate": self.final_validate,
             "compile_repair": self.compile_repair,
+            "step_policy": step_policy,
             "guards": self.guards.describe(),
             "budgets": {
                 "step_tokens": meta.step_tokens(),
@@ -2685,6 +3015,10 @@ class _RunController:
         self.state = self.run_state.data
         self.history = self.run_state.history
         self.recorder = self.run_state.recorder
+        # The pressure/completion policy arm is constructed last so it can
+        # hold run-scoped state over the same run_state/guards the
+        # controller uses (issue #31).
+        self.step_policy = _STEP_POLICY_ARMS[step_policy](self)
 
     def _emit(self, msg):
         """Console line through the injected sink, defaulting to log()."""
@@ -2910,6 +3244,11 @@ class _RunController:
             # Reset per-attempt execution state (the task may be a replacement)
             attempt = self._new_attempt(task)
             completed_repair = _task_satisfied_by_deterministic_repair(task, self.state)
+            if completed_repair and not self.step_policy.allows_deterministic_completion():
+                # An automatic completion must pass the same policy gate as a
+                # model done: with an open verification obligation the attempt
+                # runs normally so the model can verify first.
+                completed_repair = None
             if completed_repair:
                 self._emit(
                     f"  auto-done (deterministic repair already satisfied task: {completed_repair.get('output', '')[:60]})"
@@ -3004,8 +3343,8 @@ class _RunController:
                 reasoning_policy=self.reasoning_policy,
                 reasoning_trigger=attempt.reasoning_trigger,
                 goal_context_chars=self.goal_context_chars,
-                write_pressure=attempt.write_pressure(),
-                validate_pressure=self.run_state.validate_pressure_target(),
+                write_pressure=self.step_policy.write_pressure(attempt),
+                validate_pressure=self.step_policy.validate_pressure(attempt),
                 **self._llm_kwargs(),
             )
         except LLMTransportError as e:
@@ -3076,7 +3415,12 @@ class _RunController:
         return _StepContext(task_index=i, step=step, started=t_step, action=action, act=act)
 
     def _decide_step(self, ctx, attempt):
-        """Run the controller guards; None means dispatch the action."""
+        """Run the shared invariants and the policy arm; None dispatches.
+
+        Order: write-truncation/obligation preparation and the completion
+        blocker are shared invariants; the policy arm's discipline runs
+        next; duplicate/stuck loop protection guards every arm last.
+        """
         if ctx.act == "done":
             return self._handle_done(ctx, attempt)
         if ctx.act == "fail":
@@ -3086,15 +3430,13 @@ class _RunController:
             return _StepFlow.END_ATTEMPT
         flow = self._prepare_write(ctx)
         if flow is None:
-            flow = self._observe_tail_guard(ctx, attempt)
-        if flow is None:
-            flow = self._rewrite_loop_guard(ctx, attempt)
+            flow = self.step_policy.guard_action(ctx, attempt)
         if flow is None:
             flow = self._duplicate_guard(ctx, attempt)
         return flow
 
     def _handle_done(self, ctx, attempt):
-        """Accept ``done`` only while no incomplete-write obligation blocks."""
+        """Accept ``done`` only past the shared blocker and the policy arm."""
         blocker = _completion_blocker(self.state, self.working_dir)
         if blocker is not None:
             incomplete_name, recovery_arg, append_allowed = blocker
@@ -3125,6 +3467,9 @@ class _RunController:
                 }
             )
             return _StepFlow.NEXT_STEP
+        flow = self.step_policy.guard_done(ctx, attempt)
+        if flow is not None:
+            return flow
         attempt.done = True
         return _StepFlow.END_ATTEMPT
 
@@ -3247,77 +3592,6 @@ class _RunController:
                 return _StepFlow.NEXT_STEP
             action["content"] = kept
         return None
-
-    def _observe_tail_guard(self, ctx, attempt):
-        """Reserve the final steps of a write-shaped task for commitment."""
-        # Write-forcing tail reserve (issue #15): on a write-shaped task the
-        # final steps are reserved for committing actions.
-        if not (
-            ctx.act in OBSERVE_ACTIONS
-            and attempt.wants_write
-            and attempt.commit_executed == 0
-            and self.max_steps - ctx.step <= self.guards.observe_tail_reserve
-        ):
-            return None
-        attempt.observe_blocked += 1
-        if attempt.observe_blocked >= 2:
-            self._emit(
-                f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)"
-            )
-            self.state["errors"].append(
-                f"[stuck_loop] {ctx.act} {ctx.action.get('arg', '')[:60]}: observation steps exhausted without a write"
-            )
-            self.recorder.skip(
-                ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_exhausted"
-            )
-            return _StepFlow.END_ATTEMPT
-        self._emit(
-            f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)"
-        )
-        self.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_reserved")
-        self.recorder.note(
-            {
-                "action": ctx.act,
-                "arg": ctx.action.get("arg", ""),
-                "ok": True,
-                "output": "Observation budget exhausted. Next action MUST be write, edit, or shell — or fail with reason.",
-            }
-        )
-        return _StepFlow.NEXT_STEP
-
-    def _rewrite_loop_guard(self, ctx, attempt):
-        """Skip a same-target full rewrite once the streak is armed."""
-        # Rewrite damping (revision 4): after REWRITE_SKIP_WRITES successful
-        # full writes of the same target with no intervening successful
-        # shell/edit, further full rewrites are skipped — verify, edit, or
-        # finish instead.
-        if not (
-            ctx.act == "write"
-            and not ctx.action.get("append")
-            and not ctx.truncated_write
-            and self.run_state.rewrite_skip_armed(ctx.logical_write_target)
-        ):
-            return None
-        attempt.dup_skip_count += 1
-        self._emit(
-            f"  [{ctx.step + 1}] skip (rewrite loop: "
-            f"{ctx.action.get('arg', '')[:40]} already written "
-            f"{self.run_state.consecutive_target_writes}x)"
-        )
-        self.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "rewrite_loop")
-        self.recorder.note(
-            {
-                "action": ctx.act,
-                "arg": ctx.action.get("arg", ""),
-                "ok": True,
-                "output": (
-                    f"Already written {self.run_state.consecutive_target_writes} times. "
-                    "Do NOT write it again — verify with shell, make a "
-                    "targeted edit, or emit done."
-                ),
-            }
-        )
-        return _StepFlow.NEXT_STEP
 
     def _duplicate_guard(self, ctx, attempt):
         """Per-action-type loop detection against the previous step."""
@@ -3530,21 +3804,7 @@ class _RunController:
             # Counted only on success (Codex P2, PR #16): a failed mutation
             # must not disarm write pressure or the observation tail reserve.
             attempt.commit_executed += 1
-        if act == "write" and result.ok:
-            if ctx.truncated_write:
-                # A partial (truncated) write is not a completed rewrite
-                # (Codex P1, PR #21): the file is incomplete, and the
-                # recovery path may legitimately append to it or restart the
-                # write. Reset for truncated append chunks too; otherwise an
-                # armed streak can block the clean restart.
-                self.run_state.disarm_rewrite_damping()
-            elif not action.get("append"):
-                self.run_state.note_successful_full_write(ctx.logical_write_target)
-        elif act in ("shell", "edit") and result.ok:
-            # Verification or a targeted fix breaks the rewrite streak;
-            # observations do not (the v6 Gemma loop interleaved tree/read
-            # between rewrites).
-            self.run_state.break_rewrite_streak()
+        self.step_policy.note_result(ctx, attempt, result)
         if ctx.truncated_write and result.ok:
             # The executor is stateless per step: without a resume anchor
             # the model cannot know where the write stopped. The kept
@@ -3595,10 +3855,14 @@ class _RunController:
                 # one recorder, exactly like a model-selected step.
                 repair_result = self._dispatch(repair_action)
                 if repair_result.ok:
-                    # The deterministic source fix is a successful targeted
-                    # repair, so it breaks an armed rewrite streak just like
-                    # a model-selected edit.
-                    self.run_state.break_rewrite_streak()
+                    # The policy arm observes the deterministic mutation like
+                    # any targeted fix (heuristic: rewrite streak broken;
+                    # lifecycle: the repaired target needs verification).
+                    self.step_policy.note_deterministic_repair(
+                        _mutation_target_key(
+                            {"arg": repair_action.get("arg", "")}, self.working_dir
+                        )
+                    )
                     self._emit(
                         f"  Deterministic repair: {repair_action['reasoning']} "
                         f"in {Path(repair_action['arg']).name}"
@@ -3612,6 +3876,7 @@ class _RunController:
                     )
 
                     retry_result = self._dispatch(action)
+                    self.step_policy.note_deterministic_retry(retry_result)
                     retry_entry = self.recorder.record(
                         StepReceipt.deterministic_retry(action, retry_result),
                         ctx.task_index,

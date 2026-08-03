@@ -276,6 +276,7 @@ class TestConfigHash:
         [
             {"final_validate": "always"},
             {"compile_repair": False},
+            {"step_policy": "lifecycle"},
             {"rewrite_skip_writes": 9},
             {"max_steps": 4},
             {"reasoning_policy": "off"},
