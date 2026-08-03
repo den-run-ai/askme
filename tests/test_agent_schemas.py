@@ -178,6 +178,20 @@ class TestDecodeSchemaEnforcement:
         mock_post.return_value = mock_response({"tasks": ["anything"]})
         assert ask_llm([{"role": "user", "content": "t"}]) == {"tasks": ["anything"]}
 
+    @patch("askme.requests.post")
+    def test_plan_schema_honors_the_configured_task_limit(self, mock_post):
+        """PR #75 review: decode-time truncation follows the run's max_tasks,
+        so an entry past the configured limit cannot fail a valid plan."""
+        mock_post.return_value = mock_response({"tasks": ["valid task", None]})
+        result = ask_llm(
+            [{"role": "user", "content": "t"}],
+            expect="plan",
+            expect_context={"max_tasks": 1},
+        )
+        assert result == {"tasks": ["valid task", None]}
+        with pytest.raises(json.JSONDecodeError):
+            ask_llm([{"role": "user", "content": "t"}], expect="plan")
+
     def test_unknown_expect_is_rejected(self):
         with pytest.raises(ValueError, match="expect"):
             LLMClient().ask([{"role": "user", "content": "t"}], expect="poem")

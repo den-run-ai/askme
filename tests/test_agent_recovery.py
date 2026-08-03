@@ -923,6 +923,10 @@ class TestExpectedFailureRemoval:
         )
         assert result["status"] == "complete"
         assert any(s["action"] == "shell" and not s["ok"] for s in result["state"]["all_steps"])
+        # PR #70 review: the observed failure is task evidence — it must
+        # reach completed_step_groups so the final validator can see it.
+        evidence = result["state"]["completed_step_groups"][0]
+        assert any(s["action"] == "shell" and not s["ok"] for s in evidence)
 
     @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch(

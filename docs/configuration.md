@@ -66,9 +66,12 @@ verified pass), or `exhausted` on failure; the process exit code is `0`
 exactly when the status is `complete` or `complete_unverified` — the
 structured `state` dict, and the `log` history list. Issue #40 added two
 credential-free metadata keys: `config` (the resolved immutable run
-configuration — backend, model, provider routing, reasoning effort/policy,
-execution policy, validation mode, the #41 compile-repair arm, the #31
-`step_policy` arm, guard thresholds, token budgets, limits, and a
+configuration — backend, endpoint `api` and `timeout_s`, model, provider
+routing, reasoning effort/policy, execution policy, validation mode, the
+#41 compile-repair arm, the #31 `step_policy` arm, guard thresholds, token
+budgets, limits, an `llm_provenance` marker naming where the LLM identity
+came from (`module_snapshot`, `pinned_config`, `injected_client_settings`,
+or `injected_opaque` for a duck-typed client without settings), and a
 `config_hash` over that whole canonical payload; never the API key) and
 `workspace` (`path` plus a `created` flag that is true only when AskMe made
 the temporary directory, so callers can clean it up intentionally). Issue

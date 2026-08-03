@@ -608,11 +608,16 @@ class ValidationResponse:
 
 
 # Decode-time response schemas by expected type: True accepts the envelope.
+# Each schema receives the caller's ``expect_context`` so per-run limits (for
+# example the plan's configured max_tasks) shape validation exactly like the
+# consuming call site will.
 RESPONSE_SCHEMAS = {
-    "plan": lambda obj: PlanResponse.parse(obj, MAX_TASKS) is not None,
-    "action": lambda obj: _action_envelope_error(obj) is None,
-    "task_replan": lambda obj: TaskReplanResponse.parse(obj) is not None,
-    "validation": lambda obj: ValidationResponse.parse(obj) is not None,
+    "plan": lambda obj, context: (
+        PlanResponse.parse(obj, (context or {}).get("max_tasks", MAX_TASKS)) is not None
+    ),
+    "action": lambda obj, context: _action_envelope_error(obj) is None,
+    "task_replan": lambda obj, context: TaskReplanResponse.parse(obj) is not None,
+    "validation": lambda obj, context: ValidationResponse.parse(obj) is not None,
 }
 
 
@@ -929,6 +934,7 @@ class LLMClient:
         reasoning_policy=DEFAULT_REASONING_POLICY,
         reasoning_trigger="unspecified",
         expect=None,
+        expect_context=None,
     ):
         """Call the backend and decode one plan/action/validator reply.
 
@@ -938,7 +944,9 @@ class LLMClient:
         malformed_action/response_truncated). ``expect`` names the response
         schema this call site accepts (issue #68): a decoded envelope of the
         wrong type — empty, cross-type, or an unknown action — is retried
-        like any parse failure and raises typed after the retry budget."""
+        like any parse failure and raises typed after the retry budget.
+        ``expect_context`` passes the call site's per-run limits (for example
+        the plan's configured max_tasks) into that schema."""
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
         if expect is not None and expect not in RESPONSE_SCHEMAS:
@@ -1048,7 +1056,7 @@ class LLMClient:
                 raise
             if repaired:
                 self._log(f"  JSON repaired on attempt {attempt}")
-            if expect is not None and not RESPONSE_SCHEMAS[expect](obj):
+            if expect is not None and not RESPONSE_SCHEMAS[expect](obj, expect_context):
                 if attempt < max_retries:
                     self._log(f"  [retry {attempt + 1}] reply failed the {expect} schema")
                     continue
@@ -1075,15 +1083,16 @@ def ask_llm(
     reasoning_policy=DEFAULT_REASONING_POLICY,
     reasoning_trigger="unspecified",
     expect=None,
+    expect_context=None,
 ):
     """Call the configured backend and decode one plan/action/validator reply.
 
     Compatibility facade over LLMClient: snapshots the module-level
     configuration for this call and delegates. Retry/backoff policy, the
-    parse-retry budget escalation, response-schema enforcement (``expect``),
-    and the typed errors callers rely on (LLMTransportError, KeyError for
-    API-error bodies, json.JSONDecodeError with
-    malformed_action/response_truncated) live in LLMClient.ask."""
+    parse-retry budget escalation, response-schema enforcement (``expect`` /
+    ``expect_context``), and the typed errors callers rely on
+    (LLMTransportError, KeyError for API-error bodies, json.JSONDecodeError
+    with malformed_action/response_truncated) live in LLMClient.ask."""
     return LLMClient().ask(
         messages,
         max_tokens=max_tokens,
@@ -1095,6 +1104,7 @@ def ask_llm(
         reasoning_policy=reasoning_policy,
         reasoning_trigger=reasoning_trigger,
         expect=expect,
+        expect_context=expect_context,
     )
 
 
@@ -1433,7 +1443,7 @@ def _write_visibility_flag(task_steps):
     return {"unvalidated_write": Path(arg).name if arg else True}
 
 
-def get_plan(user_prompt, state, client=None, max_tokens=None):
+def get_plan(user_prompt, state, client=None, max_tokens=None, max_tasks=None):
     # Include environment and policy in planner state.
     # Run-control metadata is logged/returned but is not task evidence for the
     # model, and raw step payloads (write contents) never reach the planner —
@@ -1497,6 +1507,9 @@ def get_plan(user_prompt, state, client=None, max_tokens=None):
         reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
         reasoning_trigger="planner_replan" if is_replan else "initial_plan",
         expect="plan",
+        # The decode-time schema truncates exactly like the consuming call
+        # site (PR #75 review): the run's task limit, not the module default.
+        expect_context={"max_tasks": MAX_TASKS if max_tasks is None else max_tasks},
     )
 
 
@@ -2434,7 +2447,12 @@ class RunDependencies:
     ``log``, ``_run_log``, and ``time.time`` — resolved at call time, so
     patch-based tests keep intercepting them. An injected ``llm_client``
     (an :class:`LLMClient` or any object with a compatible ``ask``) handles
-    every planner, executor, validator, and task-replanner call. An injected
+    every planner, executor, validator, and task-replanner call; its ``ask``
+    must accept the keyword arguments :meth:`LLMClient.ask` accepts —
+    including ``expect``/``expect_context`` — so duck-typed clients should
+    take ``**kwargs`` (the protocol tracks the client, issue #68). A client
+    without a ``settings`` attribute is recorded as ``injected_opaque`` in
+    the hashed config provenance. An injected
     ``action_executor`` receives every dispatch, including deterministic
     retries; when it names a ``working_dir`` it must be the run's workspace,
     and the run is rejected otherwise. Sinks capture controller-owned
@@ -3516,6 +3534,18 @@ class _RunController:
             self._llm_meta = client_settings
         else:
             self._llm_meta = cfg.llm if cfg.llm is not None else LLMSettings.current()
+        # Provenance of the hashed LLM identity (PR #72 review): an injected
+        # duck-typed client without settings leaves the payload describing
+        # the module snapshot, so the record must say the identity is opaque
+        # rather than combining unlike runs under one hash.
+        if deps.llm_client is not None:
+            self._llm_provenance = (
+                "injected_client_settings" if client_settings is not None else "injected_opaque"
+            )
+        elif cfg.llm is not None:
+            self._llm_provenance = "pinned_config"
+        else:
+            self._llm_provenance = "module_snapshot"
         self._policy = {
             "allow_system_installs": (
                 ALLOW_SYSTEM_INSTALLS
@@ -3563,11 +3593,18 @@ class _RunController:
         meta = self._llm_meta
         self._config_payload = {
             "backend": meta.backend,
+            # The endpoint identity and request deadline are outcome-affecting
+            # (PR #72 review): two local servers or two timeouts must not share
+            # a hash. `api` is operator-supplied endpoint configuration; the
+            # Authorization credential never rides in it.
+            "api": meta.api,
             "model": meta.model,
             "provider": meta.provider if meta.backend == "openrouter" else "",
             "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
             "allow_provider_fallbacks": meta.allow_fallbacks,
             "require_provider_parameters": meta.require_parameters,
+            "timeout_s": meta.timeout,
+            "llm_provenance": self._llm_provenance,
             "policy": dict(self._policy),
             "reasoning_policy": self.reasoning_policy,
             "final_validate": self.final_validate,
@@ -3709,6 +3746,7 @@ class _RunController:
                 self.user_prompt,
                 self.state,
                 max_tokens=self._budgets["planner_max_tokens"],
+                max_tasks=self.max_tasks,
                 **self._llm_kwargs(),
             )
         except (LLMTransportError, KeyError) as e:
@@ -4059,7 +4097,14 @@ class _RunController:
         )
 
         if not result.ok:
-            return self._recover_failed_step(ctx, attempt, result)
+            flow = self._recover_failed_step(ctx, attempt, result)
+            if flow is None:
+                # The typed failure is task evidence (PR #70 review): a task
+                # the model completes after observing a failure must carry
+                # that observation into completed_step_groups so the final
+                # validator sees what the task actually observed.
+                attempt.steps.append(step_entry)
+            return flow
         attempt.use_think = False
         attempt.reasoning_trigger = "executor"
         attempt.steps.append(step_entry)

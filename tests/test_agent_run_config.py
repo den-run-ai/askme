@@ -293,6 +293,49 @@ class TestConfigHash:
         assert with_key["config_hash"] == without_key["config_hash"]
         assert "sk-secret" not in json.dumps(with_key)
 
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"api": "http://localhost:9999/v1/chat/completions"},
+            {"timeout": 15},
+        ],
+    )
+    def test_endpoint_identity_and_timeout_reach_the_hash(self, tmp_path, override):
+        """PR #72 review: two runs differing only in endpoint or deadline
+        must not share provenance."""
+        base = self._metadata(tmp_path, config=RunConfig(llm=_settings()))
+        changed = self._metadata(tmp_path, config=RunConfig(llm=_settings(**override)))
+        assert base["config_hash"] != changed["config_hash"]
+        assert changed["api"] == override.get("api", base["api"])
+        assert changed["timeout_s"] == override.get("timeout", base["timeout_s"])
+
+    def test_llm_provenance_marks_opaque_injected_clients(self, tmp_path):
+        """PR #72 review: a duck-typed client without settings cannot borrow
+        the module snapshot's identity silently — the payload labels it."""
+        default = askme._RunController("greet", str(tmp_path)).config_metadata()
+        assert default["llm_provenance"] == "module_snapshot"
+        pinned = askme._RunController(
+            "greet", str(tmp_path), config=RunConfig(llm=_settings())
+        ).config_metadata()
+        assert pinned["llm_provenance"] == "pinned_config"
+        opaque_client = ScriptedClient([])
+        opaque = askme._RunController(
+            "greet",
+            str(tmp_path),
+            dependencies=_quiet_deps(llm_client=opaque_client),
+        ).config_metadata()
+        assert opaque["llm_provenance"] == "injected_opaque"
+        assert opaque["config_hash"] != default["config_hash"]
+        settings_client = ScriptedClient([])
+        settings_client.settings = _settings(model="scripted-model")
+        with_settings = askme._RunController(
+            "greet",
+            str(tmp_path),
+            dependencies=_quiet_deps(llm_client=settings_client),
+        ).config_metadata()
+        assert with_settings["llm_provenance"] == "injected_client_settings"
+        assert with_settings["model"] == "scripted-model"
+
     def test_run_start_event_pins_the_hash_and_config(self, tmp_path):
         log_path = tmp_path / "run.jsonl"
         responses = [{"tasks": ["greet"]}, {"action": "done"}]
@@ -336,7 +379,7 @@ class TestConfigClosure:
         result = run_result(
             "greet",
             working_dir=str(tmp_path),
-            config=RunConfig(max_replans=1, max_steps=2),
+            config=RunConfig(max_replans=1, max_tasks=2, max_steps=2),
             dependencies=_quiet_deps(llm_client=client),
         )
         assert result["status"] == "exhausted"
@@ -345,6 +388,9 @@ class TestConfigClosure:
         assert by_expect["plan"] == budgets["planner_max_tokens"]
         assert by_expect["action"] == budgets["step_tokens"]
         assert by_expect["task_replan"] == budgets["task_replan_max_tokens"]
+        # The plan schema receives the run's task limit (PR #75 review).
+        plan_call = next(c for c in client.calls if c.get("expect") == "plan")
+        assert plan_call["expect_context"] == {"max_tasks": 2}
 
     def test_mid_run_global_mutation_cannot_change_budgets(self, tmp_path):
         """A hostile mid-run change to the module budget globals must not
