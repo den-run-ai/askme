@@ -3,6 +3,7 @@
 Requires: requests. Expects llama-server on localhost:8080."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -144,6 +145,10 @@ class LLMSettings:
     # None derives the truncated-write retry budget from `backend`; `current`
     # pins the module global so patched values keep reaching the facade.
     step_write_tokens: int | None = None
+    # None derives the executor step budget from `backend`. These two are the
+    # per-run capability budgets (issue #68): pin them to freeze a run's
+    # output budgets independent of the backend-name heuristic.
+    step_token_budget: int | None = None
 
     def write_retry_tokens(self):
         """Decode-retry budget for truncated write/edit payloads."""
@@ -152,7 +157,9 @@ class LLMSettings:
         return _step_write_tokens(self.backend)
 
     def step_tokens(self):
-        """Executor step budget for this backend (issues #15/#40)."""
+        """Executor step budget for this run (issues #15/#40/#68)."""
+        if self.step_token_budget is not None:
+            return self.step_token_budget
         return _step_tokens(self.backend)
 
     @classmethod
@@ -192,6 +199,7 @@ class LLMSettings:
             reasoning_effort=OPENROUTER_REASONING_EFFORT,
             timeout=LLM_TIMEOUT,
             step_write_tokens=STEP_WRITE_TOKENS,
+            step_token_budget=STEP_TOKENS,
         )
 
 
@@ -1761,11 +1769,15 @@ def replan_task(
         return TaskReplanResult(None, "missing_task_key")
 
 
-def _should_validate(replan, history, state, user_prompt):
-    """Decide whether to run final validation. Returns True if validation should run."""
-    if FINAL_VALIDATE == "0":
+def _should_validate(replan, history, state, user_prompt, final_validate=None):
+    """Decide whether to run final validation. Returns True if validation should run.
+
+    ``final_validate`` is the run's resolved mode (issue #68); None keeps
+    the module-level compatibility surface."""
+    mode = FINAL_VALIDATE if final_validate is None else final_validate
+    if mode == "0":
         return False
-    if FINAL_VALIDATE == "always":
+    if mode == "always":
         return True
     # auto mode: trigger on complexity/risk signals
     if replan > 0:
@@ -1977,9 +1989,12 @@ def _compile_repair_candidates(error_output, cmd, working_dir):
     return c_files if len(c_files) == 1 else []
 
 
-def _try_compile_repair(error_output, working_dir, cmd):
-    """Apply a narrow deterministic source repair. Returns (file, desc) or None."""
-    if not COMPILE_REPAIR_ENABLED:
+def _try_compile_repair(error_output, working_dir, cmd, enabled=None):
+    """Apply a narrow deterministic source repair. Returns (file, desc) or None.
+
+    ``enabled`` is the run's resolved #41 ablation arm; None keeps the
+    module-level compatibility surface."""
+    if not (COMPILE_REPAIR_ENABLED if enabled is None else enabled):
         return None
     for pattern in _COMPILE_REPAIR_PATTERNS:
         if not pattern["diagnostic_re"].search(error_output):
@@ -2146,13 +2161,16 @@ class TaskAttemptState:
     observe_executed: int = 0
     commit_executed: int = 0
     observe_blocked: int = 0
+    # Resolved per-run guard threshold (issue #68); the default keeps direct
+    # constructions behaving like the module constant.
+    write_pressure_observations: int = WRITE_PRESSURE_OBSERVATIONS
 
     def write_pressure(self):
         """True once observation spending must yield to a first commit."""
         return (
             self.wants_write
             and self.commit_executed == 0
-            and self.observe_executed >= WRITE_PRESSURE_OBSERVATIONS
+            and self.observe_executed >= self.write_pressure_observations
         )
 
 
@@ -2182,8 +2200,24 @@ class RunState:
     successful shell/edit and truncation paths disarm it.
     """
 
-    def __init__(self, reasoning_policy, goal_context_chars, clock=None, event_sink=None):
+    def __init__(
+        self,
+        reasoning_policy,
+        goal_context_chars,
+        clock=None,
+        event_sink=None,
+        rewrite_pressure_writes=None,
+        rewrite_skip_writes=None,
+    ):
         self.clock = time.time if clock is None else clock
+        # Resolved per-run guard thresholds (issue #68); None keeps the
+        # module constants so direct constructions behave unchanged.
+        self.rewrite_pressure_writes = (
+            REWRITE_PRESSURE_WRITES if rewrite_pressure_writes is None else rewrite_pressure_writes
+        )
+        self.rewrite_skip_writes = (
+            REWRITE_SKIP_WRITES if rewrite_skip_writes is None else rewrite_skip_writes
+        )
         self.data: dict[str, Any] = {
             "completed_tasks": [],
             "errors": [],
@@ -2237,7 +2271,7 @@ class RunState:
         """True when further full rewrites of ``target`` must be skipped."""
         return (
             self.last_write_target is not None
-            and self.consecutive_target_writes >= REWRITE_SKIP_WRITES
+            and self.consecutive_target_writes >= self.rewrite_skip_writes
             and target == self.last_write_target
         )
 
@@ -2245,22 +2279,74 @@ class RunState:
         """Basename the executor must verify once rewrites repeat, or None."""
         if (
             self.last_write_target is not None
-            and self.consecutive_target_writes >= REWRITE_PRESSURE_WRITES
+            and self.consecutive_target_writes >= self.rewrite_pressure_writes
         ):
             return Path(str(self.last_write_target)).name
         return None
 
 
 @dataclass(frozen=True)
+class GuardThresholds:
+    """Resolved controller guard thresholds for one run (issue #68).
+
+    These counters decide when observation must yield to a commit, when
+    rewrites must yield to verification, and how many task-local replans an
+    attempt gets — outcome-affecting policy, so they are frozen per run and
+    enter the hash-logged configuration instead of being read from module
+    globals mid-run."""
+
+    write_pressure_observations: int
+    observe_tail_reserve: int
+    rewrite_pressure_writes: int
+    rewrite_skip_writes: int
+    max_task_local_replans: int
+
+    def __post_init__(self):
+        for name in (
+            "write_pressure_observations",
+            "observe_tail_reserve",
+            "rewrite_pressure_writes",
+            "rewrite_skip_writes",
+            "max_task_local_replans",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+
+    def describe(self):
+        """JSON-ready threshold record for config metadata and hashing."""
+        return {
+            "write_pressure_observations": self.write_pressure_observations,
+            "observe_tail_reserve": self.observe_tail_reserve,
+            "rewrite_pressure_writes": self.rewrite_pressure_writes,
+            "rewrite_skip_writes": self.rewrite_skip_writes,
+            "max_task_local_replans": self.max_task_local_replans,
+        }
+
+
+def _config_hash(payload):
+    """Short stable digest of the resolved outcome-affecting configuration.
+
+    Canonical-JSON sha256 prefix; never includes credentials. Two runs with
+    the same hash ran the same policy surface (issue #68)."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
 class RunConfig:
-    """Immutable per-run configuration (issue #40).
+    """Immutable per-run configuration (issues #40/#68).
 
     ``None`` fields resolve from the module-level compatibility surface when
     the run starts, so a default config behaves exactly like the patchable
     globals. Explicit fields pin the run: a pinned ``llm`` makes the run
     construct its own :class:`LLMClient` instead of using the module
     ``ask_llm`` facade, so differently configured runs coexist in one
-    process without saving or restoring globals."""
+    process without saving or restoring globals. Every outcome-affecting
+    setting — validation mode, the #41 compile-repair arm, guard
+    thresholds, capability budgets (on ``llm``), and run limits — resolves
+    into one frozen per-run surface whose hash is logged at run_start and
+    returned in the config metadata."""
 
     llm: LLMSettings | None = None
     allow_system_installs: bool | None = None
@@ -2270,6 +2356,13 @@ class RunConfig:
     max_tasks: int | None = None
     max_steps: int | None = None
     goal_context_chars: int | None = None
+    final_validate: str | None = None
+    compile_repair: bool | None = None
+    write_pressure_observations: int | None = None
+    observe_tail_reserve: int | None = None
+    rewrite_pressure_writes: int | None = None
+    rewrite_skip_writes: int | None = None
+    max_task_local_replans: int | None = None
 
     @classmethod
     def from_env(cls, env=None):
@@ -2288,6 +2381,8 @@ class RunConfig:
             allow_system_installs=e.get("ALLOW_SYSTEM_INSTALLS", "0") == "1",
             allow_network=e.get("ALLOW_NETWORK", "1") == "1",
             reasoning_policy=policy,
+            final_validate=e.get("AGENT_FINAL_VALIDATE", "auto"),
+            compile_repair=e.get("AGENT_COMPILE_REPAIR", "1") == "1",
         )
 
 
@@ -2491,11 +2586,73 @@ class _RunController:
             ),
             "allow_network": (ALLOW_NETWORK if cfg.allow_network is None else cfg.allow_network),
         }
+        # Outcome-affecting settings resolve once here (issue #68): validation
+        # mode, the #41 compile-repair arm, and the guard thresholds are
+        # frozen for the run — mid-run changes to the module globals cannot
+        # change this run's policy, and the hash below pins what actually ran.
+        self.final_validate = FINAL_VALIDATE if cfg.final_validate is None else cfg.final_validate
+        self.compile_repair = (
+            COMPILE_REPAIR_ENABLED if cfg.compile_repair is None else cfg.compile_repair
+        )
+        self.guards = GuardThresholds(
+            write_pressure_observations=(
+                WRITE_PRESSURE_OBSERVATIONS
+                if cfg.write_pressure_observations is None
+                else cfg.write_pressure_observations
+            ),
+            observe_tail_reserve=(
+                OBSERVE_TAIL_RESERVE
+                if cfg.observe_tail_reserve is None
+                else cfg.observe_tail_reserve
+            ),
+            rewrite_pressure_writes=(
+                REWRITE_PRESSURE_WRITES
+                if cfg.rewrite_pressure_writes is None
+                else cfg.rewrite_pressure_writes
+            ),
+            rewrite_skip_writes=(
+                REWRITE_SKIP_WRITES if cfg.rewrite_skip_writes is None else cfg.rewrite_skip_writes
+            ),
+            max_task_local_replans=(
+                MAX_TASK_LOCAL_REPLANS
+                if cfg.max_task_local_replans is None
+                else cfg.max_task_local_replans
+            ),
+        )
+        meta = self._llm_meta
+        self._config_payload = {
+            "backend": meta.backend,
+            "model": meta.model,
+            "provider": meta.provider if meta.backend == "openrouter" else "",
+            "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
+            "allow_provider_fallbacks": meta.allow_fallbacks,
+            "require_provider_parameters": meta.require_parameters,
+            "policy": dict(self._policy),
+            "reasoning_policy": self.reasoning_policy,
+            "final_validate": self.final_validate,
+            "compile_repair": self.compile_repair,
+            "guards": self.guards.describe(),
+            "budgets": {
+                "step_tokens": meta.step_tokens(),
+                "step_write_tokens": meta.write_retry_tokens(),
+                "planner_max_tokens": PLANNER_MAX_TOKENS,
+                "task_replan_max_tokens": TASK_REPLAN_MAX_TOKENS,
+            },
+            "limits": {
+                "max_replans": self.max_replans,
+                "max_tasks": self.max_tasks,
+                "max_steps": self.max_steps,
+                "goal_context_chars": self.goal_context_chars,
+            },
+        }
+        self.config_hash = _config_hash(self._config_payload)
         self.run_state = RunState(
             reasoning_policy,
             goal_context_chars,
             clock=self._clock,
             event_sink=deps.event_sink,
+            rewrite_pressure_writes=self.guards.rewrite_pressure_writes,
+            rewrite_skip_writes=self.guards.rewrite_skip_writes,
         )
         self.state = self.run_state.data
         self.history = self.run_state.history
@@ -2526,26 +2683,12 @@ class _RunController:
     def config_metadata(self):
         """Resolved immutable run configuration for the structured result.
 
-        Mirrors the ``run_start`` event fields and never includes
+        A fresh projection of the hash-logged payload — the same fields the
+        ``run_start`` event carries — plus ``config_hash``. Never includes
         credentials."""
-        meta = self._llm_meta
-        return {
-            "backend": meta.backend,
-            "model": meta.model,
-            "provider": meta.provider if meta.backend == "openrouter" else "",
-            "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
-            "allow_provider_fallbacks": meta.allow_fallbacks,
-            "require_provider_parameters": meta.require_parameters,
-            "policy": dict(self._policy),
-            "reasoning_policy": self.reasoning_policy,
-            "compile_repair": COMPILE_REPAIR_ENABLED,
-            "limits": {
-                "max_replans": self.max_replans,
-                "max_tasks": self.max_tasks,
-                "max_steps": self.max_steps,
-                "goal_context_chars": self.goal_context_chars,
-            },
-        }
+        metadata = json.loads(json.dumps(self._config_payload))
+        metadata["config_hash"] = self.config_hash
+        return metadata
 
     def run(self):
         """Drive planning, task attempts, validation, and finalization.
@@ -2589,30 +2732,17 @@ class _RunController:
         )
 
     def _log_run_start(self):
-        meta = self._llm_meta
         self._emit(f"Prompt: {self.user_prompt}")
         self._emit(f"Working directory: {self.working_dir}")
+        # The full resolved configuration — including the #41 compile-repair
+        # arm, whose provenance zero repair receipts cannot reconstruct — and
+        # its hash are pinned into the run record before any model call.
         self._event(
             {
                 "event": "run_start",
                 "prompt": self.user_prompt,
                 "working_dir": self.working_dir,
-                "backend": meta.backend,
-                "model": meta.model,
-                "provider": meta.provider if meta.backend == "openrouter" else "",
-                "reasoning_effort": (meta.reasoning_effort if meta.backend == "openrouter" else ""),
-                "allow_provider_fallbacks": meta.allow_fallbacks,
-                "require_provider_parameters": meta.require_parameters,
-                "reasoning_policy": self.reasoning_policy,
-                # Ablation-arm provenance (issue #41): zero repair receipts cannot
-                # distinguish arm B from an arm-A run that never hit the trigger.
-                "compile_repair": COMPILE_REPAIR_ENABLED,
-                "limits": {
-                    "max_replans": self.max_replans,
-                    "max_tasks": self.max_tasks,
-                    "max_steps": self.max_steps,
-                    "goal_context_chars": self.goal_context_chars,
-                },
+                **self.config_metadata(),
             }
         )
 
@@ -2726,23 +2856,31 @@ class _RunController:
                 break
         return all_done
 
+    def _new_attempt(self, task):
+        """Fresh attempt state for one task under the run's guard thresholds."""
+        return TaskAttemptState(
+            task=task,
+            wants_write=_is_write_shaped(task),
+            write_pressure_observations=self.guards.write_pressure_observations,
+        )
+
     def _run_task(self, i, task, tasks, prev_last):
-        """Attempt one task with at most MAX_TASK_LOCAL_REPLANS local retries.
+        """Attempt one task with the run's task-local replan budget.
 
         Returns ``(task, done, steps)``; ``task`` is the possibly replaced
         task text the run record must carry forward.
         """
         # E11: inner retry loop — try task-local replan before full replan
-        attempt = TaskAttemptState(task=task, wants_write=_is_write_shaped(task))
+        attempt = self._new_attempt(task)
         saved_errors = []
-        for task_attempt in range(1 + MAX_TASK_LOCAL_REPLANS):
+        for task_attempt in range(1 + self.guards.max_task_local_replans):
             self.state["current_task"] = task
             self.state["task_index"] = f"{i + 1}/{len(tasks)}"
             self.state["last_steps"] = list(prev_last)
             self._emit(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             # Reset per-attempt execution state (the task may be a replacement)
-            attempt = TaskAttemptState(task=task, wants_write=_is_write_shaped(task))
+            attempt = self._new_attempt(task)
             completed_repair = _task_satisfied_by_deterministic_repair(task, self.state)
             if completed_repair:
                 self._emit(
@@ -2757,7 +2895,7 @@ class _RunController:
                 break  # break task_attempt loop — success
 
             # E11: try task-local replan before falling through to full replan
-            if task_attempt < MAX_TASK_LOCAL_REPLANS:
+            if task_attempt < self.guards.max_task_local_replans:
                 saved_errors = list(self.state["errors"])
                 t_lr = self._clock()
                 replan = _coerce_task_replan(
@@ -3090,7 +3228,7 @@ class _RunController:
             ctx.act in OBSERVE_ACTIONS
             and attempt.wants_write
             and attempt.commit_executed == 0
-            and self.max_steps - ctx.step <= OBSERVE_TAIL_RESERVE
+            and self.max_steps - ctx.step <= self.guards.observe_tail_reserve
         ):
             return None
         attempt.observe_blocked += 1
@@ -3420,7 +3558,9 @@ class _RunController:
         action, act = ctx.action, ctx.act
         etype = result.error_type or "unknown"
         if act == "shell" and etype == "compile_error":
-            repair = _try_compile_repair(result.output, self.working_dir, action.get("arg", ""))
+            repair = _try_compile_repair(
+                result.output, self.working_dir, action.get("arg", ""), enabled=self.compile_repair
+            )
             if repair:
                 # The deterministic source edit is a successful targeted fix,
                 # so it breaks an armed rewrite streak just like a
@@ -3468,7 +3608,9 @@ class _RunController:
     def _try_finish(self, replan):
         """Validate an all-done pass; a :class:`RunOutcome` ends the run."""
         status, validation = "complete", "skipped"
-        wants_validation = _should_validate(replan, self.history, self.state, self.user_prompt)
+        wants_validation = _should_validate(
+            replan, self.history, self.state, self.user_prompt, final_validate=self.final_validate
+        )
         first_validation = self.state.get("validation_attempts", 0) == 0
         recheck_validation = (
             self.state.get("validation_recheck_needed")
