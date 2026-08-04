@@ -1,0 +1,40 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (5045 earlier characters omitted):
+ield 'step' is not allowed for action 'fail': line 1 column 1 (char 0)", '[malformed_plan] planner returned no valid tasks']
+[17:25:29] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-195/test_fix_python_syntax_error0
+FAILED
+
+=================================== FAILURES ===================================
+______________ TestIntegrationMedium.test_fix_python_syntax_error ______________
+
+self = <test_agent_integration.TestIntegrationMedium object at 0x106e634a0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-195/test_fix_python_syntax_error0')
+
+    def test_fix_python_syntax_error(self, tmp_path):
+        """LLM writes a broken Python file, runs it (fails), fixes it, runs again."""
+        broken = tmp_path / "greet.py"
+        broken.write_text('print("hello"\n')
+        result = int_run(
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+>       assert result["status"] == "complete", (
+            f"Agent failed to self-correct. Errors: {result['state']['errors']}"
+        )
+E       AssertionError: Agent failed to self-correct. Errors: ["[malformed_action] LLM parse error on task 'Fix the syntax error in greet.py': Incomplete action: field 'step' is not allowed for action 'fail': line 1 column 1 (char 0)", '[malformed_plan] planner returned no valid tasks']
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:71: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationMedium::test_fix_python_syntax_error
+================= 1 failed, 22 deselected in 270.41s (0:04:30) =================
+
+stderr:
+(empty)
