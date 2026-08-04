@@ -211,6 +211,21 @@ def _capability_profile_from_env(env):
     return get_capability_profile(requested) if requested else _default_capability_profile()
 
 
+# Action transport arm (issue #68): "json" is the historical envelope-in-text
+# contract; "tools" sends the identical action set as native tool definitions
+# and decodes the structured tool call into the same envelope validation.
+# Selection is explicit and hash-logged — a transport is an experimental arm,
+# never an implicit consequence of backend, provider, or model.
+ACTION_TRANSPORTS = ("json", "tools")
+
+
+def _action_transport_from_env(env):
+    raw = (env.get("LLM_ACTION_TRANSPORT") or "json").strip().lower()
+    if raw not in ACTION_TRANSPORTS:
+        raise ValueError(f"LLM_ACTION_TRANSPORT must be one of {', '.join(ACTION_TRANSPORTS)}")
+    return raw
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     """Immutable client-local LLM configuration (issue #37).
@@ -247,6 +262,9 @@ class LLMSettings:
     # Added at the end to preserve positional compatibility. None resolves to
     # the generic profile; transport/provider and model aliases never select it.
     capability_profile: CapabilityProfile | None = None
+    # Issue #68 action-transport arm; appended last to preserve positional
+    # compatibility. "json" is the historical text-envelope contract.
+    action_transport: str = "json"
 
     def resolved_capability_profile(self):
         """Return the effective detached profile, including legacy overrides."""
@@ -331,6 +349,7 @@ class LLMSettings:
             reasoning_effort=_parse_reasoning_effort(e.get("OPENROUTER_REASONING_EFFORT")),
             timeout=LLM_TIMEOUT,
             capability_profile=_capability_profile_from_env(e),
+            action_transport=_action_transport_from_env(e),
             replan_timeout=LLM_TIMEOUT_REPLAN,
             max_retries=MAX_LLM_RETRIES,
         )
@@ -367,6 +386,7 @@ class LLMSettings:
             reasoning_effort=OPENROUTER_REASONING_EFFORT,
             timeout=LLM_TIMEOUT,
             capability_profile=capabilities,
+            action_transport=ACTION_TRANSPORT,
             replan_timeout=LLM_TIMEOUT_REPLAN,
             max_retries=MAX_LLM_RETRIES,
         )
@@ -379,6 +399,7 @@ class LLMSettings:
 _DEFAULT_LLM_SETTINGS = LLMSettings.from_env()
 _DEFAULT_CAPABILITY_PROFILE = _DEFAULT_LLM_SETTINGS.resolved_capability_profile()
 CAPABILITY_PROFILE = _DEFAULT_CAPABILITY_PROFILE.name
+ACTION_TRANSPORT = _DEFAULT_LLM_SETTINGS.action_transport
 REASONING_TOKEN_FLOORS = _DEFAULT_CAPABILITY_PROFILE.reasoning_token_floors
 LLM_BACKEND = _DEFAULT_LLM_SETTINGS.backend  # "local" or "openrouter"
 OPENROUTER_API_KEY = _DEFAULT_LLM_SETTINGS.api_key
@@ -604,6 +625,79 @@ Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}""".replac
     "__ACTION_NAMES__", ", ".join(ACTION_SPECS)
 )
 
+# Tools-transport executor prompt (issue #68): identical rules, but the output
+# contract is a native tool call, so the JSON-format and sentinel-transport
+# instructions do not apply. Tool syntax carries string arguments unescaped.
+SYSTEM_STEP_TOOLS = """Executor. Call exactly ONE tool per turn. No text outside the tool call.
+Rules:
+- done only when the FULL task description is satisfied
+- fail if same error appears 2+ times
+- Never redo completed_tasks
+- Relative paths, except use an exact incomplete_write_target supplied in state.
+  Recover it before done; append only when incomplete_write_append_allowed=true.
+  Reasoning max 10 words
+- If missing_tools required and allow_system_installs=false: fail; do NOT install
+- Prefer edit over write for existing files
+- Prefer search/tree over shell grep/find/ls
+- read: initial pages take offset/limit (1-based lines); continuation pages must
+  echo the output's cursor, limit, and sha256. Cursors count Unicode code points.
+- write: whole file in content; set append=true to append the next chunk"""
+
+# One JSON-schema fragment per model-visible action field; tool definitions
+# are derived from ACTION_SPECS so both transports expose the identical
+# action set and land in the identical envelope validation.
+_TOOL_FIELD_SCHEMAS = {
+    "arg": {"type": "string"},
+    "content": {"type": "string"},
+    "append": {"type": "boolean"},
+    "find": {"type": "string"},
+    "replace": {"type": "string"},
+    "offset": {"type": "integer"},
+    "limit": {"type": "integer"},
+    "cursor": {"type": "integer"},
+    "sha256": {"type": "string"},
+    "path": {"type": "string"},
+    "timeout": {"type": "integer"},
+    "reasoning": {"type": "string"},
+}
+_TOOL_DESCRIPTIONS = {
+    "shell": "Run a shell command in the working directory.",
+    "write": "Create or overwrite a file; set append=true to append the next chunk.",
+    "edit": "Replace exact text in a file.",
+    "read": "Read a file window; continuation pages echo the output's cursor/limit/sha256.",
+    "search": "Bounded literal search; pattern in arg, optional path (default '.').",
+    "tree": "Bounded directory listing; directory in arg (default '.').",
+    "done": "Declare the FULL task complete.",
+    "fail": "Give up on the task; one-line reason in arg.",
+}
+
+
+def _action_tools():
+    """OpenAI-style tool definitions for the registry's action set."""
+    tools = []
+    for name, spec in ACTION_SPECS.items():
+        fields = [field for field in spec.allowed if field != "action"]
+        parameters = {
+            "type": "object",
+            "properties": {field: dict(_TOOL_FIELD_SCHEMAS[field]) for field in fields},
+        }
+        if spec.requires:
+            parameters["required"] = list(spec.requires)
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": _TOOL_DESCRIPTIONS[name],
+                    "parameters": parameters,
+                },
+            }
+        )
+    return tools
+
+
+_ACTION_TOOLS = _action_tools()
+
 
 def _repair_json(text):
     """Return a semantics-preserving JSON object repair, or ``None``.
@@ -818,6 +912,7 @@ RESPONSE_SCHEMAS = {
 _STRICT_JSON_SUFFIX = (
     "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
 )
+_STRICT_TOOL_SUFFIX = "Call exactly one tool now. No reasoning, no text outside the tool call."
 
 # Sentinel-framed content transport (issue #15): implementation-scale write
 # content travels between sentinel lines after the action JSON instead of
@@ -889,14 +984,25 @@ def _reasoning_decision(attempt, think, think_level, reasoning_policy, reasoning
     return requested, effective, trigger
 
 
-def _build_llm_request(messages, budget, effective_think_level, strict, settings=None):
+def _build_llm_request(messages, budget, effective_think_level, strict, settings=None, expect=None):
     """Build one backend-specific request: (body, headers, sent_effort).
 
-    `strict` appends the E03 strict-JSON contract as a final user turn after
+    `strict` appends the E03 strict contract as a final user turn after
     backend shaping. Never mutates the caller's message list. `settings`
-    defaults to a snapshot of the module-level configuration (issue #37)."""
+    defaults to a snapshot of the module-level configuration (issue #37).
+    Under the tools transport an ``expect="action"`` call carries the
+    registry-derived tool definitions (issue #68); every other response type
+    keeps the plain JSON contract."""
     cfg = LLMSettings.current() if settings is None else settings
     body = {"model": cfg.model, "messages": messages, "temperature": 0.1, "max_tokens": budget}
+    tools_transport = cfg.action_transport == "tools" and expect == "action"
+    if tools_transport:
+        body["tools"] = _ACTION_TOOLS
+        # "auto", never "required": grammar-forced tool choice corrupted the
+        # native Gemma 4 string delimiters into argument text on the b9618
+        # PEG parser (2026-08-04 smoke); empty replies are handled by the
+        # caller's normal parse-retry policy instead.
+        body["tool_choice"] = "auto"
     sent_effort = effective_think_level
     if cfg.backend == "openrouter":
         if cfg.provider:
@@ -928,7 +1034,12 @@ def _build_llm_request(messages, budget, effective_think_level, strict, settings
         body["max_tokens"] = max(budget, cfg.reasoning_token_floor(effective_think_level))
     if strict:
         msgs = list(body["messages"])
-        msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
+        msgs.append(
+            {
+                "role": "user",
+                "content": _STRICT_TOOL_SUFFIX if tools_transport else _STRICT_JSON_SUFFIX,
+            }
+        )
         body["messages"] = msgs
     headers = {"Content-Type": "application/json"}
     if cfg.backend == "openrouter" and cfg.api_key:
@@ -1074,6 +1185,56 @@ def _decode_action_reply(text, finish_reason):
         raise
 
 
+def _tool_reply_error(reason, cleaned):
+    error = json.JSONDecodeError(reason, cleaned or "", 0)
+    setattr(error, "cleaned_text", cleaned or "")
+    return error
+
+
+def _decode_tool_call_reply(rj, finish_reason):
+    """Decode one native tool-call reply into the action-envelope contract.
+
+    Mirrors :func:`_decode_action_reply`'s return/raise contract so the
+    client's retry policy, budget escalation, and typed classification apply
+    unchanged. The synthesized ``cleaned_text`` embeds the attempted action
+    name in envelope form so a truncated write/edit argument payload still
+    triggers the caller's write-budget escalation."""
+    msg = (rj.get("choices") or [{}])[0].get("message") or {}
+    calls = msg.get("tool_calls") or []
+    if not calls:
+        raise _tool_reply_error(
+            "reply contains no tool call", (msg.get("content") or "").strip()[:200]
+        )
+    if len(calls) > 1:
+        names = ", ".join(str((call.get("function") or {}).get("name")) for call in calls)
+        raise _tool_reply_error("reply contains multiple tool calls", names[:200])
+    function = calls[0].get("function") or {}
+    name = function.get("name")
+    arguments = function.get("arguments")
+    if isinstance(arguments, str):
+        raw_arguments = arguments
+    elif isinstance(arguments, dict):
+        raw_arguments = json.dumps(arguments)
+    else:
+        raw_arguments = ""
+    cleaned = f'{{"action": "{name}", "arguments": {raw_arguments[:400]}}}'
+    if not isinstance(name, str) or not name:
+        raise _tool_reply_error("tool call is missing a function name", cleaned)
+    try:
+        args = json.loads(raw_arguments) if raw_arguments.strip() else {}
+    except json.JSONDecodeError:
+        suffix = " (truncated)" if finish_reason == "length" else ""
+        raise _tool_reply_error(
+            f"tool call arguments are not valid JSON{suffix}", cleaned
+        ) from None
+    if not isinstance(args, dict):
+        raise _tool_reply_error("tool call arguments must be a JSON object", cleaned)
+    if "action" in args:
+        raise _tool_reply_error("tool call arguments may not carry an action field", cleaned)
+    envelope = {"action": name, **args}
+    return _accept_or_raise(envelope, cleaned, ActionTransport()), cleaned, False
+
+
 def _log_llm_usage(
     rj, sent_effort, attempt, finish_reason, settings=None, log_sink=None, event_sink=None
 ):
@@ -1187,6 +1348,8 @@ class LLMClient:
         if expect is not None and expect not in RESPONSE_SCHEMAS:
             raise ValueError(f"expect must be one of {', '.join(sorted(RESPONSE_SCHEMAS))}")
         cfg = self.settings
+        if cfg.action_transport not in ACTION_TRANSPORTS:
+            raise ValueError(f"action_transport must be one of {', '.join(ACTION_TRANSPORTS)}")
         budget = max_tokens
         for attempt in range(max_retries + 1):
             requested_level, effective_think_level, effective_trigger = _reasoning_decision(
@@ -1213,6 +1376,7 @@ class LLMClient:
                 effective_think_level,
                 strict=attempt >= 2 and not think_level,
                 settings=cfg,
+                expect=expect,
             )
             # One transport attempt; retry/backoff policy is enacted here.
             rj, failure = _llm_http_attempt(
@@ -1267,7 +1431,10 @@ class LLMClient:
             if raw:
                 return text
             try:
-                obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
+                if cfg.action_transport == "tools" and expect == "action":
+                    obj, _decoded_text, repaired = _decode_tool_call_reply(rj, finish_reason)
+                else:
+                    obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
             except json.JSONDecodeError as parse_err:
                 cleaned = getattr(parse_err, "cleaned_text", "")
                 if attempt < max_retries:
@@ -1887,13 +2054,22 @@ def get_step(
         step_budget = step_tokens
     else:
         step_budget = STEP_TOKENS if settings is None else settings.step_tokens()
+    # Prompt selection must mirror the settings ask() will resolve: an
+    # injected client's own settings, else the run-pinned facade settings,
+    # else the module global (issue #68 transport arm).
+    if settings is None:
+        run_settings = _RUN_LLM_SETTINGS.get()
+        transport = ACTION_TRANSPORT if run_settings is None else run_settings.action_transport
+    else:
+        transport = settings.action_transport
+    system_step = SYSTEM_STEP_TOOLS if transport == "tools" else SYSTEM_STEP
     request_policy = {}
     if timeout is not None:
         request_policy["timeout"] = timeout
     if max_retries is not None:
         request_policy["max_retries"] = max_retries
     return ask(
-        [{"role": "system", "content": SYSTEM_STEP}, {"role": "user", "content": user_msg}],
+        [{"role": "system", "content": system_step}, {"role": "user", "content": user_msg}],
         max_tokens=step_budget,
         think=think,
         reasoning_policy=reasoning_policy,
@@ -2735,6 +2911,8 @@ def _resolve_run_llm_settings(settings):
         or resolved.max_retries < 0
     ):
         raise ValueError("max_retries must be a non-negative integer")
+    if resolved.action_transport not in ACTION_TRANSPORTS:
+        raise ValueError(f"action_transport must be one of {', '.join(ACTION_TRANSPORTS)}")
     return resolved
 
 
@@ -3996,6 +4174,7 @@ class _RunController:
             "api": meta.api,
             "model": meta.model,
             "capability_profile": capabilities.describe(),
+            "action_transport": meta.action_transport,
             "provider": meta.provider if meta.backend == "openrouter" else "",
             "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
             "allow_provider_fallbacks": meta.allow_fallbacks,
@@ -4735,6 +4914,11 @@ def _main(argv=None):
         "(default: LLM_CAPABILITY_PROFILE or generic-feature-scale-v1)",
     )
     parser.add_argument(
+        "--action-transport",
+        choices=ACTION_TRANSPORTS,
+        help="Executor action transport arm (default: LLM_ACTION_TRANSPORT or json)",
+    )
+    parser.add_argument(
         "--max-replans",
         type=_positive_int,
         default=MAX_REPLANS,
@@ -4792,6 +4976,11 @@ def _main(argv=None):
                 config.llm,
                 capability_profile=get_capability_profile(args.capability_profile),
             ),
+        )
+    if args.action_transport is not None:
+        config = _dataclass_replace(
+            config,
+            llm=_dataclass_replace(config.llm, action_transport=args.action_transport),
         )
     config = _dataclass_replace(
         config,

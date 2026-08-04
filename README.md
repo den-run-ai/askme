@@ -83,7 +83,7 @@ Full model/build/flag rationale and benchmark history:
 
 - **CLI** — `python3 askme.py [prompt] [--prompt-file F] [--working-dir D]
   [--result-json R] [--reasoning-policy P] [--capability-profile P]
-  [--max-replans/--max-tasks/--max-steps N]
+  [--action-transport T] [--max-replans/--max-tasks/--max-steps N]
   [--goal-context-chars N]`; exit code `0` exactly when the run completes.
 - **Python API** — `run_result(prompt, working_dir=None, config=None,
   dependencies=None)` returns the structured result (`status`, `state`, `log`,
