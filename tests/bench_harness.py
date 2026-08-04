@@ -279,7 +279,7 @@ def parse_log(log_path):
         "reasoning_effort": run_start.get("reasoning_effort", ""),
         "reasoning_policy": run_start.get("reasoning_policy", ""),
         "allow_provider_fallbacks": run_start.get("allow_provider_fallbacks"),
-        "require_provider_parameters": run_start.get("require_parameters"),
+        "require_provider_parameters": run_start.get("require_provider_parameters"),
         "capability_profile": (run_start.get("capability_profile") or {}).get("name", ""),
         "config_hash": run_start.get("config_hash", ""),
         "token_requested_models": token_requested_models,

@@ -425,7 +425,7 @@ def test_pinned_provider_must_match_every_observed_response(tmp_path, monkeypatc
                             "reasoning_effort": "",
                             "reasoning_policy": "gated",
                             "allow_provider_fallbacks": False,
-                            "require_parameters": True,
+                            "require_provider_parameters": True,
                             "capability_profile": {"name": "generic-feature-scale-v1"},
                             "config_hash": "c" * 16,
                         }
@@ -478,3 +478,82 @@ def test_pinned_provider_must_match_every_observed_response(tmp_path, monkeypatc
     assert result["route_valid"] == [False]
     assert result["served_provider_observed"] == [True]
     assert result["served_providers"] == [["OtherProvider"]]
+
+
+def test_truthful_openrouter_record_qualifies_pinned_cell(tmp_path, monkeypatch):
+    """A valid pinned-provider trial must qualify from the record askme writes.
+
+    Regression for the Codex P1 on PR #88: the harness read a nonexistent
+    ``require_parameters`` run_start key, so every OpenRouter cell failed the
+    provider-parameter identity check regardless of the actual configuration.
+    """
+
+    def run_trial(*args, **_kwargs):
+        args[3].write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "event": "run_start",
+                            "backend": "openrouter",
+                            "model": "requested/model",
+                            "provider": "siliconflow",
+                            "reasoning_effort": "",
+                            "reasoning_policy": "gated",
+                            "allow_provider_fallbacks": False,
+                            "require_provider_parameters": True,
+                            "capability_profile": {"name": "generic-feature-scale-v1"},
+                            "config_hash": "d" * 16,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "tokens",
+                            "requested_model": "requested/model",
+                            "served_model": "served/model",
+                            "served_model_source": "openrouter_metadata",
+                            "provider": "SiliconFlow",
+                            "usage_observed": True,
+                            "prompt": 1,
+                            "completion": 1,
+                        }
+                    ),
+                    json.dumps({"event": "run_end", "status": "complete", "wall_s": 1}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return True, 1.0, "", ""
+
+    monkeypatch.setattr(bench_harness, "run_single_test", run_trial)
+    monkeypatch.setattr(bench_harness, "git_state", lambda: ("0" * 40, False))
+
+    assert (
+        bench_harness.main(
+            [
+                "--backend",
+                "openrouter",
+                "--test",
+                "test_route",
+                "--trials",
+                "1",
+                "--model",
+                "requested/model",
+                "--provider",
+                "siliconflow",
+                "--expected-served-model",
+                "served/model",
+                "--log-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    result = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))["tests"][
+        "test_route"
+    ]
+    assert result["route_valid"] == [True]
+    assert result["contract_valid"] == [True]
+    assert result["valid_trials"] == 1
+    assert result["valid_passes"] == 1
