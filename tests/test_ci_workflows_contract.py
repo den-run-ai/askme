@@ -135,11 +135,27 @@ def test_llm_workflow_smoke_suite_selector_covers_every_suite():
 def test_llm_workflow_guards_against_silent_skips():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     # pytest reports skip reasons, and the smoke job asserts the agent
-    # actually logged run events.
+    # actually logged run events — per matrix model, and again after the loop.
     assert "-rs" in text
     assert 'ASKME_RUN_LIVE_LLM_TESTS: "1"' in text
     assert "-m live_llm" in text
-    assert "test -s llm-logs/smoke.jsonl" in text
+    assert 'test -s "llm-logs/smoke-$SLUG.jsonl"' in text
+    assert 'for f in llm-logs/smoke-*.jsonl; do test -s "$f"; done' in text
+
+
+def test_llm_workflow_smoke_supports_model_matrix():
+    """The smoke job runs the selected suite once per SMOKE_MODELS entry with
+    the model (and optional '@effort' baseline) exported per iteration, keeps
+    running after a model fails so the matrix yields complete evidence, and
+    fails the job at the end when any model failed."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    smoke, _ = _paid_job_sections(text)
+    assert "SMOKE_MODELS: ${{ inputs.smoke_models || 'google/gemma-4-26b-a4b-it' }}" in smoke
+    assert 'OPENROUTER_MODEL="$MODEL"' in smoke
+    assert 'OPENROUTER_REASONING_EFFORT="$EFFORT"' in smoke
+    assert 'AGENT_RUN_LOG="$GITHUB_WORKSPACE/llm-logs/smoke-$SLUG.jsonl"' in smoke
+    assert "FAILED_MODELS" in smoke
+    assert "exit 1" in smoke
 
 
 def test_llm_workflow_gates_bench_results():

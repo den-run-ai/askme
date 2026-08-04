@@ -198,8 +198,9 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
   as an environment secret. The key is scoped only to preflight and live-model
   execution steps. Runs on push to `main` touching agent/test/dependency code,
-  weekly on schedule, on manual dispatch (choose suite, models, provider,
-  trials), and on pull requests only when labeled `llm-tests` — the job guard
+  weekly on schedule, on manual dispatch (choose suite, smoke-model matrix,
+  Berkeley models, provider, trials), and on pull requests only when labeled
+  `llm-tests` — the job guard
   also requires the PR head branch to live in this repository, so labeled fork
   PRs are rejected before any credential is in scope.
 

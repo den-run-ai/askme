@@ -172,10 +172,12 @@ harness was built around.
    registered additively under the frozen protocol's versioning rules — a
    new phase and manifest, not a rewrite of Phase 1. Still proposed.
 4. **Hosted smoke on demand.** Landed as a dispatch choice: `llm.yml`'s
-   smoke job accepts `suite: web` (never hermetic `ci.yml`). Following the
-   E21 matrix pattern, pair hosted cells with `openai/gpt-oss-20b@low`
-   beside the `google/gemma-4-26b-a4b-it` control so the CI signal stays in
-   the same active-parameter class as the local E4B target.
+   smoke job accepts `suite: web` plus a `smoke_models` matrix — one full
+   suite per model per dispatch (never hermetic `ci.yml`). Following the
+   E21 matrix pattern, pair the `google/gemma-4-26b-a4b-it` control with
+   small-active-parameter peers (`openai/gpt-oss-20b@low`,
+   `qwen/qwen3.6-35b-a3b`) so the CI signal stays in the same
+   active-parameter class as the local E4B target.
 
 Pre-registration checklist before the first outcome-bearing run: budgets
 and prompts frozen (prompt within the goal-context cap), port ≠ 8080
