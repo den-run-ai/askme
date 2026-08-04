@@ -167,7 +167,8 @@ harness was built around.
 2. **T1 as opt-in live integration tests.** Landed: `TestWebLocal` and
    `TestOpenRouterWeb` in `tests/test_agent_integration.py` (marker
    `live_llm`, skip-by-default), selectable as the `web` suite in
-   `tests/bench_harness.py` for 3-trial medians.
+   `tests/bench_harness.py` for 3-trial medians — in CI via the
+   dispatch-only `web-bench-trials` job (`web_trials` ≥ 1 in `llm.yml`).
 3. **T1c as a new workflow fixture** (e.g. `tests/workflows/notes_health/`)
    registered additively under the frozen protocol's versioning rules — a
    new phase and manifest, not a rewrite of Phase 1. Still proposed.

@@ -204,8 +204,12 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   also requires the PR head branch to live in this repository, so labeled fork
   PRs are rejected before any credential is in scope.
 
-`llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
-by default) with automatic provider routing. The Berkeley job replays the two
+`llm.yml` has three jobs. The smoke job runs an OpenRouter pytest suite (easy
+by default) with automatic provider routing, once per model in the
+`smoke_models` matrix. The dispatch-only `web-bench-trials` job (opt-in via a
+nonzero `web_trials` input) benches every `web_models` × web-task cell that
+many times through `tests/bench_harness.py` for median+range evidence. The
+Berkeley job replays the two
 protocol cells from
 [the talk's eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
 — hard build + medium repair — per model through `tests/bench_harness.py`,
