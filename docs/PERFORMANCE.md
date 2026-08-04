@@ -15,6 +15,58 @@ exact base SHAs and other provenance limits.
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## E25 Transport A/B — 2026-08-04, Local (build 9618, E4B QAT Q4_0, legacy profile) — TOOLS NON-INFERIOR; JSON EXECUTOR PATH REMOVED
+
+Paired json-vs-tools executor-transport bench (issue #68 / E25): easy+medium
+suites, 3 trials each, `legacy-e4b-m1-16k-v1` profile, `--reasoning off`
+server flags, both arms from an isolated worktree at revision `d0c2826b`
+(clean tree; the arm selected per cell via `LLM_ACTION_TRANSPORT` and
+verified from every retained `run_start`). The hard suite was deliberately
+deferred (owner decision) — this comparison covers easy+medium only.
+
+| Test | json pytest | tools pytest | json wall med (range) | tools wall med (range) |
+|---|---|---|---|---|
+| `create_and_read_file` | 3/3 | 3/3 | 94.3s (44–281) | **74.6s (61–78)** |
+| `shell_and_write` | 3/3 | 3/3 | **19.5s** (19–44) | 33.0s (31–37) |
+| `multi_step_build` | 3/3 | 2/3 | 187.3s (79–269) | 140.8s (103–147) |
+| `fix_python_syntax_error` | 1/3 | 0/3 | 437.1s (306–578) | 344.2s (197–547) |
+| `fix_missing_include` | 3/3 | 1/3 | **23.2s** (22–31) | 105.9s (39–151) |
+| `create_missing_file_then_use` | 1/3 | 3/3 | 154.8s (44–800) | **58.3s (27–68)** |
+| **Total (pytest / agent-complete)** | **14/18 / 15/18** | **12/18 / 12/18** | — | — |
+
+**Findings.**
+
+1. **No transport-level failures.** All 36 trials were contract-valid; the
+   tools arm produced zero malformed, corrupted, or unparseable tool calls.
+   Every tools failure is one of the two documented QAT behavior classes
+   (E20/E07 dispositions): content drift on rewrites
+   (`fix_python_syntax_error`, bad on both arms — json 1/3, tools 0/3) and
+   done-emission loops. Both failed tools `fix_missing_include` trials
+   completed the work — compile fixed, binary built and ran — then exhausted
+   re-emitting the same successful shell instead of `done`; the stuck guard
+   and terminal exhaustion reported them correctly.
+2. **The classes redistributed, not multiplied.** Tools lost trials on
+   `fix_missing_include`/`multi_step_build` to done-emission loops; json lost
+   `create_missing_file_then_use` to the same class (one 800.3s exhaustion
+   spiral). Net −2 pytest for tools on n=18 against a baseline whose own
+   day-to-day swing on identical weights spans 22/27 (E23) to 14/18 (this
+   run) — inside run-to-run variance, and no new failure class.
+3. **Tools runs are tighter.** Worst tools wall 547s vs json 800s; tools took
+   the loop-prone `create_and_read_file` with zero retries/replans at a 61–78s
+   range where json spread 44–281s. Easy-suite decode overhead from grammar
+   constraint did not translate into materially worse totals.
+4. **Verdict (per the preregistered E25 rule + owner decision).** Non-inferior
+   on pass rate within variance, not materially slower, structurally simpler
+   (−249 lines, sentinel/repair/envelope machinery deleted) and
+   industry-aligned — the JSON executor transport was removed (interface
+   revision 6, workflow protocol revision 7). The done-emission loop class is
+   transport-independent and remains the sanctioned #31 lifecycle-arm target.
+
+Raw records: [tests/bench_records/2026-08-04/](../tests/bench_records/2026-08-04/)
+— per-arm summaries, per-trial JSONL, pytest diagnostics, and the provenance
+README (worktree isolation, one invalidated-and-rerun first attempt, deferred
+hard suite).
+
 ## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE UNDER THE E4B-FITTED CONTRACT
 
 E09 candidate trial of `google/gemma-4-12B-it-qat-q4_0-gguf` (6.98 GB,

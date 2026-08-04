@@ -1,0 +1,52 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (11233 earlier characters omitted):
+text('print("hello"\n')
+        result = int_run(
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+        assert result["status"] == "complete", (
+            f"Agent failed to self-correct. Errors: {result['state']['errors']}"
+        )
+        fixed_text = broken.read_text()
+        assert "print" in fixed_text, f"File was overwritten unexpectedly: {fixed_text[:200]}"
+>       assert_command_output(["python3", "greet.py"], tmp_path, "hello")
+
+tests/test_agent_integration.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+command = ['python3', 'greet.py']
+cwd = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-261/test_fix_python_syntax_error0')
+expected = 'hello'
+
+    def assert_command_output(command, cwd, expected):
+        """Run a deterministic postcondition command and verify its output."""
+        import subprocess
+    
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"Postcondition command failed ({result.returncode}): {result.stderr[:200]}"
+        )
+>       assert expected in result.stdout, (
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+            f"Expected '{expected}' in command output, got: {result.stdout[:200]}"
+        )
+E       AssertionError: Expected 'hello' in command output, got: Hello
+
+tests/_test_support.py:142: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationMedium::test_fix_python_syntax_error
+================= 1 failed, 22 deselected in 577.57s (0:09:37) =================
+
+stderr:
+(empty)
