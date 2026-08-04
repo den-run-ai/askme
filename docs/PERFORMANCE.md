@@ -64,8 +64,37 @@ deferred (owner decision) — this comparison covers easy+medium only.
 
 Raw records: [tests/bench_records/2026-08-04/](../tests/bench_records/2026-08-04/)
 — per-arm summaries, per-trial JSONL, pytest diagnostics, and the provenance
-README (worktree isolation, one invalidated-and-rerun first attempt, deferred
-hard suite).
+README (worktree isolation, one invalidated-and-rerun first attempt).
+
+**Hard-suite addendum (2026-08-04, run post-merge to close the deferred
+gap).** Both arms, same worktree at `d0c2826b`, 3 trials:
+
+| Test | json pytest | tools pytest | json wall med | tools wall med |
+|---|---|---|---|---|
+| `replan_build_with_dependency` | 1/3 (2× 1200s timeout) | 0/3 | 627.2s (1 valid) | 975.4s (1 honest; see below) |
+| `replan_fix_wrong_command` | 3/3 | 3/3 | 92.7s (55–139) | 222.0s (39–289) |
+| `replan_multi_step_recovery` | 3/3 | 3/3 | 177.2s (88–938) | 423.9s (339–503) |
+| **Hard total** | **7/9** | **6/9** | — | — |
+| **All-suite total (easy+medium+hard)** | **21/27** | **18/27** | — | — |
+
+Addendum findings: (1) **Neither arm reproduced E23's hard 9/9** — today's
+stack is materially worse on `build_with_dependency` for both transports
+(json needed two harness timeouts to salvage 1/3), so the E23 hard reference
+should not be cited as current until re-benched. (2) Two tools build walls
+(5791.9s, 16607.2s) are **infrastructure-corrupted**: agent-spawned commands
+hung and blocked the harness's 1200s subprocess kill via inherited pipes —
+975.4s is the only honest tools build wall, and the harness needs
+process-group cleanup before the next long bench. (3) All three tools build
+failures are one semantic loop — repeated `cc -o main main.c msg.h` (clang
+rejects the header as a second output) that E05 thinking escalation never
+broke; a recovery-policy gap, not a transport failure (every trial remained
+contract-valid with zero malformed tool calls, hard included). (4) One
+`multi_step_recovery` tools trial passed pytest while ending `exhausted` —
+the done-emission class again. The all-suite gap (18/27 vs 21/27) stays
+within the same two-plus-one known behavior classes; the shipped
+non-inferiority verdict stands on pass-rate shape, but hard is tools'
+weakest suite and the `cc` recovery loop is a concrete new data point for
+the #31 lifecycle / recovery-policy arms.
 
 ## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE UNDER THE E4B-FITTED CONTRACT
 
