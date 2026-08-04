@@ -1,8 +1,12 @@
 # Showcase tasks for small local LLMs — proposal
 
-Status: proposal (2026-08-04, drafted for the issue #85 release preparation).
-No outcome-bearing model run has been made against any task below; every
-number here is a design budget or a qualification requirement, not a result.
+Status: T1 implemented as the opt-in `web` suite (2026-08-04, issue #85
+release preparation) — offline fixture qualification in
+`tests/test_webapp_showcase.py`, live tests in `TestWebLocal` /
+`TestOpenRouterWeb` (`tests/test_agent_integration.py`), suite wiring in
+`tests/bench_harness.py` and the `llm.yml` smoke job. T2–T4 remain
+proposals. This document records no model outcomes; a single CI run of the
+suite is a health check, not a result.
 
 ## Why a new task family
 
@@ -155,21 +159,23 @@ harness was built around.
 
 ## Landing path
 
-1. **Offline qualification first (no model calls).** Same-author reference
-   implementations for T1a/T1b/T1c that pass on Python 3.10–3.14; for T1c,
-   the no-op seed must pass regression while failing visible feedback and
-   held-out acceptance, per protocol qualification rules.
-2. **T1a/T1b as opt-in live integration tests** (a new `live_llm` class in
-   `tests/test_agent_integration.py`), which `bench_harness.py` then
-   discovers automatically for 3-trial medians.
+1. **Offline qualification first (no model calls).** Landed:
+   `tests/test_webapp_showcase.py` runs the gold and no-op controls
+   deterministically on every CI Python — the reference implementations
+   pass held-out acceptance, the T1c seed fails both visible feedback and
+   acceptance, and the intended one-value fix flips it to passing.
+2. **T1 as opt-in live integration tests.** Landed: `TestWebLocal` and
+   `TestOpenRouterWeb` in `tests/test_agent_integration.py` (marker
+   `live_llm`, skip-by-default), selectable as the `web` suite in
+   `tests/bench_harness.py` for 3-trial medians.
 3. **T1c as a new workflow fixture** (e.g. `tests/workflows/notes_health/`)
    registered additively under the frozen protocol's versioning rules — a
-   new phase and manifest, not a rewrite of Phase 1.
-4. **Optional hosted smoke**: add the family to `llm.yml` manual-dispatch
-   suites only, never into hermetic `ci.yml`. Following the E21 matrix
-   pattern, run hosted cells as `openai/gpt-oss-20b@low` beside the
-   `google/gemma-4-26b-a4b-it` control so the CI signal stays in the same
-   active-parameter class as the local E4B target.
+   new phase and manifest, not a rewrite of Phase 1. Still proposed.
+4. **Hosted smoke on demand.** Landed as a dispatch choice: `llm.yml`'s
+   smoke job accepts `suite: web` (never hermetic `ci.yml`). Following the
+   E21 matrix pattern, pair hosted cells with `openai/gpt-oss-20b@low`
+   beside the `google/gemma-4-26b-a4b-it` control so the CI signal stays in
+   the same active-parameter class as the local E4B target.
 
 Pre-registration checklist before the first outcome-bearing run: budgets
 and prompts frozen (prompt within the goal-context cap), port ≠ 8080

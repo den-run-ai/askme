@@ -8,12 +8,20 @@ from _test_support import (
     MED_MAX_REPLANS,
     MED_MAX_STEPS,
     MED_MAX_TASKS,
+    WEB_GOAL_CONTEXT_CHARS,
+    WEBAPP_SEED_APP,
+    WEBAPP_SEED_TEST,
     assert_command_output,
     assert_executable_output,
     assert_file,
+    assert_notes_service,
+    assert_status_service,
     int_run,
     log,
     or_run,
+    webapp_notes_prompt,
+    webapp_repair_prompt,
+    webapp_status_prompt,
 )
 from conftest import skip_no_llm, skip_no_openrouter
 
@@ -175,6 +183,66 @@ class TestIntegrationHard:
             )
 
 
+# --- Showcase web-app tasks, local backend (docs/showcase-tasks.md) ---
+
+
+@skip_no_llm
+class TestWebLocal:
+    """Loopback micro-services built and proven end-to-end (T1 family).
+
+    Held-out acceptance relaunches app.py on a fresh ephemeral port the agent
+    never saw, so agent-reported completion never stands in for behavior.
+    Fixture qualification is deterministic in tests/test_webapp_showcase.py.
+    """
+
+    def test_webapp_build_status_service(self, tmp_path):
+        """T1a: build a status service plus its self-terminating smoke test."""
+        result = int_run(
+            webapp_status_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_file(tmp_path / "app.py", "MICRO_OK")
+        assert_file(tmp_path / "test_app.py", "WEBAPP_OK")
+        assert_status_service(tmp_path)
+
+    def test_webapp_notes_round_trip(self, tmp_path):
+        """T1b: build a notes service whose deliverable has state over time."""
+        result = int_run(
+            webapp_notes_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_file(tmp_path / "app.py", "/notes")
+        assert_file(tmp_path / "test_app.py", "NOTES_OK")
+        assert_notes_service(tmp_path)
+
+    def test_webapp_fix_failing_health_check(self, tmp_path):
+        """T1c: repair the seeded service until its protected test passes."""
+        (tmp_path / "app.py").write_text(WEBAPP_SEED_APP)
+        (tmp_path / "test_app.py").write_text(WEBAPP_SEED_TEST)
+        result = int_run(
+            webapp_repair_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+        assert (tmp_path / "test_app.py").read_text() == WEBAPP_SEED_TEST, (
+            "protected test_app.py was modified"
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_status_service(tmp_path)
+
+
 # --- OpenRouter integration tests (gemma-4-26b-a4b via Parasail/bf16) ---
 
 
@@ -304,6 +372,62 @@ class TestOpenRouterHard:
             max_steps=HARD_MAX_STEPS,
         )
         assert_file(tmp_path / "config.json", "SUCCESS")
+
+
+# --- Showcase web-app tasks via OpenRouter (docs/showcase-tasks.md) ---
+
+
+@skip_no_openrouter
+class TestOpenRouterWeb:
+    """T1 loopback micro-service tasks on the configured OpenRouter model.
+
+    Same prompts, budgets, and held-out acceptance as TestWebLocal; this is
+    the `web` suite the llm.yml smoke job and bench_harness can select.
+    """
+
+    def test_webapp_build_status_service(self, tmp_path):
+        result = or_run(
+            webapp_status_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_file(tmp_path / "app.py", "MICRO_OK")
+        assert_file(tmp_path / "test_app.py", "WEBAPP_OK")
+        assert_status_service(tmp_path)
+
+    def test_webapp_notes_round_trip(self, tmp_path):
+        result = or_run(
+            webapp_notes_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_file(tmp_path / "app.py", "/notes")
+        assert_file(tmp_path / "test_app.py", "NOTES_OK")
+        assert_notes_service(tmp_path)
+
+    def test_webapp_fix_failing_health_check(self, tmp_path):
+        (tmp_path / "app.py").write_text(WEBAPP_SEED_APP)
+        (tmp_path / "test_app.py").write_text(WEBAPP_SEED_TEST)
+        result = or_run(
+            webapp_repair_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+        assert (tmp_path / "test_app.py").read_text() == WEBAPP_SEED_TEST, (
+            "protected test_app.py was modified"
+        )
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+        assert_status_service(tmp_path)
 
 
 # --- Planner reasoning integration tests ---

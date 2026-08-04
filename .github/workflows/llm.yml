@@ -20,7 +20,7 @@ on:
       suite:
         description: Pytest suite for the smoke job
         type: choice
-        options: [easy, medium, hard]
+        options: [easy, medium, hard, web]
         default: easy
       models:
         description: >-
@@ -99,6 +99,7 @@ jobs:
             easy)   K="TestOpenRouterEasy" ;;
             medium) K="TestOpenRouterMedium" ;;
             hard)   K="TestOpenRouterHard" ;;
+            web)    K="TestOpenRouterWeb" ;;
             *) echo "unknown suite: $SUITE" >&2; exit 1 ;;
           esac
           uv run --locked pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"

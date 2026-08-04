@@ -118,6 +118,20 @@ def test_llm_workflow_preflights_before_spending():
     )
 
 
+def test_llm_workflow_smoke_suite_selector_covers_every_suite():
+    """The dispatch suite choices and the -k mapping must stay in step; a
+    choice without a case branch would exit 1 after the credential preflight."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    assert "options: [easy, medium, hard, web]" in text
+    for class_name in (
+        "TestOpenRouterEasy",
+        "TestOpenRouterMedium",
+        "TestOpenRouterHard",
+        "TestOpenRouterWeb",
+    ):
+        assert f'K="{class_name}"' in text
+
+
 def test_llm_workflow_guards_against_silent_skips():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     # pytest reports skip reasons, and the smoke job asserts the agent

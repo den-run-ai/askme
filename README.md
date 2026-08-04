@@ -156,6 +156,10 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.p
 # Integration — OpenRouter (requires OPENROUTER_API_KEY in .env)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 
+# Integration — showcase web-app tasks (docs/showcase-tasks.md)
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestWebLocal"
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterWeb"
+
 # Multi-trial benchmark harness (reports median + range across N trials)
 uv run --locked python tests/bench_harness.py          # 3 trials, easy, local
 uv run --locked python tests/bench_harness.py --list   # available tests; --help for suites, backends, model/provider pins
