@@ -46,7 +46,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 10  | E18 | Deterministic compile-repair templates                  | 3    | P1       | M      | done     |
 | 11  | E04 | Deterministic `search` action (ripgrep)                 | 3    | P1       | M      | done     |
 | 12  | E20 | Auto-done after consecutive duplicate-edit skip         | 3    | P1       | S      | removed  |
-| 13  | E09 | Model-swap trials: 12B QAT, Q8_0 (QAT Q4_0 done in E23) | 3    | P1       | S      | planned  |
+| 13  | E09 | Model-swap trials: 12B QAT (negative), Q8_0 remaining   | 3    | P2       | S      | partial  |
 | 14  | E12 | Split planner vs executor retry budgets                 | 4    | P2       | S      | planned  |
 | 15  | E15 | Command-family timeout ladder                           | 4    | P2       | S      | planned  |
 | 16  | E19 | Capped low-reasoning task-local replan A/B              | 4    | P2       | S      | planned  |
@@ -345,8 +345,8 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Hypothesis.** Better weights reduce the root-cause bad-JSON/bad-edit rate; model quality is the lever the scaffold can't reach.
 - **Evidence (2026-08-03, E23).** Candidate 1 (official E4B QAT Q4_0) is done and promoted to primary: `fix_missing_include` 609s → 15.7s, hard 9/9 at −38–66% wall, thinking retries near-zero. The pre-QAT evidence line ("bad edit JSON ~60% of first attempts") no longer describes the primary model — remaining candidates are quality plays, benchmarked against the E23 reference.
 - **Candidates.**
-  1. **Gemma 4 12B Unified QAT** ([google/gemma-4-12B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf), ~6.98 GB) — strongest quality candidate that fits 16 GB; dense, so decode will be slower than E4B. Test at 16K ctx, q4_0 KV, no projector.
-  2. **E4B Q8_0** (~8 GB) — original candidate, now behind 12B QAT.
+  1. **Gemma 4 12B Unified QAT** — **DONE, NEGATIVE (2026-08-03).** 3.6–35× slower than E4B QAT with *worse* reliability (6–8 thinking retries/trial — the ~192-token JSON action contract fits its output style poorly, compounding the dense-decode tax); easy 6/9, medium partial with 2/3 exhaustion on `fix_python_syntax_error`. Ruled out for the agent loop on 16 GB M1. See [PERFORMANCE.md E09 12B entry](PERFORMANCE.md#e09-12b-qat-trial--2026-08-03-local-build-9618-gemma-4-12b-unified-qat-q4_0--negative). Scaffold caveat recorded there (post-rebase scaffold vs pre-rebase E23 reference).
+  2. **E4B Q8_0** (~8 GB) — remaining candidate, repriced **down**: the 12B result shows raw model quality does not convert to agent reliability under the action contract on this hardware. Same-model higher precision is a different bet (fewer bad tokens, same style), but expectations are now modest.
 - **Change.** For each candidate: download, launch with the E23-validated flags (`--reasoning off`, MTP off), run easy + medium under E01's harness, compare against the E23 reference.
 - **Metric.** Parse-retry count, edit-failure rate, done-emission-loop rate, content-drift incidents, agent_complete rate, total test time; decode tok/s as a guard metric (especially for 12B).
 - **Risk.** Low. Model swaps revert trivially. For 12B: decode-speed regression may outweigh quality gains for the agent loop — measure both axes.

@@ -10,6 +10,31 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE
+
+E09 candidate trial of `google/gemma-4-12B-it-qat-q4_0-gguf` (6.98 GB, dense 12B) with the same flags as the E23 reference (`--reasoning off`, q4_0 KV, `--swa-full --cache-reuse 256`, MTP off). **Scaffold caveat:** this ran on post-rebase main (issue #68 completion semantics, revision-4 write pressure, uv-locked pytest 9), while the E23 E4B numbers are from the pre-rebase tree — a cross-scaffold comparison. The observed magnitudes far exceed any plausible scaffold delta.
+
+The run was **stopped externally partway through medium** (easy complete, medium partial), but the pre-registered decision rule — within ~2× of E4B QAT wall time and both failure classes cleared — was already decisively failed at the easy tier.
+
+### Easy (3 trials each, vs E23 E4B QAT reference)
+
+| Test | Pass | Wall (median) | E4B QAT | Think retries/trial | Notes |
+|---|---|---|---|---|---|
+| `create_and_read_file` | 2/3 | 268.3s (138.1–374.2) | 95.5s | 3–4 | 1 exhausted |
+| `shell_and_write` | 3/3 | 66.4s (34.5–83.6) | 15.8s | 0–1 | clean but 4.2× slower — near-pure decode/prompt-eval tax |
+| `multi_step_build` | **1/3** | 202.1s (181.1–215.7) | 43.8s | **6–8** | 2 exhausted; heavy parse-retry churn |
+
+Easy totals: 1568s vs 437s (**3.6×**), pytest 6/9 vs 7/9.
+
+### Medium (partial — run stopped during trial set)
+
+- `fix_python_syntax_error`: exhausted 270.3s / exhausted 482.0s / complete 222.8s (E4B QAT: complete 3/3 at 43.8s median).
+- `fix_missing_include` trial 1: complete at **545.8s** (E4B QAT: 15.7s — **35×**).
+
+### Verdict
+
+**12B QAT is ruled out as the agent model on this 16 GB M1.** The quality advantage never materializes as agent reliability: 6–8 thinking retries per trial indicate the ~192-token JSON action contract fits 12B's output style poorly, so it pays the parse-retry tax *on top of* ~2.5× slower dense decode — compounding to 3.6–35× wall time with *more* exhaustion, not less. Neither E23 failure class is cleared (done-emission-style exhaustion recurs; content drift untested — suite stopped first). **E4B QAT Q4_0 remains primary.** 12B stays viable as an interactive-quality model on this hardware, not for the agent loop. Logs: `/tmp/bench_12b_{easy,medium}_20260803/`.
+
 ## E23 QAT Baseline — 2026-08-03, Local (build 9618, official E4B QAT Q4_0)
 
 First local benchmark on the current stack (E23): build 9618 `c34b92235`, official post-refresh **QAT Q4_0** (`google/gemma-4-E4B-it-qat-q4_0-gguf`, 5.15 GB, downloaded 2026-08-03), flags per gemma4-setup.md incl. `--reasoning off`, MTP off, default (heuristic) step policy. 3 trials per test via `bench_harness.py`. Logs: `/tmp/bench_qat_{easy,medium,hard}_20260803/`.
