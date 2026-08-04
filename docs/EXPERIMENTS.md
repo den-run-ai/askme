@@ -147,9 +147,10 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   3. On final auto-retry (attempt 2), a strict JSON-only instruction is appended to messages.
 - **Result (2026-04-27).** Done. 197/197 unit tests pass (16 new: 10 `TestJsonRepair` + 6 `TestTieredRetryContract`). No upstream fix available — `--json-schema` is broken for Gemma 4 ([#22396](https://github.com/ggml-org/llama.cpp/issues/22396)), grammar+reasoning coexistence has no upstream solution ([#12276](https://github.com/ggml-org/llama.cpp/issues/12276)). Client-side repair is the correct approach.
 - **Follow-up gap (2026-05-03, experience.md Run 4).** `_repair_json` can structurally close truncated JSON but strip a required field (`content` for `write` actions). Run 4 wrote `cli.py` with empty content because repair closed the brace around a truncated `content` key. Fix: `_repair_json` should return `None` (let retry escalate) when a required field for the action type is missing. Required fields: `write` → `content`, `edit` → `find`+`replace`, `shell` → `arg`.
+- **Follow-up closed (2026-08-03, PR #82).** Repair is now semantics-preserving: `_repair_json` returns `None` rather than dropping or defaulting an action field, required fields come from `ACTION_SPECS`, and a malformed required field retries or fails closed. Matches the 2026-05-03 wave note above; this entry previously still described the gap as open.
 - **Code.** `askme.py:205` (`_repair_json`), `askme.py:228` (`_STRICT_JSON_SUFFIX`), `askme.py:231` (`ask_llm` — retry ladder + repair).
 - **Effort.** S.
-- **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness. Follow-up fix for required-field validation not yet implemented.
+- **Status.** Done (2026-04-27). Pending integration benchmark via E01 harness. Required-field follow-up closed by PR #82 (2026-08-03).
 - **Upstream status (2026-08-03).** [#22396](https://github.com/ggml-org/llama.cpp/issues/22396) was stale-closed 2026-07-05 without a fix (a re-regression was reported 2026-05-20 on builds 9244/9253 and got no response). Client-side repair confirmed as the durable approach. Master's grammar/PEG overhaul (#24869/#24839/#24835, post-b9618) is worth a `--json-schema` retest after any rebuild.
 
 ## Tools / action model
@@ -477,7 +478,7 @@ Moved to [Archived / rejected](#archived--rejected).
 
 ## References
 
-- [experience.md](experience.md) — qualitative findings from 7 live runs as subagent (2026-04-26/27).
+- experience.md — qualitative findings from 7 live runs as subagent (2026-04-26/27). Not in the current tree: the file predates the 2026-07-11 history squash and is retained only at the repository root on the `archive/main-pre-pr1-squash-20260711` branch (commit `7449777`). The findings cited inline above (Runs 4 and 6 especially) are summarized where referenced.
 - [PERFORMANCE.md](PERFORMANCE.md) — benchmark history; completed experiments land here.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — design decisions + current constraints.
 - [gemma4-setup.md](gemma4-setup.md) — server config; runtime experiments (E08, E09) land here.
