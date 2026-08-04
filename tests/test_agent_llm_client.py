@@ -445,6 +445,27 @@ class TestLLMSettings:
         with pytest.raises(ValueError, match="step_tokens"):
             CapabilityProfile(name="bad", step_tokens=0, step_write_tokens=1)
 
+    @pytest.mark.parametrize("name", ["", "   ", None])
+    def test_profile_rejects_blank_name(self, name):
+        with pytest.raises(ValueError, match="name must be non-empty"):
+            CapabilityProfile(name=name, step_tokens=1, step_write_tokens=1)
+
+    @pytest.mark.parametrize("field_name", ["context_window", "server_slots"])
+    @pytest.mark.parametrize("value", [0, -1, True, "16384"])
+    def test_profile_rejects_invalid_declared_topology(self, field_name, value):
+        with pytest.raises(ValueError, match=f"{field_name} must be a positive integer or None"):
+            CapabilityProfile(name="bad", step_tokens=1, step_write_tokens=1, **{field_name: value})
+
+    @pytest.mark.parametrize(
+        "floors",
+        [(1024, 1536), (1024, 1536, 0), (1024, 1536, "2048"), [1024, 1536, 2048]],
+    )
+    def test_profile_rejects_invalid_reasoning_floors(self, floors):
+        with pytest.raises(ValueError, match="reasoning_token_floors"):
+            CapabilityProfile(
+                name="bad", step_tokens=1, step_write_tokens=1, reasoning_token_floors=floors
+            )
+
     def test_from_env_rejects_bad_effort(self):
         with pytest.raises(ValueError, match="OPENROUTER_REASONING_EFFORT"):
             LLMSettings.from_env(env={"OPENROUTER_REASONING_EFFORT": "max"})
@@ -506,6 +527,24 @@ class TestLLMSettings:
             REASONING_TOKEN_FLOORS=selected_profile.reasoning_token_floors,
         ):
             assert LLMSettings.current().resolved_capability_profile() == selected_profile
+
+    def test_current_keeps_patched_unknown_profile_name_with_default_topology(self):
+        import_profile = get_capability_profile("legacy-e4b-m1-16k-v1")
+        with patch.multiple(
+            askme,
+            _DEFAULT_CAPABILITY_PROFILE=import_profile,
+            CAPABILITY_PROFILE="experiment-arm-v0",
+            STEP_TOKENS=111,
+            STEP_WRITE_TOKENS=222,
+        ):
+            profile = LLMSettings.current().resolved_capability_profile()
+        assert profile.name == "experiment-arm-v0"
+        assert profile.step_tokens == 111
+        assert profile.step_write_tokens == 222
+        # An unknown name is not a built-in selection; declared topology
+        # falls back to the import-time default profile's claims.
+        assert profile.context_window == import_profile.context_window
+        assert profile.server_slots == import_profile.server_slots
 
     def test_module_mirrors_match_the_one_derivation(self):
         s = askme._DEFAULT_LLM_SETTINGS
