@@ -60,12 +60,21 @@ class TestActionRegistry:
             else:
                 assert callable(spec.handler)
 
-    def test_system_step_action_list_derives_from_the_registry(self):
-        """The executor prompt's action list is rendered from ACTION_SPECS,
-        byte-identical to the historical literal."""
-        assert f"Actions: {', '.join(askme.ACTION_SPECS)}." in askme.SYSTEM_STEP
-        assert "Actions: shell, write, edit, read, search, tree, done, fail." in askme.SYSTEM_STEP
-        assert "__ACTION_NAMES__" not in askme.SYSTEM_STEP
+    def test_tool_definitions_derive_from_the_registry(self):
+        """The executor's model-visible action surface is the tool list,
+        rendered one-to-one from ACTION_SPECS (the prompt no longer carries
+        an action list — the tools parameter does)."""
+        assert [t["function"]["name"] for t in askme._ACTION_TOOLS] == list(askme.ACTION_SPECS)
+        assert [t["function"]["name"] for t in askme._ACTION_TOOLS] == [
+            "shell",
+            "write",
+            "edit",
+            "read",
+            "search",
+            "tree",
+            "done",
+            "fail",
+        ]
 
     def test_specs_drive_the_decode_contract(self):
         """Blanking any registry-required field must fail decode validation."""

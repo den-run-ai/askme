@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from _test_support import mock_response
+from _test_support import mock_llm_response
 
 import askme
 from actions import ActionExecutor, ActionResult
@@ -106,7 +106,7 @@ def _scripted_post(transcript, replies):
                 "authorization": (headers or {}).get("Authorization", ""),
             }
         )
-        return mock_response(remaining.pop(0))
+        return mock_llm_response(remaining.pop(0))
 
     return post
 
@@ -388,7 +388,7 @@ class TestInjectedDependencies:
         lines = []
         events = []
         usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
-        responses = [mock_response(reply, usage=usage) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply, usage=usage) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             result = run_result(
                 "greet",
@@ -680,7 +680,7 @@ class TestCliResultJsonContract:
         workspace = tmp_path / "ws"
         workspace.mkdir()
         result_file, argv = self._cli(tmp_path, "greet", "--working-dir", str(workspace))
-        responses = [mock_response(reply) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)
         assert exit_code == 0
@@ -693,7 +693,7 @@ class TestCliResultJsonContract:
 
     def test_success_with_temporary_workspace(self, tmp_path):
         result_file, argv = self._cli(tmp_path, "greet")
-        responses = [mock_response(reply) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)
         assert exit_code == 0
@@ -721,9 +721,9 @@ class TestCliResultJsonContract:
             "1",
         )
         responses = [
-            mock_response({"tasks": ["work"]}),
-            mock_response({"action": "fail", "reasoning": "cannot"}),
-            mock_response({"task": ""}),  # task-local replan rejected: empty
+            mock_llm_response({"tasks": ["work"]}),
+            mock_llm_response({"action": "fail", "reasoning": "cannot"}),
+            mock_llm_response({"task": ""}),  # task-local replan rejected: empty
         ]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)

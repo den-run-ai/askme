@@ -54,7 +54,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 17  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
 | 18  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
 | —   | E24 | MTP A/B on E4B (gated on upstream Metal fixes)          | 4    | P2       | S      | planned  |
-| —   | E25 | Native tool-call action transport arm (issue #68)       | 4    | P1       | M      | wired    |
+| —   | E25 | Native tool-call action transport arm (issue #68)       | 4    | P1       | M      | done     |
 | 19  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
@@ -223,11 +223,27 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** Low while opt-in: the default arm is untouched and both arms are
   deterministic-tested. The known model-side metadata bug and the empty-reply
   edge are recorded above and must be re-checked on any GGUF or build change.
-- **Code.** `askme.py` (`ACTION_TRANSPORTS`, `_action_tools`,
-  `SYSTEM_STEP_TOOLS`, `_decode_tool_call_reply`, request shaping),
+- **Code.** `askme.py` (`_action_tools`, `SYSTEM_STEP`,
+  `_decode_tool_call_reply`, request shaping),
   `tests/test_agent_tool_transport.py`.
-- **Effort.** M (wiring done; paired bench pending).
-- **Status.** Wired (2026-08-04); default flip gated on the paired bench.
+- **Result (2026-08-04).** Paired easy+medium bench (3 trials/arm, legacy
+  profile, isolated worktree at `d0c2826b`; hard deferred by owner decision):
+  json 14/18 pytest / 15/18 agent-complete, tools 12/18 / 12/18 — the gap is
+  two trials on n=18 against a baseline whose same-weights swing spans 22/27
+  (E23) to 14/18 (this run). All 36 trials contract-valid; the tools arm
+  produced zero malformed tool calls, and every tools failure is one of the
+  two documented QAT classes (content drift; done-emission loops after
+  completed work — both failed `fix_missing_include` trials had the fix
+  landed and the binary running before exhausting without `done`). Tools took
+  the loop-prone `create_missing_file_then_use` 3/3 (json 1/3 with an 800s
+  spiral) with tighter walls throughout. Full table:
+  [PERFORMANCE.md E25 entry](PERFORMANCE.md#e25-transport-ab--2026-08-04-local-build-9618-e4b-qat-q4_0-legacy-profile--tools-non-inferior-json-executor-path-removed);
+  records: `tests/bench_records/2026-08-04/`.
+- **Status.** Done (2026-08-04). Verdict: non-inferior within variance, not
+  materially slower, structurally simpler — the JSON executor transport and
+  sentinel salvage were removed the same day (interface revision 6, workflow
+  protocol revision 7). The done-emission class is transport-independent;
+  its sanctioned lever remains the #31 lifecycle arm.
 
 ### E15 — Command-family timeout ladder
 

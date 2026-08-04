@@ -1,0 +1,43 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (5026 earlier characters omitted):
+2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-282/test_fix_missing_include0
+FAILED
+
+=================================== FAILURES ===================================
+________________ TestIntegrationMedium.test_fix_missing_include ________________
+
+self = <test_agent_integration.TestIntegrationMedium object at 0x106ffb2c0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-282/test_fix_missing_include0')
+
+    def test_fix_missing_include(self, tmp_path):
+        """LLM compiles a C file missing #include <stdio.h>, fixes it, compiles again."""
+        broken_c = tmp_path / "fix_me.c"
+        broken_c.write_text('int main() { printf("FIXED\\n"); return 0; }\n')
+        result = int_run(
+            f"Compile {broken_c} with 'cc -o {tmp_path}/fix_me {broken_c}'. "
+            f"It will fail because stdio.h is not included. "
+            f"Read the error, add '#include <stdio.h>' to {broken_c}, compile again, then run {tmp_path}/fix_me.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+        fixed_text = broken_c.read_text()
+        assert "stdio.h" in fixed_text, (
+            f"Expected #include <stdio.h> in fixed file, got: {fixed_text[:200]}"
+        )
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: ['[stuck_loop] shell /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pyt: same successful command repeated']
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:97: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationMedium::test_fix_missing_include
+================= 1 failed, 22 deselected in 105.95s (0:01:45) =================
+
+stderr:
+(empty)

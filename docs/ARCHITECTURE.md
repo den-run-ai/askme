@@ -141,8 +141,9 @@ Internally the provider call is split into client seams (issue #37, first
 extraction): a pure per-attempt reasoning decision, a backend-specific request
 builder, a one-shot transport step that only classifies its outcome
 (`transport`/`http_retryable`/`http_fatal`/`non_json`), and a pure reply
-decoder owning reasoning/fence stripping, sentinel content, JSON
-extraction/semantics-preserving repair, and typed action parsing. `ask_llm(...)` remains the
+decoder per response family: native tool-call decoding for executor actions,
+and reasoning/fence stripping with JSON extraction/semantics-preserving
+repair for planner, task-replan, and validation text replies. `ask_llm(...)` remains the
 compatibility facade and still owns retry/backoff policy, the parse-retry
 budget escalation, and the typed errors callers see; its signature, defaults,
 and error contract are unchanged. Per-run immutable configuration and
@@ -164,7 +165,7 @@ callbacks because those paths make no model call.
 | Action | Purpose | Notes |
 |---|---|---|
 | `shell` | Run command with timeout | Command-aware timeouts (`SHELL_TIMEOUT`, `SHELL_TIMEOUT_LONG` for install/build, `SHELL_TIMEOUT_MAX` hard cap) |
-| `write` | Create or replace a whole file | Atomic (temp file + rename). An explicitly present empty string creates a zero-byte file. Dict/list content remains supported and auto-serializes to JSON. `append` must be a JSON boolean; `"append": true` appends one chunk. Content may instead travel between sentinel lines after the action JSON — the two forms are mutually exclusive |
+| `write` | Create or replace a whole file | Atomic (temp file + rename). An explicitly present empty string creates a zero-byte file. Dict/list content remains supported and auto-serializes to JSON. `append` must be a JSON boolean; `"append": true` appends one chunk |
 | `edit` | Exact single-match string replacement | For localized changes. Fails on zero or multiple matches. Atomic write |
 | `read` | Lossless paged read of a UTF-8 file | Initial requests use `offset`/`limit` (1-based lines). Every successful read carries exact page text in `content`; a successful page with unread source returns an action-ready `continuation` with a 0-based Unicode-code-point `cursor`, normalized `limit`, source `sha256`, and informational next-line `offset`. The next action must echo the cursor, limit, and hash; cursors at or beyond `total_chars` are invalid because generated continuations always point to unread content. Line terminators are preserved, `READ_CHARS` counts code points (not UTF-8 bytes or grapheme clusters), and a changed source rejects the stale cursor. `total_lines`/`total_chars`/`total_bytes`/`sha256` hash-link each page and its run-log record |
 | `search` | Bounded literal search | `arg` = literal pattern, optional `path` (default `.`). Skips VCS/dependency/hidden/binary files; caps matches and chars; suggests narrowing when capped |
@@ -181,6 +182,28 @@ Interface revision 3 (issue #15) adds a sentinel-framed content transport: `writ
 Interface revision 4 responds to the rewrite loop observed in the 2026-08-01 v6 canary under the bundled revision-3 changes and a changed serving stack: Gemma rewrote one file 18 times without running the delivered tests or emitting `done`. After `REWRITE_PRESSURE_WRITES` consecutive successful full writes of the same target with no intervening successful `shell`/`edit`, the step prompt requires a shell action, a targeted edit, or `done`; from `REWRITE_SKIP_WRITES` on, further full rewrites of that target are skipped (`rewrite_loop`) with a corrective hint. Observations do not reset the streak; a successful shell or targeted fix does. Any truncated write, including an empty or append attempt, clears the streak so the instructed clean restart cannot be blocked; ordinary appends are exempt from counting but do not clear an armed streak. Replan state distinguishes `unvalidated_write` (a complete mutation with no later successful shell) from `incomplete_write` (any target still has a truncated write not followed by a complete write/append to that same target). `incomplete_write_target` preserves the canonical actionable target across leaf- or working-directory-symlink retargets, and `incomplete_write_append_allowed` records whether append recovery is safe; both fields remain structured on every executor turn, including task-local retries. That exact target is the narrow exception to the usual relative-path rule. Empty-overwrite retries retain every observed referent guard, restrictive overwrite recovery is surfaced before a blocked append, and appending through an older physical alias cannot mutate stale content. Edits and shells cannot reconstruct a missing suffix; unresolved incomplete state blocks `done`, and step exhaustion is terminal — the former deterministic reconciliation of an exhausted run to `complete` from a trailing successful shell is removed (issue #68). `no_write_executed`, `unvalidated_write`, and task-local `failed_steps` use the current task's slice even when it is empty, so zero-dispatch failures do not leak prior-task progress; incomplete artifacts remain visible run-wide across replacement tasks, including zero-byte pending truncations. Empty task lists are rejected as malformed plans, and a failed final validation cannot be bypassed by a recovery without new successful write, edit, or shell evidence. The same revision folds in the three post-merge Codex P2 fixes from PR #16: `commit_executed` counts only successful mutations, write intent is classified from the failed task rather than the whole request, and `_WRITE_TASK_RE` drops passive-prone `include` plus exempts tasks led by an observation verb (`_is_write_shaped`). A future explicit inspect → modify → verify → finish controller is tracked separately in issue #31; revision 4 does not prove that a successful shell was targeted verification.
 
 Interface revision 5 fixes the ranged-read reconstruction defect tracked by issue #30. Revision 2 selected a line window, clipped its rendered body at 1,200 characters, then advanced continuation from the unclipped line endpoint; this could skip unseen suffixes or return no continuation for one oversized line. Revision 5 pages the exact decoded UTF-8 source with a source-hash-bound Unicode-code-point cursor, preserves line terminators, returns page text separately from the display header, and makes the duplicate-read identity include initial line limits or continuation cursor/limit/hash fields. It also makes bounded `search`/`tree` omissions explicit rather than returning definitive-looking incomplete discovery results. Historical v4/v6 canaries retain their original interface attribution; this repair does not retroactively strengthen those outcomes.
+
+Interface revision 6 (issue #68, 2026-08-04) replaces the executor's JSON
+envelope-in-text transport with native tool calling. Every action request
+carries OpenAI-style tool definitions derived one-to-one from `ACTION_SPECS`
+with `tool_choice: "auto"` (`"required"` corrupted native Gemma 4 string
+delimiters into argument text on llama.cpp b9618's PEG parser and is
+deliberately not used); the single tool call decodes into the same envelope
+validation, retry policy, write-budget escalation, and typed classification
+as before. A text reply with no tool call, multiple calls, a missing name,
+non-object or reserved-field arguments, or an unknown tool classifies exactly
+like the former JSON parse failures — retried, then typed — so a malformed or
+unknown call still never consumes an execution step. The revision-3 sentinel
+content transport is removed with the envelope: native tool syntax carries
+string arguments unescaped, which eliminates the escaping overhead the
+sentinel existed to avoid, and a `finish_reason=length` truncation returns a
+structured partial tool call whose retry gets the payload-sized budget. The
+`content_truncated` intake, incomplete-write obligations, and chunked-append
+recovery remain for the structured run API and injected clients, but the wire
+decoder no longer produces partial content. Planner, task-replan, and
+validation replies remain plain JSON text — they are not actions. Grounding
+evidence and the paired json-vs-tools bench are recorded in
+[EXPERIMENTS.md E25](EXPERIMENTS.md).
 
 The run loop also accounts for selected vs executed actions: every action the executor emits increments `selected_steps`, only dispatched ones increment `executed_steps`, and each guard-suppressed one increments `skipped_steps` and logs a `step_skipped` JSONL event with a typed reason (`duplicate_read`, `stuck_read`, `stuck_append`, …). The 2026-07-31 Qwen canary selected 14 reads of which only 2 executed — that gap is now first-class in `run_end` metrics instead of being reconstructed from logs.
 
@@ -267,7 +290,7 @@ budget selection logic.
 
 | Constraint | Solution |
 |---|---|
-| Limited speed | Short prompts (~200 tok executor, ~500 tok planner), JSON-only output |
+| Limited speed | Short prompts (~200 tok executor, ~500 tok planner); native tool-call actions, JSON-only planner/validator output |
 | Bounded context | Slim executor state (sliding window), no history accumulation; optional context expectations live in the selected profile |
 | Token efficiency | Executor gets slim state (~150-200 tok) vs full state; planner gets full context |
 | Code fences | Strip ` ```json ``` ` wrappers from output |
@@ -284,13 +307,13 @@ budget selection logic.
 | Dict/list content | Write actions auto-serialize dict/list content to JSON — models sometimes output objects instead of escaped strings |
 | Multi-backend | `LLM_BACKEND=openrouter` switches to OpenRouter API with configurable model and provider |
 | Thinking-on-retry | Zero explicit-reasoning cost on the happy path under `gated`; escalation is keyed by error class (E05). Structural failures skip it while semantic/unknown failures request medium. The `off` policy suppresses every explicit request, including caller-specified levels |
-| JSON repair (E03) | `_repair_json` may extract a complete object, remove only a trailing delimiter, or insert missing container closers. It never deletes a partial semantic field. A malformed header with `finish_reason=length` is not repaired into an executable action; valid partial sentinel content is the explicit exception |
+| JSON repair (E03) | `_repair_json` may extract a complete object, remove only a trailing delimiter, or insert missing container closers. It never deletes a partial semantic field, and a length-truncated reply is never repaired. Serves planner/task-replan/validation text replies; executor actions arrive as native tool calls (interface revision 6) |
 | Strict final retry (E03) | Final auto-retry (attempt 2) disables explicit reasoning and appends a strict JSON-only instruction. Caller-specified levels (for example `_validate_completion`) are respected under `gated` and suppressed under `off`. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. `edit_failed`/`missing_file` explain how to recover context; the four read-continuation contract errors deterministically direct the executor to echo the exact fields or restart after a source change |
 | Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, profile-owned budget (96 in both built-ins), `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
 | Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once with a typed observation carrying the exact continuation cursor/limit/hash, then auto-fail as `stuck_loop`. Read identity includes `offset` + `limit` for initial ranges and `cursor` + `limit` + `sha256` for continuation pages, so legitimate navigation is not suppressed. Same-chunk append repeats auto-fail as `stuck_loop` |
 | App-dev action surface (issues #7, #30) | Losslessly resumable `read` pages with exact content, source-bound cursors, and hash-linked totals; bounded, explicitly incomplete `search`/`tree` discovery; atomic `write`/`edit` with chunked `append`; per-action observation budgets; `finish_reason` logged per LLM attempt; typed `malformed_action`/`response_truncated` parse failures; and selected/executed/skipped step accounting. Deterministic coverage reconstructs long-line, wide multiline, CRLF, and multibyte sources through EOF and checks bounded discovery caps, snippet clipping, unreadable files, and traversal errors. Protocol revisions 2, 5, and 6 are recorded in `tests/workflows/PROTOCOL.md` |
-| Sentinel content transport (issue #15) | The 2026-08-01 v4 canary lost Gemma's repeated implementation writes at the 1536-token cap because whole files rode inside JSON strings — all-or-nothing truncation. Revision 3 moves `write` content between sentinel lines after the action JSON: no escaping, and a truncated block keeps its complete lines and continues through the existing chunked `append` machinery |
+| Sentinel content transport (issue #15) — removed | The 2026-08-01 v4 canary lost Gemma's repeated implementation writes at the 1536-token cap because whole files rode inside JSON strings — all-or-nothing truncation. Revision 3 moved `write` content between sentinel lines after the action JSON. Interface revision 6 (2026-08-04) removed it with the JSON executor transport: native tool syntax carries string arguments unescaped, serving the same goal without custom framing |
 | Capability-based budgets (issues #15/#68) | Output and reasoning budgets come from an immutable named profile, never `local`/`openrouter` or provider names. `generic-feature-scale-v1` preserves the feature-scale allowance; explicit `legacy-e4b-m1-16k-v1` preserves the constrained E4B contract. The resolved profile and compatibility overrides are hash-bearing |
 | Write-forcing policy (issue #15) | The 2026-08-01 Qwen canary executed 27 observation steps and never selected a write. On write-shaped tasks: pressure note in the executor prompt after 3 observations with no commit, observation blocked in the last 3 steps of an attempt (skip once, then auto-fail), and `no_write_executed` surfaced in full and task-local replan state |
 | Validate-after-write policy (revision 4) | Repeated same-target full writes trigger shell/edit/done pressure and then `rewrite_loop` damping across task-local and full-replan boundaries; `no_write_executed`, `unvalidated_write`, and `failed_steps` are task-scoped, while incomplete artifacts remain visible run-wide across replacement tasks |

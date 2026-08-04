@@ -1,6 +1,21 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 6 (2026-08-04; manifest schema 2). Revision 6 replaces backend-derived
+**Protocol revision:** 7 (2026-08-04; manifest schema 2). Revision 7 binds the
+executor's action interface to native tool calling (askme interface revision
+6, issue #68): every action request carries `ACTION_SPECS`-derived tool
+definitions with `tool_choice: "auto"`, and the JSON envelope-in-text executor
+transport — including the revision-3 sentinel content transport — no longer
+exists, so a served model that cannot emit structured tool calls cannot
+qualify. Planner, task-replan, and validation replies remain plain JSON.
+Manifests are unchanged (schema 2); the removed `LLM_ACTION_TRANSPORT` axis
+is one fewer outcome-affecting arm for a future v-next outcome protocol to
+pin, and cold runs still record `action_transport: "tools"` in `run_start`
+for provenance. No outcome-bearing native-workflow call has run under
+revision 7; the next outcome-bearing protocol must bind revision 7 plus the
+corrected `askme.py` source hash. Historical results retain their original
+JSON-envelope interface attribution.
+
+Revision 6 (2026-08-04; manifest schema 2) replaces backend-derived
 output and reasoning limits with an immutable named capability profile. Every
 manifest must pin `agent_limits.capability_profile`; the cold AskMe subprocess
 receives the same value through both `--capability-profile` and
@@ -14,10 +29,10 @@ future v7 outcome protocol must add and enforce backend, requested/served model,
 and provider pins before any call. It must also pin or sanitize every inherited
 outcome-affecting arm (`AGENT_STEP_POLICY`, `AGENT_COMPILE_REPAIR`, install and
 network policy, plus any new equivalent); a self-describing post-hoc hash is not
-a frozen experimental contract. No outcome-bearing native-workflow call has run
-under revision 6. The next outcome-bearing protocol remains v7 and must bind
-revision 6 plus the corrected `askme.py` source hash. Historical results retain
-their original profile-less/backend-budget attribution.
+a frozen experimental contract. No outcome-bearing native-workflow call ran
+under revision 6; revision 7 now supersedes its interface binding for the
+future outcome run. Historical results retain their original
+profile-less/backend-budget attribution.
 
 Revision 5 (2026-08-02) repairs ranged-read
 continuation (issue #30): exact UTF-8 source pages preserve line terminators,

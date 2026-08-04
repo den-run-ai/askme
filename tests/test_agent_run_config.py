@@ -10,7 +10,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from _test_support import mock_response, mock_response_raw
+from _test_support import mock_llm_response, mock_response_raw
 
 import askme
 from askme import (
@@ -517,7 +517,7 @@ class TestConfigHash:
         def post(url, json=None, headers=None, timeout=None):
             bodies.append(json)
             reply = {"tasks": ["greet"]} if len(bodies) == 1 else {"action": "done"}
-            return mock_response(reply)
+            return mock_llm_response(reply)
 
         with patch("askme.requests.post", side_effect=post):
             result = run_result(
@@ -544,9 +544,9 @@ class TestConfigHash:
         )
         settings = _settings(capability_profile=profile, max_retries=1)
         replies = [
-            mock_response({"tasks": ["greet"]}),
+            mock_llm_response({"tasks": ["greet"]}),
             mock_response_raw("not json"),
-            mock_response({"action": "done"}),
+            mock_llm_response({"action": "done"}),
         ]
         bodies = []
 
@@ -726,14 +726,14 @@ class TestConfigClosure:
             "validation_tokens": 99,
         }
         replies = [
-            mock_response({"tasks": ["greet"]}),
+            mock_llm_response({"tasks": ["greet"]}),
             mock_response_raw("not json"),  # executor retry proves its budget stayed at one
-            mock_response({"action": "fail", "reasoning": "cannot"}),
-            mock_response({"task": ""}),  # rejected task-local replan
-            mock_response({"tasks": ["create greeting in hi.txt"]}),
-            mock_response({"action": "write", "arg": "hi.txt", "content": "hi"}),
-            mock_response({"action": "done"}),
-            mock_response({"valid": True}),
+            mock_llm_response({"action": "fail", "reasoning": "cannot"}),
+            mock_llm_response({"task": ""}),  # rejected task-local replan
+            mock_llm_response({"tasks": ["create greeting in hi.txt"]}),
+            mock_llm_response({"action": "write", "arg": "hi.txt", "content": "hi"}),
+            mock_llm_response({"action": "done"}),
+            mock_llm_response({"valid": True}),
         ]
         calls = []
 
