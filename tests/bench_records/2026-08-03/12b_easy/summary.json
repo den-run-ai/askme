@@ -1,0 +1,306 @@
+{
+  "suite": "easy",
+  "backend": "local",
+  "trials": 3,
+  "model": null,
+  "provider": null,
+  "reasoning_effort": null,
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "e64ec1a1e84be516a3343f818dcdfcb520e815d2",
+  "git_dirty": true,
+  "total_wall_s": 1567.9,
+  "tests": {
+    "test_create_and_read_file": {
+      "passed": 2,
+      "pytest_passed": 2,
+      "agent_complete": 2,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "exhausted",
+        "complete"
+      ],
+      "wall_s": [
+        268.29,
+        374.22,
+        138.08
+      ],
+      "replans": [
+        1,
+        1,
+        0
+      ],
+      "local_replans": [
+        1,
+        2,
+        0
+      ],
+      "local_replans_ok": [
+        0,
+        2,
+        0
+      ],
+      "steps": [
+        5,
+        9,
+        5
+      ],
+      "thinking_retries": [
+        4,
+        3,
+        3
+      ],
+      "llm_calls": [
+        15,
+        24,
+        12
+      ],
+      "prompt_tokens": [
+        9813,
+        16063,
+        7575
+      ],
+      "completion_tokens": [
+        1262,
+        1857,
+        658
+      ],
+      "total_tokens": [
+        11075,
+        17920,
+        8233
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        "test_create_and_read_file_trial2_pytest.txt",
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    },
+    "test_shell_and_write": {
+      "passed": 3,
+      "pytest_passed": 3,
+      "agent_complete": 3,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        83.57,
+        34.46,
+        66.36
+      ],
+      "replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans_ok": [
+        0,
+        0,
+        0
+      ],
+      "steps": [
+        2,
+        2,
+        2
+      ],
+      "thinking_retries": [
+        1,
+        0,
+        1
+      ],
+      "llm_calls": [
+        6,
+        4,
+        5
+      ],
+      "prompt_tokens": [
+        3452,
+        2140,
+        3228
+      ],
+      "completion_tokens": [
+        423,
+        169,
+        321
+      ],
+      "total_tokens": [
+        3875,
+        2309,
+        3549
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        null,
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    },
+    "test_multi_step_build": {
+      "passed": 1,
+      "pytest_passed": 1,
+      "agent_complete": 1,
+      "total": 3,
+      "agent_status": [
+        "exhausted",
+        "exhausted",
+        "complete"
+      ],
+      "wall_s": [
+        181.09,
+        215.72,
+        202.1
+      ],
+      "replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans": [
+        1,
+        2,
+        1
+      ],
+      "local_replans_ok": [
+        1,
+        1,
+        1
+      ],
+      "steps": [
+        5,
+        5,
+        4
+      ],
+      "thinking_retries": [
+        8,
+        6,
+        6
+      ],
+      "llm_calls": [
+        21,
+        21,
+        19
+      ],
+      "prompt_tokens": [
+        13046,
+        13081,
+        11419
+      ],
+      "completion_tokens": [
+        712,
+        932,
+        947
+      ],
+      "total_tokens": [
+        13758,
+        14013,
+        12366
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ],
+        [
+          "gemma-4-12b-it-qat-q4_0.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        "test_multi_step_build_trial1_pytest.txt",
+        "test_multi_step_build_trial2_pytest.txt",
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}

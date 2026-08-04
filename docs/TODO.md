@@ -27,7 +27,7 @@
 
 - ~~Reconcile all stated test counts across `README.md`, `ARCHITECTURE.md`, `gemma4-setup.md`, and `CLAUDE.md`.~~ → `README.md` now carries a dated current-suite snapshot; older counts are explicitly historical phase records (2026-07-13).
 - ~~Reconcile the claim that "all tests pass" with the currently documented subsets actually verified.~~ → Current verification reports the exact `pytest -q` pass/skip outcome and labels backend-dependent skips (2026-07-13).
-- Clarify the difference between broken `--cache-reuse` and working slot save/restore so "cache enabled" is not misleading.
+- ~~Clarify the difference between broken `--cache-reuse` and working slot save/restore so "cache enabled" is not misleading.~~ → Obsolete: `--cache-reuse` works for Gemma 4 since upstream #22288 + #23468; gemma4-setup.md documents current cache state (2026-08-03).
 - Working directory assumptions in command examples are now aligned across `README.md` and `CLAUDE.md`; keep them in sync if commands change again.
 
 ## Cache Workaround State — RESOLVED (2026-08-02)

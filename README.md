@@ -44,6 +44,27 @@ uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failin
 
 For OpenRouter or other options, see [configuration](docs/configuration.md).
 
+### Local llama.cpp setup
+
+The local backend expects `llama-server` on `:8080`. The current reference
+setup (2026-08-03, 16 GB M1): **Gemma 4 E4B QAT Q4_0** (official post-refresh
+weights, ~5.15 GB) on llama.cpp build 9618+, launched with q4_0 KV cache,
+`--swa-full --cache-reuse 256` (prompt caching), and `--reasoning off` —
+required, or template auto-detection silently drains action budgets into
+reasoning. MTP speculative decoding stays off (currently a small loss on M1).
+
+```bash
+./build/bin/llama-server \
+  -m models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf \
+  -ngl 99 --ctx-size 16384 --flash-attn on \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  --swa-full --cache-reuse 256 --reasoning off \
+  -np 1 --port 8080
+```
+
+Full model/build/flag rationale and benchmark history:
+[gemma4-setup.md](docs/gemma4-setup.md), [PERFORMANCE.md](docs/PERFORMANCE.md).
+
 ### Supported surfaces
 
 - **CLI** — `python3 askme.py [prompt] [--prompt-file F] [--working-dir D]

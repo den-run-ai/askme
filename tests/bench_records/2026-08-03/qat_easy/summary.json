@@ -1,0 +1,260 @@
+{
+  "suite": "easy",
+  "backend": "local",
+  "trials": 3,
+  "model": null,
+  "provider": null,
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "187a2c1488a77a9cc501f2ad0e97f38935655163",
+  "git_dirty": true,
+  "total_wall_s": 437.3,
+  "tests": {
+    "test_create_and_read_file": {
+      "passed": 1,
+      "pytest_passed": 1,
+      "agent_complete": 1,
+      "total": 3,
+      "agent_status": [
+        "exhausted",
+        "complete",
+        "exhausted"
+      ],
+      "wall_s": [
+        137.41,
+        14.99,
+        95.51
+      ],
+      "replans": [
+        1,
+        0,
+        1
+      ],
+      "local_replans": [
+        2,
+        0,
+        2
+      ],
+      "local_replans_ok": [
+        0,
+        0,
+        0
+      ],
+      "steps": [
+        4,
+        1,
+        2
+      ],
+      "thinking_retries": [
+        0,
+        0,
+        0
+      ],
+      "llm_calls": [
+        13,
+        3,
+        13
+      ],
+      "prompt_tokens": [
+        8817,
+        1627,
+        8754
+      ],
+      "completion_tokens": [
+        1654,
+        156,
+        1127
+      ],
+      "total_tokens": [
+        10471,
+        1783,
+        9881
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ]
+    },
+    "test_shell_and_write": {
+      "passed": 3,
+      "pytest_passed": 3,
+      "agent_complete": 3,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        17.94,
+        15.83,
+        15.36
+      ],
+      "replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans_ok": [
+        0,
+        0,
+        0
+      ],
+      "steps": [
+        1,
+        1,
+        1
+      ],
+      "thinking_retries": [
+        0,
+        0,
+        0
+      ],
+      "llm_calls": [
+        3,
+        3,
+        3
+      ],
+      "prompt_tokens": [
+        1717,
+        1717,
+        1717
+      ],
+      "completion_tokens": [
+        190,
+        195,
+        187
+      ],
+      "total_tokens": [
+        1907,
+        1912,
+        1904
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ]
+    },
+    "test_multi_step_build": {
+      "passed": 3,
+      "pytest_passed": 3,
+      "agent_complete": 3,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        35.65,
+        43.76,
+        53.69
+      ],
+      "replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans": [
+        0,
+        0,
+        0
+      ],
+      "local_replans_ok": [
+        0,
+        0,
+        0
+      ],
+      "steps": [
+        5,
+        5,
+        5
+      ],
+      "thinking_retries": [
+        0,
+        0,
+        0
+      ],
+      "llm_calls": [
+        9,
+        10,
+        10
+      ],
+      "prompt_tokens": [
+        5358,
+        6133,
+        6623
+      ],
+      "completion_tokens": [
+        402,
+        523,
+        644
+      ],
+      "total_tokens": [
+        5760,
+        6656,
+        7267
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "served_models": [
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ],
+        [
+          "gemma-4-E4B_q4_0-it.gguf"
+        ]
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ]
+    }
+  }
+}
