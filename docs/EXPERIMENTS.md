@@ -54,6 +54,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 | 17  | E13 | Planner critique pass on redundancy-risk plans          | 4    | P2       | M      | planned  |
 | 18  | E14 | Typed planner output with `success_criteria`            | 4    | P2       | M      | planned  |
 | —   | E24 | MTP A/B on E4B (gated on upstream Metal fixes)          | 4    | P2       | S      | planned  |
+| —   | E25 | Native tool-call action transport arm (issue #68)       | 4    | P1       | M      | wired    |
 | 19  | E10 | Batched actions (2-3 atomic actions per LLM call)       | 5    | P3       | L      | planned  |
 
 ### Wave ordering rationale
@@ -175,6 +176,58 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Risk.** High. The whole step loop, duplicate guard, step-history shape, and recovery logic are built around one action per step (`askme.py:686` step loop, `askme.py:715` duplicate guard, `askme.py:788` step log). Batched failure attribution breaks error classification. This is a redesign, not a drop-in — do not run before most P1s are done and the harness can measure whether it regresses reliability on medium/hard tests.
 - **Code.** `askme.py:686` (step loop), `askme.py:715` (duplicate guard), `askme.py:189` (`SYSTEM_STEP`).
 - **Effort.** L.
+
+### E25 — Native tool-call action transport arm (issue #68)
+
+- **Context.** Added 2026-08-04. The ground shifted under the JSON envelope
+  path: the post-refresh QAT GGUF ships Google's canonical Gemma 4 chat
+  template (2026-07-09, native `<|tool_call>` syntax, changelog "Fixed
+  tool-calling loops, turn closures, and thinking content-ordering"), and the
+  pinned b9618 build has a dedicated `COMMON_CHAT_FORMAT_PEG_GEMMA4` parser —
+  so native tool calling does not depend on the `--json-schema` machinery that
+  #22396 left broken. Native tool syntax carries string arguments unescaped
+  between `<|"|>` delimiters, removing the JSON-escaping burden that motivated
+  the sentinel content transport.
+- **Qualification smoke (2026-08-04, local, one-shot probes — not
+  outcome-bearing).** Against the documented server flags (`--reasoning off`,
+  jinja default-on): 9/9 tool-call responses were structured `tool_calls` with
+  valid JSON arguments; multi-line C content with escaped quotes round-tripped
+  exactly; multi-step chains continued correctly after `role:tool` results
+  (write → compile → run); `done()` was emitted cleanly under explicit
+  guidance; `finish_reason=length` returned a structured *partial* tool call
+  (name intact, recoverable content prefix); tool definitions cost ~307 prompt
+  tokens, fully prefix-cached under `--cache-reuse`. Three sharp edges:
+  `tool_choice: "required"` corrupted native delimiters into argument text
+  (the arm pins `"auto"`); a satisfied task with no urged next step twice
+  produced a 1-token empty reply (handled by normal parse-retry policy); and
+  llama.cpp flags a `<|tool_response>` token-metadata bug in the GGUF at load.
+  Decode ran ~8.6–11.4 tok/s vs the 13.61 baseline — grammar overhead is
+  plausible but unpriced.
+- **Change (wired 2026-08-04).** `LLM_ACTION_TRANSPORT`/`--action-transport`
+  selects `json` (default, unchanged) or `tools` per run, hash-logged in
+  `run_start`/result metadata. The tools arm derives its definitions from
+  `ACTION_SPECS`, sends them only on `expect="action"` calls with
+  `tool_choice: "auto"`, uses a tools-variant executor prompt, and decodes the
+  single tool call into the same envelope validation, retry policy,
+  write-budget escalation, and typed classification as the JSON path. Planner,
+  task-replan, and validation responses remain JSON on both arms.
+- **Metric / decision rule.** Paired local bench (E01 harness, both arms,
+  same suites, ≥3 trials, identical budgets/policies) against the E23
+  reference: pytest pass + agent-complete rate, wall time, parse retries,
+  done-emission-loop incidence, content-drift incidents, decode tok/s. If the
+  tools arm is non-inferior on pass rate and not materially slower, flip the
+  default and schedule the JSON executor salvage machinery for removal per the
+  #68 partial-writes item — after truncated-tool-call recovery obligations are
+  requalified. Hosted cells additionally require per-provider tools-support
+  qualification before any llm.yml adoption.
+- **Risk.** Low while opt-in: the default arm is untouched and both arms are
+  deterministic-tested. The known model-side metadata bug and the empty-reply
+  edge are recorded above and must be re-checked on any GGUF or build change.
+- **Code.** `askme.py` (`ACTION_TRANSPORTS`, `_action_tools`,
+  `SYSTEM_STEP_TOOLS`, `_decode_tool_call_reply`, request shaping),
+  `tests/test_agent_tool_transport.py`.
+- **Effort.** M (wiring done; paired bench pending).
+- **Status.** Wired (2026-08-04); default flip gated on the paired bench.
 
 ### E15 — Command-family timeout ladder
 
