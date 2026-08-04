@@ -1,0 +1,549 @@
+{
+  "suite": "hard",
+  "backend": "local",
+  "trials": 3,
+  "model": "gemma-4-e4b",
+  "provider": null,
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "legacy-e4b-m1-16k-v1",
+  "expected_served_model": "gemma-4-e4b",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "d0c2826bf4fb8a96e14e936f9740585387178318",
+  "git_dirty": false,
+  "total_wall_s": 4520.9,
+  "tests": {
+    "test_replan_build_with_dependency": {
+      "passed": 1,
+      "pytest_passed": 1,
+      "valid_trials": 1,
+      "valid_passes": 1,
+      "agent_complete": 1,
+      "total": 3,
+      "agent_status": [
+        "complete"
+      ],
+      "wall_s": [
+        627.23
+      ],
+      "replans": [
+        2
+      ],
+      "local_replans": [
+        3
+      ],
+      "local_replans_ok": [
+        3
+      ],
+      "steps": [
+        36
+      ],
+      "thinking_retries": [
+        7
+      ],
+      "llm_calls": [
+        55
+      ],
+      "prompt_tokens": [
+        37471
+      ],
+      "completion_tokens": [
+        5284
+      ],
+      "total_tokens": [
+        42755
+      ],
+      "openrouter_cost": [
+        0.0
+      ],
+      "usage_complete": [
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true
+      ],
+      "served_provider_observed": [
+        false
+      ],
+      "recorded_backends": [
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true
+      ],
+      "requested_providers": [
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "5617985f60642159"
+      ],
+      "route_valid": [
+        false,
+        false,
+        true
+      ],
+      "contract_valid": [
+        false,
+        false,
+        true
+      ],
+      "served_providers": [
+        []
+      ],
+      "pytest_diagnostics": [
+        "test_replan_build_with_dependency_trial1_pytest.txt",
+        "test_replan_build_with_dependency_trial2_pytest.txt",
+        null
+      ],
+      "timed_out": [
+        true,
+        true,
+        false
+      ],
+      "log_parse_errors": [
+        "benchmark log must contain exactly one run_start and one run_end (found 1 and 0)",
+        "benchmark log must contain exactly one run_start and one run_end (found 1 and 0)",
+        null
+      ]
+    },
+    "test_replan_fix_wrong_command": {
+      "passed": 3,
+      "pytest_passed": 3,
+      "valid_trials": 3,
+      "valid_passes": 3,
+      "agent_complete": 3,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        138.62,
+        54.9,
+        92.74
+      ],
+      "replans": [
+        1,
+        0,
+        0
+      ],
+      "local_replans": [
+        1,
+        1,
+        1
+      ],
+      "local_replans_ok": [
+        0,
+        1,
+        1
+      ],
+      "steps": [
+        6,
+        2,
+        2
+      ],
+      "thinking_retries": [
+        2,
+        1,
+        2
+      ],
+      "llm_calls": [
+        13,
+        8,
+        9
+      ],
+      "prompt_tokens": [
+        8597,
+        5064,
+        5890
+      ],
+      "completion_tokens": [
+        1104,
+        398,
+        799
+      ],
+      "total_tokens": [
+        9701,
+        5462,
+        6689
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "5617985f60642159",
+        "5617985f60642159",
+        "5617985f60642159"
+      ],
+      "route_valid": [
+        true,
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        null,
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    },
+    "test_replan_multi_step_recovery": {
+      "passed": 3,
+      "pytest_passed": 3,
+      "valid_trials": 3,
+      "valid_passes": 3,
+      "agent_complete": 3,
+      "total": 3,
+      "agent_status": [
+        "complete",
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        938.02,
+        177.24,
+        88.07
+      ],
+      "replans": [
+        1,
+        0,
+        0
+      ],
+      "local_replans": [
+        3,
+        0,
+        0
+      ],
+      "local_replans_ok": [
+        3,
+        0,
+        0
+      ],
+      "steps": [
+        27,
+        3,
+        6
+      ],
+      "thinking_retries": [
+        6,
+        5,
+        0
+      ],
+      "llm_calls": [
+        56,
+        12,
+        11
+      ],
+      "prompt_tokens": [
+        50937,
+        9667,
+        8368
+      ],
+      "completion_tokens": [
+        7603,
+        1594,
+        622
+      ],
+      "total_tokens": [
+        58540,
+        11261,
+        8990
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "5617985f60642159",
+        "5617985f60642159",
+        "5617985f60642159"
+      ],
+      "route_valid": [
+        true,
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        null,
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}
