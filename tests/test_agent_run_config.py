@@ -14,12 +14,14 @@ from _test_support import mock_response, mock_response_raw
 
 import askme
 from askme import (
+    CapabilityProfile,
     GuardThresholds,
     LLMSettings,
     RunConfig,
     RunDependencies,
     _config_hash,
     _run_loop,
+    get_capability_profile,
     run_result,
 )
 
@@ -34,6 +36,12 @@ class ScriptedClient:
     def ask(self, messages, **kwargs):
         self.calls.append({"messages": messages, **kwargs})
         return self.replies.pop(0)
+
+
+class ConfiguredScriptedClient(ScriptedClient):
+    def __init__(self, replies, settings):
+        super().__init__(replies)
+        self.settings = settings
 
 
 def _quiet_deps(**kwargs):
@@ -151,11 +159,16 @@ class TestConfigResolution:
             )
 
     @pytest.mark.parametrize(
-        "name", ["PLANNER_MAX_TOKENS", "TASK_REPLAN_MAX_TOKENS", "VALIDATION_MAX_TOKENS"]
+        ("name", "message"),
+        [
+            ("PLANNER_MAX_TOKENS", "planner_tokens"),
+            ("TASK_REPLAN_MAX_TOKENS", "task_replan_tokens"),
+            ("VALIDATION_MAX_TOKENS", "validation_tokens"),
+        ],
     )
-    def test_invalid_module_capability_budget_is_rejected(self, tmp_path, name):
+    def test_invalid_module_capability_budget_is_rejected(self, tmp_path, name, message):
         with patch.object(askme, name, 0):
-            with pytest.raises(ValueError, match=name.lower()):
+            with pytest.raises(ValueError, match=message):
                 askme._RunController("greet", str(tmp_path))
 
     @pytest.mark.parametrize(
@@ -332,6 +345,98 @@ class TestConfigHash:
         assert metadata["budgets"]["planner_max_tokens"] == askme.PLANNER_MAX_TOKENS
         assert metadata["budgets"]["step_tokens"] == askme.STEP_TOKENS
         assert metadata["budgets"]["step_write_tokens"] == askme.STEP_WRITE_TOKENS
+        assert metadata["capability_profile"] == askme._DEFAULT_CAPABILITY_PROFILE.describe()
+
+    def test_profile_owns_all_model_output_and_reasoning_budgets(self, tmp_path):
+        profile = CapabilityProfile(
+            name="test-profile-v1",
+            step_tokens=101,
+            step_write_tokens=202,
+            planner_tokens=303,
+            task_replan_tokens=404,
+            validation_tokens=505,
+            reasoning_token_floors=(707, 808, 909),
+        )
+        metadata = self._metadata(
+            tmp_path,
+            config=RunConfig(llm=_settings(capability_profile=profile)),
+        )
+        assert metadata["capability_profile"] == profile.describe()
+        assert metadata["budgets"] == {
+            "step_tokens": 101,
+            "step_write_tokens": 202,
+            "planner_max_tokens": 303,
+            "task_replan_max_tokens": 404,
+            "final_validation_max_tokens": 505,
+            "llm_max_retries": askme.MAX_LLM_RETRIES,
+            "reasoning_token_floors": {"low": 707, "medium": 808, "high": 909},
+        }
+        assert metadata["limits"]["goal_context_chars"] == askme.GOAL_CONTEXT_CHARS
+
+    def test_direct_helpers_use_the_injected_clients_profile_budgets(self, tmp_path):
+        profile = CapabilityProfile(
+            name="direct-helper-profile-v1",
+            step_tokens=101,
+            step_write_tokens=202,
+            planner_tokens=303,
+            task_replan_tokens=404,
+            validation_tokens=505,
+        )
+        settings = _settings(capability_profile=profile)
+        state = {
+            "completed_tasks": [],
+            "completed_step_groups": [],
+            "errors": [],
+            "all_steps": [],
+        }
+
+        planner = ConfiguredScriptedClient([{"tasks": []}], settings)
+        askme.get_plan("plan work", state, client=planner)
+        replanner = ConfiguredScriptedClient([{"task": "implement alternative"}], settings)
+        askme.replan_task("fix behavior", ["[unknown] failed"], [], state, "goal", client=replanner)
+        validator = ConfiguredScriptedClient([{"valid": True}], settings)
+        askme._validate_completion("deliver artifact", state, tmp_path, client=validator)
+
+        assert planner.calls[0]["max_tokens"] == 303
+        assert replanner.calls[0]["max_tokens"] == 404
+        assert validator.calls[0]["max_tokens"] == 505
+
+    def test_same_profile_has_same_budgets_across_backends(self, tmp_path):
+        profile = get_capability_profile("generic-feature-scale-v1")
+        local = self._metadata(
+            tmp_path,
+            config=RunConfig(llm=_settings(capability_profile=profile)),
+        )
+        remote = self._metadata(
+            tmp_path,
+            config=RunConfig(
+                llm=_settings(
+                    backend="openrouter",
+                    api="https://example.test/v1/chat/completions",
+                    provider="ProviderA",
+                    capability_profile=profile,
+                )
+            ),
+        )
+        assert local["budgets"] == remote["budgets"]
+        assert local["capability_profile"] == remote["capability_profile"]
+        assert local["config_hash"] != remote["config_hash"]  # transport identity still differs
+
+    def test_profile_changes_hash_on_the_same_backend(self, tmp_path):
+        legacy = self._metadata(
+            tmp_path,
+            config=RunConfig(
+                llm=_settings(capability_profile=get_capability_profile("legacy-e4b-m1-16k-v1"))
+            ),
+        )
+        general = self._metadata(
+            tmp_path,
+            config=RunConfig(
+                llm=_settings(capability_profile=get_capability_profile("generic-feature-scale-v1"))
+            ),
+        )
+        assert legacy["config_hash"] != general["config_hash"]
+        assert legacy["budgets"] != general["budgets"]
 
     def test_hash_is_stable_for_identical_configuration(self, tmp_path):
         assert self._metadata(tmp_path)["config_hash"] == self._metadata(tmp_path)["config_hash"]
@@ -428,6 +533,41 @@ class TestConfigHash:
             "low": 111,
             "medium": 222,
             "high": 333,
+        }
+
+    def test_local_reasoning_floor_is_recorded_and_applied(self, tmp_path):
+        profile = CapabilityProfile(
+            name="local-floor-v1",
+            step_tokens=16,
+            step_write_tokens=32,
+            reasoning_token_floors=(11, 22, 33),
+        )
+        settings = _settings(capability_profile=profile, max_retries=1)
+        replies = [
+            mock_response({"tasks": ["greet"]}),
+            mock_response_raw("not json"),
+            mock_response({"action": "done"}),
+        ]
+        bodies = []
+
+        def post(url, json=None, headers=None, timeout=None):
+            bodies.append(json)
+            return replies.pop(0)
+
+        with patch("askme.requests.post", side_effect=post):
+            result = run_result(
+                "greet",
+                working_dir=str(tmp_path),
+                config=RunConfig(llm=settings, final_validate="0"),
+                dependencies=_quiet_deps(),
+            )
+
+        assert result["status"] == "complete"
+        assert [body["max_tokens"] for body in bodies] == [768, 16, 22]
+        assert result["config"]["budgets"]["reasoning_token_floors"] == {
+            "low": 11,
+            "medium": 22,
+            "high": 33,
         }
 
     def test_final_validation_budget_reaches_hash(self, tmp_path):
@@ -646,6 +786,7 @@ class TestConfigClosure:
                 PLANNER_MAX_TOKENS=frozen["planner_tokens"],
                 TASK_REPLAN_MAX_TOKENS=frozen["task_replan_tokens"],
                 VALIDATION_MAX_TOKENS=frozen["validation_tokens"],
+                REASONING_TOKEN_FLOORS=(1024, 1536, 2048),
             ),
             patch("askme.requests.post", side_effect=post),
         ):

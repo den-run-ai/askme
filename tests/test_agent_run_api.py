@@ -22,6 +22,7 @@ from askme import (
     RunConfig,
     RunDependencies,
     RunWorkspace,
+    get_capability_profile,
     run,
     run_result,
 )
@@ -86,6 +87,7 @@ def _local_settings(**overrides):
         "require_parameters": False,
         "reasoning_effort": "",
         "timeout": 120,
+        "capability_profile": get_capability_profile("legacy-e4b-m1-16k-v1"),
     }
     fields.update(overrides)
     return LLMSettings(**fields)
@@ -339,15 +341,15 @@ class TestInjectedDependencies:
     @pytest.mark.parametrize(
         ("settings", "expected_step_tokens"),
         [(_openrouter_settings(), 4096), (_local_settings(), 256)],
-        ids=["openrouter", "local"],
+        ids=["generic-profile", "legacy-e4b-profile"],
     )
     def test_pinned_config_builds_its_own_client_and_budgets(
         self, tmp_path, settings, expected_step_tokens
     ):
-        """config.llm alone pins the transport target and the step budget.
+        """config.llm alone pins the transport target and capability budget.
 
-        The executor budget follows the pinned backend regardless of which
-        backend the module-level STEP_TOKENS was derived for at import."""
+        The executor budget follows the pinned profile, independent of the
+        module-level compatibility budget selected at import."""
         transcript = []
         replies = [{"tasks": ["work"]}, {"action": "done"}]
         with patch("askme.requests.post", side_effect=_scripted_post(transcript, replies)):

@@ -3,10 +3,11 @@ name: LLM Tests
 # Live-model tests against OpenRouter. These spend real (tiny) OpenRouter
 # credits — the measured Berkeley smoke matrix cost ~$0.012 total — so the
 # workflow only runs when explicitly wanted:
-#   - push to main touching agent/test code (the stochastic Berkeley matrix is
-#     retained as advisory evidence; the easy smoke job still gates)
-#   - weekly schedule (strict provider/model drift check)
-#   - manual dispatch, with strict suite/model/provider/trial overrides
+#   - push to main touching agent/test code (the stochastic Berkeley-derived
+#     task smoke is advisory; the easy smoke job still gates)
+#   - weekly schedule (exact served-model and evidence-contract drift check;
+#     provider routing remains automatic unless manually pinned)
+#   - manual dispatch, with strict suite/model-cell/provider/trial overrides
 #   - pull requests only when labeled 'llm-tests' AND from a same-repo
 #     branch — the job guards reject fork PRs before any credential is in
 #     scope (secrets are withheld from forks by GitHub)
@@ -24,17 +25,18 @@ on:
         default: easy
       models:
         description: >-
-          Comma-separated OpenRouter model IDs for the Berkeley job. Append
-          '@low', '@medium', or '@high' to pin a baseline reasoning effort for
-          always-on reasoners (e.g. openai/gpt-oss-20b@low).
+          Comma-separated requested=expected-served model cells for the
+          Berkeley-derived task smoke. Append '@low', '@medium', or '@high' to a complete cell to pin a
+          baseline reasoning effort (for example
+          openai/gpt-oss-20b=openai/gpt-oss-20b@low).
         type: string
-        default: google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b
+        default: google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422
       provider:
         description: OpenRouter provider slug ('auto' = automatic routing)
         type: string
         default: auto
       trials:
-        description: Trials per Berkeley cell
+        description: Trials per Berkeley-derived smoke cell
         type: string
         default: "1"
   schedule:
@@ -114,10 +116,11 @@ jobs:
           retention-days: 14
 
   berkeley-protocol:
-    # Replays the two Berkeley talk eval cells per model — the hard build and
-    # medium repair selectors from talks/berkeley-agentic-ai-summit-2026/
-    # evals/README.md — through tests/bench_harness.py, then evaluates the
-    # protocol's pass rule (pytest pass + agent complete for every trial).
+    # Legacy job ID retained for workflow compatibility. This runs the two task
+    # selectors used by the Berkeley talk on current code and current model
+    # cells; it is not a replay of the frozen four-model, strict-SiliconFlow
+    # historical matrix in talks/berkeley-agentic-ai-summit-2026/evals/README.md.
+    # The report requires pytest pass + agent complete for every valid trial.
     # A valid one-trial live-model result rejection is advisory on post-merge
     # main pushes, but evidence-integrity failures remain blocking everywhere.
     # Cell results stay strict for scheduled drift checks, manual runs, and PRs.
@@ -148,43 +151,68 @@ jobs:
       - name: Run Berkeley protocol cells
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          MODELS: ${{ inputs.models || 'google/gemma-4-26b-a4b-it,qwen/qwen3.6-27b' }}
+          MODELS: ${{ inputs.models || 'google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422' }}
           PROVIDER: ${{ inputs.provider || 'auto' }}
           TRIALS: ${{ inputs.trials || '1' }}
+          BENCH_ROOT: ${{ runner.temp }}/askme-bench-logs
         run: |
+          # Valid negative outcomes return zero so the report step can apply
+          # strict/advisory policy. A nonzero harness result is invalid evidence
+          # and deliberately stops this step before any later cell can qualify.
           set -u
           MODEL_COUNT=0
           IFS=',' read -ra MODEL_LIST <<< "$MODELS"
           for MODEL in "${MODEL_LIST[@]}"; do
-            MODEL="$(echo "$MODEL" | xargs)"
+            MODEL="$(printf '%s' "$MODEL" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
             [ -z "$MODEL" ] && continue
-            # Optional '@effort' suffix pins a baseline reasoning effort for
-            # always-on reasoners: 'openai/gpt-oss-20b@low'.
+            # A cell is requested=expected-served, with an optional '@effort'
+            # suffix for always-on reasoners:
+            # 'openai/gpt-oss-20b=openai/gpt-oss-20b@low'.
             EFFORT=""
             case "$MODEL" in
               *@*) EFFORT="${MODEL##*@}"; MODEL="${MODEL%@*}" ;;
             esac
+            case "$EFFORT" in
+              ""|low|medium|high) ;;
+              *) echo "invalid reasoning effort in model cell: $EFFORT" >&2; exit 1 ;;
+            esac
+            case "$MODEL" in
+              *=*) EXPECTED_SERVED_MODEL="${MODEL#*=}"; MODEL="${MODEL%%=*}" ;;
+              *) echo "model cell must use requested=expected-served syntax" >&2; exit 1 ;;
+            esac
+            if [ -z "$MODEL" ] || [ -z "$EXPECTED_SERVED_MODEL" ] || [[ "$EXPECTED_SERVED_MODEL" == *"="* ]]; then
+              echo "model cell must contain exactly one non-empty requested=expected-served pair" >&2
+              exit 1
+            fi
             EFFORT_ARGS=()
             [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
             MODEL_COUNT=$((MODEL_COUNT + 1))
-            SLUG="$(echo "$MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
+            SLUG="$(printf '%s' "$MODEL-$EXPECTED_SERVED_MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
             uv run --locked python tests/bench_harness.py --backend openrouter --suite hard \
               --test test_replan_build_with_dependency --trials "$TRIALS" \
               --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
-              --log-dir "bench-logs/$SLUG/build"
+              --reasoning-policy gated \
+              --capability-profile generic-feature-scale-v1 \
+              --expected-served-model "$EXPECTED_SERVED_MODEL" \
+              --log-dir "$BENCH_ROOT/$SLUG/build"
             uv run --locked python tests/bench_harness.py --backend openrouter --suite medium \
               --test test_fix_python_syntax_error --trials "$TRIALS" \
               --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
-              --log-dir "bench-logs/$SLUG/repair"
+              --reasoning-policy gated \
+              --capability-profile generic-feature-scale-v1 \
+              --expected-served-model "$EXPECTED_SERVED_MODEL" \
+              --log-dir "$BENCH_ROOT/$SLUG/repair"
           done
           echo "EXPECTED_CELLS=$((MODEL_COUNT * 2))" >> "$GITHUB_ENV"
       - name: Gate on protocol pass rule
+        env:
+          BENCH_ROOT: ${{ runner.temp }}/askme-bench-logs
         run: |
           ADVISORY_ARGS=()
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             ADVISORY_ARGS=(--advisory-cell-failures)
           fi
-          uv run --locked python tests/ci_llm_gate.py report bench-logs/*/*/summary.json \
+          uv run --locked python tests/ci_llm_gate.py report "$BENCH_ROOT"/*/*/summary.json \
             --expect-cells "$EXPECTED_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY" \
             "${ADVISORY_ARGS[@]}"
       - name: Upload bench logs and summaries
@@ -192,6 +220,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: berkeley-protocol-logs
-          path: bench-logs/
+          path: ${{ runner.temp }}/askme-bench-logs/
           if-no-files-found: warn
           retention-days: 14

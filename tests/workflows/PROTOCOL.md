@@ -1,6 +1,25 @@
 # Native workflow protocol — Phase 1
 
-**Protocol revision:** 5 (2026-08-02). Revision 5 repairs ranged-read
+**Protocol revision:** 6 (2026-08-04; manifest schema 2). Revision 6 replaces backend-derived
+output and reasoning limits with an immutable named capability profile. Every
+manifest must pin `agent_limits.capability_profile`; the cold AskMe subprocess
+receives the same value through both `--capability-profile` and
+`LLM_CAPABILITY_PROFILE`. The resolved profile is part of `run_start`, result
+metadata, and `config_hash`. The generic profile makes no context/slot claim;
+E4B/M1/16K reproduction requires explicit `legacy-e4b-m1-16k-v1`. Separately,
+qualifying `bench_harness.py` cells pin requested and expected served identities
+and invalidate requested-model, selected-profile, or exact served-model
+mismatches. Native schema-v2 manifests do not yet freeze a route identity; a
+future v7 outcome protocol must add and enforce backend, requested/served model,
+and provider pins before any call. It must also pin or sanitize every inherited
+outcome-affecting arm (`AGENT_STEP_POLICY`, `AGENT_COMPILE_REPAIR`, install and
+network policy, plus any new equivalent); a self-describing post-hoc hash is not
+a frozen experimental contract. No outcome-bearing native-workflow call has run
+under revision 6. The next outcome-bearing protocol remains v7 and must bind
+revision 6 plus the corrected `askme.py` source hash. Historical results retain
+their original profile-less/backend-budget attribution.
+
+Revision 5 (2026-08-02) repairs ranged-read
 continuation (issue #30): exact UTF-8 source pages preserve line terminators,
 `READ_CHARS` counts Unicode code points, and every successful page with unread
 source returns an action-ready cursor bound to the read target's content hash.
@@ -11,9 +30,9 @@ continuations always point to unread content. Duplicate-read identity includes t
 range or cursor/limit/hash. Bounded `search` and `tree` remain discovery
 summaries rather than resumable streams, but now expose every bounded
 cap/snippet omission plus read/traversal errors and pack only complete records
-within the total observation budget. No v7 canary protocol has been registered,
-so the next outcome-bearing run remains v7 and must bind revision 5 plus the
-corrected `askme.py` source hash.
+within the total observation budget. At revision 5 no v7 canary had been
+registered; revision 6 now supersedes the interface binding for that future
+run.
 Historical v4/v6 results retain their original interface attribution.
 
 Revision 4 (2026-08-02) adds the validate-after-write
@@ -109,9 +128,15 @@ suppressing every explicit reasoning request.
 | Task-local replan | disabled | disabled |
 | LLM final validator, when enabled | high | disabled |
 
-Every HTTP attempt must emit a `reasoning_decision` record containing the
-requested policy, trigger, requested level, effective level, and attempt.
-Policy compliance is a run-validity check, not an outcome metric.
+AskMe must emit a `reasoning_decision` record for every HTTP attempt, containing
+the requested policy, trigger, requested level, effective level, and attempt.
+The revision-6 adapter validates those fields and their arm-level consistency
+and requires each retained successful-response (`tokens`) record to follow at
+least one decision. Failed HTTP attempts have no matching response event, and
+the current record does not carry enough call-site intent to prove the complete
+gated schedule. Before any v7 outcome call, add attempt correlation/call-site
+intent and register a validator for one-to-one completeness plus the full table
+above. The checks currently implemented are run-validity checks, not outcomes.
 
 ## Outcome contract
 

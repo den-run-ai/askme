@@ -65,13 +65,13 @@ Updated 2026-08-03 after the upstream/status audit and the E23 QAT bench (see [g
 - **E23 executed (P0, Wave 1) — new local reference established.** The local binary had silently changed on 2026-06-12 (`a702f395` → `c34b92235` b9618, adding the #23468 cache fix and MTP support) and the installed GGUF (2026-04-06) predated Google's 2026-07-15 weight refresh, so no valid local baseline existed for the revision-3 scaffold. E23 benched the official post-refresh QAT Q4_0 across all three suites — QAT is now the primary model. `--reasoning off` is verified permanent: even the post-refresh template auto-detects as thinking-capable and drains ~192-token action budgets into `reasoning_content`.
 - **E02 repriced down.** Its hypothesis assumed #21468 kept every system-prompt token re-processing on every call. Cache reuse has been solid since #23468 (in b9618): warm calls reuse the prefix, so prompt-shrink saves mostly cold-call and completion-side tokens plus planner-budget headroom (the E14 gate). Still worth doing, but the "linear speedup across every call" claim is dead.
 - **E03 approach confirmed by upstream inaction.** #22396 (`--json-schema` broken for Gemma 4) was stale-closed 2026-07-05 without a fix, with a re-regression reported in May. Client-side JSON repair remains the durable approach. Retest grammar-based output only after a rebuild past the master PEG overhaul (#24869 et al.).
-- **E09 narrowed.** QAT Q4_0 was candidate 1 and is consumed by E23; remaining candidates are Gemma 4 12B Unified QAT (~6.98 GB, strongest quality option on 16 GB) and Q8_0. No small-MoE Gemma 4 exists; 26B-A4B remains off the 16 GB shortlist.
-- **QAT shifts the failure mix.** The recovery machinery (E03/E05/E06/E11) barely fires on QAT weights; the dominant local failure class is now done-emission loops (correct deliverable, no `done`, duplicate skips to exhaustion) plus a new content-drift class on whole-file rewrites. Dated evidence recorded on the E20 and E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal — the sanctioned lever to A/B against this class is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`), which steers unverified rewrites and premature `done` toward verification.
+- **E09 narrowed.** QAT Q4_0 was candidate 1 and is consumed by E23; remaining candidates are Gemma 4 12B Unified QAT (~6.98 GB, the largest dense candidate that fits) and Q8_0. No small-MoE Gemma 4 exists; 26B-A4B remains off the 16 GB shortlist.
+- **The E23 QAT stack shows a shifted failure mix, but does not make recovery obsolete.** E06 had no eligible failures and easy+medium had no JSON thinking retries, while E05 still handled `missing_tool` in all three `replan_fix_wrong_command` trials and deterministic C repair fired 11 times across the medium/hard records. The dominant observed local failures were done-emission loops (correct deliverable, no `done`, duplicate skips to exhaustion) plus content drift on whole-file rewrites. Dated evidence is recorded on the E20/E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal; mechanism removal remains gated on the planned ablations.
 - **E24 added (Wave 4, gated).** MTP self-speculation measured −13% (n-max=1) / −2.7% (n-max=3) on an M1 smoke test — currently a loss, mechanistically explained by llama.cpp #25250 (Metal small-batch mul_mat gap at exactly the draft-verification batch sizes) and #24768 (no adaptive n-max). Gated on either landing.
 
 Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions against local E4B, 2026-04-26/27). Prior update: 2026-04-26 E05/E06 rerun analysis.
 
-- **E05/E06/E16 completed; E03 done (with follow-up gap).** E05/E06 validated the targeted edit-recovery mechanism. E16 hardened shell error classification. E03 added JSON repair and tiered retry contract — but experience.md Run 4 exposed a gap: repair can strip required fields (empty `content` on `write`), producing a silently broken deliverable. The follow-up fix (reject repair when required fields are missing) is small and should land before E02.
+- **E05/E06/E16 completed; E03's follow-up is closed.** E05/E06 validated the targeted edit-recovery mechanism. E16 hardened shell error classification. E03 added JSON repair and the tiered retry contract; the historical field-dropping gap from experience.md Run 4 is closed by strict action parsing and the semantics-preserving repair rules completed in PR #82. Repair no longer drops/defaults semantic fields; malformed required fields retry or fail closed.
 - **E07 elevated.** Experience.md's strongest finding is that the status field lies in both directions (Run 4: `complete` but broken; Run 6: `exhausted` but correct). E07's deterministic verification directly addresses both. Recommended to run immediately after the E03 follow-up fix.
 - **E20 added to Wave 3.** Experience.md Run 6 (783s, 42K tokens) exposed a new failure class: successful edit followed by 8 duplicate-edit loops the scaffold can't break. E20 is a surgical S-effort fix (auto-done after 2+ consecutive duplicate-skipped edits on the same target). Should run before E17/E18 because it addresses a broader pattern (any edit-heavy task, not just expected-failure or compile-repair).
 - **E09 stays after E20.** E09 could reduce the underlying edit failure rate from the model side, but E20 and the E03 follow-up target larger observed scaffold bottlenecks first.
@@ -231,7 +231,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 
 - **Hypothesis.** Full replan costs ~73s on local (planner thinking budget, ARCHITECTURE.md:185). Most failures are task-local: one task's plan was wrong, the others are fine. A scoped "re-plan this task only" is dramatically cheaper.
 - **Evidence (2026-04-26).** All 3 `fix_missing_include` trials replan once at 69–112s. The replan produces essentially the same 3-task plan. Task-local replan would save ~60–90s per trial.
-- **Change (implemented).** On task failure, `replan_task()` calls a mini-planner (`SYSTEM_TASK_REPLAN`) with `(failed_task, errors, completed_tasks, policy, missing_tools)` that returns a replacement task description. The call is deliberately cheap: `think=False`, `max_tokens=96`, `max_retries=0`. Inner retry loop (Option A) wraps the per-task body: first failure → local replan → retry with replacement. If replacement also fails or replan returns None, fall through to existing full replan. Original errors are saved and merged back so the full replan sees both failure contexts. `MAX_TASK_LOCAL_REPLANS = 1` prevents infinite loops. Exact duplicates, near duplicates, and passive downgrades are rejected; rejection reasons are logged in `task_local_replan.reject_reason`. Per-attempt execution state (task_done, task_steps, use_think, dup_skip_count) is reset.
+- **Change (implemented).** On task failure, `replan_task()` calls a mini-planner (`SYSTEM_TASK_REPLAN`) with `(failed_task, errors, completed_tasks, policy, missing_tools)` that returns a replacement task description. The call is deliberately cheap: `think=False`, a profile-owned budget (96 tokens in both built-ins), and `max_retries=0`. Inner retry loop (Option A) wraps the per-task body: first failure → local replan → retry with replacement. If replacement also fails or replan returns None, fall through to existing full replan. Original errors are saved and merged back so the full replan sees both failure contexts. `MAX_TASK_LOCAL_REPLANS = 1` prevents infinite loops. Exact duplicates, near duplicates, and passive downgrades are rejected; rejection reasons are logged in `task_local_replan.reject_reason`. Per-attempt execution state (task_done, task_steps, use_think, dup_skip_count) is reset.
 - **Metric.** Replan count; total test time on failure-heavy medium/hard tests; `task_local_replan` JSONL events.
 - **Upside.** Medium — saves ~60–90s per replan on local, but lower leverage than E05/E06.
 - **Risk.** Low. Additive change — any failure falls through to existing behavior. Cap at 1 local attempt.
@@ -345,9 +345,9 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Hypothesis.** Better weights reduce the root-cause bad-JSON/bad-edit rate; model quality is the lever the scaffold can't reach.
 - **Evidence (2026-08-03, E23).** Candidate 1 (official E4B QAT Q4_0) is done and promoted to primary: `fix_missing_include` 609s → 15.7s, hard 9/9 at −38–66% wall, thinking retries near-zero. The pre-QAT evidence line ("bad edit JSON ~60% of first attempts") no longer describes the primary model — remaining candidates are quality plays, benchmarked against the E23 reference.
 - **Candidates.**
-  1. **Gemma 4 12B Unified QAT** — **DONE, NEGATIVE (2026-08-03).** 3.6–35× slower than E4B QAT with *worse* reliability (6–8 thinking retries/trial — the ~192-token JSON action contract fits its output style poorly, compounding the dense-decode tax); easy 6/9, medium partial with 2/3 exhaustion on `fix_python_syntax_error`. Ruled out for the agent loop on 16 GB M1. See [PERFORMANCE.md E09 12B entry](PERFORMANCE.md#e09-12b-qat-trial--2026-08-03-local-build-9618-gemma-4-12b-unified-qat-q4_0--negative). Scaffold caveat recorded there (post-rebase scaffold vs pre-rebase E23 reference).
-  2. **E4B Q8_0** (~8 GB) — remaining candidate, repriced **down**: the 12B result shows raw model quality does not convert to agent reliability under the action contract on this hardware. Same-model higher precision is a different bet (fewer bad tokens, same style), but expectations are now modest.
-- **Change.** For each candidate: download, launch with the E23-validated flags (`--reasoning off`, MTP off), run easy + medium under E01's harness, compare against the E23 reference.
+  1. **Gemma 4 12B Unified QAT** — **DONE, NEGATIVE UNDER THE E4B-FITTED CONTRACT (2026-08-03); GENERIC-PROFILE QUALIFICATION OPEN.** With the then-default local 256-step/512-write-token limits it was 3.6–35× slower than E4B QAT with worse reliability (up to 6–8 JSON retries on `multi_step_build`, easy 6/9, medium partial with 2/3 exhaustion on `fix_python_syntax_error`). The run's requested-model provenance was mislabeled; token events reported the 12B served-model identity, but no artifact hash was retained. This rules out that contract, not the model across capability profiles. See [PERFORMANCE.md E09 12B entry](PERFORMANCE.md#e09-12b-qat-trial--2026-08-03-local-build-9618-gemma-4-12b-unified-qat-q4_0--negative-under-the-e4b-fitted-contract). Scaffold and provenance caveats are recorded there.
+  2. **E4B Q8_0** (~8 GB) — remaining candidate, repriced **down**: the 12B result shows raw model quality did not convert to agent reliability under its tested contract on this hardware. Same-model higher precision is a different bet (fewer bad tokens, same style), but expectations are now modest.
+- **Change.** For each candidate: download, launch with the E23-validated flags (`--reasoning off`, MTP off), register and pin the requested model/capability profile/served identity, then run easy + medium under E01's harness and compare against the E23 reference.
 - **Metric.** Parse-retry count, edit-failure rate, done-emission-loop rate, content-drift incidents, agent_complete rate, total test time; decode tok/s as a guard metric (especially for 12B).
 - **Risk.** Low. Model swaps revert trivially. For 12B: decode-speed regression may outweigh quality gains for the agent loop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
@@ -356,8 +356,8 @@ Moved to [Archived / rejected](#archived--rejected).
 ### E21 — gpt-oss-20b low/medium/high effort as the OpenRouter CI/prototyping model
 
 - **Context.** OpenRouter-backed CI (`.github/workflows/llm.yml`) and fast
-  prototyping currently default to `google/gemma-4-26b-a4b-it` — the hosted
-  stand-in for the local Gemma 4 MoE. `openai/gpt-oss-20b` is a comparable-class
+  prototyping currently default to `google/gemma-4-26b-a4b-it` — a larger
+  hosted Gemma-family comparison for the local dense-PLE E4B. `openai/gpt-oss-20b` is a comparable-class
   MoE (21B total, ~3.6B active) that was explicitly post-trained for agentic
   tool use and CoT, with a selectable reasoning dial (harmony `low`/`medium`/
   `high`) instead of Gemma's hybrid on/off reasoning.
@@ -379,8 +379,9 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Change.** `OPENROUTER_REASONING_EFFORT` baseline in `askme.py` (merged as
   `max(baseline, gated level)`; `off` policy pins to the baseline; budget
   floors 1024/1536/2048), `--reasoning-effort` on `tests/bench_harness.py`,
-  `model@effort` suffix in the llm.yml Berkeley job (e.g.
-  `openai/gpt-oss-20b@low`), effort-qualified cells in `tests/ci_llm_gate.py`.
+  `requested=expected@effort` cells in the llm.yml Berkeley job (e.g.
+  `openai/gpt-oss-20b=openai/gpt-oss-20b@low`), effort-qualified cells in
+  `tests/ci_llm_gate.py`.
 - **Metric.** Per E01 harness: pytest pass + agent-complete rate, wall time,
   completion tokens, `openrouter_cost`, thinking retries — cells
   `gemma-4-26b-a4b-it` (control) vs `gpt-oss-20b@{low,medium,high}` on the
@@ -399,10 +400,10 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Effort.** S.
 - **Status.** Running (2026-08-02). Wiring + unit coverage landed; live cells
   pending an `OPENROUTER_API_KEY` run:
-  `python3 tests/bench_harness.py --backend openrouter --suite easy --model openai/gpt-oss-20b --reasoning-effort low`
+  `python3 tests/bench_harness.py --backend openrouter --suite easy --model openai/gpt-oss-20b --expected-served-model openai/gpt-oss-20b --reasoning-effort low`
   (repeat per effort, plus the control without `--reasoning-effort`), or
   dispatch llm.yml with
-  `models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`.
+  `models: google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,openai/gpt-oss-20b=openai/gpt-oss-20b@low,openai/gpt-oss-20b=openai/gpt-oss-20b@medium,openai/gpt-oss-20b=openai/gpt-oss-20b@high`.
   Decision rule: adopt for CI smoke only if every `@low` cell passes at cost
   ≤ the Gemma control and wall time ≤ 1.5× control; otherwise keep Gemma as
   default and retain the effort axis for experiments.

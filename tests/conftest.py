@@ -34,7 +34,11 @@ def _llm_available():
     try:
         import requests
 
-        r = requests.get("http://localhost:8080/health", timeout=3)
+        chat_url = os.environ.get(
+            "LLM_API_URL", "http://localhost:8080/v1/chat/completions"
+        ).rstrip("/")
+        base_url = chat_url.removesuffix("/v1/chat/completions")
+        r = requests.get(f"{base_url}/health", timeout=3)
         return r.status_code == 200
     except Exception:
         return False
