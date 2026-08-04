@@ -8,13 +8,30 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 
 **Build caveat (2026-08-03).** All local (M1) entries below through 2026-05-03 were measured on llama.cpp build `a702f395` (2026-04-25). The machine has been running build 9618 (`c34b92235`, master 2026-06-13) since 2026-06-12 — it adds the #23468 cache-reuse reliability fix and Gemma 4 MTP support. The E23 entry below is the first benchmark on the current stack and the new local reference; treat all older local numbers as pre-b9618 history.
 
+**Source caveat (2026-08-03 records).** Every complete E23/12B summary records
+`git_dirty=true`. Its SHA is a base commit, not an exact reproducible AskMe
+revision; the worktree diffs were not retained. See the records README for the
+exact base SHAs and other provenance limits.
+
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
-## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE
+## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE UNDER THE E4B-FITTED CONTRACT
 
-E09 candidate trial of `google/gemma-4-12B-it-qat-q4_0-gguf` (6.98 GB, dense 12B) with the same flags as the E23 reference (`--reasoning off`, q4_0 KV, `--swa-full --cache-reuse 256`, MTP off). **Scaffold caveat:** this ran on post-rebase main (issue #68 completion semantics, revision-4 write pressure, uv-locked pytest 9), while the E23 E4B numbers are from the pre-rebase tree — a cross-scaffold comparison. The observed magnitudes far exceed any plausible scaffold delta.
+E09 candidate trial of `google/gemma-4-12B-it-qat-q4_0-gguf` (6.98 GB,
+dense 12B) with the same server flags as the E23 reference (`--reasoning off`,
+q4_0 KV, `--swa-full --cache-reuse 256`, MTP off) and the then-default local
+E4B-fitted 256-step/512-write-token contract. The records predate named
+capability profiles. Their `run_start.model` is incorrectly
+`gemma-4-e4b` and the summaries have no model identity; the per-call token
+events report `gemma-4-12b-it-qat-q4_0.gguf` as the served-model identity, but
+the retained records contain no physical-artifact hash.
+AskMe's recorded reasoning policy was `gated`; the server's `--reasoning off`
+is a separate llama-server parser/default setting. **Scaffold caveat:** this
+ran on post-rebase main (issue #68 completion semantics, revision-4 write
+pressure, uv-locked pytest 9), while the E23 E4B numbers are from the
+pre-rebase tree — a cross-scaffold comparison.
 
-The run was **stopped externally partway through medium** (easy complete, medium partial), but the pre-registered decision rule — within ~2× of E4B QAT wall time and both failure classes cleared — was already decisively failed at the easy tier.
+The run was **stopped externally partway through medium** (easy complete, medium partial), but the predeclared decision rule — within ~2× of E4B QAT wall time and both failure classes cleared — was already decisively failed at the easy tier.
 
 ### Easy (3 trials each, vs E23 E4B QAT reference)
 
@@ -33,7 +50,15 @@ Easy totals: 1568s vs 437s (**3.6×**), pytest 6/9 vs 7/9.
 
 ### Verdict
 
-**12B QAT is ruled out as the agent model on this 16 GB M1.** The quality advantage never materializes as agent reliability: 6–8 thinking retries per trial indicate the ~192-token JSON action contract fits 12B's output style poorly, so it pays the parse-retry tax *on top of* ~2.5× slower dense decode — compounding to 3.6–35× wall time with *more* exhaustion, not less. Neither E23 failure class is cleared (done-emission-style exhaustion recurs; content drift untested — suite stopped first). **E4B QAT Q4_0 remains primary.** 12B stays viable as an interactive-quality model on this hardware, not for the agent loop. Raw records: `tests/bench_records/2026-08-03/12b_{easy,medium}/`.
+**12B QAT failed this E4B-fitted agent contract on this 16 GB M1.** Under the
+256/512-token limits it paid up to 6–8 JSON retries on `multi_step_build` on top of ~2.5× slower
+dense decode, compounding to 3.6–35× wall time with more exhaustion. Neither
+E23 failure class was cleared (done-emission-style exhaustion recurred;
+content drift was untested because the suite stopped first). This is not a
+model-wide rejection: a conclusion under the new generic capability profile
+requires a newly registered run with requested, profile, and served identities
+pinned. **E4B QAT Q4_0 remains the qualified primary model.** Raw records:
+`tests/bench_records/2026-08-03/12b_{easy,medium}/`.
 
 ## E23 QAT Baseline — 2026-08-03, Local (build 9618, official E4B QAT Q4_0)
 
@@ -69,14 +94,14 @@ First local benchmark on the current stack (E23): build 9618 `c34b92235`, offici
 
 ### Findings
 
-1. **The current stack transforms error-recovery tests — attribution is stack-level, not weights-isolated.** `fix_missing_include` collapses 609s → 15.7s and `multi_step_build` loses its every-trial replan. **Correction (2026-08-04, from the retained records): recovery machinery was not idle.** Deterministic C repair (issue #41) fired once in each of the three medium `fix_missing_include` trials (**3 repairs**) and 2, 2, and 4 times in the three hard `replan_build_with_dependency` trials (**8 repairs**). These records make repair part of the bundled stack; without the #41 off arm they do not identify its causal contribution to speed or variance. The suite recorded zero `edit_failed` events and zero thinking retries in easy+medium, but E05 was not fully dormant: `missing_tool` triggered its no-think policy in all three `replan_fix_wrong_command` trials. Hard recorded **5 thinking-retry attempts** (2, 3, 0), not 10; 10 is the paired `reasoning_decision` + `tokens` line count. The comparison baselines are Apr/May runs on build `a702f395` with an older AskMe revision, older assertions, and no deterministic C repair, so the deltas bundle QAT weights + build 9618 (including the #23468 cache fix) + server `--reasoning off` + scaffold evolution + deterministic repair. No matched Q4_K_M-on-b9618 control was run (see `tests/bench_records/2026-08-03/README.md`, limitation 1); the #41 default-off ablation is required to price the template's share.
+1. **The current stack transforms error-recovery tests — attribution is stack-level, not weights-isolated.** `fix_missing_include` collapses 609s → 15.7s and `multi_step_build` loses its every-trial replan. **Correction (2026-08-04, from the retained records): recovery machinery was not idle.** Deterministic C repair (issue #41) fired once in each of the three medium `fix_missing_include` trials (**3 repairs**) and 2, 2, and 4 times in the three hard `replan_build_with_dependency` trials (**8 repairs**). These records make repair part of the bundled stack; without the draft #41 on-vs-off arm they do not identify its causal contribution to speed or variance. The suite recorded zero `edit_failed` events and zero thinking retries in easy+medium, but E05 was not fully dormant: `missing_tool` triggered its no-think policy in all three `replan_fix_wrong_command` trials. Hard recorded **5 thinking-retry attempts** (2, 3, 0), not 10; 10 is the paired `reasoning_decision` + `tokens` line count. The comparison baselines are Apr/May runs on build `a702f395` with an older AskMe revision, older assertions, and no deterministic C repair, so the deltas bundle QAT weights + build 9618 (including the #23468 cache fix) + server `--reasoning off` + scaffold evolution + deterministic repair. No matched Q4_K_M-on-b9618 control was run (see `tests/bench_records/2026-08-03/README.md`, limitation 1); the draft #41 on-vs-off ablation is required to price the repair arm's contribution.
 2. **New dominant failure class: done-emission loops.** 2 of 5 pytest failures are "work done correctly, `done` never emitted, duplicate-skip until exhausted" (`create_and_read_file` trials 1 and 3), and a third occurrence of the same loop pattern in `create_missing_file_then_use` trial 1 recovered within budget and passed (226.6s vs 13.3s median) — so the pattern appeared in 3 runs but caused 2 of the 5 failures. It extends beyond edits to reads/writes. Recorded as dated evidence on the E20 and E07 dispositions; per the issue #68 design (repetition is never acceptance, exhaustion is terminal) these runs correctly stay `exhausted`, and the sanctioned lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`) — this bench ran the default heuristic arm.
 3. **New failure class: content drift on rewrite.** QAT prefers whole-file `write` over minimal `edit` for the first fix and takes liberties with content (capitalization). Systematic (3/3). An agent asked to fix an error should preserve program semantics — a genuine model-behavior regression; motivates a prompt nudge toward `edit` for fixes and the goal-output arm of E07.
 4. Suite scorecard: easy 7/9, medium 6/9, hard 9/9 pytest (agent-complete 25/27). The Apr/May Q4_K_M baseline was 27/27 — but at 1.6–39× the wall time on the tests that matter.
 
 ### Verdict
 
-**QAT Q4_0 promoted to primary model (2026-08-03).** Every one of the 5 pytest failures is one of the two identified behavioral quirks, both recorded in EXPERIMENTS.md dispositions (E20/E07) and ARCHITECTURE.md Current Constraints, while the measured wall-time and reliability gains on agentic workloads are 1.6–39×. The promotion is a **current-stack decision** — the post-refresh QAT weights are the recommended E4B artifact going forward regardless of how the gain decomposes across weights/build/flags — not a weights-isolated causal claim (limitation 1 in the bench records). Raw records: `tests/bench_records/2026-08-03/` (copied from `/tmp/bench_qat_{easy,medium,hard}_20260803/`).
+**QAT Q4_0 promoted to primary model (2026-08-03).** Every one of the 5 pytest failures is one of the two identified behavioral quirks, both recorded in EXPERIMENTS.md dispositions (E20/E07) and ARCHITECTURE.md Current Constraints, while measured wall-time gains on the improved workloads are 1.6–39×. The promotion is a **current-stack decision** — the post-refresh QAT weights are the recommended E4B artifact going forward regardless of how the gain decomposes across weights/build/flags — not a weights-isolated causal claim (limitation 1 in the bench records). Raw records: `tests/bench_records/2026-08-03/` (copied from `/tmp/bench_qat_{easy,medium,hard}_20260803/`).
 
 ## MTP + Reasoning-Default Smoke Test — 2026-08-03, Local (build 9618 `c34b92235`)
 
@@ -98,7 +123,7 @@ Offline unit suite on the same date: 448 passed, 31 deselected in 35.1s.
 
 Wiring for [EXPERIMENTS.md E21](EXPERIMENTS.md#e21--gpt-oss-20b-lowmediumhigh-effort-as-the-openrouter-ciprototyping-model)
 landed: `OPENROUTER_REASONING_EFFORT` baseline in `askme.py`,
-`--reasoning-effort` on `bench_harness.py`, `model@effort` cells in the llm.yml
+`--reasoning-effort` on `bench_harness.py`, `requested=expected@effort` cells in the llm.yml
 Berkeley job, and effort-qualified rows in `ci_llm_gate.py`. No live cells have
 run yet (no key in the authoring environment) — the numbers below are from the
 unauthenticated OpenRouter catalog (`/models`, `/models/openai/gpt-oss-20b/endpoints`,
@@ -128,13 +153,16 @@ logged axis instead.
 Comparison matrix to run once a key is available (3 trials each):
 
 ```bash
-python3 tests/bench_harness.py --backend openrouter --suite easy                              # control
 python3 tests/bench_harness.py --backend openrouter --suite easy \
-  --model openai/gpt-oss-20b --reasoning-effort low      # repeat with medium, high
+  --model google/gemma-4-26b-a4b-it \
+  --expected-served-model google/gemma-4-26b-a4b-it-20260403  # control
+python3 tests/bench_harness.py --backend openrouter --suite easy \
+  --model openai/gpt-oss-20b --expected-served-model openai/gpt-oss-20b \
+  --reasoning-effort low                                 # repeat with medium, high
 ```
 
 or dispatch llm.yml with
-`models: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,openai/gpt-oss-20b@medium,openai/gpt-oss-20b@high`
+`models: google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,openai/gpt-oss-20b=openai/gpt-oss-20b@low,openai/gpt-oss-20b=openai/gpt-oss-20b@medium,openai/gpt-oss-20b=openai/gpt-oss-20b@high`
 (8 Berkeley cells). Decision rule is predeclared in E21.
 
 ## Revision-4 Focused Test Snapshot — 2026-08-02
@@ -153,18 +181,28 @@ integration tests skip when their server or credential is unavailable. Pytest
 counts in dated sections below are historical snapshots, not the current suite
 size.
 
-## Reproducing Multi-Trial Entries
+## Running the Current Multi-Trial Harness
 
-Entries from E01 onward use `tests/bench_harness.py` (median + range across N
-trials):
+Current runs use `tests/bench_harness.py` (median + range across N trials).
+They create new evidence under the current contract; they do not reproduce the
+dated entries above, whose source/configuration limitations remain attached:
 
 ```bash
-python3 tests/bench_harness.py                                    # 3 trials, easy, local
-python3 tests/bench_harness.py --suite medium --trials 5          # 5 trials, medium, local
-python3 tests/bench_harness.py --backend openrouter --suite hard  # 3 trials, hard, openrouter
+python3 tests/bench_harness.py --model gemma-4-e4b \
+  --capability-profile legacy-e4b-m1-16k-v1 \
+  --expected-served-model gemma-4-e4b
+python3 tests/bench_harness.py --suite medium --trials 5 \
+  --model gemma-4-e4b --capability-profile legacy-e4b-m1-16k-v1 \
+  --expected-served-model gemma-4-e4b
+python3 tests/bench_harness.py --backend openrouter --suite hard \
+  --model google/gemma-4-26b-a4b-it \
+  --expected-served-model google/gemma-4-26b-a4b-it-20260403
 python3 tests/bench_harness.py --backend openrouter --suite easy --trials 1 \
-  --model qwen/qwen3.6-27b --provider siliconflow                 # strict provider pin
-python3 tests/bench_harness.py --test test_shell_and_write        # single test
+  --model qwen/qwen3.6-27b --expected-served-model qwen/qwen3.6-27b-20260422 \
+  --provider siliconflow                                         # strict provider pin
+python3 tests/bench_harness.py --test test_shell_and_write \
+  --model gemma-4-e4b \
+  --expected-served-model gemma-4-e4b
 python3 tests/bench_harness.py --list                             # show available tests
 ```
 

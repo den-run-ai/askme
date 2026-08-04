@@ -1,5 +1,7 @@
 """Integration tests: local LLM + OpenRouter (easy/medium/hard) + planner reasoning."""
 
+import platform
+
 import pytest
 from _test_support import (
     HARD_MAX_REPLANS,
@@ -39,7 +41,7 @@ class TestIntegration:
         """LLM runs a shell command and writes output to a file."""
         result = int_run(f"Run 'uname -s' and write its output to {tmp_path}/os.txt", str(tmp_path))
         assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
-        assert_file(tmp_path / "os.txt", "darwin")
+        assert_file(tmp_path / "os.txt", platform.system())
 
     def test_multi_step_build(self, tmp_path):
         """LLM creates a C file, compiles it, and runs it."""

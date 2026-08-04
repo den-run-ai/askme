@@ -9,7 +9,15 @@ import pytest
 from _test_support import mock_http_response, mock_response
 from conftest import skip_no_llm
 
-from askme import TASK_REPLAN_MAX_TOKENS, LLMTransportError, get_plan, get_step, replan_task, run
+from askme import (
+    TASK_REPLAN_MAX_TOKENS,
+    LLMSettings,
+    LLMTransportError,
+    get_plan,
+    get_step,
+    replan_task,
+    run,
+)
 
 # --- Planner reasoning tests ---
 
@@ -411,16 +419,24 @@ class TestCommandAwareTimeout:
 @skip_no_llm
 @pytest.mark.live_llm
 class TestServerConfig:
-    """Verify llama-server is running with optimized agentic configuration.
-    These are fast (no LLM inference), just HTTP checks against the server."""
+    """Verify only deployment assertions named by the selected profile."""
 
     def test_single_slot_full_context(self):
-        """Server should have 1 slot (-np 1) with full 16K context."""
+        """The legacy E4B profile owns the M1 single-slot/16K contract."""
         import requests
 
-        slots = requests.get("http://localhost:8080/slots", timeout=5).json()
-        assert len(slots) == 1, f"Expected 1 slot (-np 1), got {len(slots)}"
-        assert slots[0]["n_ctx"] == 16384, f"Expected 16384 ctx, got {slots[0]['n_ctx']}"
+        settings = LLMSettings.from_env()
+        profile = settings.resolved_capability_profile()
+        if profile.server_slots is None or profile.context_window is None:
+            pytest.skip(f"{profile.name} has no server-topology assertion")
+        slots_url = settings.api.rsplit("/v1/chat/completions", 1)[0] + "/slots"
+        slots = requests.get(slots_url, timeout=5).json()
+        assert len(slots) == profile.server_slots, (
+            f"Expected {profile.server_slots} slots for {profile.name}, got {len(slots)}"
+        )
+        assert slots[0]["n_ctx"] == profile.context_window, (
+            f"Expected {profile.context_window} ctx for {profile.name}, got {slots[0]['n_ctx']}"
+        )
 
 
 # --- E11: Task-local replan function tests ---

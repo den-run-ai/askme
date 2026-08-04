@@ -16,14 +16,15 @@ settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `OPENROUTER_REASONING_EFFORT` | (unset) | Baseline reasoning effort (`low`/`medium`/`high`) for always-on reasoners like `openai/gpt-oss-20b`. Leave unset for hybrid models like Gemma 4 |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
-| `LLM_MODEL` | `gemma-4-e4b` | Model name (local only) |
+| `LLM_MODEL` | `local-model` | Requested model name or server alias (local only) |
+| `LLM_CAPABILITY_PROFILE` | `generic-feature-scale-v1` | Immutable model-facing budget/context contract. The E4B/M1 reference requires explicit `legacy-e4b-m1-16k-v1` |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `ALLOW_NETWORK` | `1` | Reserved prompt-visible policy; currently does not enforce network isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled). An unavailable or malformed verdict never counts as a pass — the run completes with status `complete_unverified` |
-| `AGENT_COMPILE_REPAIR` | `1` | Deterministic C-header compile repair (tracked in issue #41). `0` disables it — the preregistered ablation's off arm ([ablation-compile-repair.md](ablation-compile-repair.md)). The repair rule proposes a normal write action that is dispatched through the action executor |
+| `AGENT_COMPILE_REPAIR` | `1` | Deterministic C-header compile repair (tracked in issue #41). `0` disables it for the draft on-vs-off ablation ([ablation-compile-repair.md](ablation-compile-repair.md)); no outcome protocol is registered yet. The repair rule proposes a normal write action that is dispatched through the action executor |
 | `AGENT_STEP_POLICY` | `heuristic` | Step/completion-pressure arm (issue #31): `heuristic` is the guard/counter baseline; `lifecycle` is the explicit inspect → modify → verify → finish alternative |
 | `AGENT_REASONING_POLICY` | `gated` | Explicit-reasoning requests: `gated` preserves the recovery policy; `off` suppresses them at every call site |
-| `AGENT_GOAL_CONTEXT_CHARS` | `300` | Goal characters retained for executor and task-local replan context; independent of result/history truncation |
+| `AGENT_GOAL_CONTEXT_CHARS` | `300` | Optional goal-character override for executor and task-local replan context; independent of result/history truncation and capability profiles |
 | `AGENT_RUN_LOG` | (unset) | Path to append JSONL events (`run_start`, `reasoning_decision`, `plan`, `tokens`, `step`, `task_complete`, `task_failed`, `validation`, `run_end`). Disabled when unset. |
 
 `off` controls explicit reasoning requests sent by the harness; it is not a claim
@@ -32,14 +33,44 @@ requested policy, trigger, and effective reasoning level when `AGENT_RUN_LOG` is
 enabled. Per-call-site `gated`/`off` semantics are specified in
 [ARCHITECTURE.md](ARCHITECTURE.md#explicit-reasoning-policy).
 
+## Capability profiles
+
+Profiles are frozen dataclass values selected independently of transport or
+provider. They own every model-facing output budget, the three reasoning
+floors, and optional deployment expectations. The complete resolved profile is
+included in `run_start`, structured result metadata, and `config_hash`; the
+existing flat `budgets` fields remain for result-schema compatibility.
+
+| Profile | Planner / step / write / task-replan / validation | Reasoning floors (low / medium / high) | Deployment expectations |
+|---|---|---|---|
+| `generic-feature-scale-v1` (default) | 768 / 4096 / 8192 / 96 / 768 | 1024 / 1536 / 2048 | none |
+| `legacy-e4b-m1-16k-v1` | 768 / 256 / 512 / 96 / 768 | 512 / 512 / 768 | 16,384 context, one server slot |
+
+Legacy reproduction is explicit; a model name never silently selects the E4B
+profile. Pin both identities in automated runs:
+
+```bash
+LLM_MODEL=gemma-4-e4b \
+LLM_CAPABILITY_PROFILE=legacy-e4b-m1-16k-v1 \
+python3 askme.py --capability-profile legacy-e4b-m1-16k-v1 "your request here"
+```
+
+For benchmark cells, `tests/bench_harness.py --model ...
+--capability-profile ... --expected-served-model ...` separately pins the
+requested identity, capability contract, and exact identity returned by the
+server. A requested-model, profile, or served-model mismatch invalidates the
+cell even if pytest passes; a contract-valid task failure remains a valid
+negative trial rather than disappearing from the denominator.
+
 `OPENROUTER_REASONING_EFFORT` exists because harmony-format models
 (gpt-oss-20b/120b) expose `low`/`medium`/`high` effort but no off switch, so the
 default reasoning-disabled request leaves their effort at the provider default
 on every call. When set, every OpenRouter request carries at least the baseline
 effort; `gated` escalation raises it but never lowers it, and
 `AGENT_REASONING_POLICY=off` pins requests to exactly the baseline. The outer
-`max_tokens` is floored at 1024/1536/2048 for low/medium/high because reasoning
-tokens share the completion budget on Parasail-class providers. Example:
+`max_tokens` is floored by the selected profile (1024/1536/2048 for the generic
+profile) because reasoning tokens share the completion budget on
+Parasail-class providers. Example:
 
 ```bash
 LLM_BACKEND=openrouter OPENROUTER_MODEL=openai/gpt-oss-20b \
@@ -56,6 +87,7 @@ evaluation runners:
 mkdir -p /tmp/task-workspace
 python3 askme.py --prompt-file task.md --working-dir /tmp/task-workspace \
   --result-json /tmp/run.json --reasoning-policy gated \
+  --capability-profile generic-feature-scale-v1 \
   --max-replans 3 --max-tasks 4 --max-steps 10 --goal-context-chars 1200
 ```
 
@@ -66,7 +98,8 @@ verified pass), or `exhausted` on failure; the process exit code is `0`
 exactly when the status is `complete` or `complete_unverified` — the
 structured `state` dict, and the `log` history list. Issue #40 added two
 credential-free metadata keys: `config` (the resolved immutable run
-configuration — backend, endpoint `api` and `timeout_s`, model, provider
+configuration — backend, endpoint `api` and `timeout_s`, model, the complete
+`capability_profile`, provider
 routing, reasoning effort/policy, execution policy, validation mode, the
 #41 compile-repair arm, the #31 `step_policy` arm, guard thresholds, token
 budgets (including final validation), per-call `timeouts_s` and
@@ -96,7 +129,7 @@ Run composition snapshots the module compatibility settings exactly once.
 Later changes to model, endpoint, provider routing, request deadlines, retry
 limits, or token budgets cannot alter requests in that run. Direct
 `ask_llm(...)` callers keep the historical per-call module snapshot behavior.
-The `budgets.reasoning_token_floors` map records the low/medium/high floors
-that request construction applies when reasoning shares the HTTP completion
-allowance, so the effective `max_tokens` remains derivable from the requested
-call-site budget and selected effort.
+The selected profile and `budgets.reasoning_token_floors` map record the
+low/medium/high floors that request construction applies when reasoning shares
+the HTTP completion allowance, so the effective `max_tokens` remains derivable
+from the requested call-site budget and selected effort.

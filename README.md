@@ -29,8 +29,10 @@ Today, AskMe is a minimal two-module Python agent with no frameworks and no
 dependencies beyond `requests`: `askme.py` owns the CLI, LLM calls, and the
 plan/execute/replan controller, and `actions.py` owns the action registry and
 handlers. It takes a prompt, plans tasks, executes them via
-shell/write/edit/read/search/tree actions, and replans on failure. It is
-built for Gemma 4 E4B on `llama-server` and also supports OpenRouter.
+shell/write/edit/read/search/tree actions, and replans on failure. Its
+capability-budget selection is provider/backend-independent by default; a
+named legacy profile preserves the original Gemma 4 E4B/M1 setup, and the
+runtime remains configurable for local servers and OpenRouter.
 
 ## Quick Start
 
@@ -46,8 +48,9 @@ For OpenRouter or other options, see [configuration](docs/configuration.md).
 
 ### Local llama.cpp setup
 
-The local backend expects `llama-server` on `:8080`. The current reference
-setup (2026-08-03, 16 GB M1): **Gemma 4 E4B QAT Q4_0** (official post-refresh
+The local backend expects `llama-server` on `:8080`. The explicit
+`legacy-e4b-m1-16k-v1` reference deployment (2026-08-03, 16 GB M1) uses
+**Gemma 4 E4B QAT Q4_0** (official post-refresh
 weights, ~5.15 GB) on llama.cpp build 9618+, launched with q4_0 KV cache,
 `--swa-full --cache-reuse 256` (prompt caching), and `--reasoning off` —
 required, or template auto-detection silently drains action budgets into
@@ -59,8 +62,19 @@ reasoning. MTP speculative decoding stays off (currently a small loss on M1).
   -ngl 99 --ctx-size 16384 --flash-attn on \
   --cache-type-k q4_0 --cache-type-v q4_0 \
   --swa-full --cache-reuse 256 --reasoning off \
-  -np 1 --port 8080
+  -np 1 --alias gemma-4-e4b --port 8080
 ```
+
+Run that deployment with its matching immutable profile:
+
+```bash
+LLM_MODEL=gemma-4-e4b \
+LLM_CAPABILITY_PROFILE=legacy-e4b-m1-16k-v1 \
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
+```
+
+`llama-server --reasoning off` controls server-side template parsing; it is
+separate from AskMe's `AGENT_REASONING_POLICY`, whose default remains `gated`.
 
 Full model/build/flag rationale and benchmark history:
 [gemma4-setup.md](docs/gemma4-setup.md), [PERFORMANCE.md](docs/PERFORMANCE.md).
@@ -68,7 +82,8 @@ Full model/build/flag rationale and benchmark history:
 ### Supported surfaces
 
 - **CLI** — `python3 askme.py [prompt] [--prompt-file F] [--working-dir D]
-  [--result-json R] [--reasoning-policy P] [--max-replans/--max-tasks/--max-steps N]
+  [--result-json R] [--reasoning-policy P] [--capability-profile P]
+  [--max-replans/--max-tasks/--max-steps N]
   [--goal-context-chars N]`; exit code `0` exactly when the run completes.
 - **Python API** — `run_result(prompt, working_dir=None, config=None,
   dependencies=None)` returns the structured result (`status`, `state`, `log`,
@@ -122,6 +137,8 @@ The everyday knobs:
 | Env var | Default | Purpose |
 |---|---|---|
 | `LLM_BACKEND` | `local` | `local` or `openrouter` |
+| `LLM_MODEL` | `local-model` | Requested local model/alias |
+| `LLM_CAPABILITY_PROFILE` | `generic-feature-scale-v1` | Immutable model-facing budgets; select `legacy-e4b-m1-16k-v1` explicitly for the M1/E4B reference |
 | `OPENROUTER_API_KEY` | (from `.env`) | API key for OpenRouter |
 | `ALLOW_SYSTEM_INSTALLS` | `0` | Prompt-visible install policy; does not enforce host isolation |
 | `AGENT_FINAL_VALIDATE` | `auto` | Final validation: `auto`, `always`, or `0` (disabled) |
@@ -157,8 +174,11 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.p
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 
 # Multi-trial benchmark harness (reports median + range across N trials)
-uv run --locked python tests/bench_harness.py          # 3 trials, easy, local
-uv run --locked python tests/bench_harness.py --list   # available tests; --help for suites, backends, model/provider pins
+uv run --locked python tests/bench_harness.py --list
+uv run --locked python tests/bench_harness.py \
+  --model gemma-4-e4b \
+  --capability-profile legacy-e4b-m1-16k-v1 \
+  --expected-served-model gemma-4-e4b
 
 # Native semantic-workflow qualification (offline; no model call)
 uv run --locked pytest \
@@ -200,13 +220,18 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   PRs are rejected before any credential is in scope.
 
 `llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
-by default) with automatic provider routing. The Berkeley job replays the two
-protocol cells from
-[the talk's eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
-— hard build + medium repair — per model through `tests/bench_harness.py`,
-then `tests/ci_llm_gate.py report` evaluates the protocol pass rule (every
+by default) with automatic provider routing. The legacy-named Berkeley job
+runs the same hard-build and medium-repair selectors used by
+[the talk's frozen eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
+on current code and current model cells; it is not a replay of that historical
+four-model, strict-SiliconFlow matrix. `tests/ci_llm_gate.py report` then
+evaluates the smoke pass rule (every
 trial: pytest pass and agent completion) and publishes a summary table. Because
-a single unseeded live-model trial is not a reliability estimate, valid
+a cell separately pins its requested model, immutable capability profile, and
+exact expected served identity, requested/served-model/profile drift and
+missing configuration hashes are evidence-integrity failures rather than model
+outcomes. Provider drift is checked only when a provider is explicitly pinned. Since a
+single unseeded live-model trial is not a reliability estimate, valid
 Berkeley-cell outcome failures are advisory on post-merge `main` pushes;
 malformed or missing evidence remains blocking, and scheduled, manual, and
 opt-in PR runs remain strict. JSONL run logs, bounded pytest failure diagnostics,

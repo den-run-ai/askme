@@ -1476,19 +1476,17 @@ class TestTruncatedWriteContinuation:
         assert not any("Already done" in o for o in captured)
 
 
-# --- Revision 3 (issue #15): backend-aware output budgets ---
+# --- Issue #68: capability-profile output budgets ---
 
 
-class TestBackendAwareBudgets:
-    def test_budgets_keyed_by_backend(self):
-        if askme.LLM_BACKEND == "openrouter":
-            assert askme.STEP_TOKENS == 4096
-            assert askme.STEP_WRITE_TOKENS == 8192
-        else:
-            assert askme.STEP_TOKENS == 256
-            assert askme.STEP_WRITE_TOKENS == 512
+class TestCapabilityProfileBudgets:
+    def test_module_budgets_match_selected_profile(self):
+        profile = askme._DEFAULT_CAPABILITY_PROFILE
+        assert askme.CAPABILITY_PROFILE == profile.name
+        assert askme.STEP_TOKENS == profile.step_tokens
+        assert askme.STEP_WRITE_TOKENS == profile.step_write_tokens
 
-    def test_get_step_requests_backend_budget(self):
+    def test_get_step_requests_profile_budget(self):
         with patch("askme.ask_llm", return_value={"action": "done"}) as m:
             askme.get_step("do a thing", {})
         assert m.call_args.kwargs["max_tokens"] == askme.STEP_TOKENS

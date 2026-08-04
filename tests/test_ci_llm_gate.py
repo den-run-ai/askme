@@ -1,6 +1,7 @@
 """Unit tests for tests/ci_llm_gate.py (offline; no LLM or network needed)."""
 
 import json
+from pathlib import Path
 
 import ci_llm_gate
 import pytest
@@ -19,19 +20,29 @@ def _summary(
     cost=(0.00066688,),
     provider="",
     served=("SiliconFlow",),
+    capability_profile=ci_llm_gate.BERKELEY_CAPABILITY_PROFILE,
+    expected_served_model=None,
 ):
     """Build a dict shaped like a bench_harness summary.json."""
     pytest_passed = total if pytest_passed is None else pytest_passed
     agent_complete = total if agent_complete is None else agent_complete
+    expected_served_model = expected_served_model or {
+        "google/gemma-4-26b-a4b-it": "google/gemma-4-26b-a4b-it-20260403",
+        "qwen/qwen3.6-27b": "qwen/qwen3.6-27b-20260422",
+    }.get(model, model)
     statuses = ["complete"] * agent_complete + ["incomplete"] * (total - agent_complete)
     return {
         "suite": suite,
         "backend": "openrouter",
         "trials": total,
         "model": model,
+        "reasoning_effort": "",
+        "reasoning_policy": "gated",
+        "capability_profile": capability_profile,
+        "expected_served_model": expected_served_model,
         "provider": provider,
-        "allow_provider_fallbacks": None,
-        "require_provider_parameters": None,
+        "allow_provider_fallbacks": False if provider else None,
+        "require_provider_parameters": True if provider else None,
         "git_commit": "0" * 40,
         "git_dirty": False,
         "total_wall_s": sum(wall),
@@ -41,6 +52,8 @@ def _summary(
                 "pytest_passed": pytest_passed,
                 "agent_complete": agent_complete,
                 "total": total,
+                "valid_trials": total,
+                "valid_passes": pytest_passed,
                 "agent_status": statuses,
                 "wall_s": list(wall),
                 "replans": [0] * total,
@@ -53,8 +66,25 @@ def _summary(
                 "completion_tokens": [375] * total,
                 "total_tokens": [4351] * total,
                 "openrouter_cost": list(cost),
-                "served_models": [["google/gemma-4-26b-a4b-it-20260403"]] * total,
+                "usage_complete": [True] * total,
+                "served_models": [[expected_served_model]] * total,
+                "served_model_sources": [["response"]] * total,
+                "served_model_provenance_valid": [True] * total,
                 "served_providers": [list(served)] * total,
+                "served_provider_observed": [True] * total,
+                "recorded_backends": ["openrouter"] * total,
+                "requested_models": [model] * total,
+                "token_requested_models": [[model]] * total,
+                "token_requested_model_valid": [True] * total,
+                "requested_providers": [provider] * total,
+                "recorded_reasoning_efforts": [""] * total,
+                "recorded_reasoning_policies": ["gated"] * total,
+                "recorded_allow_provider_fallbacks": [False] * total,
+                "recorded_require_provider_parameters": [True] * total,
+                "capability_profiles": [capability_profile] * total,
+                "config_hashes": ["0123456789abcdef"] * total,
+                "route_valid": [True] * total,
+                "contract_valid": [True] * total,
             }
         },
     }
@@ -214,10 +244,193 @@ class TestReportGate:
         assert rc == 1
         assert "LLM GATE: FAIL (evidence integrity)" in capsys.readouterr().out
 
+    def test_non_object_summary_is_an_integrity_failure(self, tmp_path, capsys):
+        path = _write(tmp_path, "list.json", json.dumps([_summary()]))
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "summary root is not an object" in out
+
     def test_summary_without_tests_fails_gate(self, tmp_path):
         path = _write(tmp_path, "empty.json", {"suite": "hard", "tests": {}})
         rc = ci_llm_gate.main(["report", path])
         assert rc == 1
+
+    @pytest.mark.parametrize(
+        "field", ["model", "capability_profile", "expected_served_model", "reasoning_policy"]
+    )
+    def test_summary_contract_fields_are_required_in_advisory_mode(self, tmp_path, capsys, field):
+        summary = _summary(pytest_passed=0)
+        summary.pop(field)
+        path = _write(tmp_path, "missing-{}.json".format(field), summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "summary {} is not a non-empty string".format(field) in out
+
+    def test_berkeley_profile_must_be_the_generic_profile(self, tmp_path, capsys):
+        summary = _summary(capability_profile="legacy-e4b-m1-v1", pytest_passed=0)
+        path = _write(tmp_path, "wrong-profile.json", summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert "expected 'generic-feature-scale-v1'" in out
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("git_commit", "not-a-sha", "not a 40-character hexadecimal SHA"),
+            ("git_dirty", True, "git_dirty is not false"),
+            ("git_dirty", None, "git_dirty is not false"),
+        ],
+    )
+    def test_source_provenance_is_required(self, tmp_path, capsys, field, value, message):
+        summary = _summary()
+        summary[field] = value
+        path = _write(tmp_path, "bad-source.json", summary)
+
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert message in out
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("valid_trials", 1, "valid_trials does not equal total"),
+            ("valid_passes", 1, "valid_passes disagrees with pytest_passed"),
+            ("route_valid", [True], "route_valid length does not match total"),
+            ("route_valid", [True, False], "route_valid contains an invalid trial"),
+            ("contract_valid", [True], "contract_valid length does not match total"),
+            (
+                "contract_valid",
+                [True, False],
+                "contract_valid contains an invalid trial",
+            ),
+            ("usage_complete", [True], "usage_complete length does not match total"),
+            (
+                "usage_complete",
+                [True, False],
+                "usage_complete contains an incomplete trial",
+            ),
+            ("config_hashes", ["hash"], "config_hashes length does not match total"),
+            (
+                "config_hashes",
+                ["hash", ""],
+                "config_hashes must contain only 16-character hex digests",
+            ),
+            (
+                "config_hashes",
+                ["not-a-hash", "not-a-hash"],
+                "config_hashes must contain only 16-character hex digests",
+            ),
+            (
+                "config_hashes",
+                ["a" * 16, "b" * 16],
+                "config_hashes differ within one result cell",
+            ),
+            (
+                "requested_models",
+                ["google/gemma-4-26b-a4b-it"],
+                "requested_models length does not match total",
+            ),
+            (
+                "requested_models",
+                ["google/gemma-4-26b-a4b-it", "wrong/model"],
+                "requested_models do not exactly match summary model",
+            ),
+            (
+                "recorded_backends",
+                ["openrouter"],
+                "recorded_backends length does not match total",
+            ),
+            (
+                "recorded_backends",
+                ["openrouter", "local"],
+                "recorded_backends do not exactly match summary backend",
+            ),
+            (
+                "requested_providers",
+                [""],
+                "requested_providers length does not match total",
+            ),
+            (
+                "requested_providers",
+                ["", "other"],
+                "requested_providers do not exactly match summary provider",
+            ),
+            (
+                "recorded_reasoning_efforts",
+                ["", "low"],
+                "recorded_reasoning_efforts do not exactly match summary reasoning_effort",
+            ),
+            (
+                "recorded_reasoning_policies",
+                ["gated", "off"],
+                "recorded_reasoning_policies do not exactly match summary reasoning_policy",
+            ),
+            (
+                "capability_profiles",
+                [ci_llm_gate.BERKELEY_CAPABILITY_PROFILE],
+                "capability_profiles length does not match total",
+            ),
+            (
+                "capability_profiles",
+                [ci_llm_gate.BERKELEY_CAPABILITY_PROFILE, "legacy-e4b-m1-v1"],
+                "capability_profiles do not exactly match summary capability_profile",
+            ),
+            (
+                "served_models",
+                [
+                    ["google/gemma-4-26b-a4b-it-20260403"],
+                    ["wrong/served-model"],
+                ],
+                "served_models do not exactly match summary expected_served_model",
+            ),
+            (
+                "token_requested_models",
+                [["google/gemma-4-26b-a4b-it"], ["wrong/model"]],
+                "token_requested_models do not exactly match summary model",
+            ),
+            (
+                "token_requested_model_valid",
+                [True, False],
+                "token_requested_model_valid contains an invalid trial",
+            ),
+            (
+                "served_model_sources",
+                [["response"], ["unobserved"]],
+                "served_model_sources contain a non-observed source",
+            ),
+            (
+                "served_model_provenance_valid",
+                [True, False],
+                "served_model_provenance_valid contains an invalid trial",
+            ),
+        ],
+    )
+    def test_trial_contract_failures_stay_blocking_in_advisory_mode(
+        self, tmp_path, capsys, field, value, message
+    ):
+        summary = _summary(
+            total=2,
+            pytest_passed=0,
+            wall=(66.5, 70.1),
+            cost=(0.0006, 0.0007),
+        )
+        result = summary["tests"]["test_replan_build_with_dependency"]
+        result[field] = value
+        path = _write(tmp_path, "invalid-{}.json".format(field), summary)
+        rc = ci_llm_gate.main(["report", path, "--advisory-cell-failures"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "LLM GATE: FAIL (evidence integrity)" in out
+        assert message in out
 
     def test_advisory_mode_keeps_invalid_counts_blocking(self, tmp_path, capsys):
         summary = _summary(total=0, wall=(), cost=())
@@ -280,8 +493,10 @@ class TestReportGate:
         distinct model labels and both count toward --expect-cells."""
         low = _summary(model="openai/gpt-oss-20b")
         low["reasoning_effort"] = "low"
+        low["tests"]["test_replan_build_with_dependency"]["recorded_reasoning_efforts"] = ["low"]
         high = _summary(model="openai/gpt-oss-20b", pytest_passed=0)
         high["reasoning_effort"] = "high"
+        high["tests"]["test_replan_build_with_dependency"]["recorded_reasoning_efforts"] = ["high"]
         paths = [_write(tmp_path, "low.json", low), _write(tmp_path, "high.json", high)]
         rc = ci_llm_gate.main(["report"] + paths + ["--expect-cells", "2"])
         out = capsys.readouterr().out
@@ -290,3 +505,21 @@ class TestReportGate:
         assert "openai/gpt-oss-20b@high" in out
         # the failure line carries the effort-qualified label
         assert "[openai/gpt-oss-20b@high]: pytest 0/1" in out
+
+
+def test_workflow_pins_each_berkeley_cell_contract():
+    workflow = (Path(__file__).parents[1] / ".github/workflows/llm.yml").read_text(encoding="utf-8")
+    berkeley_run = workflow.split("- name: Run Berkeley protocol cells", 1)[1].split(
+        "- name: Gate on protocol pass rule", 1
+    )[0]
+    matrix = (
+        "google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,"
+        "qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422"
+    )
+    assert workflow.count(matrix) == 2
+    assert "requested=expected-served model cells" in workflow
+    assert workflow.count("--capability-profile generic-feature-scale-v1") == 2
+    assert workflow.count("--reasoning-policy gated") == 2
+    assert workflow.count('--expected-served-model "$EXPECTED_SERVED_MODEL"') == 2
+    assert "set -u" in berkeley_run
+    assert "set -e" not in berkeley_run

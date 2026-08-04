@@ -1,6 +1,9 @@
 # AskMe — Minimal Local Agent for Constrained LLMs
 
-Designed for: Gemma 4 E4B (dense PLE, 4.5B effective / 8B including embeddings), 16K context, 16GB M1 Mac.
+Capability-budget selection is provider/backend-independent by default. Gemma
+4 E4B on a 16K, single-slot, 16 GB M1 deployment remains reproducible through
+the explicit `legacy-e4b-m1-16k-v1` profile; other controller policies are
+tracked separately and are not claimed to be model-neutral.
 
 For usage, quickstart, and test commands see [README.md](../README.md). For model/server/runtime configuration see [gemma4-setup.md](gemma4-setup.md). For benchmark history and test-run matrices see [PERFORMANCE.md](PERFORMANCE.md).
 
@@ -41,11 +44,11 @@ framework. `askme.py` re-exports the action layer's public names, and
 - `preflight_probe(working_dir)` — environment probe (platform, arch, tools, package managers, dir listing)
 - `get_policy()` — execution policy (`allow_system_installs`, `allow_network`)
 - `_repair_json(text)` — semantics-preserving JSON repair: safe object extraction, trailing-delimiter cleanup, and insertion-only container completion; partial keys/values are never deleted or defaulted; returns dict or None
-- `LLMSettings` / `LLMClient` — immutable client-local LLM configuration (one `from_env` derivation; the module-level backend/model globals remain the patchable compatibility mirrors) and the client boundary bundling those settings with an injectable HTTP `post`, sleeper, and log/event sinks, so two clients with different backends/models can share one process without global leakage (issue #37)
+- `CapabilityProfile` / `LLMSettings` / `LLMClient` — an immutable, hash-bearing model-facing budget/context contract; immutable client-local transport/model configuration (one `from_env` derivation; the module-level globals remain patchable compatibility mirrors); and the client boundary bundling those settings with an injectable HTTP `post`, sleeper, and log/event sinks. Two clients can use different models, profiles, and transports in one process without global leakage (issues #37/#68)
 - `ask_llm(messages, max_tokens, think, reasoning_policy, reasoning_trigger)` — compatibility facade that snapshots the module configuration into a fresh `LLMClient` per call: calls a backend, logs the requested/effective explicit-reasoning decision for every attempt, strips `<think>`/`<|channel>` blocks and code fences, extracts JSON, attempts repair, then retries on parse failure (up to 2). E03: the final auto-retry uses a strict contract with no thinking
 - `get_plan(user_prompt, state, client=None)` — task list. Under the default `gated` policy, explicit reasoning is off for the first plan and enabled for replans
 - `get_step(task, state, goal, reasoning_policy, goal_context_chars, write_pressure, client=None)` — next action within a task. Goal-aware completion uses the per-run frozen goal-context view rather than the generic field cap; `write_pressure` appends a commit-demanding note on stalled write-shaped tasks
-- `replan_task(failed_task, errors, completed_tasks, state, user_prompt, client=None)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (`max_tokens=96`, no retries). Returns a `TaskReplanResult` named tuple — the accepted `task` or a typed `reject_reason` (issue #40 removed the module-global side channel). Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
+- `replan_task(failed_task, errors, completed_tasks, state, user_prompt, client=None)` — mini-planner for E11: generates a replacement task description for a single failed task. Cheap no-thinking call (96 tokens in both built-in profiles, no retries). Returns a `TaskReplanResult` named tuple — the accepted `task` or a typed `reject_reason` (issue #40 removed the module-global side channel). Includes policy/missing_tools in state and rejects exact duplicates, near duplicates, and passive downgrades
 - `classify_error(output, cmd)` — categorizes as `timeout`, `missing_tool`, `permission_denied`, `missing_file`, `compile_error`, or `unknown`. Command-aware: compiler-family commands prefer `compile_error` over `missing_file` for ambiguous diagnostics (E16)
 - `summarize_errors(errors)` — groups, deduplicates, caps at 3 per type for planner
 - `actions.parse_action_envelope(obj)` / `actions.ActionEnvelope` — one pure action boundary shared by reply decode, injected-client controller intake, and defensive dispatch. The parser owns allowed/required fields, string and integer types/bounds, reserved controller metadata, and read-continuation dependencies; it returns either a detached immutable normalized action or a precise `ActionProtocolError` without raising or mutating the raw object. Optional `reasoning:null` and optional tree/control `arg:null` are the only legacy null normalizations
@@ -57,7 +60,7 @@ framework. `askme.py` re-exports the action layer's public names, and
 - `_validate_completion(...)` — post-completion LLM check; gated by `_should_validate()`; returns a typed `ValidationResponse` or None when no verdict is available
 - `RunOutcome` — the typed terminal record (issue #68): status, final-validation disposition, replans, wall time, and step counters; the `run_end` JSONL event and the structured result's `status`/`outcome` fields are projections of the same record
 - `GuardThresholds` / `_config_hash` — resolved outcome-affecting configuration (issue #68): validation mode, the #41 compile-repair arm, the #31 step-policy arm, guard thresholds, per-call request timeouts/retry limits, and capability budgets freeze at run start into one payload whose sha256 `config_hash` is logged at `run_start` and returned in the config metadata (never credentials). The default compatibility path binds that snapshot to `ask_llm` for the whole run; direct facade calls still snapshot per call
-- `run_result(user_prompt, working_dir=None, config=None, dependencies=None)` — the public structured-run API (issue #40): resolves workspace ownership (`RunWorkspace`, with an explicit `created` flag and intentional `cleanup()`), composes `_RunController` from an immutable `RunConfig` (per-run LLM settings, execution policy, reasoning policy, budgets; `None` fields resolve from the module compatibility surface) and injectable `RunDependencies` (LLM client, action executor, clock, log/event sinks), and returns `status`/`state`/`log` plus credential-free `config` metadata and the `workspace` record. A pinned `llm` config gives the run its own `LLMClient` — and backend-shaped step budgets — so differently configured runs coexist in one process
+- `run_result(user_prompt, working_dir=None, config=None, dependencies=None)` — the public structured-run API (issue #40): resolves workspace ownership (`RunWorkspace`, with an explicit `created` flag and intentional `cleanup()`), composes `_RunController` from an immutable `RunConfig` (per-run LLM settings, capability profile, execution policy, reasoning policy, and limits; `None` fields resolve from the module compatibility surface) and injectable `RunDependencies` (LLM client, action executor, clock, log/event sinks), and returns `status`/`state`/`log` plus credential-free `config` metadata and the `workspace` record. A pinned `llm` config gives the run its own `LLMClient` and profile-derived budgets, so differently configured runs coexist in one process
 - `_run_loop(...)` — compatibility seam over `run_result()` and `_RunController`, the structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls. Run-scoped controller data (the structured state dict, rewrite damping, wall clock, the one recorder) lives on `RunState`; attempt-scoped executor state (write pressure, duplicate/observation counters, thinking escalation) lives on `TaskAttemptState`; `done`/`fail` and one shared completion-blocker gate (`_completion_blocker`) remain controller concerns (issue #31)
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper over `run_result()` returning a boolean
 
@@ -169,7 +172,7 @@ callbacks because those paths make no model call.
 | `done` | Mark current task complete | Terminal |
 | `fail` | Mark current task failed | Triggers replan |
 
-`edit` exists because full-file `write` content frequently exceeds the local model's 256-token executor budget on multi-line files. Edit payloads fit in ~40-80 tokens; the 26B model on OpenRouter also spontaneously prefers `edit` for fixes. For new large files, chunked `append` writes cover what `edit` cannot.
+`edit` exists because full-file `write` content frequently exceeded the legacy E4B profile's 256-token executor budget on multi-line files. Edit payloads fit in ~40-80 tokens; the 26B model on OpenRouter also spontaneously prefers `edit` for fixes. For new large files, chunked `append` writes cover what `edit` cannot.
 
 Observation actions (`read`/`search`/`tree`) carry their own budgets (issue #7): results are bounded by `READ_CHARS`/`SEARCH_MAX_CHARS`/`TREE_MAX_CHARS` and kept in executor step history up to `OBSERVE_STATE_CHARS` (vs 100 chars for mutating actions). Read pages are losslessly resumable. Search and tree remain intentionally lossy discovery summaries: bounded match/file/snippet/entry/depth/character omissions plus unreadable files and traversal errors are exposed in `truncation_reasons` — carried through the action result, the executor step history (inside the bracketed header), and the JSONL `step` record — only complete records are packed, total output including the header fits the history budget, and the model is directed to narrow the query/path or use `read`. On the model-output side, `ask_llm` records `finish_reason` in every `tokens` JSONL event; when a truncated `write`/`edit` payload fails to parse, the retry gets a payload-sized budget (`STEP_WRITE_TOKENS`) instead of more reasoning, and an unrecoverable parse failure surfaces as a typed `[malformed_action]` or `[response_truncated]` error (the latter when the final attempt hit the token budget) that the replanner sees.
 
@@ -208,6 +211,23 @@ After all tasks complete, `_validate_completion()` runs an LLM check to verify t
 
 Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `always`, or `0` (disabled).
 
+## Capability Profiles
+
+The provider/transport shapes the HTTP envelope but does not select output
+limits. A versioned immutable profile owns the model-facing limits and is
+serialized into every run's metadata and hash.
+
+| Profile | Planner / step / write / task-replan / validation | Reasoning floors | Deployment expectations |
+|---|---|---|---|
+| `generic-feature-scale-v1` (default) | 768 / 4096 / 8192 / 96 / 768 | 1024 / 1536 / 2048 | none |
+| `legacy-e4b-m1-16k-v1` | 768 / 256 / 512 / 96 / 768 | 512 / 512 / 768 | 16,384 context, one slot |
+
+The legacy profile is never inferred from a backend or model alias. Select it
+through `LLM_CAPABILITY_PROFILE`, `--capability-profile`, or an explicit
+`LLMSettings.capability_profile`. Module constants such as `STEP_TOKENS`
+remain patchable compatibility mirrors of the process default, not production
+budget selection logic.
+
 ## Safety Limits
 
 | Constant | Value | Purpose |
@@ -222,14 +242,14 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `LLM_TIMEOUT` | 120s | Default planner, executor, task-replan, and validator request deadline |
 | `LLM_TIMEOUT_REPLAN` | 180s | Full-planner replan request deadline |
 | `MAX_INPUT` | 300 | Max chars per non-goal field sent to executor |
-| `GOAL_CONTEXT_CHARS` | 300 | Default executor/task-replan goal view; independently configurable and frozen per run |
+| `GOAL_CONTEXT_CHARS` | 300 | Default executor/task-replan goal view; independently configurable and frozen per run; state projection is not a model capability |
 | `SHELL_TIMEOUT` | 30s | Default per-command timeout |
 | `SHELL_TIMEOUT_LONG` | 120s | Timeout for install/build commands |
 | `SHELL_TIMEOUT_MAX` | 300s | Hard cap for model-specified timeout hint |
-| `PLANNER_MAX_TOKENS` | 768 | Task list budget; shared with thinking on replans |
-| `TASK_REPLAN_MAX_TOKENS` | 96 | Task-local replacement budget |
-| `VALIDATION_MAX_TOKENS` | 768 | Final completion-validator budget |
-| Reasoning token floors | 1024/1536/2048 | Effective HTTP `max_tokens` floors for low/medium/high effort; frozen and recorded per run |
+| `PLANNER_MAX_TOKENS` | selected profile | Compatibility mirror of the task-list budget; shared with thinking on replans |
+| `TASK_REPLAN_MAX_TOKENS` | selected profile | Compatibility mirror of the task-local replacement budget |
+| `VALIDATION_MAX_TOKENS` | selected profile | Compatibility mirror of the final completion-validator budget |
+| Reasoning token floors | selected profile | Effective HTTP `max_tokens` floors for low/medium/high effort; frozen and recorded per run |
 | `ALLOW_SYSTEM_INSTALLS` | false | Prompt-visible install policy; not host-level enforcement |
 | `ALLOW_NETWORK` | true | Reserved for future use |
 | Step output | 100 chars | Max output stored per mutating-action step in history |
@@ -237,20 +257,18 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | Read page | 60 lines / 1200 Unicode code points | `READ_LINES` / `READ_CHARS`; `READ_LIMIT_MAX=200` caps model-specified limit, while exact cursor continuation handles an oversized page or line |
 | Search bound | 15 matches / 1500 chars / 500 files | `SEARCH_MAX_MATCHES` / `SEARCH_MAX_CHARS` / `SEARCH_MAX_FILES` |
 | Tree bound | 60 entries / 1500 chars / depth 3 | `TREE_MAX_ENTRIES` / `TREE_MAX_CHARS` / `TREE_MAX_DEPTH` |
-| Write-payload retry budget | 512 (local) / 8192 (OpenRouter) | `STEP_WRITE_TOKENS` — bumped when a truncated write/edit payload fails to parse |
-| Step tokens (local) | 256 | `STEP_TOKENS` — max completion tokens (local) |
-| Step tokens (OpenRouter) | 4096 | `STEP_TOKENS` — sized for implementation writes (issue #15); an 8KB file is ~3000 tokens |
+| Write-payload retry budget | selected profile | `STEP_WRITE_TOKENS` compatibility mirror — used when a truncated write/edit payload fails to parse |
+| Executor step budget | selected profile | `STEP_TOKENS` compatibility mirror; an 8KB implementation is roughly 3000 tokens |
 | `WRITE_PRESSURE_OBSERVATIONS` | 3 | Executed observation steps before the executor prompt demands a committing action (write-shaped tasks) |
 | `OBSERVE_TAIL_RESERVE` | 3 | Final steps per task attempt reserved for committing actions on write-shaped tasks |
-| Thinking tokens (local) | 512 (medium) / 768 (high) | Must be bumped when thinking is enabled |
-| Thinking tokens (OpenRouter) | 1024 (low) / 1536 (medium) / 2048 (high) | Reasoning tokens share budget with Parasail; same floors apply to the `OPENROUTER_REASONING_EFFORT` baseline |
+| Thinking-token floors | selected profile | Apply on local and OpenRouter requests; reasoning shares the completion allowance |
 
 ## Design Decisions
 
 | Constraint | Solution |
 |---|---|
 | Limited speed | Short prompts (~200 tok executor, ~500 tok planner), JSON-only output |
-| 16K context | Slim executor state (sliding window), no history accumulation |
+| Bounded context | Slim executor state (sliding window), no history accumulation; optional context expectations live in the selected profile |
 | Token efficiency | Executor gets slim state (~150-200 tok) vs full state; planner gets full context |
 | Code fences | Strip ` ```json ``` ` wrappers from output |
 | Reliability | JSON-only output, retries, safety limits, truncated results |
@@ -269,11 +287,11 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | JSON repair (E03) | `_repair_json` may extract a complete object, remove only a trailing delimiter, or insert missing container closers. It never deletes a partial semantic field. A malformed header with `finish_reason=length` is not repaired into an executable action; valid partial sentinel content is the explicit exception |
 | Strict final retry (E03) | Final auto-retry (attempt 2) disables explicit reasoning and appends a strict JSON-only instruction. Caller-specified levels (for example `_validate_completion`) are respected under `gated` and suppressed under `off`. Upstream has no grammar+reasoning coexistence solution |
 | Recovery hints (E06) | Short hint appended to step output after typed failures. Model can override — hints are nudges, not commands. `edit_failed`/`missing_file` explain how to recover context; the four read-continuation contract errors deterministically direct the executor to echo the exact fields or restart after a source change |
-| Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, `max_tokens=96`, `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
+| Task-local replan (E11) | On task failure, a mini-planner (`SYSTEM_TASK_REPLAN`) generates a replacement task before burning a full replan. Capped at 1 attempt; no-thinking, profile-owned budget (96 in both built-ins), `max_retries=0`; exact/near duplicates and passive downgrades rejected with `reject_reason`. Happy path: zero overhead. Observed failure-path cost: ~1.5–5s vs ~70–110s full replan |
 | Failed edit/read stuck guard | Consecutive `edit_failed` attempts with the same file and find string auto-fail the task and trigger replan. Repeated duplicate reads are skipped once with a typed observation carrying the exact continuation cursor/limit/hash, then auto-fail as `stuck_loop`. Read identity includes `offset` + `limit` for initial ranges and `cursor` + `limit` + `sha256` for continuation pages, so legitimate navigation is not suppressed. Same-chunk append repeats auto-fail as `stuck_loop` |
-| App-dev action surface (issues #7, #30) | Losslessly resumable `read` pages with exact content, source-bound cursors, and hash-linked totals; bounded, explicitly incomplete `search`/`tree` discovery; atomic `write`/`edit` with chunked `append`; per-action observation budgets; `finish_reason` logged per LLM attempt; typed `malformed_action`/`response_truncated` parse failures; and selected/executed/skipped step accounting. Deterministic coverage reconstructs long-line, wide multiline, CRLF, and multibyte sources through EOF and checks bounded discovery caps, snippet clipping, unreadable files, and traversal errors. Protocol revisions 2 and 5 are recorded in `tests/workflows/PROTOCOL.md` |
+| App-dev action surface (issues #7, #30) | Losslessly resumable `read` pages with exact content, source-bound cursors, and hash-linked totals; bounded, explicitly incomplete `search`/`tree` discovery; atomic `write`/`edit` with chunked `append`; per-action observation budgets; `finish_reason` logged per LLM attempt; typed `malformed_action`/`response_truncated` parse failures; and selected/executed/skipped step accounting. Deterministic coverage reconstructs long-line, wide multiline, CRLF, and multibyte sources through EOF and checks bounded discovery caps, snippet clipping, unreadable files, and traversal errors. Protocol revisions 2, 5, and 6 are recorded in `tests/workflows/PROTOCOL.md` |
 | Sentinel content transport (issue #15) | The 2026-08-01 v4 canary lost Gemma's repeated implementation writes at the 1536-token cap because whole files rode inside JSON strings — all-or-nothing truncation. Revision 3 moves `write` content between sentinel lines after the action JSON: no escaping, and a truncated block keeps its complete lines and continues through the existing chunked `append` machinery |
-| Backend-aware budgets (issue #15) | 256/512-token step caps are a wall-clock constraint at ~7 tok/s locally but unnecessary on OpenRouter. `STEP_TOKENS` is 4096 and `STEP_WRITE_TOKENS` 8192 on OpenRouter; local values are unchanged, but the local-neutrality bar was waived and no local-regression claim is made |
+| Capability-based budgets (issues #15/#68) | Output and reasoning budgets come from an immutable named profile, never `local`/`openrouter` or provider names. `generic-feature-scale-v1` preserves the feature-scale allowance; explicit `legacy-e4b-m1-16k-v1` preserves the constrained E4B contract. The resolved profile and compatibility overrides are hash-bearing |
 | Write-forcing policy (issue #15) | The 2026-08-01 Qwen canary executed 27 observation steps and never selected a write. On write-shaped tasks: pressure note in the executor prompt after 3 observations with no commit, observation blocked in the last 3 steps of an attempt (skip once, then auto-fail), and `no_write_executed` surfaced in full and task-local replan state |
 | Validate-after-write policy (revision 4) | Repeated same-target full writes trigger shell/edit/done pressure and then `rewrite_loop` damping across task-local and full-replan boundaries; `no_write_executed`, `unvalidated_write`, and `failed_steps` are task-scoped, while incomplete artifacts remain visible run-wide across replacement tasks |
 | Curated replan state | Planner sees `completed_tasks`/`errors`/`environment`/`policy` plus a `recent_steps` digest; raw write contents stay out of planner prompts. Task-local replanner additionally sees a `failed_steps` digest |
@@ -283,8 +301,8 @@ Env var `AGENT_FINAL_VALIDATE` controls behavior: `auto` (default, gated), `alwa
 | `_content` in step dict | Stored for duplicate detection; excluded from slim state via underscore-prefix convention |
 | Multi-turn rejected | Accumulated prior turns bloat context (500-800 tokens across 3 turns) vs curated slim state (~150-200). Revisit with a stronger local model and more context headroom |
 | Null content (OpenRouter) | Parasail reasoning can return `content: null` when reasoning exhausts `max_tokens` — fall back to `reasoning_content` / `reasoning` fields, then require result is a dict (non-dict like `null`/`[]` triggers retry) |
-| Effort + max_tokens (OpenRouter) | `reasoning.effort` and `reasoning.max_tokens` are mutually exclusive; API returns 400. Use `effort` only; floor outer `max_tokens` at 1024/1536/2048 per effort |
-| `<\|think\|>` prefix (local) | Prepended to system prompt to enable thinking; `max_tokens` must be bumped 256→512→768 as thinking tokens share the budget |
+| Effort + max_tokens (OpenRouter) | `reasoning.effort` and `reasoning.max_tokens` are mutually exclusive; API returns 400. Use `effort` only; floor outer `max_tokens` with the selected profile's low/medium/high vector |
+| `<\|think\|>` prefix (local) | Prepended to the system prompt to enable thinking; `max_tokens` is raised to the selected profile's effort floor because thinking shares the budget |
 
 ## Current Constraints
 
@@ -292,7 +310,7 @@ Active limitations that still shape the design.
 
 - **Feature-scale structured writes can exceed the ordinary action budget.** In one frozen FeatureBench fast canary, the 512-token non-reasoning cap bound implementation writes: after four reads and three planning attempts, the agent emitted zero writes and an empty patch. This is one-task evidence, not a reliability, model-family, or model-size result; it motivates chunked writes, localized edits, or adaptive action budgets rather than proving that a larger cap alone is sufficient. See the [published result](../tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json). Chunked `append` writes, ranged reads, and per-action budgets now exist (issue #7, protocol revision 2). Revision 3 bundled sentinel transport, larger OpenRouter budgets, and write pressure after the v4 canaries and an exploratory pi run. In one v6 attempt per model on a changed serving stack, both cells left applied-but-unresolved patches (Gemma 11/13 target tests; Qwen 7/13); neither ran the delivered tests or terminated cleanly. These observations show that the harness was consequential on this task, but they do not isolate transport, establish a pi ceiling, or support local-performance or general readiness claims.
 - **Commit-without-validate rewrite loop (revision 3, observed 2026-08-01).** Under the bundled revision-3 changes on CoreWeave, Gemma 4 31B rewrote the same implementation file 18 times without running the delivered tests or emitting `done`. The externally evaluated patch was applied but unresolved at 11/13 target tests. Interface revision 4 mechanically guards this trajectory with shell/edit/done pressure, rewrite damping, and distinct `unvalidated_write`/`incomplete_write` replan state. This is implemented behavior, not evidence of improved task outcomes; outcome-bearing requalification requires a registered matched-provider v7 protocol.
-- **Write content truncation (local Gemma 4 E4B).** The 256-token executor budget can't fit multi-line file content with escapes. The `edit` action is the primary workaround for localized changes; for new large files, chunked `append` writes assemble the file in budget-sized pieces, and a truncated `write`/`edit` payload that fails to parse retries with a `STEP_WRITE_TOKENS` budget.
+- **Write content truncation (legacy E4B profile).** Its 256-token executor budget cannot fit multi-line file content with escapes. The `edit` action is the primary path for localized changes; for new large files, chunked `append` writes assemble the file in budget-sized pieces, and a truncated `write`/`edit` payload that fails to parse retries with the selected profile's write budget.
 - **JSON parse failures on already-solved tasks (local).** When the planner emits a task that's already complete, the local model sometimes generates verbose reasoning text instead of `{"action":"done"}`, exhausting token budgets across retries. Mitigation: executor sees `completed_tasks` in slim state and emits `done` on step 1 in the normal case; conditional validation may catch some that slip through.
 - **Path truncation in long temp paths (local).** The local model reproduces long absolute paths in shell commands and sometimes truncates them. `SYSTEM_STEP` recommends relative paths; the 26B model on OpenRouter handles this correctly.
 - **Action looping (Gemma 4 26B via OpenRouter).** The 26B model occasionally repeats the same successful write action 2-3 times before emitting `done`. Handled by the duplicate guard at the framework level.
@@ -325,7 +343,7 @@ Env var reference lives in [configuration.md](configuration.md).
 - Any task decomposable into 3-10 sequential steps
 
 **Cannot handle:**
-- Tasks requiring >16K context (large file analysis)
+- Tasks exceeding the selected model/server context window (large-file analysis)
 - Parallel/branching workflows
 - Interactive programs
 - Tasks needing >~30 LLM calls (too slow)

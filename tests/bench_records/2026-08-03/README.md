@@ -16,12 +16,16 @@ narrative, these are the records they must stay arithmetically consistent with.
 
 ## Cells
 
-| Dir | Model | AskMe revision | Invocation |
+| Dir | Model | Recorded dirty-worktree base | Invocation |
 |---|---|---|---|
-| `qat_easy` / `qat_medium` / `qat_hard` | `google/gemma-4-E4B-it-qat-q4_0-gguf` (`gemma-4-E4B_q4_0-it.gguf`, 5.15 GB) | `187a2c1` (pre-rebase `agent/docs-reorg`) | `python3 tests/bench_harness.py --suite {easy,medium,hard} --trials 3` |
-| `12b_easy` / `12b_medium` | `google/gemma-4-12B-it-qat-q4_0-gguf` (`gemma-4-12b-it-qat-q4_0.gguf`, 6.98 GB) | `b86e534`-based branch (post-rebase main: issue #68 semantics, revision-4 pressure) | `ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked python tests/bench_harness.py --suite {easy,medium} --trials 3` |
+| `qat_easy` / `qat_medium` / `qat_hard` | `google/gemma-4-E4B-it-qat-q4_0-gguf` (`gemma-4-E4B_q4_0-it.gguf`, 5.15 GB) | `187a2c1488a77a9cc501f2ad0e97f38935655163` (pre-rebase `agent/docs-reorg`) | `python3 tests/bench_harness.py --suite {easy,medium,hard} --trials 3` |
+| `12b_easy` / `12b_medium` | `google/gemma-4-12B-it-qat-q4_0-gguf` (`gemma-4-12b-it-qat-q4_0.gguf`, 6.98 GB) | `e64ec1a1e84be516a3343f818dcdfcb520e815d2` (`b86e534`-ancestry post-rebase branch: issue #68 semantics, revision-4 pressure) | `ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked python tests/bench_harness.py --suite {easy,medium} --trials 3` |
 
 ## Known limitations (recorded, not corrected post hoc)
+
+Every complete summary records `git_dirty=true`. The SHAs above are base
+commits, not exact reproducible AskMe revisions; the worktree diffs were not
+retained, so no source-exact replay or attribution is possible.
 
 1. **No matched Q4_K_M control.** The E23 comparison baselines are the Apr/May
    PERFORMANCE.md entries: build `a702f395`, older AskMe revision, older test
@@ -30,15 +34,24 @@ narrative, these are the records they must stay arithmetically consistent with.
    A matched control (Q4_K_M on build 9618, same flags/revision) was not run —
    the legacy weights were deleted for disk space before the need was flagged;
    re-download (`ggml-org/gemma-4-E4B-it-GGUF`) if isolation ever matters.
-2. **Cross-revision model comparison.** The 12B cell ran on a newer AskMe
-   revision than the QAT cells (rebase landed between them). The 3.6–35×
-   deltas and retry counts far exceed plausible scaffold-delta effects, but a
-   same-revision E4B rerun is the clean version of this comparison.
-3. **12B run stopped externally** during the medium suite (manual interrupt):
+2. **Requested-model provenance defect and implicit capability contract.** The
+   12B `run_start` events say `model=gemma-4-e4b` and the summaries record no
+   model. Per-call token events consistently report
+   `gemma-4-12b-it-qat-q4_0.gguf` as the served-model identity; no physical
+   artifact hash was retained. Both model trials predate named
+   capability profiles; the 12B run used the local E4B-fitted 256-step and
+   512-write-token limits. AskMe logged `reasoning_policy=gated`; server
+   `--reasoning off` did not turn that harness policy off. The dated result is
+   therefore conditional on that reconstructed contract.
+3. **Cross-revision model comparison.** The 12B cell ran on a newer AskMe
+   revision than the QAT cells (rebase landed between them). Cross-revision
+   attribution is unavailable; a same-revision E4B rerun is required for a
+   clean comparison.
+4. **12B run stopped externally** during the medium suite (manual interrupt):
    `12b_easy` is complete (9 trials + summary), `12b_medium` holds 4 complete
-   trial JSONLs and one incomplete, no `summary.json`. The pre-registered
+   trial JSONLs and one incomplete, no `summary.json`. The predeclared
    decision rule (within ~2× E4B QAT wall time, both E23 failure classes
    cleared) had already failed at the easy tier.
-4. The decision rules for both trials were stated in conversation/PR before
-   the runs, not in a registered protocol file; this README is the
-   after-the-fact registration. Future model trials should register here first.
+5. The decision rules for both trials were stated in conversation/PR before
+   the runs, not in a registered protocol file; this README is a retrospective
+   record, not registration. Future model trials should register first.
