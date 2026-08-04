@@ -22,7 +22,7 @@ from askme import (
     _run_loop,
     ask_llm,
 )
-from tests._test_support import mock_response
+from tests._test_support import mock_llm_response
 
 # --- Typed response records ---
 
@@ -134,17 +134,17 @@ class TestDecodeSchemaEnforcement:
     @patch("askme.requests.post")
     def test_cross_type_reply_at_action_site_retries_then_types(self, mock_post):
         """A plan reply at the action seam burns the parse retries and raises
-        with the typed envelope classification."""
-        mock_post.return_value = mock_response({"tasks": ["do it"]})
-        with pytest.raises(json.JSONDecodeError) as excinfo:
+        typed. Under the tool transport a cross-type reply is a text message
+        with no tool call, so it fails at decode rather than at the schema."""
+        mock_post.return_value = mock_llm_response({"tasks": ["do it"]})
+        with pytest.raises(json.JSONDecodeError, match="no tool call") as excinfo:
             ask_llm([{"role": "user", "content": "t"}], expect="action")
         assert mock_post.call_count == askme.MAX_LLM_RETRIES + 1
-        assert getattr(excinfo.value, "envelope_error") == "malformed_action"
         assert getattr(excinfo.value, "malformed_action") is True
 
     @patch("askme.requests.post")
     def test_unknown_action_reply_raises_typed_after_retries(self, mock_post):
-        mock_post.return_value = mock_response({"action": "refactor", "arg": "f"})
+        mock_post.return_value = mock_llm_response({"action": "refactor", "arg": "f"})
         with pytest.raises(json.JSONDecodeError) as excinfo:
             ask_llm([{"role": "user", "content": "t"}], expect="action")
         assert getattr(excinfo.value, "envelope_error") == "unknown_action"
@@ -152,37 +152,37 @@ class TestDecodeSchemaEnforcement:
     @patch("askme.requests.post")
     def test_schema_retry_can_recover_a_valid_action(self, mock_post):
         mock_post.side_effect = [
-            mock_response({"tasks": ["not an action"]}),
-            mock_response({"action": "done"}),
+            mock_llm_response({"tasks": ["not an action"]}),
+            mock_llm_response({"action": "done"}),
         ]
         result = ask_llm([{"role": "user", "content": "t"}], expect="action")
         assert result == {"action": "done"}
 
     @patch("askme.requests.post")
     def test_action_reply_at_plan_site_is_rejected(self, mock_post):
-        mock_post.return_value = mock_response({"action": "shell", "arg": "ls"})
+        mock_post.return_value = mock_llm_response({"action": "shell", "arg": "ls"})
         with pytest.raises(json.JSONDecodeError):
             ask_llm([{"role": "user", "content": "t"}], expect="plan")
 
     @patch("askme.requests.post")
     def test_plan_schema_retry_can_recover_a_valid_plan(self, mock_post):
         mock_post.side_effect = [
-            mock_response({"tasks": []}),
-            mock_response({"tasks": ["write app.py"]}),
+            mock_llm_response({"tasks": []}),
+            mock_llm_response({"tasks": ["write app.py"]}),
         ]
         result = ask_llm([{"role": "user", "content": "t"}], expect="plan")
         assert result == {"tasks": ["write app.py"]}
 
     @patch("askme.requests.post")
     def test_no_expect_keeps_the_permissive_decode(self, mock_post):
-        mock_post.return_value = mock_response({"tasks": ["anything"]})
+        mock_post.return_value = mock_llm_response({"tasks": ["anything"]})
         assert ask_llm([{"role": "user", "content": "t"}]) == {"tasks": ["anything"]}
 
     @patch("askme.requests.post")
     def test_plan_schema_honors_the_configured_task_limit(self, mock_post):
         """PR #75 review: decode-time truncation follows the run's max_tasks,
         so an entry past the configured limit cannot fail a valid plan."""
-        mock_post.return_value = mock_response({"tasks": ["valid task", None]})
+        mock_post.return_value = mock_llm_response({"tasks": ["valid task", None]})
         result = ask_llm(
             [{"role": "user", "content": "t"}],
             expect="plan",

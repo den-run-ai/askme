@@ -44,6 +44,43 @@ def mock_response(
     return mock_response_raw(json.dumps(content), finish_reason=finish_reason, usage=usage)
 
 
+def mock_llm_response(
+    reply: Any,
+    *,
+    finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
+) -> FakeHttpResponse:
+    """Shape a scripted reply the way the wire now carries it.
+
+    An action-shaped dict becomes a native tool call (the executor's only
+    transport, issue #68 / E25); every other reply stays a JSON text message
+    (planner, task-replan, validation)."""
+    if isinstance(reply, dict) and "action" in reply:
+        arguments = {key: value for key, value in reply.items() if key != "action"}
+        choice: dict[str, Any] = {
+            "message": {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_scripted",
+                        "type": "function",
+                        "function": {
+                            "name": reply["action"],
+                            "arguments": json.dumps(arguments),
+                        },
+                    }
+                ],
+            }
+        }
+        if finish_reason is not None:
+            choice["finish_reason"] = finish_reason
+        body: dict[str, Any] = {"choices": [choice]}
+        if usage is not None:
+            body["usage"] = usage
+        return mock_http_response(json_body=body)
+    return mock_response(reply, finish_reason=finish_reason, usage=usage)
+
+
 def mock_response_raw(
     text: str,
     *,

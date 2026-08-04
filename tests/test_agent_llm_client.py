@@ -335,25 +335,15 @@ class TestDecodeActionReply:
             _decode_action_reply("no json here", "stop")
         assert exc_info.value.cleaned_text == "no json here"
 
-    def test_closed_sentinel_block_attaches_content(self):
+    def test_sentinel_framing_is_gone_from_text_decode(self):
+        # The sentinel content transport was removed with the JSON executor
+        # path (issue #68 / E25): a sentinel-framed reply is trailing garbage
+        # after the JSON object, never an attached content payload — and the
+        # required-field repair rule refuses to fabricate a content-less write.
         text = (
             '{"action":"write","arg":"f.py","reasoning":"w"}\n<<<CONTENT\nline1\nline2\nCONTENT>>>'
         )
-        obj, _, _ = _decode_action_reply(text, "stop")
-        assert obj["content"] == "line1\nline2"
-        assert "content_truncated" not in obj
-
-    def test_unclosed_sentinel_at_length_keeps_last_complete_line(self):
-        text = '{"action":"write","arg":"f.py","reasoning":"w"}\n<<<CONTENT\nline1\nline2\n'
-        obj, _, _ = _decode_action_reply(text, "length")
-        assert obj["content_truncated"] is True
-        # The stripped trailing newline is restored so the run loop's
-        # partial-line trim keeps line2.
-        assert obj["content"] == "line1\nline2\n"
-
-    def test_unclosed_sentinel_without_length_is_rejected(self):
-        text = '{"action":"write","arg":"f.py","reasoning":"w"}\n<<<CONTENT\nline1\nline2'
-        with pytest.raises(json.JSONDecodeError, match="sentinel content must close"):
+        with pytest.raises(json.JSONDecodeError):
             _decode_action_reply(text, "stop")
 
 
