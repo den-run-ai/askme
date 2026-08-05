@@ -21,8 +21,16 @@ on:
       suite:
         description: Pytest suite for the smoke job
         type: choice
-        options: [easy, medium, hard]
+        options: [easy, medium, hard, web]
         default: easy
+      smoke_models:
+        description: >-
+          Comma-separated OpenRouter model IDs for the smoke job — the full
+          selected suite runs once per model. Append '@low', '@medium', or
+          '@high' to pin a baseline reasoning effort for always-on reasoners
+          (e.g. openai/gpt-oss-20b@low).
+        type: string
+        default: google/gemma-4-26b-a4b-it
       models:
         description: >-
           Comma-separated requested=expected-served model cells for the
@@ -39,6 +47,19 @@ on:
         description: Trials per Berkeley-derived smoke cell
         type: string
         default: "1"
+      web_trials:
+        description: >-
+          Trials per web-suite bench cell. "0" (default) skips the
+          web-bench-trials job entirely; any positive value runs every
+          web_models × web-task cell that many times via bench_harness.
+        type: string
+        default: "0"
+      web_models:
+        description: >-
+          Comma-separated OpenRouter model IDs for web-bench-trials
+          ('@effort' suffix supported, e.g. openai/gpt-oss-20b@low).
+        type: string
+        default: google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,qwen/qwen3.6-35b-a3b
   schedule:
     - cron: "17 14 * * 1" # Mondays 14:17 UTC
   push:
@@ -67,7 +88,9 @@ jobs:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'llm-tests'))
     runs-on: ubuntu-latest
     environment: Openrouter
-    timeout-minutes: 30
+    # One full suite per smoke model; the web suite alone can take ~20 min
+    # on a slow model, so the budget covers a three-model matrix.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -92,20 +115,55 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           # Automatic routing: this checks the loop, not one provider's uptime.
           OPENROUTER_PROVIDER: ""
-          AGENT_RUN_LOG: ${{ github.workspace }}/llm-logs/smoke.jsonl
           ASKME_RUN_LIVE_LLM_TESTS: "1"
           SUITE: ${{ inputs.suite || 'easy' }}
+          SMOKE_MODELS: ${{ inputs.smoke_models || 'google/gemma-4-26b-a4b-it' }}
         run: |
+          set -u
           mkdir -p llm-logs
           case "$SUITE" in
             easy)   K="TestOpenRouterEasy" ;;
             medium) K="TestOpenRouterMedium" ;;
             hard)   K="TestOpenRouterHard" ;;
+            web)    K="TestOpenRouterWeb" ;;
             *) echo "unknown suite: $SUITE" >&2; exit 1 ;;
           esac
-          uv run --locked pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"
+          # One full suite per model; every model runs even if an earlier one
+          # fails, so a mixed matrix still yields complete evidence.
+          FAILED_MODELS=""
+          IFS=',' read -ra MODEL_LIST <<< "$SMOKE_MODELS"
+          for MODEL in "${MODEL_LIST[@]}"; do
+            MODEL="$(echo "$MODEL" | xargs)"
+            [ -z "$MODEL" ] && continue
+            # Optional '@effort' suffix pins a baseline reasoning effort for
+            # always-on reasoners, same syntax as the Berkeley job. An empty
+            # OPENROUTER_REASONING_EFFORT means unset.
+            EFFORT=""
+            case "$MODEL" in
+              *@*) EFFORT="${MODEL##*@}"; MODEL="${MODEL%@*}" ;;
+            esac
+            SLUG="$(echo "$MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
+            echo "::group::$SUITE suite on $MODEL${EFFORT:+ (effort $EFFORT)}"
+            if OPENROUTER_MODEL="$MODEL" \
+               OPENROUTER_REASONING_EFFORT="$EFFORT" \
+               AGENT_RUN_LOG="$GITHUB_WORKSPACE/llm-logs/smoke-$SLUG.jsonl" \
+               uv run --locked pytest tests/test_agent_integration.py -s -v -rs -m live_llm -k "$K"; then
+              echo "RESULT $MODEL${EFFORT:+@$EFFORT}: pass"
+            else
+              echo "RESULT $MODEL${EFFORT:+@$EFFORT}: FAIL"
+              FAILED_MODELS="$FAILED_MODELS $MODEL${EFFORT:+@$EFFORT}"
+            fi
+            echo "::endgroup::"
+            test -s "llm-logs/smoke-$SLUG.jsonl"
+          done
+          if [ -n "$FAILED_MODELS" ]; then
+            echo "failed models:$FAILED_MODELS" >&2
+            exit 1
+          fi
       - name: Assert the suite really ran (no silent skips)
-        run: test -s llm-logs/smoke.jsonl
+        run: |
+          ls llm-logs/smoke-*.jsonl
+          for f in llm-logs/smoke-*.jsonl; do test -s "$f"; done
       - name: Upload agent run logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -221,5 +279,77 @@ jobs:
         with:
           name: berkeley-protocol-logs
           path: ${{ runner.temp }}/askme-bench-logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  web-bench-trials:
+    # Multi-trial web-suite matrix (docs/showcase-tasks.md), dispatch-only
+    # and opt-in via web_trials > 0: one bench_harness cell per
+    # (model, web task) so ci_llm_gate evaluates every trial, with
+    # median+range summaries suitable for a dated docs/PERFORMANCE.md entry.
+    # Never runs on push, schedule, or pull_request events.
+    if: github.event_name == 'workflow_dispatch' && inputs.web_trials != '' && inputs.web_trials != '0'
+    runs-on: ubuntu-latest
+    environment: Openrouter
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Preflight OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: uv run --locked python tests/ci_llm_gate.py preflight
+      - name: Run web-suite trial matrix
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          WEB_MODELS: ${{ inputs.web_models || 'google/gemma-4-26b-a4b-it,openai/gpt-oss-20b@low,qwen/qwen3.6-35b-a3b' }}
+          WEB_TRIALS: ${{ inputs.web_trials }}
+          PROVIDER: ${{ inputs.provider || 'auto' }}
+        run: |
+          set -u
+          CELLS=0
+          TESTS="test_webapp_build_status_service test_webapp_notes_round_trip test_webapp_fix_failing_health_check"
+          IFS=',' read -ra MODEL_LIST <<< "$WEB_MODELS"
+          for MODEL in "${MODEL_LIST[@]}"; do
+            MODEL="$(echo "$MODEL" | xargs)"
+            [ -z "$MODEL" ] && continue
+            EFFORT=""
+            case "$MODEL" in
+              *@*) EFFORT="${MODEL##*@}"; MODEL="${MODEL%@*}" ;;
+            esac
+            EFFORT_ARGS=()
+            [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
+            SLUG="$(echo "$MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
+            for T in $TESTS; do
+              CELLS=$((CELLS + 1))
+              uv run --locked python tests/bench_harness.py --backend openrouter --suite web \
+                --test "$T" --trials "$WEB_TRIALS" \
+                --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
+                --log-dir "web-bench/$SLUG/$T"
+            done
+          done
+          echo "EXPECTED_WEB_CELLS=$CELLS" >> "$GITHUB_ENV"
+      - name: Report web matrix (strict)
+        run: |
+          uv run --locked python tests/ci_llm_gate.py report web-bench/*/*/summary.json \
+            --expect-cells "$EXPECTED_WEB_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Upload web bench logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-bench-trial-logs
+          path: web-bench/
           if-no-files-found: warn
           retention-days: 14

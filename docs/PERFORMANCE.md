@@ -96,6 +96,70 @@ non-inferiority verdict stands on pass-rate shape, but hard is tools'
 weakest suite and the `cc` recovery loop is a concrete new data point for
 the #31 lifecycle / recovery-policy arms.
 
+## Web Showcase 3-Trial Matrix — 2026-08-04, OpenRouter (three small-active-class models)
+
+First multi-trial measurement of the showcase web suite
+([showcase-tasks.md](showcase-tasks.md) T1 family, PR #89) via the
+dispatch-only `web-bench-trials` job: one `bench_harness` cell per
+(model × task), 3 trials per cell, 27 agent runs at PR head `9eba802`
+([run 30883171900](https://github.com/den-run-ai/askme/actions/runs/30883171900),
+artifact `web-bench-trial-logs`, 14-day retention). Automatic provider
+routing — an uncontrolled axis; per-cell routes are in the gate table.
+`openai/gpt-oss-20b` pinned to `@low` baseline effort; the other two models
+ran the hybrid default. The strict gate failed 5 of 9 cells on the
+every-trial rule. Same-day single-trial context: gemma went web 3/3 then
+2/3 across two earlier dispatches — the variance that motivated this
+matrix.
+
+### Web (3 trials per cell; pytest agreed with agent-complete in all 27 trials)
+
+Cell format: pytest-pass/3 — median wall, total cell cost.
+
+| Task | gemma-4-26b-a4b-it | gpt-oss-20b@low | qwen3.6-35b-a3b |
+|---|---|---|---|
+| `webapp_build_status_service` (T1a) | 1/3 — 376.7s, $0.0275 | 0/3 — 64.0s, $0.0027 | 2/3 — 88.1s, $0.0340 |
+| `webapp_notes_round_trip` (T1b) | 3/3 — 233.4s, $0.0270 | 1/3 — 393.0s, $0.0133 | 3/3 — 13.3s, $0.0071 |
+| `webapp_fix_failing_health_check` (T1c) | 3/3 — 74.3s, $0.0087 | 0/3 — 878.7s, $0.0092 | 3/3 — 11.6s, $0.0044 |
+| **Trials passed** | **7/9** | **1/9** | **8/9** |
+
+Whole-matrix cost ≈ $0.134.
+
+### Qwen3.6-35B-A3B standard cells (3 trials each, same dispatch — gate PASS)
+
+| Test | Pass | Wall (median) | Cost |
+|---|---|---|---|
+| `test_replan_build_with_dependency` (hard) | 3/3 | 16.4s | $0.0113 |
+| `test_fix_python_syntax_error` (medium) | 3/3 | 5.4s | $0.0016 |
+
+### Findings
+
+- **T1a — a two-file build against a runtime server contract — is the
+  discriminating task**: every model dropped trials there. The dominant
+  gemma failure is its own smoke script hanging while waiting for its
+  server, then step/replan exhaustion.
+- **gpt-oss-20b@low collapsed on the web family (1/9)** despite going 2/2
+  on the standard cells at one trial earlier the same day. The standard
+  suite did not predict web-family behavior; whether `@medium` effort
+  recovers it is an open, cheap follow-up (`low` was the only arm run).
+- **qwen3.6-35b-a3b: 8/9 web trials plus 6/6 standard trials**, with the
+  lowest medians recorded on every task it swept (5.4–16.4s standard,
+  11.6–13.3s on T1b/T1c).
+- **gemma-4-26b-a4b-it control: 7/9**, but 6–18× slower than qwen on
+  shared-pass medians and the most expensive per cell.
+- All 27 web-trial failures were exhaustion/timeout class; the
+  false-completion class appeared only in the same-day single-trial rounds
+  (once per model family, each caught by held-out acceptance — see the PR
+  #89 evidence comments).
+
+### Verdict
+
+n=3 per cell under automatic routing is enough to separate task families
+and to flag the gpt-oss@low web-family collapse, not enough for
+reliability rates or a model-family conclusion. A citable comparison
+should pin providers and pre-register per the evaluation discipline.
+Local Gemma 4 E4B remains unmeasured on this suite (`TestWebLocal` is
+wired for it).
+
 ## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE UNDER THE E4B-FITTED CONTRACT
 
 E09 candidate trial of `google/gemma-4-12B-it-qat-q4_0-gguf` (6.98 GB,

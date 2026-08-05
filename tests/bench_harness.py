@@ -51,6 +51,10 @@ SUITES = {
         "local": "TestIntegrationHard",
         "openrouter": "TestOpenRouterHard",
     },
+    "web": {
+        "local": "TestWebLocal",
+        "openrouter": "TestOpenRouterWeb",
+    },
 }
 
 
@@ -409,7 +413,7 @@ def positive_int(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="E01: Multi-trial integration harness")
-    parser.add_argument("--suite", choices=["easy", "medium", "hard"], default="easy")
+    parser.add_argument("--suite", choices=["easy", "medium", "hard", "web"], default="easy")
     parser.add_argument("--backend", choices=["local", "openrouter"], default="local")
     parser.add_argument("--trials", type=positive_int, default=3)
     parser.add_argument("--test", help="Run a single test by name")

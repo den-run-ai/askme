@@ -173,6 +173,10 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.p
 # Integration — OpenRouter (requires OPENROUTER_API_KEY in .env)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
 
+# Integration — showcase web-app tasks (docs/showcase-tasks.md)
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestWebLocal"
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterWeb"
+
 # Multi-trial benchmark harness (reports median + range across N trials)
 uv run --locked python tests/bench_harness.py --list
 uv run --locked python tests/bench_harness.py \
@@ -214,14 +218,19 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
   as an environment secret. The key is scoped only to preflight and live-model
   execution steps. Runs on push to `main` touching agent/test/dependency code,
-  weekly on schedule, on manual dispatch (choose suite, models, provider,
-  trials), and on pull requests only when labeled `llm-tests` — the job guard
+  weekly on schedule, on manual dispatch (choose suite, smoke-model matrix,
+  Berkeley models, provider, trials), and on pull requests only when labeled
+  `llm-tests` — the job guard
   also requires the PR head branch to live in this repository, so labeled fork
   PRs are rejected before any credential is in scope.
 
-`llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
-by default) with automatic provider routing. The legacy-named Berkeley job
-runs the same hard-build and medium-repair selectors used by
+`llm.yml` has three jobs. The smoke job runs an OpenRouter pytest suite (easy
+by default) with automatic provider routing, once per model in the
+`smoke_models` matrix. The dispatch-only `web-bench-trials` job (opt-in via a
+nonzero `web_trials` input) benches every `web_models` × web-task cell that
+many times through `tests/bench_harness.py` for median+range evidence. The
+legacy-named Berkeley job runs the same hard-build and medium-repair selectors
+used by
 [the talk's frozen eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
 on current code and current model cells; it is not a replay of that historical
 four-model, strict-SiliconFlow matrix. `tests/ci_llm_gate.py report` then
