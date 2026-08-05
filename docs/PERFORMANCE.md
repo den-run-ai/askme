@@ -157,8 +157,57 @@ n=3 per cell under automatic routing is enough to separate task families
 and to flag the gpt-oss@low web-family collapse, not enough for
 reliability rates or a model-family conclusion. A citable comparison
 should pin providers and pre-register per the evaluation discipline.
-Local Gemma 4 E4B remains unmeasured on this suite (`TestWebLocal` is
-wired for it).
+Local Gemma 4 E4B was measured on this suite the same day — see the E89
+entry below.
+
+## E89 Web Showcase on Local E4B — 2026-08-04, Local (E4B QAT Q4_0, tools transport) — 3 APPS: 0/3 AS SHIPPED
+
+First local measurement of the PR #89 web suite (`TestWebLocal`), filling
+the gap the entry above records. Revision `4e528a6` — PR #89 head `56608b1`
+merged into tools-only `main` `fcd5bc0`, so this is the suite as it would
+land, not as the PR validated it (PR #89 predates the #92 tools-only
+switch). Persistent llama-server per `gemma4-setup.md`, `--reasoning off`,
+policy `gated`, ~12.8 tok/s. 11 runs. Raw records + protocol:
+`tests/bench_records/2026-08-04/e89-web-local/`.
+
+| Task | Shipped `legacy-e4b-m1-16k-v1` (write 512) | Diagnostic `generic-feature-scale-v1` (write 8192) |
+|---|---|---|
+| T1a status service | 0/1 — TIMEOUT >1200 s, write-truncation loop | 0/1 — 2017 s, bloated file + hung smoke script |
+| T1b notes service | 0/1 — 839 s, 6/7 steps `response_truncated` | 0/2 — 1841 s / 2039 s, `import requests`, workdir escape |
+| T1c repair | **0/4 pytest, 4/4 correct artifact** — 191–254 s | **2/2 pass** — 164 s / 150 s |
+
+**T1a/T1b/T1a-raised are single trials** — health checks, not rates. The
+planned 3-trial shipped arm was stopped by owner decision once the pilot
+established the same bind on all three tasks.
+
+### Findings
+
+1. **The tasks fit the shipped budget; the model's output does not.**
+   Tokenized on the serving model, gold implementations cost 310 / 369 / 408
+   tokens as tool-call arguments against a 512-token write budget. E4B writes
+   163–180 line files against a ~35-line design target. Raising the budget to
+   8192 removed truncation entirely (zero `finish_reason=length`; write steps
+   3 LLM calls → 1, 77–102 s → 28–45 s) and the build tasks still failed, worse
+   and slower. The budget is the first symptom, not the root cause.
+2. **T1c is a true completion the agent could not claim.** All 4 shipped-profile
+   runs landed one correct `edit`, ran the test to `HEALTH_OK`, then repeated
+   that passing command to exhaustion. Held-out acceptance passes on every
+   surviving workspace with the protected test unmodified — the inverse of a
+   false completion, and the E23 done-emission loop (E20/E07) on a new family.
+3. **A token-cut write is lost, not resumed, on tools transport.**
+   `_decode_tool_call_reply` raises on unparseable arguments and never sets
+   `content_truncated`, so `incomplete_write` / resume-anchor recovery has no
+   live producer — only the injection seam at `askme.py:4502`. The showcase
+   doc's expectation that oversize writes would exercise the append-resume path
+   does not hold post-#92.
+
+### Verdict
+
+The suite is **correctly designed and correctly rejecting**: its held-out
+acceptance passed the one deliverable that was actually built and refused the
+ones that were not. Local E4B is **not ready for the two build tasks** at any
+budget tested; its repair task is behaviorally solved but blocked by
+termination, not capability. Nothing here is a reliability rate.
 
 ## E09 12B QAT Trial — 2026-08-03, Local (build 9618, Gemma 4 12B Unified QAT Q4_0) — NEGATIVE UNDER THE E4B-FITTED CONTRACT
 

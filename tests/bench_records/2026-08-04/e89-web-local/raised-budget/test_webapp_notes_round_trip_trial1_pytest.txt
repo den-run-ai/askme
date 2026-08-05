@@ -1,0 +1,37 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (11466 earlier characters omitted):
+8770: Server started on port 8770\nServer failed to start: [Errno 48] Address already in use\nServer failed ', '[unknown] shell python3 test_app.py: Usage: python3 test_app.py <port>']
+[21:16:30] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-316/test_webapp_notes_round_trip0
+FAILED
+
+=================================== FAILURES ===================================
+__________________ TestWebLocal.test_webapp_notes_round_trip ___________________
+
+self = <test_agent_integration.TestWebLocal object at 0x10768f6e0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-316/test_webapp_notes_round_trip0')
+
+    def test_webapp_notes_round_trip(self, tmp_path):
+        """T1b: build a notes service whose deliverable has state over time."""
+        result = int_run(
+            webapp_notes_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: ['Stuck: shell python3 test_app.py failed twice', '[unknown] shell python3 test_app.py: Usage: python3 test_app.py <port>', '[unknown] shell python3 test_app.py 8770: Server started on port 8770\nServer failed to start: [Errno 48] Address already in use\nServer failed ', '[unknown] shell python3 test_app.py: Usage: python3 test_app.py <port>']
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:225: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestWebLocal::test_webapp_notes_round_trip
+================ 1 failed, 28 deselected in 1841.34s (0:30:41) =================
+
+stderr:
+(empty)

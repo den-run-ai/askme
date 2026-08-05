@@ -1,0 +1,43 @@
+Pytest timeout diagnostics (bounded stream tails)
+
+stdout (11791 earlier characters omitted):
+=1217
+[19:20:54]   [5] shell: cat app.py
+[19:20:54]   -> OK (66.9s): import http.server
+import socket
+import sys
+import json
+
+class SimpleHTTPRequest
+[19:21:14]   tokens: prompt=1185 completion=256 total=1441
+[19:21:14]   output hit token budget (finish_reason=length)
+[19:21:14]   write/edit payload budget -> 512
+[19:21:14]   [retry 1] JSON parse failed, raw: {"action": "write", "arguments": {"arg":"app.py","content":"import http.server\nimport socket\nimport sys\nimport json\n
+[19:21:58]   tokens: prompt=1187 completion=512 total=1699 thinking=medium
+[19:21:58]   output hit token budget (finish_reason=length)
+[19:21:58]   [retry 2] thinking=medium JSON parse failed, raw: {"action": "write", "arguments": {"arg":"app.py","content":"import http.server\nimport socket\nimport sys\nimport json\n
+[19:22:27]   tokens: prompt=1206 completion=391 total=1597
+[19:22:27]   [6] write: app.py
+[19:22:27]   -> OK (93.5s): Wrote app.py
+[19:22:47]   tokens: prompt=1161 completion=256 total=1417
+[19:22:47]   output hit token budget (finish_reason=length)
+[19:22:47]   write/edit payload budget -> 512
+[19:22:47]   [retry 1] JSON parse failed, raw: {"action": "write", "arguments": {"append":false,"arg":"app.py","content":"import http.server\nimport socket\nimport sys
+[19:23:31]   tokens: prompt=1163 completion=512 total=1675 thinking=medium
+[19:23:31]   output hit token budget (finish_reason=length)
+[19:23:31]   [retry 2] thinking=medium JSON parse failed, raw: 
+[19:23:33]   tokens: prompt=1182 completion=29 total=1211
+[19:23:33]   [7] shell: cat app.py
+[19:23:33]   -> OK (65.8s): import http.server
+import socket
+import sys
+import json
+
+class SimpleHTTPRequest
+[19:23:52]   tokens: prompt=1185 completion=256 total=1441
+[19:23:52]   output hit token budget (finish_reason=length)
+[19:23:52]   write/edit payload budget -> 512
+[19:23:52]   [retry 1] JSON parse failed, raw: {"action": "write", "arguments": {"arg":"app.py","content":"import http.server\nimport socket\nimport sys\nimport json\n
+
+stderr:
+(empty)

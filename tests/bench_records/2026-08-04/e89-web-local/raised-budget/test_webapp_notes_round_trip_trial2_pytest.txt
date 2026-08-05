@@ -1,0 +1,46 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (12058 earlier characters omitted):
+31.3s): Appended to test_app.py (+817 chars, total 2820)
+[21:50:01]   tokens: prompt=1573 completion=339 total=1912
+[21:50:01]   [7] write: test_app.py
+[21:50:01]   -> OK (35.4s): Appended to test_app.py (+1076 chars, total 3896)
+[21:50:30]   tokens: prompt=1588 completion=263 total=1851
+[21:50:30]   [8] write: test_app.py
+[21:50:30]   -> OK (29.1s): Appended to test_app.py (+780 chars, total 4676)
+[21:50:30]   Task failed, will replan. (507.7s)
+[21:50:30] Exhausted 3 replan attempts. (2039.3s total)
+[21:50:30] Errors: []
+[21:50:30] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-320/test_webapp_notes_round_trip0
+FAILED
+
+=================================== FAILURES ===================================
+__________________ TestWebLocal.test_webapp_notes_round_trip ___________________
+
+self = <test_agent_integration.TestWebLocal object at 0x10b76f560>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-320/test_webapp_notes_round_trip0')
+
+    def test_webapp_notes_round_trip(self, tmp_path):
+        """T1b: build a notes service whose deliverable has state over time."""
+        result = int_run(
+            webapp_notes_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: []
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:225: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestWebLocal::test_webapp_notes_round_trip
+================ 1 failed, 28 deselected in 2039.49s (0:33:59) =================
+
+stderr:
+(empty)

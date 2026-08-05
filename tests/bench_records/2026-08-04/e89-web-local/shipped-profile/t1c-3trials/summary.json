@@ -1,0 +1,219 @@
+{
+  "suite": "web",
+  "backend": "local",
+  "trials": 3,
+  "model": "gemma-4-e4b",
+  "provider": null,
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "legacy-e4b-m1-16k-v1",
+  "expected_served_model": "gemma-4-e4b",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "4e528a6a41600f8d5c58cc9210083f483a93b4c4",
+  "git_dirty": true,
+  "total_wall_s": 589.1,
+  "tests": {
+    "test_webapp_fix_failing_health_check": {
+      "passed": 0,
+      "pytest_passed": 0,
+      "valid_trials": 3,
+      "valid_passes": 0,
+      "agent_complete": 0,
+      "total": 3,
+      "agent_status": [
+        "exhausted",
+        "exhausted",
+        "exhausted"
+      ],
+      "wall_s": [
+        191.43,
+        199.04,
+        197.62
+      ],
+      "replans": [
+        0,
+        0,
+        1
+      ],
+      "local_replans": [
+        2,
+        2,
+        2
+      ],
+      "local_replans_ok": [
+        2,
+        1,
+        1
+      ],
+      "steps": [
+        10,
+        15,
+        17
+      ],
+      "thinking_retries": [
+        2,
+        2,
+        2
+      ],
+      "llm_calls": [
+        25,
+        27,
+        28
+      ],
+      "prompt_tokens": [
+        25480,
+        27794,
+        29378
+      ],
+      "completion_tokens": [
+        1607,
+        1566,
+        1709
+      ],
+      "total_tokens": [
+        27087,
+        29360,
+        31087
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1"
+      ],
+      "route_valid": [
+        true,
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        "test_webapp_fix_failing_health_check_trial1_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial2_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial3_pytest.txt"
+      ],
+      "timed_out": [
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}

@@ -1,0 +1,43 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (9639 earlier characters omitted):
+y 2] thinking=medium JSON parse failed, raw: 
+[20:33:04]   tokens: prompt=1558 completion=47 total=1605
+[20:33:04]   [8] read: test_app.py
+[20:33:04]   -> OK (54.3s): [test_app.py: lines 40-80 of 80, cut at 1200 chars; continue: cursor=2400, limit
+[20:33:04]   Task failed, will replan. (906.2s)
+[20:33:04] Exhausted 2 replan attempts. (2016.9s total)
+[20:33:04] Errors: ['[unknown] shell python3 test_app.py: Usage: python3 test_app.py <port>']
+[20:33:04] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-314/test_webapp_build_status_servi0
+FAILED
+
+=================================== FAILURES ===================================
+________________ TestWebLocal.test_webapp_build_status_service _________________
+
+self = <test_agent_integration.TestWebLocal object at 0x10b823ad0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-314/test_webapp_build_status_servi0')
+
+    def test_webapp_build_status_service(self, tmp_path):
+        """T1a: build a status service plus its self-terminating smoke test."""
+        result = int_run(
+            webapp_status_prompt(tmp_path),
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+            goal_context_chars=WEB_GOAL_CONTEXT_CHARS,
+        )
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: ['[unknown] shell python3 test_app.py: Usage: python3 test_app.py <port>']
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:210: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestWebLocal::test_webapp_build_status_service
+================ 1 failed, 28 deselected in 2016.80s (0:33:36) =================
+
+stderr:
+(empty)

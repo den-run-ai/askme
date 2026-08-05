@@ -1,0 +1,178 @@
+{
+  "suite": "web",
+  "backend": "local",
+  "trials": 2,
+  "model": "gemma-4-e4b",
+  "provider": null,
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "generic-feature-scale-v1",
+  "expected_served_model": "gemma-4-e4b",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "4e528a6a41600f8d5c58cc9210083f483a93b4c4",
+  "git_dirty": true,
+  "total_wall_s": 314.6,
+  "tests": {
+    "test_webapp_fix_failing_health_check": {
+      "passed": 2,
+      "pytest_passed": 2,
+      "valid_trials": 2,
+      "valid_passes": 2,
+      "agent_complete": 2,
+      "total": 2,
+      "agent_status": [
+        "complete",
+        "complete"
+      ],
+      "wall_s": [
+        164.28,
+        149.54
+      ],
+      "replans": [
+        0,
+        0
+      ],
+      "local_replans": [
+        0,
+        1
+      ],
+      "local_replans_ok": [
+        0,
+        1
+      ],
+      "steps": [
+        13,
+        15
+      ],
+      "thinking_retries": [
+        0,
+        0
+      ],
+      "llm_calls": [
+        19,
+        22
+      ],
+      "prompt_tokens": [
+        21339,
+        23919
+      ],
+      "completion_tokens": [
+        1280,
+        1340
+      ],
+      "total_tokens": [
+        22619,
+        25259
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "generic-feature-scale-v1",
+        "generic-feature-scale-v1"
+      ],
+      "config_hashes": [
+        "43d3eb9726eae7d9",
+        "43d3eb9726eae7d9"
+      ],
+      "route_valid": [
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        null
+      ],
+      "timed_out": [
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null
+      ]
+    }
+  }
+}

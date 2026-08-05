@@ -155,7 +155,11 @@ def run_single_test(
         text=True,
         cwd=str(AGENT_DIR),
         env=env,
-        timeout=1200,
+        # Eval-only deviation (E89 local web suite): the stock 1200 s cap cut
+        # local E4B runs off mid-plan, so the wall clock — not the agent's own
+        # replan/task/step budgets — decided the outcome. Raised so a run ends
+        # on completion or budget exhaustion. Not proposed for upstream.
+        timeout=int(os.environ.get("BENCH_TRIAL_TIMEOUT", "1200")),
     )
     wall = time.time() - t0
     passed = result.returncode == 0
