@@ -201,6 +201,25 @@ established the same bind on all three tasks.
    doc's expectation that oversize writes would exercise the append-resume path
    does not hold post-#92.
 
+### Addendum — step-policy arm on T1c (2026-08-06)
+
+Matched follow-up on finding 2, shipped profile, `AGENT_STEP_POLICY` the only
+changed axis (verified in every `run_start`); the lever CLAUDE.md names for
+this failure class and the subject of open issue #31.
+
+| Arm | pytest | agent complete | Acceptance | Wall median (range) |
+|---|---|---|---|---|
+| `heuristic` (control) | 0/4 | 0/4 | 4/4 correct | 197.6 s (191–254) |
+| `lifecycle` | **2/3** | **2/3** | 3/3 correct | 335.5 s (288–528) |
+
+Direction is right, sample is not decisive: 2/3 vs 0/4 is Fisher one-sided
+p ≈ 0.14. The loop was reduced, not removed — trial 3 still ended
+`[stuck_loop] same successful command repeated` — and lifecycle cost ~70%
+more wall time on a cell whose underlying repair takes ~90 s. All 7 runs
+across both arms produced an acceptance-passing artifact; the arms differ
+only in whether the agent claimed completion. **Not a #31 decision** — that
+needs a preregistered protocol and more trials.
+
 ### Verdict
 
 The suite is **correctly designed and correctly rejecting**: its held-out

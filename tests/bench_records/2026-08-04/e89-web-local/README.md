@@ -74,6 +74,36 @@ Truncation disappeared entirely (zero `finish_reason=length`), and each write
 step dropped from 3 LLM calls (256 → 512 → retry ladder) to 1, and from
 77–102 s to 28–45 s. The build tasks still failed — differently.
 
+### `shipped-profile/t1c-lifecycle-3trials/` — step-policy arm (2026-08-06)
+
+Follow-up on finding 2. `AGENT_STEP_POLICY=lifecycle` is the lever CLAUDE.md
+names for the done-emission loop and the subject of open issue #31. Matched
+against the `t1c-3trials` control: same revision, model, server, capability
+profile, reasoning policy, budgets, and prompt — **step policy is the only
+changed axis**, and `step_policy=lifecycle` is verified in all three
+`run_start` records.
+
+| Arm | pytest | agent complete | Held-out acceptance | Wall median (range) |
+|---|---|---|---|---|
+| `heuristic` (control, default) | 0/4 | 0/4 | 4/4 correct | 197.6 s (191–254) |
+| `lifecycle` | **2/3** | **2/3** | **3/3 correct** | 335.5 s (288–528) |
+
+Reading this honestly:
+
+- **The direction is right but the sample is not decisive.** 2/3 vs 0/4 is
+  Fisher one-sided p ≈ 0.14. Suggestive, not established. A decision on #31
+  needs a preregistered protocol and more trials, not this cell.
+- **The failure class did not disappear.** Trial 3 still ended
+  `[stuck_loop] same successful command repeated` — the identical signature
+  as the control. Lifecycle appears to reduce the loop's frequency, not
+  remove it.
+- **It costs wall time**: median 335.5 s vs 197.6 s, ~70% slower on a cell
+  where the underlying repair takes ~90 s. Worth pricing before adoption.
+- **Artifact correctness was never the variable.** All 7 runs across both
+  arms produced a repaired service passing held-out acceptance with the
+  protected test unmodified. The arms differ only in whether the agent
+  managed to *claim* the completion.
+
 ## Findings
 
 1. **The tasks are feasible within the shipped 512-token write budget; E4B's
