@@ -1,0 +1,383 @@
+{
+  "suite": "web",
+  "backend": "local",
+  "trials": 7,
+  "model": "gemma-4-e4b",
+  "provider": null,
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "legacy-e4b-m1-16k-v1",
+  "expected_served_model": "gemma-4-e4b",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "8ef07320c0e962e67f4cd405360ddd3526a7d4b0",
+  "git_dirty": false,
+  "total_wall_s": 77520.9,
+  "tests": {
+    "test_webapp_fix_failing_health_check": {
+      "passed": 4,
+      "pytest_passed": 4,
+      "valid_trials": 7,
+      "valid_passes": 4,
+      "agent_complete": 4,
+      "total": 7,
+      "agent_status": [
+        "exhausted",
+        "complete",
+        "exhausted",
+        "complete",
+        "complete",
+        "exhausted",
+        "complete"
+      ],
+      "wall_s": [
+        227.61,
+        252.99,
+        261.3,
+        317.16,
+        18493.23,
+        21583.35,
+        36382.34
+      ],
+      "replans": [
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        1
+      ],
+      "local_replans": [
+        3,
+        2,
+        2,
+        2,
+        2,
+        1,
+        2
+      ],
+      "local_replans_ok": [
+        3,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1
+      ],
+      "steps": [
+        19,
+        19,
+        28,
+        21,
+        22,
+        8,
+        14
+      ],
+      "thinking_retries": [
+        1,
+        2,
+        2,
+        1,
+        1,
+        4,
+        1
+      ],
+      "llm_calls": [
+        36,
+        32,
+        39,
+        33,
+        34,
+        18,
+        25
+      ],
+      "prompt_tokens": [
+        38150,
+        36056,
+        42836,
+        35402,
+        37485,
+        18622,
+        26222
+      ],
+      "completion_tokens": [
+        2194,
+        2196,
+        2260,
+        2242,
+        2216,
+        1465,
+        2009
+      ],
+      "total_tokens": [
+        40344,
+        38252,
+        45096,
+        37644,
+        39701,
+        20087,
+        28231
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "5d75709864795668",
+        "5d75709864795668",
+        "5d75709864795668",
+        "5d75709864795668",
+        "5d75709864795668",
+        "5d75709864795668",
+        "5d75709864795668"
+      ],
+      "route_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        "test_webapp_fix_failing_health_check_trial1_pytest.txt",
+        null,
+        "test_webapp_fix_failing_health_check_trial3_pytest.txt",
+        null,
+        null,
+        "test_webapp_fix_failing_health_check_trial6_pytest.txt",
+        null
+      ],
+      "timed_out": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}

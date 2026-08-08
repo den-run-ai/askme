@@ -220,6 +220,19 @@ across both arms produced an acceptance-passing artifact; the arms differ
 only in whether the agent claimed completion. **Not a #31 decision** — that
 needs a preregistered protocol and more trials.
 
+> **Superseded 2026-08-08 — the effect did not replicate.** The preregistered
+> n=10-per-arm confirmation ([#31 protocol](https://github.com/den-run-ai/askme/issues/31#issuecomment-5218596152),
+> records `tests/bench_records/2026-08-07-e31-confirmation/`) returned
+> **lifecycle 5/10 vs heuristic 4/10, Fisher two-sided p = 1.000** — and
+> 3/7 vs 4/10, p = 1.000, excluding three host-sleep-contaminated runs. The
+> pilot's 0/4 control was a small-sample artifact on a cell that is
+> high-variance around ~40–50%; the wall-time penalty dissolved too (clean
+> medians 246 s vs 253 s). Mediators recorded across all 20 runs:
+> **zero** lifecycle-specific skips, **zero** `done` emissions in either arm,
+> and verification-command suppression in 20/20 runs — universal, so not the
+> discriminator. Keep the pilot rows above as the dated record of what a
+> 7-run sample suggested; do not cite them as an effect.
+
 ### Verdict
 
 The suite is **correctly designed and correctly rejecting**: its held-out

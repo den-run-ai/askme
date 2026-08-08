@@ -1,0 +1,506 @@
+{
+  "suite": "web",
+  "backend": "local",
+  "trials": 10,
+  "model": "gemma-4-e4b",
+  "provider": null,
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "legacy-e4b-m1-16k-v1",
+  "expected_served_model": "gemma-4-e4b",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "8ef07320c0e962e67f4cd405360ddd3526a7d4b0",
+  "git_dirty": false,
+  "total_wall_s": 2376.2,
+  "tests": {
+    "test_webapp_fix_failing_health_check": {
+      "passed": 4,
+      "pytest_passed": 4,
+      "valid_trials": 10,
+      "valid_passes": 4,
+      "agent_complete": 4,
+      "total": 10,
+      "agent_status": [
+        "complete",
+        "exhausted",
+        "exhausted",
+        "complete",
+        "complete",
+        "complete",
+        "exhausted",
+        "exhausted",
+        "exhausted",
+        "exhausted"
+      ],
+      "wall_s": [
+        245.89,
+        302.37,
+        201.98,
+        172.06,
+        199.93,
+        193.35,
+        265.12,
+        259.0,
+        218.39,
+        314.76
+      ],
+      "replans": [
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "local_replans": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        2,
+        3,
+        3,
+        1,
+        2
+      ],
+      "local_replans_ok": [
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        2
+      ],
+      "steps": [
+        15,
+        11,
+        14,
+        20,
+        14,
+        15,
+        19,
+        20,
+        9,
+        21
+      ],
+      "thinking_retries": [
+        2,
+        4,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        2,
+        3
+      ],
+      "llm_calls": [
+        22,
+        24,
+        30,
+        32,
+        25,
+        27,
+        36,
+        34,
+        18,
+        34
+      ],
+      "prompt_tokens": [
+        24031,
+        25761,
+        31890,
+        33736,
+        26924,
+        28368,
+        37132,
+        37098,
+        19550,
+        36343
+      ],
+      "completion_tokens": [
+        2350,
+        3234,
+        2092,
+        1653,
+        2059,
+        2063,
+        2872,
+        2603,
+        2403,
+        3530
+      ],
+      "total_tokens": [
+        26381,
+        28995,
+        33982,
+        35389,
+        28983,
+        30431,
+        40004,
+        39701,
+        21953,
+        39873
+      ],
+      "openrouter_cost": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "usage_complete": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "served_model_observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_model_sources": [
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ],
+        [
+          "response"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_provider_observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "recorded_backends": [
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local",
+        "local"
+      ],
+      "requested_models": [
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b",
+        "gemma-4-e4b"
+      ],
+      "token_requested_models": [
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ],
+        [
+          "gemma-4-e4b"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "requested_providers": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated",
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "recorded_require_provider_parameters": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "capability_profiles": [
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1",
+        "legacy-e4b-m1-16k-v1"
+      ],
+      "config_hashes": [
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1",
+        "6fbeb9cd14415de1"
+      ],
+      "route_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "contract_valid": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "served_providers": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      "pytest_diagnostics": [
+        null,
+        "test_webapp_fix_failing_health_check_trial2_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial3_pytest.txt",
+        null,
+        null,
+        null,
+        "test_webapp_fix_failing_health_check_trial7_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial8_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial9_pytest.txt",
+        "test_webapp_fix_failing_health_check_trial10_pytest.txt"
+      ],
+      "timed_out": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "log_parse_errors": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  }
+}
