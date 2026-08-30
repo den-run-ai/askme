@@ -15,13 +15,52 @@ structured tool call with JSON-parseable arguments comes back.
 | File | What it is |
 |---|---|
 | `peg_probe.py` | The probe. Re-runnable: `uv run --locked --no-dev python tests/bench_records/2026-08-29-peg-probe/peg_probe.py [n] [arm]` |
+| `analyze.py` | **Authoritative classifier.** Re-derives outcomes from the retained records: `uv run --locked --no-dev python tests/bench_records/2026-08-29-peg-probe/analyze.py` |
 | `peg_probe_results_run1.jsonl` | One record per trial (32), including usage, finish reason, payload size, and the full request body on any failure |
-| `peg_probe_run1.txt` | Console transcript of run 1 |
+| `peg_probe_results_run2.jsonl` | Same, run 2 (32) |
+| `peg_probe_run1.txt` / `peg_probe_run2.txt` | Console transcripts |
 
-A second 32-trial replication (`peg_probe_results_run2.jsonl` /
-`peg_probe_run2.txt`) is added in a follow-up commit on this branch — see
-"Two runs" below. Transcripts use `.txt` because `*.log` is gitignored
-repository-wide.
+Transcripts use `.txt` because `*.log` is gitignored repository-wide.
+
+### Read `analyze.py`, not the raw `ok` flag
+
+The probe's inline `ok` field — and therefore the `FAIL` lines in the
+transcripts — means only "one tool call came back and its arguments parsed as
+JSON". That is too coarse, because it gives the same verdict to two unrelated
+events:
+
+- **`parser_failure`** — malformed output while the model stopped on its own
+  (`finish_reason != "length"`). This is the #25986 class and the only outcome
+  that bears on it.
+- **`budget_truncation`** — arguments are an unterminated prefix purely because
+  generation hit `max_tokens` (`finish_reason == "length"`). Expected and
+  handled: AskMe classifies this as a truncated write and retries with the
+  payload-sized budget (`STEP_WRITE_TOKENS`).
+
+`peg_probe.py` is deliberately left exactly as it was when it produced run 2, so
+that record set is provably the output of the committed script. The correction
+lives in `analyze.py` instead, which is sound because every record already
+carries `finish_reason` — the classification is fully re-derivable from the raw
+data, and no re-run was needed.
+
+## Two runs
+
+Run 1 was produced by this script before it was reformatted to satisfy the
+repository's Ruff configuration (`tests/` is linted in CI). The fix was
+cosmetic only — `dict(...)` rewritten as literals, an unused `re` import
+removed, and quote-style normalization — and **every prompt string is
+byte-identical between the two versions**, so the two runs are the same
+experiment. Run 1 is retained rather than discarded because it is a valid
+32-trial dataset; run 2 exists so that the committed script is provably the one
+that produced at least one committed record set. Combined they give n=64, which
+tightens the 95% upper bound on the per-call parser-failure rate from roughly 9%
+to roughly 4.6%.
+
+Run 2 overlapped a local `pytest tests/ -q` run on the same machine. That
+inflated its wall times (`B_long_write_512` ~37s in run 1 vs ~50–100s in run 2)
+and is why per-trial timings from run 2 must not be compared against run 1 or
+used as performance data. It does not affect parse outcomes or token counts,
+which are what this probe measures.
 
 ## Two runs
 
@@ -47,14 +86,32 @@ roughly 4.6%.
   `tool_call` plus its `role:tool` result — the conversation depth
   [#25986](https://github.com/ggml-org/llama.cpp/issues/25986)'s reporter says
   is required, and which a plain curl does not have.
-- 8 trials per arm, 4 arms.
+- 8 trials per arm, 4 arms, 2 runs — **n=64**.
 
 ## Result
 
-32/32 trials returned exactly one structured tool call with JSON-parseable
-arguments. Zero HTTP 5xx, zero `unparsed peg-gemma4` lines in the server log for
-the duration. #25986 **did not reproduce on this cell**, including at ~3x the
-payload size the `legacy-e4b-m1-16k-v1` write cap permits.
+**0/64 parser failures. #25986 did not reproduce on this cell**, including at
+~3.5x the payload size the `legacy-e4b-m1-16k-v1` write cap permits. Zero HTTP
+5xx and zero `unparsed peg-gemma4` lines in the server log across both runs.
+
+| Arm | n | clean | budget_truncation | parser_failure | hit cap | content |
+|---|---|---|---|---|---|---|
+| `A_short_args` | 16 | 16 | 0 | **0** | 0/16 | short args |
+| `B_long_write_512` | 16 | 14 | 2 | **0** | 4/16 | 1426–1644 chars, 56–68 lines |
+| `B_long_write_2048` | 16 | 16 | 0 | **0** | 0/16 | 3904–5507 chars, 119–163 lines |
+| `C_delimiter_payload` | 16 | 16 | 0 | **0** | 0/16 | 272–344 chars |
+| **Total** | **64** | **62** | **2** | **0** | 4/64 | — |
+
+The two non-clean trials are both `budget_truncation`: `finish_reason=length`
+with `completion_tokens=512` exactly, cut mid-payload so the `content` string
+never closes. Not a grammar defect — the expected truncation path.
+
+**Secondary finding, independent of #25986: the legacy 512-token write cap binds
+routinely.** 4 of 16 `B_long_write_512` trials (1/8 run 1, 3/8 run 2) hit the cap
+on an ordinary "implement a small module" task, and 2 of those landed mid-string.
+At 2048 tokens, 0 of 16 hit the cap while producing payloads up to 5,507
+characters. This is a real constraint on `legacy-e4b-m1-16k-v1` for write-shaped
+work and is unrelated to any parser issue.
 
 ## Provenance and limitations
 
@@ -73,11 +130,18 @@ payload size the `legacy-e4b-m1-16k-v1` write cap permits.
    failing cell was 26B-A4B UD-Q4_K_XL and the report notes MTP amplified it.
 4. **Not an outcome-bearing registered protocol.** 8 trials/arm is a smoke bound,
    not a reliability estimate. No decision rule was preregistered.
-5. `B_long_write_512` trial 8 hit `finish_reason=length`. It is counted clean
-   because the wire format round-tripped; AskMe would correctly classify that
-   payload as `incomplete_write`. "Parser-clean" never means "artifact complete".
-6. Records were produced from the working tree with uncommitted documentation
+5. **"Parser-clean" never means "artifact complete."** 4 of 64 trials hit
+   `finish_reason=length`; 2 still produced closeable JSON (counted `clean`
+   because the wire format round-tripped) and 2 did not (`budget_truncation`).
+   AskMe would correctly treat all four as truncated writes. The distinction this
+   probe measures is whether the *grammar* held, not whether the file was whole.
+6. **The `ok` flag in the raw records is not the verdict** — see "Read
+   `analyze.py`, not the raw `ok` flag" above. Run 2's transcript shows two
+   `FAIL` lines that are budget truncation, not parser failures.
+7. Records were produced from the working tree with uncommitted documentation
    edits present. No `askme.py`/`actions.py` source was modified for or during
-   the run — the probe only imports `_ACTION_TOOLS` and `SYSTEM_STEP`.
-7. Re-run this alongside E27: master carries post-b9618 PEG hardening (#24329,
+   either run — the probe only imports `_ACTION_TOOLS` and `SYSTEM_STEP`.
+8. Run 2's wall times are contaminated by a concurrent local test run and must
+   not be read as performance data (see "Two runs").
+9. Re-run this alongside E27: master carries post-b9618 PEG hardening (#24329,
    #24869, #26780) that a b9618 result cannot speak to.

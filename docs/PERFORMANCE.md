@@ -35,37 +35,55 @@ conversation — so a faithful conversation shape was required.
 (`b9618-c34b92235`, documented QAT flags, `--reasoning off`). Faithful to AskMe:
 the real `_ACTION_TOOLS` definitions (all 8), the real `SYSTEM_STEP`,
 `tool_choice: "auto"`, `temperature 0.1`, and a history containing a completed
-prior assistant `tool_call` + `role:tool` round. 8 trials per arm. Script,
-per-trial records, and provenance limits are retained in
+prior assistant `tool_call` + `role:tool` round. 8 trials per arm, **two runs,
+n=64**. Script, per-trial records, the classifier, and the full provenance list
+are retained in
 [`tests/bench_records/2026-08-29-peg-probe/`](../tests/bench_records/2026-08-29-peg-probe/README.md);
 the probe is re-runnable from there.
 
-| Arm | Budget | n | Parse-clean | Tool | Payload | Wall med (range) |
-|---|---|---|---|---|---|---|
-| `A_short_args` (control) | 512 | 8 | **8/8** | `read` | short args | 2.8s (2.7–3.2) |
-| `B_long_write_512` (legacy cap) | 512 | 8 | **8/8** | `write` | 1426–1644 chars, 56–68 lines | 37.8s (36.8–43.3) |
-| `B_long_write_2048` (feature-scale) | 2048 | 8 | **8/8** | `write` | 3904–5073 chars, 119–154 lines | 101.8s (95.4–120.4) |
-| `C_delimiter_payload` | 1024 | 8 | **8/8** | `write` | 273–292 chars | 9.3s (9.0–10.1) |
-| **Total** | — | **32** | **32/32** | — | — | — |
+Outcomes are classified from the retained `finish_reason`, because "arguments
+did not parse" has two unrelated causes and only one of them bears on #25986:
+**`parser_failure`** (malformed output while the model stopped on its own) versus
+**`budget_truncation`** (an unterminated prefix purely because generation hit
+`max_tokens` — the expected path, which AskMe handles by retrying at
+`STEP_WRITE_TOKENS`).
 
-All 32 returned exactly one structured tool call with JSON-parseable arguments.
-Zero HTTP 5xx and zero `unparsed peg-gemma4` lines in the server log across the
-whole run.
+| Arm | Budget | n | clean | budget_trunc | **parser_failure** | hit cap | Payload |
+|---|---|---|---|---|---|---|---|
+| `A_short_args` (control) | 512 | 16 | 16 | 0 | **0** | 0/16 | short args |
+| `B_long_write_512` (legacy cap) | 512 | 16 | 14 | 2 | **0** | 4/16 | 1426–1644 chars, 56–68 lines |
+| `B_long_write_2048` (feature-scale) | 2048 | 16 | 16 | 0 | **0** | 0/16 | 3904–5507 chars, 119–163 lines |
+| `C_delimiter_payload` | 1024 | 16 | 16 | 0 | **0** | 0/16 | 272–344 chars |
+| **Total** | — | **64** | **62** | **2** | **0** | 4/64 | — |
+
+**0/64 parser failures.** Zero HTTP 5xx and zero `unparsed peg-gemma4` lines in
+the server log across both runs. The two non-clean trials are
+`finish_reason=length` with `completion_tokens=512` exactly, cut mid-payload.
+
+Wall times are reported per run in the records, not here: run 2 overlapped a
+local test run, so its timings are contaminated and are not comparable to run 1.
+Parse outcomes and token counts are unaffected.
 
 **Findings.**
 
-1. **#25986 did not reproduce on this cell**, including at ~3× the payload size
+1. **#25986 did not reproduce on this cell**, including at ~3.5× the payload size
    the legacy profile's 512-token write cap permits. This addresses the
    write-budget exposure edge left open by E25, whose local qualification all ran
    under that cap.
-2. **`finish_reason=length` still yields a well-formed tool call.** One
-   `B_long_write_512` trial hit the cap and returned a structurally valid,
-   JSON-parseable call — an independent re-confirmation of the E25 smoke finding
-   on a fresh run. Note that AskMe would correctly treat that payload as
-   `incomplete_write`; "parser-clean" here means the wire format round-tripped,
-   not that the artifact was complete.
-3. **The 512-token cap binds in normal use**: 1 of 8 legacy-budget trials
-   truncated on an ordinary implementation task.
+2. **`finish_reason=length` degrades predictably, not chaotically.** Of the 4
+   capped trials, 2 still returned closeable JSON and 2 returned an unterminated
+   `content` prefix. Both shapes are the documented truncation path with the tool
+   name intact, and AskMe treats all four as truncated writes. "Parser-clean"
+   here means the wire format round-tripped, never that the artifact was
+   complete.
+3. **Secondary finding — the legacy 512-token write cap binds routinely, and
+   this is independent of #25986.** 4 of 16 `B_long_write_512` trials hit the cap
+   on an ordinary "implement a small module" task (1/8 run 1, 3/8 run 2). At 2048
+   tokens, 0 of 16 capped while producing payloads up to 5,507 characters. On
+   write-shaped work the `legacy-e4b-m1-16k-v1` budget is a live constraint, not
+   a theoretical one — consistent with the long-standing "write content
+   truncation (legacy E4B profile)" entry in ARCHITECTURE.md's Current
+   Constraints.
 
 **Limits — what this does NOT establish.**
 
@@ -82,8 +100,9 @@ whole run.
 - **One cell only**: one model/quant (E4B QAT Q4_0), one build (b9618), one
   conversation depth (one prior tool round), temp 0.1, no MTP. The upstream
   failing cell was 26B-A4B UD-Q4_K_XL, and the report notes MTP amplified it.
-- Not registered as an outcome-bearing protocol; 8 trials per arm is a smoke
-  bound, not a reliability estimate.
+- Not registered as an outcome-bearing protocol; n=64 across two runs bounds the
+  per-call parser-failure rate at roughly 4.6% (95%), which is a smoke bound, not
+  a reliability estimate. No decision rule was preregistered.
 
 **Disposition.** Treat the tools-only transport's PEG exposure as *bounded by
 this measurement, not eliminated*. Re-run on any build or GGUF change — in
