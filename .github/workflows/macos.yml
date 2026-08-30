@@ -81,6 +81,14 @@ on:
         description: GGUF filename within that repo
         type: string
         default: gemma-4-E4B_q4_0-it.gguf
+      model_revision:
+        description: >-
+          Hugging Face revision for the reference GGUF. 'main' is a moving
+          target — Gemma 4 checkpoints have been republished under identical
+          filenames (docs/gemma4-setup.md) — so pass an immutable commit for
+          any run whose pass/fail you intend to cite.
+        type: string
+        default: main
       suite:
         description: Integration suite for the reference lane
         type: choice
@@ -95,8 +103,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: macos-${{ github.ref }}
-  cancel-in-progress: true
+  # Routine push/PR runs coalesce per ref and cancel their predecessors. A
+  # manual dispatch gets its own group keyed by run id and is never
+  # cancelled: it shares a ref with push and schedule events, so without
+  # this a commit landing on main would kill an in-flight reference run
+  # after it had already spent time on a billed runner.
+  group: macos-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   macos-tests:
@@ -147,6 +160,7 @@ jobs:
       # transport seam on a free runner, not the model's competence.
       MODEL_REPO: ggml-org/Qwen3-0.6B-GGUF
       MODEL_FILE: Qwen3-0.6B-Q8_0.gguf
+      MODEL_REVISION: main
       LLM_BACKEND: local
       LLM_MODEL: ci-local-model
       LLM_API_URL: http://127.0.0.1:8080/v1/chat/completions
@@ -175,11 +189,28 @@ jobs:
           llama-server --version 2>&1 | tee macos-logs/llama-server-version.txt
       - name: Download the CI model
         run: |
-          mkdir -p models
+          mkdir -p models macos-logs
           curl -fL --retry 3 --retry-delay 5 \
+            -D macos-logs/model-headers.txt \
             -o "models/$MODEL_FILE" \
-            "https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_FILE"
-          ls -lh models/
+            "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REVISION/$MODEL_FILE"
+          # Record which artifact actually ran. A revision is only a name:
+          # Hugging Face serves 'main' as a moving target, so the resolved
+          # commit and the file digest are what make a run attributable.
+          {
+            echo "repo: $MODEL_REPO"
+            echo "file: $MODEL_FILE"
+            echo "requested_revision: $MODEL_REVISION"
+            grep -i '^x-repo-commit:' macos-logs/model-headers.txt \
+              || echo "x-repo-commit: (not returned)"
+            shasum -a 256 "models/$MODEL_FILE"
+          } | tee macos-logs/model-identity.txt
+          {
+            echo "### Model artifact"
+            echo '```'
+            cat macos-logs/model-identity.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Start llama-server
         run: |
           mkdir -p macos-logs
@@ -251,6 +282,7 @@ jobs:
     env:
       MODEL_REPO: ${{ inputs.model_repo || 'google/gemma-4-E4B-it-qat-q4_0-gguf' }}
       MODEL_FILE: ${{ inputs.model_file || 'gemma-4-E4B_q4_0-it.gguf' }}
+      MODEL_REVISION: ${{ inputs.model_revision || 'main' }}
       # docs/gemma4-setup.md pins both identities for the reference contract.
       LLM_BACKEND: local
       LLM_MODEL: gemma-4-e4b
@@ -294,11 +326,32 @@ jobs:
           llama-server --version 2>&1 | tee macos-logs/llama-server-version.txt
       - name: Download the reference model
         run: |
-          mkdir -p models
+          mkdir -p models macos-logs
+          # Gemma 4 checkpoints have been republished under identical
+          # filenames (docs/gemma4-setup.md), so 'main' cannot identify the
+          # weights a result came from. Unpinned runs stay allowed, but they
+          # say so, and every run records what it actually loaded.
+          if [ "$MODEL_REVISION" = "main" ]; then
+            echo "::warning::model_revision=main is a moving target; pass an immutable commit for any run whose pass/fail you intend to cite"
+          fi
           curl -fL --retry 3 --retry-delay 5 \
+            -D macos-logs/model-headers.txt \
             -o "models/$MODEL_FILE" \
-            "https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_FILE"
-          ls -lh models/
+            "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REVISION/$MODEL_FILE"
+          {
+            echo "repo: $MODEL_REPO"
+            echo "file: $MODEL_FILE"
+            echo "requested_revision: $MODEL_REVISION"
+            grep -i '^x-repo-commit:' macos-logs/model-headers.txt \
+              || echo "x-repo-commit: (not returned)"
+            shasum -a 256 "models/$MODEL_FILE"
+          } | tee macos-logs/model-identity.txt
+          {
+            echo "### Model artifact"
+            echo '```'
+            cat macos-logs/model-identity.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Start llama-server with the reference flags
         run: |
           # The stable flag set from docs/gemma4-setup.md. Gemma 4 has a

@@ -326,9 +326,46 @@ def test_macos_workflow_bounds_spend():
     text = MACOS_WORKFLOW.read_text(encoding="utf-8")
     assert text.count("timeout-minutes:") == 3
     assert "concurrency:" in text
-    assert "cancel-in-progress: true" in text
     assert "permissions:" in text
     assert "contents: read" in text
+
+
+def test_macos_manual_runs_are_not_cancelled_by_routine_events():
+    """A manual dispatch shares a ref with push and schedule events. Under a
+    ref-only concurrency group with cancel-in-progress, a commit landing on
+    main would kill an in-flight reference run after it had already spent
+    time on a billed runner. Manual runs get their own group and are never
+    cancelled; routine runs still coalesce."""
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert (
+        "group: macos-${{ github.ref }}-"
+        "${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}" in text
+    )
+    assert "cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}" in text
+    assert "cancel-in-progress: true" not in text
+
+
+def test_macos_lanes_record_the_model_artifact_they_loaded():
+    """'main' is a moving target and Gemma 4 checkpoints have been
+    republished under identical filenames, so a run labelled gemma-4-e4b
+    does not identify its weights. Every lane that loads a model resolves an
+    explicit revision and records the served commit plus the file digest."""
+    _, contract, reference = _macos_job_sections()
+    for section in (contract, reference):
+        assert "resolve/$MODEL_REVISION/$MODEL_FILE" in section
+        assert "resolve/main/" not in section
+        assert "x-repo-commit" in section
+        assert 'shasum -a 256 "models/$MODEL_FILE"' in section
+        assert "macos-logs/model-identity.txt" in section
+
+
+def test_macos_reference_lane_flags_an_unpinned_revision():
+    """Unpinned runs stay allowed — they just must not pass silently."""
+    _, _, reference = _macos_job_sections()
+    assert 'if [ "$MODEL_REVISION" = "main" ]' in reference
+    assert "::warning::" in reference
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert "model_revision:" in text
 
 
 def test_macos_workflow_states_the_evidence_boundary():
