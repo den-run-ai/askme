@@ -15,6 +15,81 @@ exact base SHAs and other provenance limits.
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## PEG Tool-Call Parser Probe — 2026-08-29, Local (build 9618 `c34b92235`, E4B QAT Q4_0) — #25986 NOT REPRODUCED ON THIS CELL
+
+**This is a diagnostic probe, not a benchmark and not an AskMe evaluation.** It
+makes no task-outcome, reliability, or model-quality claim. It answers exactly
+one question: can llama.cpp's `peg-gemma4` parser round-trip the tool-call shapes
+AskMe's tools-only executor emits, including payloads larger than the legacy
+profile's write cap allows?
+
+**Motivation.** Interface revision 6 left `peg-gemma4` on the critical path for
+every action with no JSON fallback, and upstream
+[#25986](https://github.com/ggml-org/llama.cpp/issues/25986) (open, unfixed;
+grammar verified unchanged on master `57291f264`) reports long multi-line
+tool-call string arguments intermittently failing to parse. Its reporter states
+plain curl was clean 10/10 while failures appeared only inside a fuller agent
+conversation — so a faithful conversation shape was required.
+
+**Method.** Direct `/v1/chat/completions` calls against the running server
+(`b9618-c34b92235`, documented QAT flags, `--reasoning off`). Faithful to AskMe:
+the real `_ACTION_TOOLS` definitions (all 8), the real `SYSTEM_STEP`,
+`tool_choice: "auto"`, `temperature 0.1`, and a history containing a completed
+prior assistant `tool_call` + `role:tool` round. 8 trials per arm. Script,
+per-trial records, and provenance limits are retained in
+[`tests/bench_records/2026-08-29-peg-probe/`](../tests/bench_records/2026-08-29-peg-probe/README.md);
+the probe is re-runnable from there.
+
+| Arm | Budget | n | Parse-clean | Tool | Payload | Wall med (range) |
+|---|---|---|---|---|---|---|
+| `A_short_args` (control) | 512 | 8 | **8/8** | `read` | short args | 2.8s (2.7–3.2) |
+| `B_long_write_512` (legacy cap) | 512 | 8 | **8/8** | `write` | 1426–1644 chars, 56–68 lines | 37.8s (36.8–43.3) |
+| `B_long_write_2048` (feature-scale) | 2048 | 8 | **8/8** | `write` | 3904–5073 chars, 119–154 lines | 101.8s (95.4–120.4) |
+| `C_delimiter_payload` | 1024 | 8 | **8/8** | `write` | 273–292 chars | 9.3s (9.0–10.1) |
+| **Total** | — | **32** | **32/32** | — | — | — |
+
+All 32 returned exactly one structured tool call with JSON-parseable arguments.
+Zero HTTP 5xx and zero `unparsed peg-gemma4` lines in the server log across the
+whole run.
+
+**Findings.**
+
+1. **#25986 did not reproduce on this cell**, including at ~3× the payload size
+   the legacy profile's 512-token write cap permits. This addresses the
+   write-budget exposure edge left open by E25, whose local qualification all ran
+   under that cap.
+2. **`finish_reason=length` still yields a well-formed tool call.** One
+   `B_long_write_512` trial hit the cap and returned a structurally valid,
+   JSON-parseable call — an independent re-confirmation of the E25 smoke finding
+   on a fresh run. Note that AskMe would correctly treat that payload as
+   `incomplete_write`; "parser-clean" here means the wire format round-tripped,
+   not that the artifact was complete.
+3. **The 512-token cap binds in normal use**: 1 of 8 legacy-budget trials
+   truncated on an ordinary implementation task.
+
+**Limits — what this does NOT establish.**
+
+- **The dominant failure mode was never provoked.** #25986's primary defect is
+  that trailing output after a complete tool call voids the whole parse. That
+  requires the model to over-generate past `<tool_call|>`, which it did not do at
+  `temperature 0.1`. This probe bounds the observed rate under AskMe's actual
+  settings; it does not show the parser handles trailing output.
+- **Arm C failed to force its condition.** The model declined to emit the literal
+  `<|"|>` delimiter into content in 8/8 trials despite being asked directly
+  (`delim=False` throughout), so the "no escape mechanism" defect is **untested,
+  not cleared**. Practically this lowers the risk for AskMe — the model resists
+  producing the token — but a payload that did contain it remains unexercised.
+- **One cell only**: one model/quant (E4B QAT Q4_0), one build (b9618), one
+  conversation depth (one prior tool round), temp 0.1, no MTP. The upstream
+  failing cell was 26B-A4B UD-Q4_K_XL, and the report notes MTP amplified it.
+- Not registered as an outcome-bearing protocol; 8 trials per arm is a smoke
+  bound, not a reliability estimate.
+
+**Disposition.** Treat the tools-only transport's PEG exposure as *bounded by
+this measurement, not eliminated*. Re-run on any build or GGUF change — in
+particular alongside E27, since master carries post-b9618 PEG hardening (#24329,
+#24869, #26780) that this b9618 result cannot speak to.
+
 ## E25 Transport A/B — 2026-08-04, Local (build 9618, E4B QAT Q4_0, legacy profile) — TOOLS NON-INFERIOR; JSON EXECUTOR PATH REMOVED
 
 Paired json-vs-tools executor-transport bench (issue #68 / E25): easy+medium

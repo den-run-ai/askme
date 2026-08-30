@@ -1,0 +1,40 @@
+ok  A_short_args #1 3.2s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #2 2.8s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #3 2.8s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #4 2.9s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #5 2.8s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #6 2.8s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #7 2.7s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #8 2.7s len=None lines=None delim=None fr=tool_calls
+ok  B_long_write_512 #1 37.4s len=1427 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #2 37.7s len=1433 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #3 36.8s len=1426 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #4 37.8s len=1427 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #5 38.8s len=1431 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #6 36.8s len=1427 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #7 40.8s len=1516 lines=61 delim=False fr=tool_calls
+ok  B_long_write_512 #8 43.3s len=1644 lines=68 delim=False fr=length
+ok  B_long_write_2048 #1 104.7s len=4321 lines=135 delim=False fr=tool_calls
+ok  B_long_write_2048 #2 120.4s len=4710 lines=138 delim=False fr=tool_calls
+ok  B_long_write_2048 #3 96.5s len=4317 lines=153 delim=False fr=tool_calls
+ok  B_long_write_2048 #4 98.8s len=4762 lines=142 delim=False fr=tool_calls
+ok  B_long_write_2048 #5 105.0s len=5073 lines=154 delim=False fr=tool_calls
+ok  B_long_write_2048 #6 105.6s len=4929 lines=152 delim=False fr=tool_calls
+ok  B_long_write_2048 #7 97.3s len=4423 lines=149 delim=False fr=tool_calls
+ok  B_long_write_2048 #8 95.4s len=3904 lines=119 delim=False fr=tool_calls
+ok  C_delimiter_payload #1 10.1s len=291 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #2 9.9s len=273 lines=10 delim=False fr=tool_calls
+ok  C_delimiter_payload #3 9.1s len=273 lines=10 delim=False fr=tool_calls
+ok  C_delimiter_payload #4 9.3s len=286 lines=10 delim=False fr=tool_calls
+ok  C_delimiter_payload #5 9.0s len=285 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #6 9.0s len=285 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #7 9.4s len=291 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #8 9.3s len=292 lines=9 delim=False fr=tool_calls
+
+===== SUMMARY =====
+A_short_args: 8/8 clean  failures=-
+B_long_write_512: 8/8 clean  failures=-
+B_long_write_2048: 8/8 clean  failures=-
+C_delimiter_payload: 8/8 clean  failures=-
+
+records: /private/tmp/claude-501/-Users-macmone-code-llama-cpp-agent/3b190d1e-8b4f-49e1-b754-ef8316f1382e/scratchpad/peg_probe_results.jsonl
