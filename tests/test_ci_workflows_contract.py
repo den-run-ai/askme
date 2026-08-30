@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 UNIT_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LLM_WORKFLOW = ROOT / ".github" / "workflows" / "llm.yml"
+MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "macos.yml"
 PYPROJECT = ROOT / "pyproject.toml"
 UV_LOCK = ROOT / "uv.lock"
 
@@ -70,7 +71,7 @@ def test_unit_workflow_publishes_coverage_reports():
 
 
 def test_workflows_pin_third_party_actions():
-    for workflow in (UNIT_WORKFLOW, LLM_WORKFLOW):
+    for workflow in (UNIT_WORKFLOW, LLM_WORKFLOW, MACOS_WORKFLOW):
         text = workflow.read_text(encoding="utf-8")
         external_actions = re.findall(r"^\s*(?:-\s+)?uses:\s+([^#\s]+)", text, flags=re.MULTILINE)
         assert external_actions
@@ -79,7 +80,11 @@ def test_workflows_pin_third_party_actions():
 
 
 def test_workflows_do_not_persist_checkout_credentials():
-    text = UNIT_WORKFLOW.read_text(encoding="utf-8") + LLM_WORKFLOW.read_text(encoding="utf-8")
+    text = (
+        UNIT_WORKFLOW.read_text(encoding="utf-8")
+        + LLM_WORKFLOW.read_text(encoding="utf-8")
+        + MACOS_WORKFLOW.read_text(encoding="utf-8")
+    )
     assert text.count("persist-credentials: false") == text.count("actions/checkout@")
 
 
@@ -190,3 +195,146 @@ def test_llm_workflow_bounds_spend():
     assert "cancel-in-progress: true" in text
     assert "permissions:" in text
     assert "contents: read" in text
+
+
+# --- macOS / Apple Silicon workflow ---
+
+
+def _macos_job_sections() -> tuple[str, str, str]:
+    """Return the (tests, llama-contract, llama-reference) job bodies."""
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    after_tests = text.split("  macos-tests:", 1)[1]
+    tests, after_contract = after_tests.split("  llama-contract:", 1)
+    contract, reference = after_contract.split("  llama-reference:", 1)
+    return tests, contract, reference
+
+
+def test_macos_workflow_stays_credential_free():
+    """No lane here needs a model credential: the deterministic lane runs no
+    model at all, and both llama.cpp lanes talk to a server on localhost."""
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert "OPENROUTER_API_KEY" not in text
+    assert "environment:" not in text
+    assert "secrets." not in text
+    assert "pull_request_target" not in text
+
+
+def test_macos_lanes_target_apple_silicon():
+    """macos-*-large is a 30 GB Intel runner: more memory, but no Apple
+    Silicon and no Metal, so it cannot stand in for the reference machine."""
+    for section in _macos_job_sections()[:2]:
+        assert "runs-on: macos-26\n" in section
+        # No Intel label may appear in a runs-on line in these lanes.
+        for label in re.findall(r"^\s*runs-on:\s*(.+)$", section, flags=re.MULTILINE):
+            assert "-large" not in label
+            assert "-intel" not in label
+            assert "macos-13" not in label  # the last Intel default
+
+
+def test_macos_deterministic_lane_stays_hermetic():
+    """The always-on lane must not enable live-model tests. With the opt-in
+    set, conftest would stop skipping the backend suites and every push
+    would need a running llama-server."""
+    tests, _, _ = _macos_job_sections()
+    # The opt-in must not be *set*; the comment explaining its absence is
+    # the point of the lane and must survive.
+    assert not re.search(r"ASKME_RUN_LIVE_LLM_TESTS\s*[:=]", tests)
+    assert "llama-server" not in tests
+    assert "uv run --locked pytest tests/ -v -rs" in tests
+    assert 'python-version: ["3.10", "3.14"]' in tests
+
+
+def test_macos_reference_lane_is_opt_in():
+    """Larger runners are billed per-minute even on public repositories and
+    are unavailable to user-owned repos, so the reference lane must never
+    fire on a push or pull request."""
+    _, _, reference = _macos_job_sections()
+    assert "if: github.event_name == 'workflow_dispatch'" in reference
+    assert "runs-on: ${{ inputs.runner" in reference
+
+
+def test_macos_schedule_drives_only_the_free_lanes():
+    """The weekly run exists to catch llama.cpp/Homebrew drift on the free
+    runner. It must not be able to start the billed reference lane."""
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert "schedule:" in text
+    _, _, reference = _macos_job_sections()
+    assert "github.event_name == 'schedule'" not in reference
+
+
+def test_macos_reference_lane_gates_size_before_downloading():
+    """The hardware gate must precede the multi-gigabyte model pull: an
+    undersized runner should fail fast, not get OOM-killed mid-suite in a
+    way that looks like an agent-loop bug."""
+    _, _, reference = _macos_job_sections()
+    assert reference.index("ci_local_gate.py hardware") < reference.index("Download the reference")
+    assert "--require-apple-silicon" in reference
+    assert '--min-memory-gb "$MIN_MEMORY_GB"' in reference
+
+
+def test_macos_llama_lanes_preflight_before_asserting_anything():
+    """conftest skips local tests when :8080 is absent, so a broken backend
+    would otherwise read as a green run. Both llama lanes preflight first."""
+    _, contract, reference = _macos_job_sections()
+    for section in (contract, reference):
+        assert section.count("ci_local_gate.py preflight") == 1
+        assert section.index("Start llama-server") < section.index("ci_local_gate.py preflight")
+    assert contract.index("ci_local_gate.py preflight") < contract.index("ci_local_gate.py probe")
+    assert reference.index("ci_local_gate.py preflight") < reference.index(
+        "uv run --locked pytest tests/test_agent_integration.py"
+    )
+
+
+def test_macos_reference_lane_guards_against_silent_skips():
+    _, _, reference = _macos_job_sections()
+    assert 'ASKME_RUN_LIVE_LLM_TESTS: "1"' in reference
+    assert "-m live_llm" in reference
+    assert "-rs" in reference
+    assert "test -s macos-logs/reference.jsonl" in reference
+
+
+def test_macos_contract_lane_keeps_model_behavior_advisory():
+    """The transport preflight gates; the tiny-model probe does not. A 0.6B
+    model on a 3-vCPU runner missing a tool call is evidence about the
+    model, not about AskMe."""
+    _, contract, _ = _macos_job_sections()
+    probe = contract.split("ci_local_gate.py probe", 1)[1]
+    assert "--strict" not in probe
+    # --jinja is what makes tool calls parse on Qwen-family templates.
+    assert "--jinja" in contract
+
+
+def test_macos_reference_lane_uses_the_documented_reference_flags():
+    """docs/gemma4-setup.md's stable flag set. --reasoning off is
+    permanently required for Gemma 4; the KV quantization and SWA flags are
+    what make the model fit its documented memory envelope."""
+    _, _, reference = _macos_job_sections()
+    for flag in (
+        "--ctx-size 16384",
+        "--flash-attn on",
+        "--cache-type-k q4_0 --cache-type-v q4_0",
+        "--swa-full --cache-reuse 256",
+        "--reasoning off",
+        "-np 1",
+    ):
+        assert flag in reference
+    assert "LLM_CAPABILITY_PROFILE: legacy-e4b-m1-16k-v1" in reference
+    assert "LLM_MODEL: gemma-4-e4b" in reference
+
+
+def test_macos_workflow_bounds_spend():
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert text.count("timeout-minutes:") == 3
+    assert "concurrency:" in text
+    assert "cancel-in-progress: true" in text
+    assert "permissions:" in text
+    assert "contents: read" in text
+
+
+def test_macos_workflow_states_the_evidence_boundary():
+    """CI runners are smaller and slower than the documented reference
+    machine. The workflow must say so, so a green run is never cited as a
+    local performance result."""
+    text = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert "docs/PERFORMANCE.md" in text
+    assert "performance evidence" in text

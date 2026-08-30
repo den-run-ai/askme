@@ -52,6 +52,7 @@ include = [
     "tests/_test_support.py",
     "tests/bench_harness.py",
     "tests/ci_llm_gate.py",
+    "tests/ci_local_gate.py",
     "tests/workflow_eval.py",
     "tests/featurebench/askme_adapter.py",
     "tests/featurebench/canary_audit.py",

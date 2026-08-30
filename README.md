@@ -240,11 +240,69 @@ preflight step fails loudly when the key is missing or rejected, so a bad
 credential can never produce a silently green (all-skipped) run. The full
 default matrix measured about $0.01 in OpenRouter credits per run.
 
+### macOS Apple Silicon CI
+
+[`macos.yml`](.github/workflows/macos.yml) covers the platform the local
+llama.cpp backend actually targets. It needs no credential — every lane talks
+either to nothing at all or to a `llama-server` on localhost — and has three
+lanes because they buy different things:
+
+| Lane | Runner | Trigger | Gates? |
+|---|---|---|---|
+| `macos-tests` | `macos-26` (free) | push, PR | yes |
+| `llama-contract` | `macos-26` (free) | push, PR, weekly | server preflight gates; model probe advisory |
+| `llama-reference` | `${{ inputs.runner }}` | manual only | yes, including a runner-size floor |
+
+`macos-tests` runs the deterministic suite on arm64 for Python 3.10 and 3.14 —
+the ends of the supported range, since `ci.yml` already covers the middle on
+Linux. This is the lane that catches genuine platform bugs: macOS resolves
+`/tmp` and `/var` through symlinks into `/private`, and its default filesystem
+is case-insensitive, both of which bear directly on workspace-path and
+target-identity normalization.
+
+`llama-contract` installs llama.cpp from Homebrew, serves a deliberately tiny
+tool-capable model (Qwen3-0.6B), and checks the seam through the real
+`LLMClient`. It exists to catch upstream llama.cpp drift breaking the local
+backend. `tests/ci_local_gate.py preflight` gates: `tests/conftest.py` *skips*
+local suites when `:8080` is absent, so without it a broken backend would read
+as a green run. The `probe` step — one `expect="action"` round trip asserting
+the tools payload is accepted and the envelope decodes — stays advisory,
+because a 0.6B model on a 3-vCPU runner missing a tool call is evidence about
+the model, not about AskMe.
+
+`llama-reference` runs the documented reference model (Gemma 4 E4B QAT Q4_0,
+5.15 GB) with the exact stable flags from [docs/gemma4-setup.md](docs/gemma4-setup.md).
+It is manual-only and takes a runner label, because **no GitHub-hosted runner
+matches the 16 GB reference machine**:
+
+| Label | Chip | vCPU | RAM | Cost |
+|---|---|---|---|---|
+| `macos-26` | M1 | 3 | 7 GB | free/unlimited on public repos |
+| `macos-26-xlarge` | M2 Pro | 5 | 14 GB | billed per-minute, org-owned repos only |
+| `macos-26-large` | Intel | 12 | 30 GB | not Apple Silicon — no Metal |
+
+14 GB is short of the reference 16 GB but still holds the model plus its 16K
+q4_0 KV cache, so `macos-26-xlarge` is the default. For true 16 GB+ parity,
+point `runner` at a third-party arm64 label (Depot, WarpBuild, Blaze, Bitrise)
+or a self-hosted Tart/Tartelet runner — all are one-line swaps — and set
+`min_memory_gb` to `16`. `tests/ci_local_gate.py hardware` then verifies the
+machine really is that size *before* the multi-gigabyte download, so an
+undersized runner fails fast instead of being OOM-killed mid-suite in a way
+that looks like an agent-loop bug.
+
+**These lanes are not performance evidence.** CI runners are smaller and slower
+than the documented M1/16 GB reference deployment, and a run that clears a
+lane's floor while sitting below 16 GB says so explicitly in its job summary.
+Timings from this workflow must never be written into
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md) or cited as a local baseline; use the
+reference machine for that.
+
 ## Files
 
 - `askme.py` — the agent
 - `tests/` — unit and integration tests, split by concern
 - `tests/bench_harness.py` — multi-trial benchmark harness
+- `tests/ci_local_gate.py` — macOS/llama.cpp hardware, server, and transport gate
 - `tests/workflow_eval.py` — manifest-driven native workflow evaluator
 - `tests/workflows/` — versioned semantic fixtures and [evaluation protocol](tests/workflows/PROTOCOL.md)
 - `tests/featurebench/` — FeatureBench adapter and [qualified canary runbook](tests/featurebench/README.md)

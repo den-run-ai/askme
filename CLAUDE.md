@@ -56,6 +56,9 @@ Start with:
 - `.github/workflows/ci.yml` — locked uv environments, Ruff lint/format, ty,
   hermetic Python 3.10–3.14 tests, and a 90% branch-aware coverage gate
 - `.github/workflows/llm.yml` — credentialed, paid OpenRouter smoke/protocol jobs
+- `.github/workflows/macos.yml`, `tests/ci_local_gate.py` — credential-free Apple
+  Silicon lanes: the deterministic suite on arm64, a llama.cpp local-backend
+  contract smoke, and a manual reference-model lane with a runner-size gate
 
 ## Commands
 
@@ -106,6 +109,12 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 ## CI and credentials
 
 - Keep `ci.yml` hermetic. It must never receive an OpenRouter key.
+- Keep `macos.yml` credential-free. Its lanes run no model at all or a local
+  `llama-server`, so an OpenRouter key would only un-skip paid suites. Its
+  reference lane stays manual: GitHub's larger runners are billed per-minute
+  even on public repositories and require an organization-owned repository.
+  CI runners are smaller than the M1/16 GB reference machine, so no macOS
+  lane produces `docs/PERFORMANCE.md` evidence.
 - `llm.yml` spends credits and may expose its key only to its intended jobs.
   Pull-request jobs must remain opt-in via `llm-tests` **and** restricted to
   same-repository branches before the credential enters scope.

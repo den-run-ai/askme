@@ -95,6 +95,14 @@ mean the promoted QAT weights are stale. Server `--reasoning off` disables
 llama-server template auto-detection, while AskMe's own reasoning policy stays
 `gated` unless `AGENT_REASONING_POLICY` is changed separately.
 
+The `llama-reference` lane in [`.github/workflows/macos.yml`](../.github/workflows/macos.yml)
+mirrors the stable flag set above, and `tests/test_ci_workflows_contract.py`
+pins it, so changing these flags means changing that lane in the same commit.
+That lane runs on a CI-sized Apple Silicon runner (14 GB at most from GitHub,
+against this machine's 16 GB) and is a functional check only — its timings are
+not a substitute for a measurement taken here, and never enter
+[PERFORMANCE.md](PERFORMANCE.md).
+
 #### Stable flags
 
 | Flag | Purpose | Notes |
