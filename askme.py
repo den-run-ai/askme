@@ -3122,18 +3122,17 @@ class StepPolicy:
                     attempt.reasoning_trigger = "duplicate_action"
                 return _StepFlow.NEXT_STEP
         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+            # The sliding window carries prior-task context, not proof
+            # that this attempt executed its check (issue #95). Give
+            # each new task/attempt a fresh execution after either success
+            # or failure; retain same-attempt guards and timeout bumps,
+            # including deterministic retries.
+            if not any(
+                step.get("action") == "shell" and step.get("arg", "") == action.get("arg", "")
+                for step in attempt.steps
+            ):
+                return None
             if prev.get("ok"):
-                # The sliding window carries prior-task context, not proof
-                # that this attempt executed its check (issue #95). Give
-                # each new task/attempt a fresh execution; keep same-attempt
-                # repetitions guarded, including deterministic retries.
-                if not any(
-                    step.get("action") == "shell"
-                    and step.get("arg", "") == action.get("arg", "")
-                    and step.get("ok")
-                    for step in attempt.steps
-                ):
-                    return None
                 # Repetition is never completion evidence (issue #68): the
                 # duplicate is suppressed as a no-op once, and repeating it
                 # again is a stuck loop for the replanner — task acceptance

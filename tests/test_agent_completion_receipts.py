@@ -119,6 +119,51 @@ def test_fresh_check_failure_is_recorded_instead_of_reusing_old_success(tmp_path
 
 
 @pytest.mark.parametrize("policy", ["heuristic", "lifecycle"])
+@pytest.mark.parametrize("boundary", ["task", "local_replan", "full_replan"])
+def test_new_attempt_can_retry_a_previously_failed_shell(tmp_path, policy, boundary):
+    """A transient failure must not prevent a new attempt from trying again."""
+    (tmp_path / "check.py").write_text(
+        "from pathlib import Path\n"
+        "marker = Path('attempts.txt')\n"
+        "previous = marker.read_text() if marker.exists() else ''\n"
+        "marker.write_text(previous + 'x')\n"
+        "raise SystemExit(0 if previous else 1)\n"
+    )
+    shell = {"action": "shell", "arg": "python3 check.py"}
+    settings = {"step_policy": policy}
+    if boundary == "full_replan":
+        replies = [
+            {"tasks": ["check the project"]},
+            shell,
+            {"action": "fail", "reasoning": "the first check failed"},
+            {"tasks": ["confirm the project status now"]},
+        ]
+        settings["max_replans"] = 2
+    else:
+        replies = [
+            {"tasks": ["record initial check status", "confirm the project status now"]},
+            shell,
+            {"action": "done"},
+        ]
+        if boundary == "local_replan":
+            replies.extend(
+                [
+                    {"action": "fail", "reasoning": "need another approach"},
+                    {"task": "execute the verification command and inspect its output"},
+                ]
+            )
+            settings["max_task_local_replans"] = 1
+    replies.extend([shell, {"action": "done"}])
+
+    result, events = _run(tmp_path, replies, **settings)
+
+    assert result["status"] == "complete"
+    assert (tmp_path / "attempts.txt").read_text() == "xx"
+    assert [step["ok"] for step in result["state"]["all_steps"]] == [False, True]
+    assert not any(e.get("reason") == "stuck_shell" for e in events)
+
+
+@pytest.mark.parametrize("policy", ["heuristic", "lifecycle"])
 def test_rewrite_skip_does_not_prime_first_duplicate_shell(tmp_path, policy):
     """Exercise the feedback's alleged cross-action counter poisoning path.
 

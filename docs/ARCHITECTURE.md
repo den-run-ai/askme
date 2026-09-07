@@ -216,11 +216,13 @@ emits `step_skipped`; deterministic-repair auto-completion is not a model
 Historical logs without control receipts cannot establish that a model never
 emitted `done` merely because no `step` event names it.
 
-Successful-shell duplicate suppression requires a successful receipt for that
+Shell duplicate/stuck suppression requires an executed receipt for that
 command in the current task attempt. The previous task's last step remains
 visible context, but cannot suppress a new task's first execution, including
-after task-local or full replans. Within an attempt, an adjacent successful
-repeat is still skipped once and a second repeat ends the attempt as stuck.
+after task-local or full replans and whether the previous result succeeded or
+failed. Within an attempt, an adjacent successful repeat is still skipped once
+and a second repeat ends the attempt as stuck; failed repeats still end the
+attempt unless they timed out, in which case the bounded timeout bump applies.
 Fresh executions retain their actual results; neither previous success nor
 suppression completes a task, and explicit `done`, incomplete-write gates,
 and final-validation rules still apply. This fixes a deterministic failure
