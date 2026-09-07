@@ -15,99 +15,64 @@ exact base SHAs and other provenance limits.
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
-## PEG Tool-Call Parser Probe — 2026-08-29, Local (build 9618 `c34b92235`, E4B QAT Q4_0) — #25986 NOT REPRODUCED ON THIS CELL
+## PEG Tool-Call Parser Probe — 2026-08-29, Local (build 9618 `c34b92235`, E4B QAT Q4_0)
 
-**This is a diagnostic probe, not a benchmark and not an AskMe evaluation.** It
-makes no task-outcome, reliability, or model-quality claim. It answers exactly
-one question: can llama.cpp's `peg-gemma4` parser round-trip the tool-call shapes
-AskMe's tools-only executor emits, including payloads larger than the legacy
-profile's write cap allows?
+**Diagnostic probe; interpretation corrected 2026-09-07.** This is not an
+AskMe evaluation, benchmark, or reliability estimate. The producer, both
+32-trial JSONL files, and transcripts remain unchanged in
+[`tests/bench_records/2026-08-29-peg-probe/`](../tests/bench_records/2026-08-29-peg-probe/README.md).
+The updated `analyze.py` classifies only evidence those records retain.
 
-**Motivation.** Interface revision 6 left `peg-gemma4` on the critical path for
-every action with no JSON fallback, and upstream
-[#25986](https://github.com/ggml-org/llama.cpp/issues/25986) (open, unfixed;
-grammar verified unchanged on master `57291f264`) reports long multi-line
-tool-call string arguments intermittently failing to parse. Its reporter states
-plain curl was clean 10/10 while failures appeared only inside a fuller agent
-conversation — so a faithful conversation shape was required.
+**Method.** Direct `/v1/chat/completions` calls to local b9618, E4B QAT Q4_0,
+`--reasoning off`, temperature 0.1, and AskMe's real eight tool definitions and
+`SYSTEM_STEP`. The added assistant tool call and `role: tool` history form a
+**synthetic reproduction condition** suggested by upstream #25986. AskMe's
+actual executor sends two messages: system and the current user/state digest.
+Neither this probe nor E25 establishes that AskMe uses prior tool-message history.
 
-**Method.** Direct `/v1/chat/completions` calls against the running server
-(`b9618-c34b92235`, documented QAT flags, `--reasoning off`). Faithful to AskMe:
-the real `_ACTION_TOOLS` definitions (all 8), the real `SYSTEM_STEP`,
-`tool_choice: "auto"`, `temperature 0.1`, and a history containing a completed
-prior assistant `tool_call` + `role:tool` round. 8 trials per arm, **two runs,
-n=64**. Script, per-trial records, the classifier, and the full provenance list
-are retained in
-[`tests/bench_records/2026-08-29-peg-probe/`](../tests/bench_records/2026-08-29-peg-probe/README.md);
-the probe is re-runnable from there.
+**Correction to the acceptance counter.** The frozen producer's `ok` parses
+only the first call and does not enforce cardinality, expected tool, or action
+schema. The analyzer now checks recorded call count, expected tool, parse
+status, and object-shape metadata. Successful argument values were not fully
+retained, so full AskMe schema validation cannot be reconstructed. "Parse OK"
+below always means **schema unverified**, not an accepted AskMe action.
 
-Outcomes are classified from the retained `finish_reason`, because "arguments
-did not parse" has two unrelated causes and only one of them bears on #25986:
-**`parser_failure`** (malformed output while the model stopped on its own) versus
-**`budget_truncation`** (an unterminated prefix purely because generation hit
-`max_tokens` — the expected path, which AskMe handles by retrying at
-`STEP_WRITE_TOKENS`).
-
-| Arm | Budget | n | clean | budget_trunc | **parser_failure** | hit cap | Payload |
+| Arm | Budget | n | Parse OK, schema unverified | Budget truncation | Uncapped parse failures | Hit cap | Payload |
 |---|---|---|---|---|---|---|---|
-| `A_short_args` (control) | 512 | 16 | 16 | 0 | **0** | 0/16 | short args |
-| `B_long_write_512` (legacy cap) | 512 | 16 | 14 | 2 | **0** | 4/16 | 1426–1644 chars, 56–68 lines |
-| `B_long_write_2048` (feature-scale) | 2048 | 16 | 16 | 0 | **0** | 0/16 | 3904–5507 chars, 119–163 lines |
-| `C_delimiter_payload` | 1024 | 16 | 16 | 0 | **0** | 0/16 | 272–344 chars |
-| **Total** | — | **64** | **62** | **2** | **0** | 4/64 | — |
+| `A_short_args` | 512 | 16 | 16 | 0 | 0 | 0/16 | short args |
+| `B_long_write_512` | 512 | 16 | 14 | 2 | 0 | 4/16 | 1426–1644 chars |
+| `B_long_write_2048` | 2048 | 16 | 16 | 0 | 0 | 0/16 | 3904–5507 chars |
+| `C_delimiter_payload` | 1024 | 16 | 16 | 0 | 0 | 0/16 | 272–344 chars |
+| **Total** | — | **64** | **62** | **2** | **0** | **4/64** | — |
 
-**0/64 parser failures.** Zero HTTP 5xx and zero `unparsed peg-gemma4` lines in
-the server log across both runs. The two non-clean trials are
-`finish_reason=length` with `completion_tokens=512` exactly, cut mid-payload.
+All 64 rows record one expected tool call. The 62 parseable rows record object
+keys. Schema-invalid argument values could not be distinguished
+from valid ones by these metadata alone; no schema acceptance rate is claimed.
+The two recorded parse failures both hit exactly 512 completion tokens and have
+unterminated `content` strings. There are zero recorded HTTP 5xx; the original
+report also states zero `unparsed peg-gemma4` lines in the server log.
 
-Wall times are reported per run in the records, not here: run 2 overlapped a
-local test run, so its timings are contaminated and are not comparable to run 1.
-Parse outcomes and token counts are unaffected.
+**Token-cap behavior.** Four 512-budget trials hit the cap; two remained
+JSON-parseable and two did not. At the audited AskMe runtime, invalid native
+arguments are rejected and may be retried within configured budgets. Parseable
+arguments with `finish_reason=length` are accepted with default transport
+metadata, not marked `incomplete_write`; artifact completeness remains unknown
+([#94](https://github.com/den-run-ai/askme/issues/94)). The probe did not execute
+actions or measure recovery. At 2048 tokens, none of 16 trials capped; that is a
+bounded payload observation, not evidence of a task-quality improvement.
 
-**Findings.**
+**Limits.** The upstream trailing-output condition was not provoked, and arm C
+did not emit its requested delimiter in **16/16** trials. Both conditions remain
+untested. One model/quant, build, synthetic conversation depth, temperature,
+and no MTP cannot establish a general parser-failure or AskMe rejection rate.
+The earlier roughly 4.6% bound on a broad "parser-clean" counter should not be
+cited as that evidence. Run-2 timings overlapped local tests and are not
+performance data.
 
-1. **#25986 did not reproduce on this cell**, including at ~3.5× the payload size
-   the legacy profile's 512-token write cap permits. This addresses the
-   write-budget exposure edge left open by E25, whose local qualification all ran
-   under that cap.
-2. **`finish_reason=length` degrades predictably, not chaotically.** Of the 4
-   capped trials, 2 still returned closeable JSON and 2 returned an unterminated
-   `content` prefix. Both shapes are the documented truncation path with the tool
-   name intact, and AskMe treats all four as truncated writes. "Parser-clean"
-   here means the wire format round-tripped, never that the artifact was
-   complete.
-3. **Secondary finding — the legacy 512-token write cap binds routinely, and
-   this is independent of #25986.** 4 of 16 `B_long_write_512` trials hit the cap
-   on an ordinary "implement a small module" task (1/8 run 1, 3/8 run 2). At 2048
-   tokens, 0 of 16 capped while producing payloads up to 5,507 characters. On
-   write-shaped work the `legacy-e4b-m1-16k-v1` budget is a live constraint, not
-   a theoretical one — consistent with the long-standing "write content
-   truncation (legacy E4B profile)" entry in ARCHITECTURE.md's Current
-   Constraints.
-
-**Limits — what this does NOT establish.**
-
-- **The dominant failure mode was never provoked.** #25986's primary defect is
-  that trailing output after a complete tool call voids the whole parse. That
-  requires the model to over-generate past `<tool_call|>`, which it did not do at
-  `temperature 0.1`. This probe bounds the observed rate under AskMe's actual
-  settings; it does not show the parser handles trailing output.
-- **Arm C failed to force its condition.** The model declined to emit the literal
-  `<|"|>` delimiter into content in 8/8 trials despite being asked directly
-  (`delim=False` throughout), so the "no escape mechanism" defect is **untested,
-  not cleared**. Practically this lowers the risk for AskMe — the model resists
-  producing the token — but a payload that did contain it remains unexercised.
-- **One cell only**: one model/quant (E4B QAT Q4_0), one build (b9618), one
-  conversation depth (one prior tool round), temp 0.1, no MTP. The upstream
-  failing cell was 26B-A4B UD-Q4_K_XL, and the report notes MTP amplified it.
-- Not registered as an outcome-bearing protocol; n=64 across two runs bounds the
-  per-call parser-failure rate at roughly 4.6% (95%), which is a smoke bound, not
-  a reliability estimate. No decision rule was preregistered.
-
-**Disposition.** Treat the tools-only transport's PEG exposure as *bounded by
-this measurement, not eliminated*. Re-run on any build or GGUF change — in
-particular alongside E27, since master carries post-b9618 PEG hardening (#24329,
-#24869, #26780) that this b9618 result cannot speak to.
+**Next qualification.** Preserve the producer and raw records. A newly versioned
+probe must retain complete responses, check one expected tool and its action
+schema, and separate actual AskMe requests from the synthetic-history arm.
+Pin runtime/model/server revisions and rerun when the build or GGUF changes.
 
 ## E25 Transport A/B — 2026-08-04, Local (build 9618, E4B QAT Q4_0, legacy profile) — TOOLS NON-INFERIOR; JSON EXECUTOR PATH REMOVED
 

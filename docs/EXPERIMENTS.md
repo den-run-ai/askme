@@ -258,10 +258,11 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   the E25 verdict, and the existing evidence is stronger than the issue text might
   suggest: counting the hard-suite addendum, the tools arm ran 27 real agent
   trials across easy+medium+hard, **every one contract-valid with zero malformed
-  tool calls** — and those were full agent conversations with prior tool rounds,
-  which is exactly the shape #25986 says is required to trigger it. The residual
-  exposure is therefore narrower than "native tool calls are risky", and has two
-  specific edges:
+  tool calls**. These were real agent trajectories, but `get_step()` sends only
+  system and current user/state messages; it does not replay prior assistant
+  tool calls or tool results. The separate PEG probe used synthetic tool history,
+  so neither record qualifies the other request shape. The residual exposure
+  includes these specific edges:
   1. **Write-budget scale.** All local qualification ran under
      `legacy-e4b-m1-16k-v1`, whose 512-token write cap bounds payloads to roughly
      1.5 KB. `generic-feature-scale-v1` allows 8192 — a ~16× larger payload class
