@@ -36,7 +36,12 @@ from pathlib import Path
 from typing import Any
 
 AGENT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(AGENT_DIR))
+
+from actions import CapturedProcess  # noqa: E402
+
 PYTEST_DIAGNOSTIC_STREAM_CHARS = 2000
+TRIAL_TIMEOUT = 1200
 
 SUITES = {
     "easy": {
@@ -133,8 +138,8 @@ def run_single_test(
         env["LLM_MODEL"] = model
     if capability_profile:
         env["LLM_CAPABILITY_PROFILE"] = capability_profile
-    t0 = time.time()
-    result = subprocess.run(
+    t0 = time.monotonic()
+    result = CapturedProcess.run(
         [
             sys.executable,
             "-m",
@@ -147,13 +152,11 @@ def run_single_test(
             "-k",
             k_expr,
         ],
-        capture_output=True,
-        text=True,
         cwd=str(AGENT_DIR),
         env=env,
-        timeout=1200,
+        timeout=TRIAL_TIMEOUT,
     )
-    wall = time.time() - t0
+    wall = time.monotonic() - t0
     passed = result.returncode == 0
     return passed, wall, result.stdout, result.stderr
 
@@ -547,7 +550,7 @@ def main(argv=None):
     print(f"Logs:  {log_dir}")
 
     all_results: dict[str, list[dict[str, Any]]] = {}
-    t_total = time.time()
+    t_total = time.monotonic()
 
     for test_name in tests:
         all_results[test_name] = []
@@ -559,6 +562,7 @@ def main(argv=None):
                 flush=True,
             )
             timed_out = False
+            trial_started = time.monotonic()
             try:
                 passed, wall, stdout, stderr = run_single_test(
                     test_name,
@@ -574,7 +578,7 @@ def main(argv=None):
                     reasoning_policy,
                 )
             except subprocess.TimeoutExpired as exc:
-                passed, wall = False, 1200.0
+                passed, wall = False, time.monotonic() - trial_started
                 stdout, stderr = exc.stdout, exc.stderr
                 timed_out = True
                 print(" TIMEOUT", flush=True)
@@ -670,7 +674,7 @@ def main(argv=None):
             all_results[test_name].append(result)
 
     # Summary
-    total_wall = time.time() - t_total
+    total_wall = time.monotonic() - t_total
     print(f"\n{'═' * 60}")
     print(f"  SUMMARY — {args.suite}/{args.backend}, {args.trials} trials")
     print(f"  Total wall time: {total_wall:.0f}s")
@@ -696,6 +700,7 @@ def main(argv=None):
         "git_commit": git_commit,
         "git_dirty": git_dirty,
         "total_wall_s": round(total_wall, 1),
+        "trial_timeout_s": TRIAL_TIMEOUT,
         "tests": {},
     }
     for test_name, results in all_results.items():
@@ -712,6 +717,7 @@ def main(argv=None):
             "total": len(results),
             "agent_status": [m["status"] for m in metrics_list],
             "wall_s": [m["wall_s"] for m in metrics_list],
+            "trial_wall_s": [r["wall_s"] for r in results],
             "replans": [m["replans"] for m in metrics_list],
             "local_replans": [m["local_replans"] for m in metrics_list],
             "local_replans_ok": [m["local_replans_ok"] for m in metrics_list],

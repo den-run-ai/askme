@@ -1,6 +1,7 @@
 """Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization, transport hardening."""
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,9 +37,15 @@ class TestExecuteShell:
         assert result["ok"] is False
 
     def test_timeout(self, work_dir):
-        result = execute({"action": "shell", "arg": "sleep 60"}, work_dir)
+        with patch(
+            "actions.CapturedProcess.run",
+            side_effect=subprocess.TimeoutExpired("sleep 60", 30),
+        ) as runner:
+            result = execute({"action": "shell", "arg": "sleep 60"}, work_dir)
         assert result["ok"] is False
         assert result["output"] == "TIMEOUT"
+        assert result["error_type"] == "timeout"
+        assert runner.call_args.kwargs["timeout"] == 30
 
     def test_stderr_captured(self, work_dir):
         result = execute({"action": "shell", "arg": "echo err >&2"}, work_dir)
