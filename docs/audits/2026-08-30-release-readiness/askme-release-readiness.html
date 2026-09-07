@@ -1,0 +1,607 @@
+<title>AskMe Release Readiness</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #F7F8F7;
+    --surface: #FFFFFF;
+    --surface-2: #EFF2F1;
+    --ink: #151A19;
+    --ink-2: #3D4947;
+    --ink-3: #6B7876;
+    --rule: #D6DDDB;
+    --rule-2: #E7ECEB;
+    --accent: #0F6E5C;
+    --accent-soft: #E2EFEB;
+    --crit: #A3352B;
+    --crit-soft: #F6E7E5;
+    --warn: #8A6212;
+    --warn-soft: #F6EEDC;
+    --ok: #2E6B4F;
+    --ok-soft: #E3EFE8;
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101413;
+      --surface: #171D1B;
+      --surface-2: #1E2523;
+      --ink: #E4E9E7;
+      --ink-2: #B6C1BE;
+      --ink-3: #849491;
+      --rule: #2C3634;
+      --rule-2: #232B29;
+      --accent: #4FBFA4;
+      --accent-soft: #17302B;
+      --crit: #E38578;
+      --crit-soft: #331F1C;
+      --warn: #D9AC58;
+      --warn-soft: #302719;
+      --ok: #6FC098;
+      --ok-soft: #17281F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #101413;
+    --surface: #171D1B;
+    --surface-2: #1E2523;
+    --ink: #E4E9E7;
+    --ink-2: #B6C1BE;
+    --ink-3: #849491;
+    --rule: #2C3634;
+    --rule-2: #232B29;
+    --accent: #4FBFA4;
+    --accent-soft: #17302B;
+    --crit: #E38578;
+    --crit-soft: #331F1C;
+    --warn: #D9AC58;
+    --warn-soft: #302719;
+    --ok: #6FC098;
+    --ok-soft: #17281F;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 120px; }
+  .col { max-width: var(--measure); }
+
+  code, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code {
+    font-size: 0.855em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-2);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+    word-break: break-word;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* ---------- masthead ---------- */
+  header.mast {
+    padding: 64px 0 34px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 0;
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-bottom: 22px;
+  }
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.3rem, 5.2vw, 3.4rem);
+    line-height: 1.06;
+    letter-spacing: -0.018em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+    max-width: 20ch;
+  }
+  .standfirst {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  /* ---------- verified strip ---------- */
+  .verified {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 56px;
+  }
+  .vcell { background: var(--ground); padding: 18px 20px 16px; }
+  .vcell .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: block;
+    margin-bottom: 7px;
+  }
+  .vcell .v {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 1.06rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  .vcell .n { font-size: 0.775rem; color: var(--ink-3); line-height: 1.4; margin-top: 5px; font-family: "Public Sans", sans-serif; }
+
+  /* ---------- sections ---------- */
+  section { margin-bottom: 68px; scroll-margin-top: 20px; }
+  h2 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(1.65rem, 3.1vw, 2.1rem);
+    line-height: 1.15;
+    letter-spacing: -0.012em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .sec-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 12px;
+  }
+  .sec-lede { color: var(--ink-2); max-width: var(--measure); margin: 0 0 26px; }
+  h3 {
+    font-family: "Public Sans", sans-serif;
+    font-size: 1.03rem;
+    font-weight: 600;
+    letter-spacing: -0.003em;
+    margin: 34px 0 8px;
+    line-height: 1.35;
+  }
+  p { margin: 0 0 15px; max-width: var(--measure); }
+  ul, ol { max-width: var(--measure); margin: 0 0 15px; padding-left: 1.15em; }
+  li { margin-bottom: 7px; }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border-left: 3px solid var(--crit);
+    background: var(--crit-soft);
+    padding: 20px 24px;
+    margin: 0 0 26px;
+    max-width: var(--measure);
+  }
+  .callout.acc { border-left-color: var(--accent); background: var(--accent-soft); }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .lbl {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 9px;
+    color: var(--crit);
+    font-weight: 700;
+  }
+  .callout.acc .lbl { color: var(--accent); }
+
+  /* ---------- findings ---------- */
+  .find {
+    border-left: 3px solid var(--rule);
+    padding: 2px 0 2px 20px;
+    margin-bottom: 28px;
+    max-width: var(--measure);
+  }
+  .find.crit { border-left-color: var(--crit); }
+  .find.warn { border-left-color: var(--warn); }
+  .find.ok { border-left-color: var(--ok); }
+  .find h3 { margin-top: 0; }
+  .find p { margin-bottom: 9px; }
+  .chip {
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 2px;
+    vertical-align: 2px;
+    margin-right: 9px;
+  }
+  .chip.crit { background: var(--crit-soft); color: var(--crit); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.neut { background: var(--surface-2); color: var(--ink-3); }
+  .ev {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    line-height: 1.6;
+    margin-top: 8px;
+    word-break: break-word;
+  }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap { overflow-x: auto; margin: 0 0 22px; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 620px; }
+  th {
+    text-align: left;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--rule-2); vertical-align: top; line-height: 1.5; }
+  tr:last-child td { border-bottom: none; }
+  td.id { font-family: "JetBrains Mono", monospace; font-weight: 500; white-space: nowrap; }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+  /* ---------- ordered plan ---------- */
+  ol.plan { list-style: none; padding: 0; counter-reset: step; max-width: var(--measure); }
+  ol.plan > li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-2);
+    margin: 0;
+  }
+  ol.plan > li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 3px;
+  }
+  ol.plan .t { font-weight: 600; display: block; margin-bottom: 3px; }
+  ol.plan .d { color: var(--ink-2); font-size: 14.5px; }
+
+  /* ---------- claim ledger ---------- */
+  .ledger { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 24px; }
+  .lrow { background: var(--surface); padding: 15px 18px; display: grid; grid-template-columns: 92px 1fr; gap: 16px; align-items: start; }
+  .lrow .verdict {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding-top: 3px;
+  }
+  .lrow.yes .verdict { color: var(--ok); }
+  .lrow.no .verdict { color: var(--crit); }
+  .lrow.cav .verdict { color: var(--warn); }
+  .lrow .claim { font-size: 14.5px; line-height: 1.55; }
+  .lrow .claim .why { display: block; color: var(--ink-3); font-size: 13px; margin-top: 5px; }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: 22px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+  hr.div { border: none; border-top: 1px solid var(--rule); margin: 0 0 30px; }
+
+  @media (max-width: 620px) {
+    .wrap { padding: 0 18px 80px; }
+    .lrow { grid-template-columns: 1fr; gap: 6px; }
+    header.mast { padding-top: 40px; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">
+    <span>den-run-ai/askme</span>
+    <span>main @ fcd5bc0</span>
+    <span>2026-08-30</span>
+    <span>18 issues · 6 PRs open</span>
+  </div>
+  <h1>The harness is hiding its own results</h1>
+  <p class="standfirst">A state-of-the-repo audit ahead of the public write-up. The code is in better shape than the documentation claims, the documentation claims things the code no longer does, and the single most interesting result in the project is currently unreproducible from <code>main</code>.</p>
+</header>
+
+<div class="verified">
+  <div class="vcell">
+    <span class="k">Deterministic suite</span>
+    <span class="v">1208 / 24</span>
+    <span class="n">passed / skipped, re-run here on Linux py3.11. Matches PR #97's claim exactly.</span>
+  </div>
+  <div class="vcell">
+    <span class="k">Branch coverage</span>
+    <span class="v">96.61%</span>
+    <span class="n">against a 90% gate. Covers <code>askme.py</code> + <code>actions.py</code> only.</span>
+  </div>
+  <div class="vcell">
+    <span class="k">Runtime diff, green → red CI</span>
+    <span class="v">0 lines</span>
+    <span class="n"><code>eee3fb7…fcd5bc0</code> touches docs and records only.</span>
+  </div>
+  <div class="vcell">
+    <span class="k">Local model</span>
+    <span class="v">Dense, not MoE</span>
+    <span class="n">Gemma 4 E4B QAT Q4_0 · 5.15 GB · dense PLE.</span>
+  </div>
+</div>
+
+<!-- ============ 1 ============ -->
+<section id="premise">
+  <span class="sec-num">01 — Correction first</span>
+  <h2>There is no small Gemma 4 MoE</h2>
+  <p class="sec-lede">You asked me to confirm something about "small gemma4 moe" reproducing your local M1 setup. That object doesn't exist, and the misconception is written into your own talk materials — which is almost certainly where it came from.</p>
+
+  <div class="callout">
+    <span class="lbl">From your own reference doc</span>
+    <p><code>docs/gemma4-setup.md:29</code> — "No small-MoE Gemma 4 exists — <strong>26B-A4B remains the family's only MoE</strong> (Q4 ≥13.6 GB before KV cache) and stays off the 16 GB shortlist; no verified acceptable llama.cpp run on 16 GB Apple Silicon exists."</p>
+  </div>
+
+  <p>Your local M1 primary is <strong>Gemma 4 E4B QAT Q4_0</strong> — <em>dense</em> PLE, 4.5B effective / 8B including embeddings, 5.15 GB, iSWA, full Metal (<code>docs/gemma4-setup.md:21</code>). The only Gemma 4 MoE is <code>google/gemma-4-26b-a4b-it</code>, which is your <em>hosted</em> OpenRouter cell (<code>llm.yml:33</code>) and has never run locally because it can't.</p>
+
+  <p>This matters more than a naming slip, because the local-vs-hosted split is the entire spine of the talk. And it has already leaked into the public artifacts:</p>
+
+  <div class="find crit">
+    <h3><span class="chip crit">Blocker</span>SPEAKER_NOTES.md calls the local model a mixture-of-experts, three times</h3>
+    <p>Lines 13, 24 and 62 describe "Gemma 4 MoE that fits in 16GB of MacBook RAM", "mixture-of-experts that fits in sixteen gigabytes", and "the small MoE Gemma runs this same loop". Line 32 adds "the planner sees full state", which <code>CLAUDE.md</code> and <code>askme.py:1774-1786</code> both contradict — the planner gets a curated digest.</p>
+    <p>The talk README links this file as the canonical delivery script. On a project whose entire pitch is evidence discipline, one checkable architecture error on the front-line document discounts everything else. It's a one-line-per-instance fix.</p>
+    <p class="ev">talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md:13,24,32,62 · docs/gemma4-setup.md:29 · askme.py:1774-1786</p>
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="headline">
+  <span class="sec-num">02 — The finding</span>
+  <h2>Correct work, recorded as failure</h2>
+  <p class="sec-lede">Issue #95, the four consecutive red CI runs, and the E23 done-emission quirk are all one defect. That unification is new, and it is the strongest thing you have to write about.</p>
+
+  <p>On the seeded webapp-repair cell, local Gemma 4 E4B lands the fix and verifies it in-run <strong>20/20</strong>. Held-out acceptance passes on every run checked. The harness records <strong>9/20</strong> as complete and <strong>11/20</strong> as <code>exhausted</code>. The work is done; the agent just can't say so. During this audit I reproduced the same shape on hosted models in CI — section 03, run 140.</p>
+
+  <h3>The mechanism, traced in code</h3>
+  <p>A run is only ever recorded finished if the model emits an explicit <code>done</code> for every task. There is no run status "failed" — the loop produces <code>complete</code>, <code>complete_unverified</code>, or <code>exhausted</code>, and <code>exhausted()</code> deliberately refuses any reconciliation to success (a #68 decision, and the right one).</p>
+  <p>So the failure shape is: repair lands → test passes → the replanner emits a verify-only task → the duplicate/stuck guard suppresses that command <em>because it already succeeded</em> → the task can't be satisfied → <code>task_failed</code> → replan → budget exhaustion.</p>
+
+  <div class="callout acc">
+    <span class="lbl">The missing mechanism</span>
+    <p>There is <strong>no path</strong> by which recorded evidence of a prior successful check can satisfy a verification task. The only receipt-backed auto-completion in the codebase is the narrow #41 C-header repair. Suppressed steps go only into the model's sliding window (<code>StepRecorder.note</code>, <code>askme.py:2551-2554</code>) and never into <code>all_steps</code> — so they are invisible to validation evidence, to write visibility, and to the final validator. The agent is left holding only actions guaranteed to be suppressed.</p>
+  </div>
+
+  <div class="find warn">
+    <h3><span class="chip warn">Secondary</span>The guard asymmetry is backwards</h3>
+    <p>A repeated harmless <code>read</code> ends the attempt (<code>askme.py:3171-3179</code>), while a repeated <code>write</code> — the genuinely risky one — only escalates thinking (<code>askme.py:3109-3112</code>). That inversion is exactly what produced run 135's <code>[stuck_loop] read …</code> red.</p>
+    <p>Separately, <code>dup_skip_count</code> is a single counter shared across unrelated guard types and only resets on a dispatched action (<code>askme.py:2592, 4573</code>), so one earlier rewrite-loop skip can make the very <em>first</em> duplicate shell or read fatal, with no corrective turn.</p>
+  </div>
+
+  <div class="find crit">
+    <h3><span class="chip crit">Correction</span>Strike #95's "done emitted zero times" line before anyone cites it</h3>
+    <p>It's an instrumentation artifact, not a behavior. <code>_handle_done</code> (<code>askme.py:4560-4568</code>) calls neither <code>recorder.executed()</code> nor <code>recorder.skip()</code> and emits no event, so an <em>accepted</em> <code>done</code> leaves no JSONL receipt. Residual (selected − executed − skipped) equals completed tasks in all 9 complete runs, and 8 of the 11 exhausted runs also emitted accepted dones.</p>
+  </div>
+
+  <h3>Why every coverage number should be read carefully here</h3>
+  <p>96.61% aggregate coverage hides that the uncovered lines cluster precisely in the completion, obligation and validation machinery — <code>askme.py</code> 1483→1488, 1494-1500, 1551, 1576-1583, 1599, 2172-2208, 2248-2272, 3607→3632. The code deciding "is this run complete" is among the least-exercised in the repo.</p>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="ci">
+  <span class="sec-num">03 — Your CI question</span>
+  <h2>What macOS CI and OpenRouter can actually confirm</h2>
+  <p class="sec-lede">Both credentials work. The scheduled reds are not a regression, and no GitHub-hosted runner can reproduce your laptop — but a useful subset is reachable today.</p>
+
+  <h3>The four red LLM runs are not a code regression</h3>
+  <p>Last green was run 130 on <code>eee3fb7</code>. Runs 132–135 all failed on <code>fcd5bc0</code>. I diffed them: <strong><code>askme.py</code> and <code>actions.py</code> are byte-identical</strong> — the only changes are <code>docs/PERFORMANCE.md</code> and retained bench records from the E25 addendum.</p>
+  <p>The gate is <code>trials=1</code> per cell, zero retries anywhere in <code>llm.yml</code>, and a pass rule requiring every trial to be both a pytest pass and an agent completion (<code>tests/ci_llm_gate.py:336</code>). It's also strict on schedule but advisory on push (<code>llm.yml:212-214</code>) — so identical code is advisory-green on a main push and hard-red on Monday's cron.</p>
+  <p>But "flaky gate" isn't the whole story, and this is the part worth getting right in writing: the failures are <strong>cell-correlated, not random</strong>. Both protocol failures in run 135 were the same cell — <code>medium/test_fix_python_syntax_error</code> — on <em>both</em> models, while the harder cell passed on both. And the smoke failure was <code>[stuck_loop] read …</code> → <code>exhausted</code>. That is issue #95's mechanism, sampled by a maximally sensitive gate.</p>
+
+  <h3>Run 140: the reds become rates</h3>
+  <p>I dispatched <code>llm.yml</code> on <code>main</code> with <code>trials=5</code>, both pinned dated snapshots, provider auto. Run <code>33295808202</code>, 31 minutes, $0.11 on the protocol cells. The exit code is red, as the all-trials rule guarantees; the table is the result.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Cell</th><th>Model</th><th class="num">Pytest</th><th class="num">Agent complete</th><th class="num">Median wall</th><th class="num">Cost</th></tr></thead>
+      <tbody>
+        <tr><td class="id">hard / replan_build_with_dependency</td><td>gemma-4-26b-a4b-it</td><td class="num">0/5</td><td class="num">2/5</td><td class="num">127.7 s</td><td class="num">$0.031</td></tr>
+        <tr><td class="id">medium / fix_python_syntax_error</td><td>gemma-4-26b-a4b-it</td><td class="num">1/5</td><td class="num">1/5</td><td class="num">95.8 s</td><td class="num">$0.011</td></tr>
+        <tr><td class="id">hard / replan_build_with_dependency</td><td>qwen3.6-27b</td><td class="num">5/5</td><td class="num">5/5</td><td class="num">34.8 s</td><td class="num">$0.015</td></tr>
+        <tr><td class="id">medium / fix_python_syntax_error</td><td>qwen3.6-27b</td><td class="num">3/5</td><td class="num">3/5</td><td class="num">105.2 s</td><td class="num">$0.056</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout acc">
+    <span class="lbl">What run 140 establishes</span>
+    <p><strong>#95 reproduces on hosted models, in CI, with the artifact verified correct.</strong> In the smoke job, <code>test_multi_step_build</code> wrote <code>main.c</code>, compiled it, ran it and printed <code>AGENT_OK</code> — the log shows it. The test's <code>assert_file</code> passed. Then task 3 of 3, "Run ./main", was served <code>[1] skip (duplicate successful shell)</code>, then <code>[2] auto-fail (same successful shell repeated)</code>, then task failed, replan, <code>exhausted</code>. The status assert is the one that failed. That is the mechanism from section 02, verbatim, on a hosted 26B MoE.</p>
+    <p><strong>The medium cell's claim-failure rate is in the local regime.</strong> Gemma exhausted 4/5, Qwen 2/5, against the local E4B's 11/20. On the Qwen cell every exhausted trial carried local replans and thinking retries — budget spent after the work.</p>
+    <p><strong>The inverse failure appears too.</strong> Gemma on the hard cell: 0/5 pytest, but 2/5 <em>claimed</em> complete. False completion and false exhaustion, same harness, same run.</p>
+  </div>
+
+  <p>Two caveats travel with these numbers. These CI cells are "Berkeley-derived" and, per <code>llm.yml</code>'s own comment, explicitly <em>not</em> a replay of the talk's frozen four-model matrix — so they don't overturn the 7/8 figure, they bound what it can be read as. And provider routing was <code>auto</code>: each Gemma cell was served by seven or eight different providers across its five trials. Under CLAUDE.md's matched-provider rule, that makes run 140 a variance measurement, not a causal comparison between models.</p>
+
+  <h3>No hosted macOS runner reproduces the M1 reference</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Runner</th><th class="num">RAM</th><th>Silicon</th><th>Verdict for the E4B reference</th></tr></thead>
+      <tbody>
+        <tr><td class="id">macos-26</td><td class="num">7 GB</td><td>M1, 3 vCPU</td><td><strong>No.</strong> 5.15 GB of weights leaves under ~1.5 GB for KV cache, OS and harness. Free on public repos.</td></tr>
+        <tr><td class="id">macos-26-xlarge</td><td class="num">14 GB</td><td>M2 Pro, 5 vCPU</td><td>Holds the model, but 2 GB under your machine and a different chip generation. Billed per-minute — and per PR #96, <strong>org-owned repos only</strong>. This repo is user-owned.</td></tr>
+        <tr><td class="id">macos-26-large</td><td class="num">30 GB</td><td>Intel, 12 vCPU</td><td><strong>No.</strong> No Metal backend at all, so <code>-ngl 99</code> is meaningless — it would measure CPU inference.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>PR #96 already contains all of this, honestly documented, and its <code>llama-reference</code> lane takes a runner label so a self-hosted arm64 box is a one-line swap. Two caveats it doesn't fully resolve: the lane <strong>has never executed once</strong> (it's <code>workflow_dispatch</code>-only and was skipped in both PR runs), and it installs llama.cpp from Homebrew — current upstream master — while your laptop is pinned to hand-built <code>b9618</code> / <code>c34b92235</code>, ~600+ commits behind, with a rebuild deliberately gated on ggml-org/llama.cpp#26470. So a green reference lane proves "the local backend still works against current upstream," not "this reproduces the laptop."</p>
+
+  <h3>What the two passing macOS runs did establish</h3>
+  <p>Runs <code>33293229569</code> and <code>33293545613</code> proved two real things. <strong>arm64 determinism:</strong> the full deterministic suite green on macOS for Python 3.10 and 3.14 — which exercises the platform-sensitive paths that matter here, <code>/tmp</code> and <code>/var</code> resolving through symlinks into <code>/private</code>, and a case-insensitive default filesystem, both bearing directly on workspace-path and target-identity normalization. <strong>llama.cpp contract:</strong> Homebrew llama.cpp installed, served Qwen3-0.6B under Metal, and AskMe's real <code>LLMClient</code> decoded a native tool call end to end. Neither says anything about Gemma 4, Metal performance, or the 16 GB reference.</p>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="blockers">
+  <span class="sec-num">04 — Before you publish</span>
+  <h2>Release blockers</h2>
+  <p class="sec-lede">Ranked by what a reader arriving from the video would actually hit. Refactor debt is not on this list.</p>
+
+  <div class="find crit">
+    <h3><span class="chip crit">1</span>The blog's best evidence isn't on <code>main</code></h3>
+    <p>PR #89 is unmerged, so <code>docs/showcase-tasks.md</code>, <code>tests/test_webapp_showcase.py</code> and the seeded T1c cell that issue #95's 20/20-vs-9/20 headline is measured on <strong>do not exist on the default branch</strong>. The E89 and E31 bench records live only on <code>origin/eval/e89-web-local</code>. Anyone who clones <code>main</code> after your post can reproduce none of it. This is the single biggest unblock.</p>
+    <p class="ev">git ls-tree origin/eval/e89-web-local — tests/bench_records/2026-08-07-e31-confirmation/ present; absent on main</p>
+  </div>
+
+  <div class="find crit">
+    <h3><span class="chip crit">2</span>blog.md's closing section describes a transport that no longer exists</h3>
+    <p>Lines 149–173 present the revision-3 <em>sentinel-framed write transport</em> as the landed action-interface fix, and PR #21 as "open … v7 requalification pending." Commit <code>5e59dd6</code> deleted the sentinel transport outright on 2026-08-04; <code>askme.py:218</code> now pins <code>ACTION_TRANSPORT = "tools"</code>; PR #21 merged 2026-08-02; and no v7 record exists — <code>tests/featurebench/results/</code> stops at v6. The blog's headline external evidence was produced by an interface the shipped code doesn't have.</p>
+    <p>The same paragraph is mirrored in <code>talks/…/README.md:59-78</code>, which the top-level README links.</p>
+  </div>
+
+  <div class="find crit">
+    <h3><span class="chip crit">3</span>"Six fixed JSON actions; one action per turn" is wrong — and it's in the recording</h3>
+    <p>The transport is native tool calls with <code>tool_choice="auto"</code> (<code>askme.py:925-932</code>), and <code>_action_tools()</code> exposes all eight <code>ACTION_SPECS</code> entries — six dispatchable handlers plus <code>done</code>/<code>fail</code>. The claim appears in <code>blog.md:28</code>, <code>slides.md:480</code> and <code>:679</code>, <code>SPEAKER_NOTES.md:33</code>, and therefore in <code>slides.pdf</code> and the published video. You can't fix the recording; you can fix the text and note the change.</p>
+  </div>
+
+  <div class="find crit">
+    <h3><span class="chip crit">4</span>CLAUDE.md asserts truncation recovery the code cannot perform</h3>
+    <p>Issue #94 is <strong>confirmed in code</strong>, independently. Since <code>5e59dd6</code> no live decode path can set <code>content_truncated=True</code>: the tool-call decoder raises and discards on a truncated payload (<code>askme.py:1117</code>), and the success path hardcodes a default <code>ActionTransport()</code> (<code>askme.py:1125</code>). The only remaining producer is <code>askme.py:4498-4502</code>, whose own comment says it exists to serve "patched/injected clients." <code>content_truncated</code> is even in <code>_RESERVED_ACTION_FIELDS</code>, so a model that tried to declare truncation is schema-rejected.</p>
+    <p>Safety is intact — truncated writes are discarded, never committed. But CLAUDE.md's "Truncation and observation integrity" invariant is written as unconditional live behavior, and ~38–50 test assertions drive that machinery through the injection seam only. <code>docs/ARCHITECTURE.md:200-203</code> already carries the correct caveat; CLAUDE.md doesn't. Two green suites currently encode contradictory contracts.</p>
+  </div>
+
+  <div class="find warn">
+    <h3><span class="chip warn">5</span>The #41 C-header repair is still on by default</h3>
+    <p><code>askme.py:418</code>, with its ablation still an unregistered draft. It fired 11 times on the E23 bench. Any post citing the 9/9 C result or the <code>fix_missing_include</code> 609s→15.7s speedup without the deterministic-template attribution is overclaiming — PERFORMANCE.md already had to be corrected on exactly this point in PR #87.</p>
+  </div>
+
+  <div class="find warn">
+    <h3><span class="chip warn">6</span>A stale number is still selling the primary local model</h3>
+    <p><code>docs/gemma4-setup.md:21</code> advertises the promoted QAT model with "E23 full bench: hard 9/9 at −38–66% wall." <code>docs/PERFORMANCE.md:80-83</code> retracted that on 2026-08-04 — neither E25 arm reproduced it (json 7/9, tools 6/9) and "the E23 hard reference should not be cited as current until re-benched." The retraction propagated to PERFORMANCE.md and the 08-04 records README and <strong>nowhere else</strong>: it also survives in <code>docs/EXPERIMENTS.md:66, :115, :416</code>.</p>
+  </div>
+
+  <div class="find warn">
+    <h3><span class="chip warn">7</span>The front door doesn't work</h3>
+    <p>README Quick Start (<code>README.md:37-48</code>) has no <code>git clone</code>, no <code>cd</code>, and no expected output, and nothing states the project is source-only despite <code>pyproject.toml:21 package = false</code>. Worse, every documented command fails on a stock machine: <code>pyproject.toml:22</code> pins <code>required-version = "==0.12.1"</code> exactly, so <code>uv run --locked …</code> errors out on any other uv. I hit this in this container and had to build a venv by hand. Also: no full-history secret scan has ever been run (<code>docs/TODO.md:70</code> unchecked), and the repo already appears public.</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="prs">
+  <span class="sec-num">05 — Open work</span>
+  <h2>Pull requests</h2>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>PR</th><th>Disposition</th><th>Reasoning</th></tr></thead>
+      <tbody>
+        <tr><td class="id">#96 macOS lanes</td><td><span class="chip ok">Merge now</span></td><td>Clean, credential-free, green, coverage-neutral. Delivers real Apple Silicon parity plus an end-to-end llama.cpp tool-call check, and honestly documents that no hosted runner fits the reference. Merging is also the <em>only</em> way the reference lane ever becomes dispatchable — <code>workflow_dispatch</code> reads workflows from the default branch.</td></tr>
+        <tr><td class="id">#89 showcase tasks</td><td><span class="chip warn">Merge, then port records</span></td><td>Touches no runtime files; only README and PERFORMANCE conflict. It is the release's best demo asset and carries the exact cell #95's headline rests on. Land it, then cherry-pick the E89/E31 records from <code>eval/e89-web-local</code>.</td></tr>
+        <tr><td class="id">#97 upstream audit</td><td><span class="chip warn">One fix, then merge</span></td><td>Your local work. Docs + evidence only, zero runtime change, CI green. The follow-up commit <code>b45bc87</code> did arrive and its numbers reproduce exactly from the committed <code>analyze.py</code>. But the probe README has a duplicated "## Two runs" section whose stale copy restates the very conflation the commit exists to correct.</td></tr>
+        <tr><td class="id">#47 dependabot</td><td><span class="chip ok">Merge now</span></td><td>actions/checkout 7.0.0 → 7.0.1 security bump. One minute.</td></tr>
+        <tr><td class="id">#67 README tweak</td><td><span class="chip neut">Rework</span></td><td>Em-dash sweep is wanted, but the diff drops "report" and "through <code>llama.cpp</code>" and is dirty against main.</td></tr>
+        <tr><td class="id">#14 pi ablation</td><td><span class="chip crit">Do not close</span></td><td>Draft since Aug 1 — but <code>main</code> quantitatively cites its pi-ablation numbers as "the preregistered comparison ceiling" in <code>tests/featurebench/README.md:84-87</code>, <code>blog.md:157</code>, the talk README, DECK_SPEC, and inside frozen v6 result JSONs. The published evidence chain currently terminates at an unmerged draft branch. Either land it as labelled archival evidence or remove the citations.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="issues">
+  <span class="sec-num">06 — Open work</span>
+  <h2>Issues, and where the code is ahead of them</h2>
+  <p class="sec-lede">The recurring theme: issue text describes intended work, and in this repo the code has repeatedly overtaken it. Several trackers now misrepresent their own subject.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Issue</th><th>Status</th><th>What's actually true</th></tr></thead>
+      <tbody>
+        <tr><td class="id">#85 v0.1.0 announcement</td><td><span class="chip crit">Release gate</span></td><td>This issue <em>is</em> the gate. 13 of its 15 must-haves are unlanded: no tag, no release, <code>llm.yml</code> doesn't watch <code>actions.py</code> in its push paths, README has no clone/cd and never says source-only, no secret scan, #41 on by default.</td></tr>
+        <tr><td class="id">#95 exhausted-despite-repair</td><td><span class="chip crit">Live</span></td><td>Real defect, mechanism traced. Strike the "done emitted zero times" line — instrumentation artifact.</td></tr>
+        <tr><td class="id">#94 dead incomplete_write</td><td><span class="chip crit">Live</span></td><td>Confirmed in code on every mechanism link. Its own cited grounding files aren't on main either.</td></tr>
+        <tr><td class="id">#27 talk claims</td><td><span class="chip warn">Partly done</span></td><td>Corrections landed in blog.md / README / DECK_SPEC, but <strong>SPEAKER_NOTES.md was never touched</strong> and still carries all seven flagged claims. slides.md still carries three.</td></tr>
+        <tr><td class="id">#31 lifecycle policy</td><td><span class="chip neut">Your call</span></td><td>Implemented (<code>askme.py:3344-3469</code>), tested, off by default. Its A/B returned p=1.000 <em>with the lifecycle guards firing zero times</em> — the cell never tested the mechanism. Six doc sites still call it an unrun follow-up.</td></tr>
+        <tr><td class="id">#41 / #68 / #69</td><td><span class="chip ok">Code ahead</span></td><td>#41's boundary conversion landed — the direct <code>Path.write_text()</code> and fabricated receipt the body complains about are gone. #68's eight high-confidence boxes all landed but are unchecked. #69's extraction landed. CLAUDE.md's "gated on #62/#63/#64" line is stale.</td></tr>
+        <tr><td class="id">#62 / #63 / #64 / #66</td><td><span class="chip warn">Unexecuted</span></td><td>No manifest, no runner, unstarted. #63 A.1 and #64 study-A bullet 3 both specify a sentinel-transport baseline arm that was <em>deleted</em> — re-running them as written would require re-implementing removed code. The FeatureBench adapter they depend on can't even run on main (it ships <code>askme.py</code> without <code>actions.py</code>).</td></tr>
+        <tr><td class="id">#76–#84 backlog</td><td><span class="chip neut">Not blocking</span></td><td>The one with real weight is <strong>#77's process-group leak</strong>: agent-spawned descendants survive the harness's subprocess kill via inherited pipes, producing two dated E25 build walls of 5791.9s and 16607.2s against a 1200s cap. That corrupts bench evidence. Also #84's <code>sleep 60</code> test still burns 30.15s of the 36.67s suite.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="claims">
+  <span class="sec-num">07 — For the write-up</span>
+  <h2>The claim ledger</h2>
+  <p class="sec-lede">What survives public scrutiny, what needs a caveat, and what must not be said.</p>
+
+  <div class="ledger">
+    <div class="lrow yes"><span class="verdict">Cite</span><span class="claim">Local dense Gemma 4 E4B lands and in-run verifies the seeded repair 20/20; the harness records it complete 9/20.<span class="why">Records on <code>eval/e89-web-local</code> — merge to main first (blocker 1).</span></span></div>
+    <div class="lrow yes"><span class="verdict">Cite</span><span class="claim">A preregistered A/B returned a genuine null: heuristic 4/10 vs lifecycle 5/10, Fisher two-sided p=1.000 — and the preregistered <em>mediators</em> revealed the lifecycle guards fired zero times, so the cell never tested its own mechanism.<span class="why">The pilot's apparent effect and its ~70% wall-time penalty both evaporated at n=10. This is the best methodology story in the repo.</span></span></div>
+    <div class="lrow yes"><span class="verdict">Cite</span><span class="claim">The inverse-failure pair on one task family: hosted gpt-oss-20b reported complete without touching the protected test (held-out acceptance caught <code>/health</code> still down); local E4B did the repair and couldn't claim it.<span class="why">False completion and false exhaustion, same harness, both caught by independent acceptance rather than self-report.</span></span></div>
+    <div class="lrow yes"><span class="verdict">Cite</span><span class="claim">Mid-experiment self-correction: the PEG probe's pass rule conflated a grammar defect with hitting the token cap, fixed in a separate <code>analyze.py</code> so the committed script provably produced the committed records. 0/64 parser failures.<span class="why">Recorded as a bounded negative with four named limits — including that arm C never provoked its own condition, so the missing-escape defect is "untested, not cleared."</span></span></div>
+    <div class="lrow yes"><span class="verdict">Cite</span><span class="claim">Run 140: on the hosted medium repair cell, gemma-4-26b-a4b-it exhausted 4/5 and qwen3.6-27b 2/5; in the same run the smoke build wrote, compiled and ran a correct binary and was recorded <code>exhausted</code>.<span class="why">Once ported to <code>tests/bench_records/</code>. Say "variance under auto provider routing," never "Gemma vs Qwen."</span></span></div>
+    <div class="lrow cav"><span class="verdict">Caveat</span><span class="claim">The 7/8-accepted hosted matrix from the talk.<span class="why">True as a frozen 2026-07-10 one-trial-per-cell record at <code>04033b47</code> — but its repair cell now fails on <em>both</em> models in scheduled CI against byte-identical agent code. Present as a dated record, never as current or reproducible.</span></span></div>
+    <div class="lrow cav"><span class="verdict">Caveat</span><span class="claim">FeatureBench v6: Gemma 11/13 F2P, Qwen 7/13.<span class="why">Produced under revision 3's sentinel transport, removed at revision 6. CLAUDE.md's own rule says re-run before citing. One honest sentence, or a re-run.</span></span></div>
+    <div class="lrow cav"><span class="verdict">Caveat</span><span class="claim">"1208 tests passing, 96.6% branch coverage."<span class="why">All 24 skips are live-backend tests whose skip string can't distinguish "not opted in" from "backend down," and coverage measures only <code>askme.py</code>/<code>actions.py</code> — not the evaluator and bench harness that produce your public records.</span></span></div>
+    <div class="lrow no"><span class="verdict">Never</span><span class="claim">That resume-anchor / <code>incomplete_write</code> recovery is a current capability.<span class="why">Issue #94. Frame it as evolution instead: the sentinel transport solved escaping <em>and</em> truncation salvage; native tool calls made escaping obsolete and cost the salvage half.</span></span></div>
+    <div class="lrow no"><span class="verdict">Never</span><span class="claim">That CI reproduces the M1 Gemma 4 setup.<span class="why">No hosted GitHub runner is both Apple Silicon and ≥16 GB, and the reference lane has never executed.</span></span></div>
+    <div class="lrow no"><span class="verdict">Never</span><span class="claim">The 9/9 C-header result or the 609s→15.7s speedup without attribution.<span class="why">A hard-coded two-header deterministic template is on by default and fired 11 times on that bench.</span></span></div>
+    <div class="lrow no"><span class="verdict">Never</span><span class="claim">Any wall-clock number from the E25 hard suite.<span class="why">Infrastructure-corrupted by the #77 process-group leak — 975.4s is the only honest tools build wall.</span></span></div>
+  </div>
+
+  <div class="callout acc">
+    <span class="lbl">The thesis I'd lead with</span>
+    <p>Not "small models are ready." Lead with: <strong>we built a harness careful enough to refuse to lie about success, and discovered it was lying about failure instead.</strong> The agent does the work, verifies it, passes held-out acceptance — and reports exhaustion 55% of the time. Every guard behaved exactly as designed; the gap is that nothing could say "the criterion is already satisfied, here is the receipt."</p>
+    <p>That's a better piece than a capability brag, it's fully backed by retained records, and it makes the evidence discipline the point rather than the disclaimer.</p>
+  </div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="plan">
+  <span class="sec-num">08 — Sequence</span>
+  <h2>What to do, in order</h2>
+  <ol class="plan">
+    <li><span class="t">Fix the two falsehoods a reader can check in 60 seconds</span><span class="d">SPEAKER_NOTES.md MoE → dense PLE (lines 13, 24, 62) and "planner sees full state" → curated digest (line 32). Same PR: split CLAUDE.md's truncation invariant into its live observation half and its inert write-recovery half. Half a day, zero risk.</span></li>
+    <li><span class="t">Merge #96 and #47</span><span class="d">Both clean and green. #96 also unlocks dispatching the macOS lanes at all.</span></li>
+    <li><span class="t">Land #89, then port the E89/E31 records from <code>eval/e89-web-local</code></span><span class="d">The biggest single unblock — without it your headline result is unreproducible from main.</span></li>
+    <li><span class="t">Port run 140 into a dated PERFORMANCE.md entry before it expires</span><span class="d">The GitHub artifact (<code>berkeley-protocol-logs</code>, 35 files, id <code>9727713336</code>) is retained 14 days. It's the first multi-trial hosted record of the claim-failure rate and it belongs under <code>tests/bench_records/</code> with its provider list, or the number can't be cited.</span></li>
+    <li><span class="t">Add the caveat sentences to blog.md</span><span class="d">Sentinel transport removed at revision 6; PR #21 merged; no v7 record. Free, and required by your own re-run rule.</span></li>
+    <li><span class="t">Decide #41 explicitly and write the decision into the announcement</span><span class="d">Either flip <code>AGENT_COMPILE_REPAIR</code> off for v0.1.0 or keep it on with a documented "benchmark-shaped, ablation pending" note.</span></li>
+    <li><span class="t">Fix the front door</span><span class="d">clone/cd/expected output in Quick Start; state source-only; relax or document the exact uv pin; add <code>actions.py</code> to <code>llm.yml</code> push paths with a contract-test assertion; run Gitleaks over full history.</span></li>
+    <li><span class="t">Link the recording</span><span class="d">Nothing in the repo points at the YouTube video. Top-level README, talk README, and blog.md all need it.</span></li>
+    <li><span class="t">Then, post-release engineering</span><span class="d">#77's process-group fix as a standalone PR (it corrupts bench evidence); #95's observability fix plus the guard change with a real user-visible regression test; #94 resolved one way or the other; then #80 → #81.</span></li>
+  </ol>
+
+  <div class="callout">
+    <span class="lbl">Don't promise this</span>
+    <p>#62's task panel, #63's paired runner and #64's 300–350 paid cells do not exist. Presenting them as prerequisites in the post would over-commit. If one evaluation is worth funding, make it a narrowed #66: v7 protocol, requalified controls, two AskMe cells against the v6 record.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Audited 2026-08-30 against <code>main</code> at <code>fcd5bc0</code>, with PR branches <code>agent/upstream-audit-2026-08-29</code> (<code>b107b4b</code>), <code>claude/macos-ci-apple-silicon-r6wv2y</code> (<code>27dbfba</code>) and <code>eval/e89-web-local</code>. Test suite, coverage, the green-to-red runtime diff, the model-identity correction, the #94 mechanism and the SPEAKER_NOTES claims were re-verified directly; issue and PR triage came from 19 independent agents, each grounded in file, sha or run id. No paid local model runs were made. One OpenRouter dispatch was triggered: <code>llm.yml</code> run 140, <code>33295808202</code>, trials=5, about $0.12 in total.</p>
+</footer>
+
+</div>
