@@ -6,7 +6,12 @@ the unit matrix stays credential-free, and the paid LLM workflow always
 preflights, gates, and stays opt-in for pull requests.
 """
 
+import json
+import os
 import re
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,6 +202,60 @@ def test_llm_workflow_web_bench_is_dispatch_only_and_per_cell():
     assert "EXPECTED_WEB_CELLS" in webbench
     assert "web_trials:\n        description" in text
     assert 'default: "0"' in text
+
+
+def test_web_bench_dispatch_passes_qualifying_cell_contract(tmp_path):
+    """Exercise the actual dispatch shell without calling a model or provider."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    step = text.split("      - name: Run web-suite trial matrix\n", 1)[1].split(
+        "      - name: Report web matrix (strict)\n", 1
+    )[0]
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    calls_path = tmp_path / "calls.jsonl"
+    uv = tmp_path / "uv"
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['CALLS_PATH'], 'a') as output:\n"
+        "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    github_env = tmp_path / "github-env"
+    bench_root = tmp_path / "bench-logs"
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        cwd=tmp_path,
+        env={
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "CALLS_PATH": str(calls_path),
+            "GITHUB_ENV": str(github_env),
+            "BENCH_ROOT": str(bench_root),
+            "WEB_MODELS": ("example/one=example/one-20260907@low,example/two=example/two-20260907"),
+            "WEB_TRIALS": "3",
+            "PROVIDER": "auto",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    assert len(calls) == 6
+    assert github_env.read_text().strip() == "EXPECTED_WEB_CELLS=6"
+    for index, args in enumerate(calls):
+        expected_model = "example/one" if index < 3 else "example/two"
+        assert args[args.index("--model") + 1] == expected_model
+        assert args[args.index("--expected-served-model") + 1] == expected_model + "-20260907"
+        assert args[args.index("--capability-profile") + 1] == "generic-feature-scale-v1"
+        assert args[args.index("--reasoning-policy") + 1] == "gated"
+        assert args[args.index("--suite") + 1] == "web"
+        assert args[args.index("--trials") + 1] == "3"
+        assert Path(args[args.index("--log-dir") + 1]).is_relative_to(bench_root)
+        if index < 3:
+            assert args[args.index("--reasoning-effort") + 1] == "low"
+        else:
+            assert "--reasoning-effort" not in args
 
 
 def test_llm_workflow_is_opt_in_for_pull_requests():

@@ -1,0 +1,41 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (13812 earlier characters omitted):
+ when generating multiple output files']
+[01:53:09] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-298/test_replan_build_with_depende0
+FAILED
+
+=================================== FAILURES ===================================
+____________ TestIntegrationHard.test_replan_build_with_dependency _____________
+
+self = <test_agent_integration.TestIntegrationHard object at 0x106b2b8f0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-298/test_replan_build_with_depende0')
+
+    def test_replan_build_with_dependency(self, tmp_path):
+        """First plan fails because a header file is missing. Replan creates it first."""
+        result = int_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include \"msg.h\"' and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"REPLAN_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+        )
+        assert_file(tmp_path / "main.c", "msg.h")
+        assert_file(tmp_path / "msg.h", "REPLAN_OK")
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: ['[compile_error] shell cc -o main main.c msg.h: clang: error: cannot specify -o when generating multiple output files']
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:131: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationHard::test_replan_build_with_dependency
+================= 1 failed, 22 deselected in 975.45s (0:16:15) =================
+
+stderr:
+(empty)

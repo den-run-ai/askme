@@ -1,7 +1,8 @@
 """Consistency guards for the Berkeley talk eval evidence that seeds LLM CI.
 
-The LLM CI workflow (.github/workflows/llm.yml) replays the two task cells
-from talks/berkeley-agentic-ai-summit-2026/evals/, so this module pins:
+The LLM CI workflow (.github/workflows/llm.yml) reruns the two published task
+selectors on current code/model cells (not the frozen historical matrix), so
+this module pins:
 
 - the linkage: protocol selectors -> pytest OpenRouter suite -> CI workflow,
   so a renamed test or suite breaks loudly instead of silently diverging
@@ -49,7 +50,7 @@ def test_protocol_selectors_exist_in_pytest_suite(results):
         assert "def {}(".format(test_name) in text
 
 
-def test_ci_workflow_replays_protocol_selectors(results):
+def test_ci_workflow_uses_published_protocol_selectors(results):
     workflow = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert len(results["tasks"]) == 2  # build + repair
     for task in results["tasks"].values():

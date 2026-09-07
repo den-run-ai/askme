@@ -1,0 +1,48 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (7652 earlier characters omitted):
+1]   [7] read: greet.py
+[23:03:31]   -> OK (5.5s): [greet.py: lines 1-1 of 1]
+print("hello")
+[23:03:36]   tokens: prompt=606 completion=26 total=632
+[23:03:36]   [8] shell: python3 greet.py
+[23:03:36]   -> OK (5.4s): hello
+[23:03:36]   Task failed, will replan. (107.0s)
+[23:03:36] Exhausted 2 replan attempts. (437.1s total)
+[23:03:36] Errors: []
+[23:03:36] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-256/test_fix_python_syntax_error0
+FAILED
+
+=================================== FAILURES ===================================
+______________ TestIntegrationMedium.test_fix_python_syntax_error ______________
+
+self = <test_agent_integration.TestIntegrationMedium object at 0x10b54f0e0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-256/test_fix_python_syntax_error0')
+
+    def test_fix_python_syntax_error(self, tmp_path):
+        """LLM writes a broken Python file, runs it (fails), fixes it, runs again."""
+        broken = tmp_path / "greet.py"
+        broken.write_text('print("hello"\n')
+        result = int_run(
+            "Run python3 greet.py — it has a syntax error. Fix the error in greet.py and run it again successfully.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+>       assert result["status"] == "complete", (
+            f"Agent failed to self-correct. Errors: {result['state']['errors']}"
+        )
+E       AssertionError: Agent failed to self-correct. Errors: []
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:73: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationMedium::test_fix_python_syntax_error
+================= 1 failed, 22 deselected in 437.20s (0:07:17) =================
+
+stderr:
+(empty)

@@ -383,35 +383,16 @@ def test_length_truncated_json_header_is_not_executable():
 @pytest.mark.parametrize(
     "raw",
     [
-        '{"action":"shell","arg":"true"}\n<<<CONTENT\nx\nCONTENT>>>',
-        '{"action":"write","arg":"f","content":"header"}\n<<<CONTENT\nblock\nCONTENT>>>',
         '{"action":"write","arg":"f","content":"x","content_truncated":true}',
-        '{"action":"write","arg":"f"}\n<<<CONTENT\nunclosed',
+        '{"action":"write","arg":"f","content":"x","transport":"tools"}',
     ],
 )
-def test_sentinel_ambiguity_reserved_metadata_and_unclosed_stop_are_rejected(raw):
+def test_reserved_transport_metadata_in_text_replies_is_rejected(raw):
+    # The sentinel content transport was removed with the JSON executor path
+    # (issue #68 / E25); reserved transport fields remain non-spoofable in
+    # any action-shaped text reply reaching the compatibility decoder.
     with pytest.raises(json.JSONDecodeError):
         _decode_action_reply(raw, "stop")
-
-
-def test_sentinel_payload_preserves_literal_reasoning_and_channel_tags():
-    payload = "<think>literal</think>\n<|channel>literal<channel|>\nbody"
-    raw = (
-        '<think>actual reasoning</think>{"action":"write","arg":"f"}\n'
-        f"<<<CONTENT\n{payload}\nCONTENT>>>"
-    )
-    decoded, _text, _repaired = _decode_action_reply(raw, "stop")
-    assert isinstance(decoded, DecodedAction)
-    assert decoded["content"] == payload
-
-
-def test_partial_sentinel_transport_is_separate_but_compatibly_projected():
-    raw = '{"action":"write","arg":"f"}\n<<<CONTENT\ncomplete\npartial'
-    decoded, _text, _repaired = _decode_action_reply(raw, "length")
-    assert isinstance(decoded, DecodedAction)
-    assert "content_truncated" not in decoded.envelope
-    assert decoded.transport.content_truncated is True
-    assert decoded["content_truncated"] is True
 
 
 @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))

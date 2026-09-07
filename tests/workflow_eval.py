@@ -21,9 +21,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REASONING_POLICIES = ("gated", "off")
 FINAL_VALIDATE_VALUES = ("0", "auto", "always")
+CAPABILITY_PROFILES = ("generic-feature-scale-v1", "legacy-e4b-m1-16k-v1")
 AGENT_LIMIT_KEYS = (
     "max_replans",
     "max_tasks",
@@ -76,7 +77,11 @@ def load_manifest(manifest_path: Path | str) -> dict[str, Any]:
     limits = data.get("agent_limits")
     if not isinstance(limits, dict):
         raise ManifestError("agent_limits must be an object")
-    missing_limits = [key for key in (*AGENT_LIMIT_KEYS, "final_validate") if key not in limits]
+    missing_limits = [
+        key
+        for key in (*AGENT_LIMIT_KEYS, "final_validate", "capability_profile")
+        if key not in limits
+    ]
     if missing_limits:
         raise ManifestError("agent_limits is missing: " + ", ".join(missing_limits))
     for key in AGENT_LIMIT_KEYS:
@@ -86,6 +91,9 @@ def load_manifest(manifest_path: Path | str) -> dict[str, Any]:
     if limits["final_validate"] not in FINAL_VALIDATE_VALUES:
         allowed = ", ".join(FINAL_VALIDATE_VALUES)
         raise ManifestError(f"agent_limits.final_validate must be one of: {allowed}")
+    if limits["capability_profile"] not in CAPABILITY_PROFILES:
+        allowed = ", ".join(CAPABILITY_PROFILES)
+        raise ManifestError(f"agent_limits.capability_profile must be one of: {allowed}")
     goal_cap = limits["goal_context_chars"]
     if len(prompt) > goal_cap:
         raise ManifestError(
@@ -288,23 +296,146 @@ def _read_agent_run_log(path: Path) -> tuple[dict[str, Any], Optional[str]]:
     if evidence["errors"]:
         evidence["status"] = "malformed"
         return evidence, "AskMe child JSONL run log contains malformed events"
+    if evidence["events_truncated"]:
+        evidence["status"] = "truncated"
+        error = "AskMe child JSONL run log exceeds the retained event limit"
+        evidence["errors"].append(error)
+        return evidence, error
     return evidence, None
 
 
 def _reasoning_policy_error(run_log: Mapping[str, Any], reasoning_policy: str) -> Optional[str]:
+    decision_since_response = False
     for index, event in enumerate(run_log.get("events", []), start=1):
+        if event.get("event") == "tokens":
+            if not decision_since_response:
+                return f"tokens event {index} has no preceding reasoning decision"
+            decision_since_response = False
+            continue
         if event.get("event") != "reasoning_decision":
             continue
+        decision_since_response = True
+        if (
+            not isinstance(event.get("requested_trigger"), str)
+            or not event["requested_trigger"]
+            or "requested_level" not in event
+            or "effective_level" not in event
+            or not isinstance(event.get("attempt"), int)
+            or isinstance(event.get("attempt"), bool)
+            or event["attempt"] < 0
+        ):
+            return f"reasoning decision {index} is missing level/trigger/attempt provenance"
         if event.get("requested_policy") != reasoning_policy:
             return (
                 f"reasoning decision {index} requested policy "
                 f"{event.get('requested_policy')!r}; expected {reasoning_policy!r}"
             )
+        requested = event["requested_level"]
+        if requested not in {None, "low", "medium", "high", "adaptive"}:
+            return f"reasoning decision {index} has an invalid requested level"
         if reasoning_policy == "off" and event.get("effective_level") is not None:
             return (
                 f"reasoning decision {index} enabled "
                 f"{event.get('effective_level')!r} under off policy"
             )
+        if reasoning_policy == "gated":
+            effective = event.get("effective_level")
+            if requested is None and effective is not None:
+                return f"reasoning decision {index} enabled an unrequested level"
+            if requested in {"low", "medium", "high"} and effective != requested:
+                return f"reasoning decision {index} changed the requested gated level"
+            if requested == "adaptive" and effective not in {None, "medium", "high"}:
+                return f"reasoning decision {index} has an invalid adaptive level"
+    return None
+
+
+def _configuration_provenance_error(
+    run_log: Mapping[str, Any],
+    agent_limits: Mapping[str, Any],
+    reasoning_policy: str,
+    expected_prompt: str,
+    expected_workspace: Path,
+    child_result: Optional[Mapping[str, Any]] = None,
+) -> Optional[str]:
+    """Verify the profile treatment and hash recorded by a cold AskMe run."""
+    expected_profile = str(agent_limits["capability_profile"])
+    run_starts = [event for event in run_log.get("events", []) if event.get("event") == "run_start"]
+    if len(run_starts) != 1:
+        return f"run log contains {len(run_starts)} run_start events; expected exactly one"
+    run_start = run_starts[0]
+    if run_start.get("prompt") != expected_prompt:
+        return "run_start prompt does not match the scheduled manifest prompt"
+    recorded_workspace = run_start.get("working_dir")
+    if (
+        not isinstance(recorded_workspace, str)
+        or Path(recorded_workspace).resolve() != expected_workspace
+    ):
+        return "run_start working_dir does not match the copied workflow workspace"
+    start_profile = run_start.get("capability_profile")
+    start_profile_name = start_profile.get("name") if isinstance(start_profile, Mapping) else None
+    if start_profile_name != expected_profile:
+        return f"run_start capability profile {start_profile_name!r}; expected {expected_profile!r}"
+    start_hash = run_start.get("config_hash")
+    if (
+        not isinstance(start_hash, str)
+        or len(start_hash) != 16
+        or any(character not in "0123456789abcdef" for character in start_hash.lower())
+    ):
+        return "run_start is missing config_hash"
+    start_config = {
+        key: value
+        for key, value in run_start.items()
+        if key not in {"event", "prompt", "ts", "working_dir"}
+    }
+    hash_payload = dict(start_config)
+    hash_payload.pop("config_hash")
+    canonical = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), default=str)
+    recomputed_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    if start_hash != recomputed_hash:
+        return "run_start config_hash does not match its resolved configuration"
+
+    expected_inner_limits = {
+        key: agent_limits[key]
+        for key in ("max_replans", "max_tasks", "max_steps", "goal_context_chars")
+    }
+    if run_start.get("limits") != expected_inner_limits:
+        return "run_start limits do not match the frozen manifest limits"
+    if run_start.get("final_validate") != agent_limits["final_validate"]:
+        return "run_start final_validate does not match the frozen manifest policy"
+    if run_start.get("reasoning_policy") != reasoning_policy:
+        return "run_start reasoning_policy does not match the scheduled arm"
+
+    if child_result is None:
+        return None
+
+    run_ends = [event for event in run_log.get("events", []) if event.get("event") == "run_end"]
+    if len(run_ends) != 1:
+        return f"run log contains {len(run_ends)} run_end events; expected exactly one"
+    if run_ends[0].get("status") != child_result.get("status"):
+        return "run_end status does not match structured result"
+
+    result_config = child_result.get("config")
+    if not isinstance(result_config, Mapping):
+        return "structured result is missing config metadata"
+    result_profile = result_config.get("capability_profile")
+    result_profile_name = (
+        result_profile.get("name") if isinstance(result_profile, Mapping) else None
+    )
+    if result_profile_name != expected_profile:
+        return (
+            f"structured result capability profile {result_profile_name!r}; "
+            f"expected {expected_profile!r}"
+        )
+    if dict(result_config) != start_config:
+        return "structured result config metadata does not match run_start"
+    result_workspace = child_result.get("workspace")
+    if (
+        not isinstance(result_workspace, Mapping)
+        or result_workspace.get("created") is not False
+        or not isinstance(result_workspace.get("path"), str)
+        or Path(result_workspace["path"]).resolve() != expected_workspace
+    ):
+        return "structured result workspace does not match the copied workflow workspace"
     return None
 
 
@@ -545,6 +676,8 @@ def _askme_agent(
             str(result_file),
             "--reasoning-policy",
             reasoning_policy,
+            "--capability-profile",
+            str(agent_limits["capability_profile"]),
             "--max-replans",
             str(agent_limits["max_replans"]),
             "--max-tasks",
@@ -556,6 +689,7 @@ def _askme_agent(
         ]
         environment = os.environ.copy()
         environment["AGENT_REASONING_POLICY"] = reasoning_policy
+        environment["LLM_CAPABILITY_PROFILE"] = str(agent_limits["capability_profile"])
         environment["AGENT_GOAL_CONTEXT_CHARS"] = str(agent_limits["goal_context_chars"])
         environment["AGENT_FINAL_VALIDATE"] = str(agent_limits["final_validate"])
         environment["AGENT_RUN_LOG"] = str(run_log_file)
@@ -582,10 +716,13 @@ def _askme_agent(
             metadata["timeout_seconds"] = timeout_seconds
             metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
             policy_error = _reasoning_policy_error(metadata["run_log"], reasoning_policy)
+            provenance_error = _configuration_provenance_error(
+                metadata["run_log"], agent_limits, reasoning_policy, prompt, workspace
+            )
             return failure(
                 error,
                 metadata,
-                infrastructure_error=run_log_error or policy_error,
+                infrastructure_error=run_log_error or policy_error or provenance_error,
             )
         except OSError as exc:
             error = f"could not launch AskMe child process: {exc}"
@@ -601,13 +738,18 @@ def _askme_agent(
             stderr=completed.stderr,
         )
         metadata["run_log"], run_log_error = _read_agent_run_log(run_log_file)
+        policy_error = _reasoning_policy_error(metadata["run_log"], reasoning_policy)
+        provenance_error = _configuration_provenance_error(
+            metadata["run_log"], agent_limits, reasoning_policy, prompt, workspace
+        )
+        base_evidence_error = run_log_error or policy_error or provenance_error
         if not result_file.is_file():
             metadata["status"] = "missing_result"
             error = (
                 "AskMe child did not write its structured result "
                 f"(exit code {completed.returncode})"
             )
-            return failure(error, metadata, infrastructure_error=run_log_error)
+            return failure(error, metadata, infrastructure_error=base_evidence_error)
 
         try:
             result_text = result_file.read_text(encoding="utf-8")
@@ -617,7 +759,7 @@ def _askme_agent(
             return failure(
                 f"could not read AskMe structured result: {exc}",
                 metadata,
-                infrastructure_error=run_log_error,
+                infrastructure_error=base_evidence_error,
             )
         try:
             child_result = json.loads(result_text)
@@ -631,7 +773,7 @@ def _askme_agent(
             return failure(
                 f"AskMe structured result is malformed: {exc}",
                 metadata,
-                infrastructure_error=run_log_error,
+                infrastructure_error=base_evidence_error,
             )
 
         if (
@@ -642,9 +784,18 @@ def _askme_agent(
             metadata["status"] = "malformed_result"
             metadata["result"] = child_result
             error = "AskMe structured result must contain a non-empty string status"
-            return failure(error, metadata, infrastructure_error=run_log_error)
+            return failure(error, metadata, infrastructure_error=base_evidence_error)
 
         metadata["result"] = child_result
+        result_provenance_error = _configuration_provenance_error(
+            metadata["run_log"],
+            agent_limits,
+            reasoning_policy,
+            prompt,
+            workspace,
+            child_result,
+        )
+        full_evidence_error = run_log_error or policy_error or result_provenance_error
         expected_exit = 0 if child_result["status"] == "complete" else 1
         if completed.returncode != expected_exit:
             metadata["status"] = "exit_result_mismatch"
@@ -652,7 +803,7 @@ def _askme_agent(
                 f"AskMe exit code {completed.returncode} conflicts with "
                 f"structured status {child_result['status']!r}"
             )
-            return failure(error, metadata, infrastructure_error=run_log_error)
+            return failure(error, metadata, infrastructure_error=full_evidence_error)
 
         if run_log_error is not None:
             metadata["status"] = metadata["run_log"]["status"] + "_run_log"
@@ -662,13 +813,20 @@ def _askme_agent(
                 infrastructure_error=run_log_error,
             )
 
-        policy_error = _reasoning_policy_error(metadata["run_log"], reasoning_policy)
         if policy_error is not None:
             metadata["status"] = "reasoning_policy_violation"
             return failure(
                 policy_error,
                 metadata,
                 infrastructure_error=policy_error,
+            )
+
+        if result_provenance_error is not None:
+            metadata["status"] = "configuration_provenance_violation"
+            return failure(
+                result_provenance_error,
+                metadata,
+                infrastructure_error=result_provenance_error,
             )
 
         return {

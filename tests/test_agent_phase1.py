@@ -232,6 +232,8 @@ class TestPhaseOneCli:
                     str(result_file),
                     "--reasoning-policy",
                     "off",
+                    "--capability-profile",
+                    "legacy-e4b-m1-16k-v1",
                     "--max-replans",
                     "2",
                     "--max-tasks",
@@ -251,6 +253,10 @@ class TestPhaseOneCli:
             working_dir=str(tmp_path),
             config=dataclasses.replace(
                 env_config,
+                llm=dataclasses.replace(
+                    env_config.llm,
+                    capability_profile=askme.get_capability_profile("legacy-e4b-m1-16k-v1"),
+                ),
                 reasoning_policy="off",
                 max_replans=2,
                 max_tasks=4,

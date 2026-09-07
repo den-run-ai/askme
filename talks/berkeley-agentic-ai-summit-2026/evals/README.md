@@ -36,6 +36,10 @@ The no-think path explicitly sends `reasoning.enabled=false`, which prevents Qwe
 
 ## Commands
 
+These commands are retained for the pinned historical checkout above; they are
+not a current-head runbook. The current harness additionally requires an
+explicit capability profile and expected served-model identity.
+
 Run both commands for each model, changing `MODEL` and `SLUG` together:
 
 ```bash

@@ -1125,126 +1125,6 @@ class TestEndToEndFeatureScale:
 # --- Revision 3 (issue #15): sentinel-framed content transport ---
 
 
-class TestSentinelSplit:
-    def test_no_block(self):
-        assert askme._split_content_block('{"action":"done"}') == ('{"action":"done"}', None, False)
-
-    def test_closed_block(self):
-        text = "HDR\n<<<CONTENT\na\nb\nCONTENT>>>"
-        assert askme._split_content_block(text) == ("HDR", "a\nb", True)
-
-    def test_unclosed_block(self):
-        text = "HDR\n<<<CONTENT\na\nb"
-        assert askme._split_content_block(text) == ("HDR", "a\nb", False)
-
-    def test_prompt_advertises_sentinels(self):
-        assert askme.CONTENT_OPEN in askme.SYSTEM_STEP
-        assert askme.CONTENT_CLOSE in askme.SYSTEM_STEP
-
-
-class TestSentinelTransport:
-    def test_sentinel_write_parses_without_escaping(self):
-        code = 'import numpy as np\n\ndef seed(n):\n    return {"x": n}'
-        text = (
-            '{"action":"write","arg":"impl.py","reasoning":"impl"}\n'
-            "<<<CONTENT\n" + code + "\nCONTENT>>>"
-        )
-        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["action"] == "write"
-        assert result["content"] == code
-        assert "content_truncated" not in result
-
-    def test_block_and_header_content_are_ambiguous(self):
-        text = '{"action":"write","arg":"a.py","content":"stub"}\n<<<CONTENT\nreal\nCONTENT>>>'
-        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            with pytest.raises(json.JSONDecodeError):
-                askme.ask_llm(
-                    [{"role": "user", "content": "hi"}],
-                    max_retries=0,
-                    reasoning_policy="off",
-                )
-
-    def test_unclosed_block_at_length_marks_truncated(self):
-        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\nline3 par'
-        response = mock_response_raw(text, finish_reason="length", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == "line1\nline2\nline3 par"
-        assert result["content_truncated"] is True
-
-    def test_unclosed_block_at_stop_is_rejected(self):
-        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2'
-        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            with pytest.raises(json.JSONDecodeError):
-                askme.ask_llm(
-                    [{"role": "user", "content": "hi"}],
-                    max_retries=0,
-                    reasoning_policy="off",
-                )
-
-    def test_unclosed_block_at_length_keeps_last_complete_line(self):
-        # Cutoff on a line boundary: the response's trailing newline is the
-        # proof the last line is complete — it must survive the strip chain
-        # so the run loop's partial-line trim does not drop the line.
-        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nline1\nline2\n'
-        response = mock_response_raw(text, finish_reason="length", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == "line1\nline2\n"
-        assert result["content_truncated"] is True
-
-    def test_embedded_close_line_stays_content(self):
-        # Content lines that resemble the terminator (docs/fixtures about this
-        # protocol) must not end the block when a real terminator follows.
-        code = 'print("demo")\nCONTENT>>>\nprint("after")'
-        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n' + code + "\nCONTENT>>>"
-        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}], max_retries=0, reasoning_policy="off"
-            )
-        assert result["content"] == code
-
-    def test_indented_close_is_content_not_terminator(self):
-        text = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nexample:\n    CONTENT>>>'
-        response = mock_response_raw(text, finish_reason="stop", usage=_TOKEN_USAGE)
-        with patch("askme.requests.post", return_value=response):
-            with pytest.raises(json.JSONDecodeError):
-                askme.ask_llm(
-                    [{"role": "user", "content": "hi"}],
-                    max_retries=0,
-                    reasoning_policy="off",
-                )
-
-    def test_empty_block_at_length_retries_with_payload_budget(self):
-        cut = '{"action":"write","arg":"a.py"}\n<<<CONTENT\n'
-        good = '{"action":"write","arg":"a.py"}\n<<<CONTENT\nx = 1\nCONTENT>>>'
-        responses = [
-            mock_response_raw(cut, finish_reason="length", usage=_TOKEN_USAGE),
-            mock_response_raw(good, finish_reason="stop", usage=_TOKEN_USAGE),
-        ]
-        with patch("askme.requests.post", side_effect=responses) as mock_post:
-            result = askme.ask_llm(
-                [{"role": "user", "content": "hi"}],
-                max_tokens=256,
-                max_retries=1,
-                reasoning_policy="off",
-            )
-        assert result["content"] == "x = 1"
-        bodies = [c.kwargs["json"] for c in mock_post.call_args_list]
-        assert bodies[1]["max_tokens"] == STEP_WRITE_TOKENS
-
-
 class TestTruncatedWriteContinuation:
     @patch("askme.replan_task", return_value=askme.TaskReplanResult(None, "unknown"))
     @patch("askme.ask_llm")
@@ -1476,19 +1356,17 @@ class TestTruncatedWriteContinuation:
         assert not any("Already done" in o for o in captured)
 
 
-# --- Revision 3 (issue #15): backend-aware output budgets ---
+# --- Issue #68: capability-profile output budgets ---
 
 
-class TestBackendAwareBudgets:
-    def test_budgets_keyed_by_backend(self):
-        if askme.LLM_BACKEND == "openrouter":
-            assert askme.STEP_TOKENS == 4096
-            assert askme.STEP_WRITE_TOKENS == 8192
-        else:
-            assert askme.STEP_TOKENS == 256
-            assert askme.STEP_WRITE_TOKENS == 512
+class TestCapabilityProfileBudgets:
+    def test_module_budgets_match_selected_profile(self):
+        profile = askme._DEFAULT_CAPABILITY_PROFILE
+        assert askme.CAPABILITY_PROFILE == profile.name
+        assert askme.STEP_TOKENS == profile.step_tokens
+        assert askme.STEP_WRITE_TOKENS == profile.step_write_tokens
 
-    def test_get_step_requests_backend_budget(self):
+    def test_get_step_requests_profile_budget(self):
         with patch("askme.ask_llm", return_value={"action": "done"}) as m:
             askme.get_step("do a thing", {})
         assert m.call_args.kwargs["max_tokens"] == askme.STEP_TOKENS

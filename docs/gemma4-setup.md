@@ -1,6 +1,7 @@
-# Gemma 4 E4B — Setup, Configuration & Optimization
+# Gemma 4 E4B — Legacy Capability-Profile Reference
 
-Mac M1 16GB. Last updated 2026-08-03.
+Mac M1 16GB. Last updated 2026-08-04. This guide describes the explicit
+`legacy-e4b-m1-16k-v1` AskMe profile; it is not the generic runtime default.
 
 **Current local build:** `c34b92235` (build 9618, master as of 2026-06-13; pulled + rebuilt 2026-06-12). Includes all Phase 6 fixes plus, from the `a702f395 → c34b92235` delta: **Gemma 4 MTP speculative decoding** ([#23398](https://github.com/ggml-org/llama.cpp/pull/23398) for 31B/26B-A4B, [#24282](https://github.com/ggml-org/llama.cpp/pull/24282) for E2B/E4B assistants), the **state-save fix [#23468](https://github.com/ggml-org/llama.cpp/pull/23468) that makes Gemma 4 cache reuse fully reliable** (build ~9484), SWA checkpoint improvements (#23981, #24110, #24411), structured-output parser fix (#22302), fast Walsh-Hadamard KV rotation (#22631), Gemma4ForCausalLM conversion (#23682), and the 12B Unified conversion fix (#24118). PERFORMANCE.md local baselines predate this binary — see the build caveat there.
 **Fetched master snapshot as of 2026-08-03:** `ee0445c99` — 632 commits ahead of local. Contains a large grammar/PEG overhaul (#24869, #24839, #24835, #24653, #24624, #24329), server prompt-cache work (#24176 checkpoints at every user message, #25070 prompt-cache RAM limit, #25649 state-ownership refactor), and a reasoning-leak template fix (#24674). A rebuild is worth an isolated A/B, but gate on [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma-family decode regression, reported on M5/macOS 27 — M1 impact unknown). Do not replace stable b9618 without a side-by-side.
@@ -9,7 +10,7 @@ Mac M1 16GB. Last updated 2026-08-03.
 **Phase 4 (EOS fix): COMPLETE** — #21492 merged, rebuilt, 157/157 unit tests pass, 3/3 easy integration pass (10:02). See [Phase 4 results](#phase-4-eos-fix--complete-2026-04-08).
 **Phase 5 (build refresh): COMPLETE** — pulled 12 new Gemma 4 commits to `85dde8dc4`, rebuilt, 159/159 unit tests pass, 3/3 easy integration pass (1:36 — fastest ever). See [Phase 5 results](#phase-5-build-refresh--complete-2026-04-16).
 **Phase 6 (cache-reuse unblock): COMPLETE** — #21468 closed upstream via #22288 (merged to master). Rebuilt on master `a702f395`. Deterministic multi-turn benchmark (3 trials × 7 requests) shows no downside vs Phase 5: same cache behavior, same decode speed, 4.5% faster prompt eval. **Phase 6 is the new default.** See [caching_analysis.md](caching_analysis.md) and [PERFORMANCE.md](PERFORMANCE.md#phase-6-caching-ab--2026-04-25-build-a702f395-master).
-**Build refresh (2026-06-12, undocumented at the time):** pulled + rebuilt to `c34b92235` (b9618), picking up MTP support and the #23468 cache fix. No local benchmark has been run on this binary — establishing a fresh baseline is EXPERIMENTS.md E23.
+**Build refresh (2026-06-12, undocumented at the time):** pulled + rebuilt to `c34b92235` (b9618), picking up MTP support and the #23468 cache fix. At that date no local benchmark had run on the binary; E23 established the first baseline on 2026-08-03.
 **Status refresh (2026-08-03):** upstream issue dispositions, the MTP smoke test, the `--reasoning off` requirement, and Google's 2026-07-15/16 weight refresh are covered in the dated sections below.
 
 ## Model
@@ -25,7 +26,7 @@ Mac M1 16GB. Last updated 2026-08-03.
 - No thinking mode by default (unlike Qwen 3.5) — responses are direct, no `<think>` overhead. If enabled via the reasoning-budget sampler (#21697), note that `<think>...</think>` is emitted before JSON content and breaks structured parsers on the non-streaming path — see [unsloth #5044](https://github.com/unslothai/unsloth/issues/5044)
 - Q8_0 (8 GB) is viable if you want higher quality and delete Qwen 3.5 9B later
 - **Weight refresh (2026-07-15/16):** Google re-published all Gemma 4 checkpoints under the same names with tool-calling JSON reliability, truncated-response, and chat-template fixes. The installed Q4_K_M is dated 2026-04-06 — pre-refresh. Re-pull before the next benchmark; prefer the official **QAT Q4_0** ([google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), ~5.15 GB, quantization-aware-trained rather than post-quantized). The stale template is also what triggers server-side thinking auto-detection — see `--reasoning off` below.
-- **Gemma 4 12B Unified** (released 2026-06-03; dense, encoder-free multimodal, 256K ctx; official [QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf) ~6.98 GB) — **benched 2026-08-03, ruled out for the agent loop**: 3.6–35× slower than E4B QAT with more exhaustion (see PERFORMANCE.md E09 12B entry). Still the best interactive-quality option on 16 GB. No small-MoE Gemma 4 exists — **26B-A4B remains the family's only MoE** (Q4 ≥13.6 GB before KV cache) and stays off the 16 GB shortlist; no verified acceptable llama.cpp run on 16 GB Apple Silicon exists.
+- **Gemma 4 12B Unified** (released 2026-06-03; dense, encoder-free multimodal, 256K ctx; official [QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf) ~6.98 GB) — the 2026-08-03 agent-loop trial was negative under the E4B-fitted contract: 3.6–35× slower than E4B QAT with more exhaustion (see PERFORMANCE.md E09 12B entry). That result is contract-conditional; a newly registered, explicitly pinned capability-profile run is required before a model-wide verdict. It remains a higher-capacity dense candidate that fits in 16 GB. No small-MoE Gemma 4 exists — **26B-A4B remains the family's only MoE** (Q4 ≥13.6 GB before KV cache) and stays off the 16 GB shortlist; no verified acceptable llama.cpp run on 16 GB Apple Silicon exists.
 
 ### Download
 
@@ -76,9 +77,23 @@ cd /Users/macmone/code/llama.cpp
   --swa-full --cache-reuse 256 \
   --reasoning off \
   -np 1 \
+  --alias gemma-4-e4b \
   --port 8080
 # Legacy pre-refresh model: -m models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf
 ```
+
+Pin the matching AskMe identities when invoking the agent or benchmark
+harness:
+
+```bash
+export LLM_MODEL=gemma-4-e4b
+export LLM_CAPABILITY_PROFILE=legacy-e4b-m1-16k-v1
+```
+
+Here “legacy” names the original constrained harness contract; it does not
+mean the promoted QAT weights are stale. Server `--reasoning off` disables
+llama-server template auto-detection, while AskMe's own reasoning policy stays
+`gated` unless `AGENT_REASONING_POLICY` is changed separately.
 
 #### Stable flags
 

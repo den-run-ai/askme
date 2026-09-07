@@ -88,15 +88,6 @@ _load_env()
 # exactly this level. Leave unset for hybrid models like Gemma 4, where
 # reasoning stays off unless the harness asks.
 _EFFORT_RANK = {"low": 0, "medium": 1, "high": 2}
-# Reasoning tokens count against max_tokens with Parasail-class providers,
-# despite OpenRouter docs claiming they're separate. Floor the budget per
-# requested effort to compensate (medium/high keep the pre-existing bumps).
-_EFFORT_TOKEN_FLOOR = {"low": 1024, "medium": 1536, "high": 2048}
-
-
-def _current_reasoning_token_floors():
-    """Tuple form keeps the run snapshot immutable and JSON-independent."""
-    return tuple(_EFFORT_TOKEN_FLOOR[level] for level in ("low", "medium", "high"))
 
 
 def _parse_reasoning_effort(raw):
@@ -114,24 +105,117 @@ OPENROUTER_CHAT_API = "https://openrouter.ai/api/v1/chat/completions"
 _OPENROUTER_DEFAULT_MODEL = "google/gemma-4-26b-a4b-it"
 
 
-def _step_write_tokens(backend):
-    """Backend-shaped retry budget for truncated write/edit payloads.
+@dataclass(frozen=True)
+class CapabilityProfile:
+    """Model-facing context and output limits for one immutable run.
 
-    The 512-token local bound is a wall-clock product constraint at ~7 tok/s;
-    OpenRouter payloads get room for whole files (issue #15). The bound must
-    follow the client's backend, not the process-wide import-time backend
-    (Codex P2, PR #61)."""
-    return 8192 if backend == "openrouter" else 512
+    The original limits were selected from the transport backend, which made
+    two identical models receive different contracts depending on where they
+    were served. Profiles make that contract explicit and hashable (issue
+    #68). ``context_window`` and ``server_slots`` are optional declared
+    deployment expectations; generic profiles do not invent server topology.
+    """
+
+    name: str
+    step_tokens: int
+    step_write_tokens: int
+    planner_tokens: int = 768
+    task_replan_tokens: int = 96
+    validation_tokens: int = 768
+    reasoning_token_floors: tuple[int, int, int] = (1024, 1536, 2048)
+    context_window: int | None = None
+    server_slots: int | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("capability profile name must be non-empty")
+        for field_name in (
+            "step_tokens",
+            "step_write_tokens",
+            "planner_tokens",
+            "task_replan_tokens",
+            "validation_tokens",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{field_name} must be a positive integer")
+        for field_name in ("context_window", "server_slots"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or value < 1
+            ):
+                raise ValueError(f"{field_name} must be a positive integer or None")
+        floors = self.reasoning_token_floors
+        if (
+            not isinstance(floors, tuple)
+            or len(floors) != 3
+            or any(
+                not isinstance(value, int) or isinstance(value, bool) or value < 1
+                for value in floors
+            )
+        ):
+            raise ValueError("reasoning_token_floors must contain three positive integers")
+
+    def describe(self):
+        return {
+            "name": self.name,
+            "step_tokens": self.step_tokens,
+            "step_write_tokens": self.step_write_tokens,
+            "planner_max_tokens": self.planner_tokens,
+            "task_replan_max_tokens": self.task_replan_tokens,
+            "final_validation_max_tokens": self.validation_tokens,
+            "reasoning_token_floors": dict(
+                zip(("low", "medium", "high"), self.reasoning_token_floors)
+            ),
+            "context_window": self.context_window,
+            "server_slots": self.server_slots,
+        }
 
 
-def _step_tokens(backend):
-    """Backend-shaped executor step budget (issue #15).
+_LEGACY_E4B_PROFILE = CapabilityProfile(
+    name="legacy-e4b-m1-16k-v1",
+    step_tokens=256,
+    step_write_tokens=512,
+    reasoning_token_floors=(512, 512, 768),
+    context_window=16384,
+    server_slots=1,
+)
+_GENERAL_PROFILE = CapabilityProfile(
+    name="generic-feature-scale-v1",
+    step_tokens=4096,
+    step_write_tokens=8192,
+)
+_CAPABILITY_PROFILES = {
+    _GENERAL_PROFILE.name: _GENERAL_PROFILE,
+    _LEGACY_E4B_PROFILE.name: _LEGACY_E4B_PROFILE,
+}
+CAPABILITY_PROFILE_NAMES = tuple(_CAPABILITY_PROFILES)
 
-    Small caps are a wall-clock necessity at ~7 tok/s locally but a pure
-    artifact on OpenRouter, where an implementation file can never fit
-    under them. Like the write retry budget, the bound must follow the
-    client's backend for pinned per-run configurations (issue #40)."""
-    return 4096 if backend == "openrouter" else 256
+
+def get_capability_profile(name):
+    """Return a built-in immutable profile by name."""
+    try:
+        return _CAPABILITY_PROFILES[name]
+    except KeyError as exc:
+        choices = ", ".join(CAPABILITY_PROFILE_NAMES)
+        raise ValueError(f"LLM_CAPABILITY_PROFILE must be one of {choices}") from exc
+
+
+def _default_capability_profile():
+    """Return the generic contract; legacy reproduction is always explicit."""
+    return _GENERAL_PROFILE
+
+
+def _capability_profile_from_env(env):
+    requested = (env.get("LLM_CAPABILITY_PROFILE") or "").strip()
+    return get_capability_profile(requested) if requested else _default_capability_profile()
+
+
+# Executor action transport (issue #68): native tool calls only. The paired
+# 2026-08-04 local bench retired the historical JSON envelope-in-text
+# contract together with its repair/sentinel salvage; planner, task-replan,
+# and validation responses remain plain JSON because they are not actions.
+ACTION_TRANSPORT = "tools"
 
 
 @dataclass(frozen=True)
@@ -155,12 +239,10 @@ class LLMSettings:
     require_parameters: bool
     reasoning_effort: str
     timeout: int
-    # None derives the truncated-write retry budget from `backend`; `current`
-    # pins the module global so patched values keep reaching the facade.
+    # Compatibility overrides from the pre-profile API. Run resolution folds
+    # either value into a detached custom profile, and ``current`` snapshots
+    # patched module globals directly into its profile.
     step_write_tokens: int | None = None
-    # None derives the executor step budget from `backend`. These two are the
-    # per-run capability budgets (issue #68): pin them to freeze a run's
-    # output budgets independent of the backend-name heuristic.
     step_token_budget: int | None = None
     # Run composition resolves these optional compatibility defaults once.
     # Keeping them on the client settings makes the request policy travel
@@ -169,26 +251,64 @@ class LLMSettings:
     replan_timeout: int | None = None
     max_retries: int | None = None
     reasoning_token_floors: tuple[int, int, int] | None = None
+    # Added at the end to preserve positional compatibility. None resolves to
+    # the generic profile; transport/provider and model aliases never select it.
+    capability_profile: CapabilityProfile | None = None
 
-    def write_retry_tokens(self):
-        """Decode-retry budget for truncated write/edit payloads."""
-        if self.step_write_tokens is not None:
-            return self.step_write_tokens
-        return _step_write_tokens(self.backend)
-
-    def step_tokens(self):
-        """Executor step budget for this run (issues #15/#40/#68)."""
-        if self.step_token_budget is not None:
-            return self.step_token_budget
-        return _step_tokens(self.backend)
-
-    def resolved_reasoning_token_floors(self):
-        """Low/medium/high HTTP completion floors for reasoning requests."""
-        return (
-            _current_reasoning_token_floors()
+    def resolved_capability_profile(self):
+        """Return the effective detached profile, including legacy overrides."""
+        profile = self.capability_profile or _default_capability_profile()
+        for field_name in ("step_token_budget", "step_write_tokens"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or value < 1
+            ):
+                raise ValueError(f"{field_name} must be a positive integer")
+        step_tokens = (
+            profile.step_tokens if self.step_token_budget is None else self.step_token_budget
+        )
+        write_tokens = (
+            profile.step_write_tokens if self.step_write_tokens is None else self.step_write_tokens
+        )
+        floors = (
+            profile.reasoning_token_floors
             if self.reasoning_token_floors is None
             else self.reasoning_token_floors
         )
+        if (
+            not isinstance(floors, tuple)
+            or len(floors) != 3
+            or any(
+                not isinstance(value, int) or isinstance(value, bool) or value < 1
+                for value in floors
+            )
+        ):
+            raise ValueError("reasoning_token_floors must contain three positive integers")
+        if (
+            step_tokens == profile.step_tokens
+            and write_tokens == profile.step_write_tokens
+            and floors == profile.reasoning_token_floors
+        ):
+            return profile
+        return _dataclass_replace(
+            profile,
+            name=f"{profile.name}+custom",
+            step_tokens=step_tokens,
+            step_write_tokens=write_tokens,
+            reasoning_token_floors=floors,
+        )
+
+    def write_retry_tokens(self):
+        """Decode-retry budget for truncated write/edit payloads."""
+        return self.resolved_capability_profile().step_write_tokens
+
+    def step_tokens(self):
+        """Executor step budget for this run (issues #15/#40/#68)."""
+        return self.resolved_capability_profile().step_tokens
+
+    def resolved_reasoning_token_floors(self):
+        """Low/medium/high HTTP completion floors for reasoning requests."""
+        return self.resolved_capability_profile().reasoning_token_floors
 
     def reasoning_token_floor(self, effort):
         return dict(zip(("low", "medium", "high"), self.resolved_reasoning_token_floors()))[effort]
@@ -206,7 +326,7 @@ class LLMSettings:
             model = e.get("OPENROUTER_MODEL", _OPENROUTER_DEFAULT_MODEL)
         else:
             api = e.get("LLM_API_URL", "http://localhost:8080/v1/chat/completions")
-            model = e.get("LLM_MODEL", "gemma-4-e4b")
+            model = e.get("LLM_MODEL", "local-model")
         return cls(
             backend=backend,
             api=api,
@@ -217,14 +337,32 @@ class LLMSettings:
             require_parameters=e.get("OPENROUTER_REQUIRE_PARAMETERS", "0") == "1",
             reasoning_effort=_parse_reasoning_effort(e.get("OPENROUTER_REASONING_EFFORT")),
             timeout=LLM_TIMEOUT,
+            capability_profile=_capability_profile_from_env(e),
             replan_timeout=LLM_TIMEOUT_REPLAN,
             max_retries=MAX_LLM_RETRIES,
-            reasoning_token_floors=_current_reasoning_token_floors(),
         )
 
     @classmethod
     def current(cls):
         """Snapshot the module-level (patchable) configuration."""
+        try:
+            named_capabilities = get_capability_profile(CAPABILITY_PROFILE)
+        except ValueError:
+            named_capabilities = None
+        topology_base = named_capabilities or _DEFAULT_CAPABILITY_PROFILE
+        capabilities = CapabilityProfile(
+            name=CAPABILITY_PROFILE,
+            step_tokens=STEP_TOKENS,
+            step_write_tokens=STEP_WRITE_TOKENS,
+            planner_tokens=PLANNER_MAX_TOKENS,
+            task_replan_tokens=TASK_REPLAN_MAX_TOKENS,
+            validation_tokens=VALIDATION_MAX_TOKENS,
+            reasoning_token_floors=REASONING_TOKEN_FLOORS,
+            context_window=topology_base.context_window,
+            server_slots=topology_base.server_slots,
+        )
+        if named_capabilities is not None and capabilities != named_capabilities:
+            capabilities = _dataclass_replace(capabilities, name=f"{CAPABILITY_PROFILE}+custom")
         return cls(
             backend=LLM_BACKEND,
             api=API,
@@ -235,11 +373,9 @@ class LLMSettings:
             require_parameters=OPENROUTER_REQUIRE_PARAMETERS,
             reasoning_effort=OPENROUTER_REASONING_EFFORT,
             timeout=LLM_TIMEOUT,
-            step_write_tokens=STEP_WRITE_TOKENS,
-            step_token_budget=STEP_TOKENS,
+            capability_profile=capabilities,
             replan_timeout=LLM_TIMEOUT_REPLAN,
             max_retries=MAX_LLM_RETRIES,
-            reasoning_token_floors=_current_reasoning_token_floors(),
         )
 
 
@@ -248,6 +384,9 @@ class LLMSettings:
 # compatibility surface that tests and the integration helpers patch;
 # ask_llm snapshots them per call via LLMSettings.current().
 _DEFAULT_LLM_SETTINGS = LLMSettings.from_env()
+_DEFAULT_CAPABILITY_PROFILE = _DEFAULT_LLM_SETTINGS.resolved_capability_profile()
+CAPABILITY_PROFILE = _DEFAULT_CAPABILITY_PROFILE.name
+REASONING_TOKEN_FLOORS = _DEFAULT_CAPABILITY_PROFILE.reasoning_token_floors
 LLM_BACKEND = _DEFAULT_LLM_SETTINGS.backend  # "local" or "openrouter"
 OPENROUTER_API_KEY = _DEFAULT_LLM_SETTINGS.api_key
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", _OPENROUTER_DEFAULT_MODEL)
@@ -368,14 +507,13 @@ def _is_write_shaped(task):
 # Observation-action budgets (issue #7): reads/searches/trees are the navigation
 # surface for app development; they get their own bounded windows so large repos
 # stay navigable without blowing up executor state.
-# Backend-aware output budgets (issue #15): small caps are a wall-clock
-# necessity at ~7 tok/s locally but a pure artifact on OpenRouter, where an
-# 8KB implementation file is ~3000 tokens and can never fit under 512/1536.
-# Local values are unchanged — the local path keeps chunked append instead.
-STEP_TOKENS = _step_tokens(LLM_BACKEND)
+# Model-capability output budgets (issue #68). The named legacy E4B profile
+# preserves the original slow-local contract; the general profile preserves
+# the feature-scale allowance. Serving backend/provider never selects them.
+STEP_TOKENS = _DEFAULT_CAPABILITY_PROFILE.step_tokens
 # Retry budget when a truncated write/edit payload fails to parse.
-STEP_WRITE_TOKENS = _step_write_tokens(LLM_BACKEND)
-PLANNER_MAX_TOKENS = 768  # 256 thinking + 512 output; shared budget on Parasail/bf16
+STEP_WRITE_TOKENS = _DEFAULT_CAPABILITY_PROFILE.step_write_tokens
+PLANNER_MAX_TOKENS = _DEFAULT_CAPABILITY_PROFILE.planner_tokens
 REASONING_POLICIES = ("gated", "off")
 DEFAULT_REASONING_POLICY = os.environ.get("AGENT_REASONING_POLICY", "gated").strip().lower()
 if DEFAULT_REASONING_POLICY not in REASONING_POLICIES:
@@ -446,7 +584,11 @@ _VALIDATE_KEYWORDS = re.compile(
     re.I,
 )
 
-SYSTEM_STEP = """Executor. ONE action per turn as JSON. Output ONLY valid JSON. No markdown, no explanation.
+# Executor prompt for the native tool-call transport (issue #68). The former
+# JSON-envelope prompt and its sentinel-transport instructions were removed
+# with the JSON executor path; native tool syntax carries string arguments
+# unescaped, so no escaping or sentinel guidance is needed.
+SYSTEM_STEP = """Executor. Call exactly ONE tool per turn. No text outside the tool call.
 Rules:
 - done only when the FULL task description is satisfied
 - fail if same error appears 2+ times
@@ -457,21 +599,64 @@ Rules:
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
-Actions: __ACTION_NAMES__.
-read: initial pages take "offset"/"limit" (1-based lines); continuation pages must echo
-      the output's "cursor", "limit", and "sha256". Cursors count Unicode code points.
-search: literal pattern in "arg", optional "path" (default "."); bounded matches
-tree: directory in "arg" (default "."); bounded listing
-write: whole file; add "append":true to append the next chunk instead
-write content may follow the JSON between sentinel lines instead of "content":
-{"action":"write","arg":"f.py","reasoning":"..."}
-<<<CONTENT
-raw file lines, no escaping
-CONTENT>>>
-edit: {"action":"edit","arg":"file","find":"exact old","replace":"new","reasoning":"..."}
-Format: {"action":"...","arg":"...","content":"...","reasoning":"..."}""".replace(
-    "__ACTION_NAMES__", ", ".join(ACTION_SPECS)
-)
+- read: initial pages take offset/limit (1-based lines); continuation pages must
+  echo the output's cursor, limit, and sha256. Cursors count Unicode code points.
+- write: whole file in content; set append=true to append the next chunk"""
+
+# One JSON-schema fragment per model-visible action field; tool definitions
+# are derived from ACTION_SPECS so both transports expose the identical
+# action set and land in the identical envelope validation.
+_TOOL_FIELD_SCHEMAS = {
+    "arg": {"type": "string"},
+    "content": {"type": "string"},
+    "append": {"type": "boolean"},
+    "find": {"type": "string"},
+    "replace": {"type": "string"},
+    "offset": {"type": "integer"},
+    "limit": {"type": "integer"},
+    "cursor": {"type": "integer"},
+    "sha256": {"type": "string"},
+    "path": {"type": "string"},
+    "timeout": {"type": "integer"},
+    "reasoning": {"type": "string"},
+}
+_TOOL_DESCRIPTIONS = {
+    "shell": "Run a shell command in the working directory.",
+    "write": "Create or overwrite a file; set append=true to append the next chunk.",
+    "edit": "Replace exact text in a file.",
+    "read": "Read a file window; continuation pages echo the output's cursor/limit/sha256.",
+    "search": "Bounded literal search; pattern in arg, optional path (default '.').",
+    "tree": "Bounded directory listing; directory in arg (default '.').",
+    "done": "Declare the FULL task complete.",
+    "fail": "Give up on the task; one-line reason in arg.",
+}
+
+
+def _action_tools():
+    """OpenAI-style tool definitions for the registry's action set."""
+    tools = []
+    for name, spec in ACTION_SPECS.items():
+        fields = [field for field in spec.allowed if field != "action"]
+        parameters = {
+            "type": "object",
+            "properties": {field: dict(_TOOL_FIELD_SCHEMAS[field]) for field in fields},
+        }
+        if spec.requires:
+            parameters["required"] = list(spec.requires)
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": _TOOL_DESCRIPTIONS[name],
+                    "parameters": parameters,
+                },
+            }
+        )
+    return tools
+
+
+_ACTION_TOOLS = _action_tools()
 
 
 def _repair_json(text):
@@ -687,38 +872,7 @@ RESPONSE_SCHEMAS = {
 _STRICT_JSON_SUFFIX = (
     "Output ONLY the JSON object. No reasoning, no explanation, no text outside the JSON."
 )
-
-# Sentinel-framed content transport (issue #15): implementation-scale write
-# content travels between sentinel lines after the action JSON instead of
-# inside a JSON string — no escaping overhead, and truncation is recoverable:
-# a missing closing sentinel at finish_reason=length means "the complete lines
-# arrived; continue via chunked append" instead of an all-or-nothing parse
-# failure.
-CONTENT_OPEN = "<<<CONTENT"
-CONTENT_CLOSE = "CONTENT>>>"
-
-
-def _split_content_block(text):
-    """Split a response into (header_text, content, closed).
-    content is None when no sentinel block is present. The closing sentinel
-    must be flush-left and is matched from the end, so content lines that
-    merely resemble it (indented examples, embedded docs) stay content. A
-    file whose genuinely-final flush-left line is the sentinel itself cannot
-    ride this transport — use JSON "content" or chunked append for that."""
-    lines = text.split("\n")
-    open_idx = None
-    for i, line in enumerate(lines):
-        if line.strip() == CONTENT_OPEN:
-            open_idx = i
-            break
-    if open_idx is None:
-        return text, None, False
-    header = "\n".join(lines[:open_idx])
-    for j in range(len(lines) - 1, open_idx, -1):
-        if lines[j].rstrip() == CONTENT_CLOSE:
-            return header, "\n".join(lines[open_idx + 1 : j]), True
-    return header, "\n".join(lines[open_idx + 1 :]), False
-
+_STRICT_TOOL_SUFFIX = "Call exactly one tool now. No reasoning, no text outside the tool call."
 
 # Truncated write/edit payloads are the most common large-output parse failure;
 # detect the attempted action so the retry gets a payload-sized budget.
@@ -758,14 +912,24 @@ def _reasoning_decision(attempt, think, think_level, reasoning_policy, reasoning
     return requested, effective, trigger
 
 
-def _build_llm_request(messages, budget, effective_think_level, strict, settings=None):
+def _build_llm_request(messages, budget, effective_think_level, strict, settings=None, expect=None):
     """Build one backend-specific request: (body, headers, sent_effort).
 
-    `strict` appends the E03 strict-JSON contract as a final user turn after
+    `strict` appends the E03 strict contract as a final user turn after
     backend shaping. Never mutates the caller's message list. `settings`
-    defaults to a snapshot of the module-level configuration (issue #37)."""
+    defaults to a snapshot of the module-level configuration (issue #37).
+    An ``expect="action"`` call carries the registry-derived tool definitions
+    (issue #68); every other response type keeps the plain JSON contract."""
     cfg = LLMSettings.current() if settings is None else settings
     body = {"model": cfg.model, "messages": messages, "temperature": 0.1, "max_tokens": budget}
+    tools_transport = expect == "action"
+    if tools_transport:
+        body["tools"] = _ACTION_TOOLS
+        # "auto", never "required": grammar-forced tool choice corrupted the
+        # native Gemma 4 string delimiters into argument text on the b9618
+        # PEG parser (2026-08-04 smoke); empty replies are handled by the
+        # caller's normal parse-retry policy instead.
+        body["tool_choice"] = "auto"
     sent_effort = effective_think_level
     if cfg.backend == "openrouter":
         if cfg.provider:
@@ -794,10 +958,15 @@ def _build_llm_request(messages, budget, effective_think_level, strict, settings
             msgs[0] = dict(msgs[0])
             msgs[0]["content"] = "<|think|>\n" + msgs[0]["content"]
         body["messages"] = msgs
-        body["max_tokens"] = max(budget, 768 if effective_think_level == "high" else 512)
+        body["max_tokens"] = max(budget, cfg.reasoning_token_floor(effective_think_level))
     if strict:
         msgs = list(body["messages"])
-        msgs.append({"role": "user", "content": _STRICT_JSON_SUFFIX})
+        msgs.append(
+            {
+                "role": "user",
+                "content": _STRICT_TOOL_SUFFIX if tools_transport else _STRICT_JSON_SUFFIX,
+            }
+        )
         body["messages"] = msgs
     headers = {"Content-Type": "application/json"}
     if cfg.backend == "openrouter" and cfg.api_key:
@@ -863,17 +1032,15 @@ def _extract_message_text(rj):
 
 
 def _decode_action_reply(text, finish_reason):
-    """Pure decode of one model reply into a contract-valid dict.
+    """Pure decode of one JSON text reply (plan/replan/validation) into a dict.
 
-    Owns reasoning/fence stripping, sentinel content extraction, JSON
-    extraction/repair, and action-contract validation. Returns
+    Owns reasoning/fence stripping and JSON extraction/repair. Actions no
+    longer travel as text — the executor decodes native tool calls via
+    :func:`_decode_tool_call_reply` — but an action-shaped object here still
+    lands in the envelope contract for ``ask_llm`` compatibility. Returns
     (obj, cleaned_text, repaired). Raises json.JSONDecodeError carrying a
     .cleaned_text attribute when no valid object can be recovered; retry
     policy and typed classification stay with the caller."""
-    # Split framing before removing reasoning wrappers: sentinel payload is
-    # raw file content, so tags that look like <think> or local channel
-    # markers inside it must survive byte-for-character (issue #79).
-    text, block, block_closed = _split_content_block(text)
     # Strip <think>...</think> (closed) or <think>... (unclosed, truncated at max_tokens)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     text = re.sub(r"<think>.*", "", text, flags=re.DOTALL).strip()
@@ -886,61 +1053,76 @@ def _decode_action_reply(text, finish_reason):
     # Try to extract JSON object from anywhere in the text
     if not text.startswith("{") and "{" in text:
         text = text[text.index("{") :]
-
-    def _attach_block(obj):
-        if block is None or not isinstance(obj, dict):
-            return obj, ActionTransport()
-        if obj.get("action") != "write":
-            error = json.JSONDecodeError(
-                "sentinel content is valid only for write actions", text, 0
-            )
-            setattr(error, "cleaned_text", text)
-            raise error
-        if "content" in obj:
-            error = json.JSONDecodeError(
-                "write action cannot combine JSON content with sentinel content", text, 0
-            )
-            setattr(error, "cleaned_text", text)
-            raise error
-        if not block_closed and finish_reason != "length":
-            error = json.JSONDecodeError(
-                "sentinel content must close unless finish_reason is length", text, 0
-            )
-            setattr(error, "cleaned_text", text)
-            raise error
-        if not block_closed and not block:
-            error = json.JSONDecodeError(
-                "truncated sentinel content contains no recoverable bytes", text, 0
-            )
-            setattr(error, "cleaned_text", text)
-            raise error
-        attached = dict(obj)
-        attached["content"] = block
-        return attached, ActionTransport(content_truncated=not block_closed)
-
     try:
         parsed = json.loads(text)
         if not isinstance(parsed, dict):
             raise json.JSONDecodeError(
                 "Expected JSON object, got " + type(parsed).__name__, text, 0
             )
-        attached, transport = _attach_block(parsed)
-        return _accept_or_raise(attached, text, transport), text, False
+        return _accept_or_raise(parsed, text), text, False
     except json.JSONDecodeError as parse_err:
-        # A length-truncated JSON header must retry; the one executable
-        # partial-response exception is a valid header plus sentinel payload,
-        # handled above.  Other replies may use insertion-only repair.
+        # A length-truncated reply must retry; other replies may use
+        # insertion-only repair.
         repaired = None if finish_reason == "length" else _repair_json(text)
         if repaired is not None:
             try:
-                attached, transport = _attach_block(repaired)
-                return _accept_or_raise(attached, text, transport), text, True
+                return _accept_or_raise(repaired, text), text, True
             except json.JSONDecodeError as repaired_err:
                 if hasattr(repaired_err, "action_protocol_error"):
                     setattr(parse_err, "action_protocol_error", repaired_err.action_protocol_error)
                 pass
         setattr(parse_err, "cleaned_text", text)
         raise
+
+
+def _tool_reply_error(reason, cleaned):
+    error = json.JSONDecodeError(reason, cleaned or "", 0)
+    setattr(error, "cleaned_text", cleaned or "")
+    return error
+
+
+def _decode_tool_call_reply(rj, finish_reason):
+    """Decode one native tool-call reply into the action-envelope contract.
+
+    Mirrors :func:`_decode_action_reply`'s return/raise contract so the
+    client's retry policy, budget escalation, and typed classification apply
+    unchanged. The synthesized ``cleaned_text`` embeds the attempted action
+    name in envelope form so a truncated write/edit argument payload still
+    triggers the caller's write-budget escalation."""
+    msg = (rj.get("choices") or [{}])[0].get("message") or {}
+    calls = msg.get("tool_calls") or []
+    if not calls:
+        raise _tool_reply_error(
+            "reply contains no tool call", (msg.get("content") or "").strip()[:200]
+        )
+    if len(calls) > 1:
+        names = ", ".join(str((call.get("function") or {}).get("name")) for call in calls)
+        raise _tool_reply_error("reply contains multiple tool calls", names[:200])
+    function = calls[0].get("function") or {}
+    name = function.get("name")
+    arguments = function.get("arguments")
+    if isinstance(arguments, str):
+        raw_arguments = arguments
+    elif isinstance(arguments, dict):
+        raw_arguments = json.dumps(arguments)
+    else:
+        raw_arguments = ""
+    cleaned = f'{{"action": "{name}", "arguments": {raw_arguments[:400]}}}'
+    if not isinstance(name, str) or not name:
+        raise _tool_reply_error("tool call is missing a function name", cleaned)
+    try:
+        args = json.loads(raw_arguments) if raw_arguments.strip() else {}
+    except json.JSONDecodeError:
+        suffix = " (truncated)" if finish_reason == "length" else ""
+        raise _tool_reply_error(
+            f"tool call arguments are not valid JSON{suffix}", cleaned
+        ) from None
+    if not isinstance(args, dict):
+        raise _tool_reply_error("tool call arguments must be a JSON object", cleaned)
+    if "action" in args:
+        raise _tool_reply_error("tool call arguments may not carry an action field", cleaned)
+    envelope = {"action": name, **args}
+    return _accept_or_raise(envelope, cleaned, ActionTransport()), cleaned, False
 
 
 def _log_llm_usage(
@@ -953,9 +1135,7 @@ def _log_llm_usage(
     cfg = LLMSettings.current() if settings is None else settings
     emit = log if log_sink is None else log_sink
     record = _run_log if event_sink is None else event_sink
-    usage = rj.get("usage", {})
-    if not usage:
-        return
+    usage = rj.get("usage") or {}
     metadata = rj.get("openrouter_metadata") or {}
     route = metadata.get("endpoints", {})
     available = route.get("available", []) if isinstance(route, dict) else []
@@ -967,6 +1147,17 @@ def _log_llm_usage(
         ),
         {},
     )
+    metadata_model = selected.get("model")
+    response_model = rj.get("model")
+    if metadata_model:
+        served_model = metadata_model
+        served_model_source = "openrouter_metadata"
+    elif response_model:
+        served_model = response_model
+        served_model_source = "response"
+    else:
+        served_model = None
+        served_model_source = "unobserved"
     tok_msg = f"  tokens: prompt={usage.get('prompt_tokens', 0)} completion={usage.get('completion_tokens', 0)} total={usage.get('total_tokens', 0)}"
     if sent_effort:
         tok_msg += f" thinking={sent_effort}"
@@ -978,7 +1169,15 @@ def _log_llm_usage(
             "completion": usage.get("completion_tokens", 0),
             "total": usage.get("total_tokens", 0),
             "openrouter_cost": usage.get("cost", 0),
-            "model": selected.get("model") or rj.get("model", cfg.model),
+            "usage_observed": bool(usage),
+            # ``model`` remains the backwards-compatible display field. The
+            # benchmark contract consumes only ``served_model``: substituting
+            # the requested alias when a provider omits route metadata would
+            # otherwise manufacture evidence that the expected model served.
+            "model": served_model or cfg.model,
+            "requested_model": cfg.model,
+            "served_model": served_model,
+            "served_model_source": served_model_source,
             "provider": selected.get("provider") or rj.get("provider", ""),
             "route_attempt": selected.get("attempt"),
             "thinking": sent_effort,
@@ -1001,10 +1200,6 @@ class LLMClient:
 
     def __init__(self, settings=None, post=None, sleep=None, log_sink=None, event_sink=None):
         resolved_settings = LLMSettings.current() if settings is None else settings
-        if resolved_settings.reasoning_token_floors is None:
-            resolved_settings = _dataclass_replace(
-                resolved_settings, reasoning_token_floors=_current_reasoning_token_floors()
-            )
         self.settings = resolved_settings
         # None means "resolve the module default at call time" so patched
         # requests.post / log / _run_log stay effective for the facade.
@@ -1069,6 +1264,7 @@ class LLMClient:
                 effective_think_level,
                 strict=attempt >= 2 and not think_level,
                 settings=cfg,
+                expect=expect,
             )
             # One transport attempt; retry/backoff policy is enacted here.
             rj, failure = _llm_http_attempt(
@@ -1123,13 +1319,16 @@ class LLMClient:
             if raw:
                 return text
             try:
-                obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
+                if expect == "action":
+                    obj, _decoded_text, repaired = _decode_tool_call_reply(rj, finish_reason)
+                else:
+                    obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
             except json.JSONDecodeError as parse_err:
                 cleaned = getattr(parse_err, "cleaned_text", "")
                 if attempt < max_retries:
                     # Action-specific budget: a truncated write/edit payload
                     # needs room for content, not more reasoning. The bound
-                    # follows this client's backend (Codex P2, PR #61).
+                    # follows this client's capability profile (Codex P2, PR #61).
                     write_budget = cfg.write_retry_tokens()
                     if budget < write_budget and _WRITE_ATTEMPT_RE.search(cleaned):
                         budget = write_budget
@@ -1621,6 +1820,12 @@ def get_plan(
     # An injected per-run client (issue #40) replaces the patchable module
     # facade only when the caller supplied one.
     ask = ask_llm if client is None else client.ask
+    settings = getattr(client, "settings", None)
+    planner_budget = (
+        PLANNER_MAX_TOKENS
+        if settings is None
+        else settings.resolved_capability_profile().planner_tokens
+    )
     request_policy = {}
     if is_replan:
         request_policy["timeout"] = LLM_TIMEOUT_REPLAN if replan_timeout is None else replan_timeout
@@ -1636,7 +1841,7 @@ def get_plan(
                 "content": f"REQUEST:\n{user_prompt}\n\nSTATE:\n{json.dumps(plan_state)}",
             },
         ],
-        max_tokens=PLANNER_MAX_TOKENS if max_tokens is None else max_tokens,
+        max_tokens=planner_budget if max_tokens is None else max_tokens,
         think=is_replan,
         reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
         reasoning_trigger="planner_replan" if is_replan else "initial_plan",
@@ -1728,7 +1933,8 @@ def get_step(
             "or done."
         )
     # The run's resolved budget wins (issue #69); otherwise a pinned
-    # client's budget follows that client's backend (issues #15/#40), and
+    # client's budget follows that client's capability profile (issues
+    # #15/#40/#68), and
     # the module facade keeps the patchable global.
     ask = ask_llm if client is None else client.ask
     settings = getattr(client, "settings", None)
@@ -1761,7 +1967,7 @@ Output ONLY valid JSON. No markdown, no explanation.
 Format: {"task": "replacement task description"}"""
 
 MAX_TASK_LOCAL_REPLANS = 1
-TASK_REPLAN_MAX_TOKENS = 96
+TASK_REPLAN_MAX_TOKENS = _DEFAULT_CAPABILITY_PROFILE.task_replan_tokens
 
 
 class TaskReplanResult(NamedTuple):
@@ -1902,6 +2108,12 @@ def replan_task(
         replan_state["missing_tools"] = env["missing_tools"]
     replan_state["policy"] = state.get("policy", get_policy())
     ask = ask_llm if client is None else client.ask
+    settings = getattr(client, "settings", None)
+    replan_budget = (
+        TASK_REPLAN_MAX_TOKENS
+        if settings is None
+        else settings.resolved_capability_profile().task_replan_tokens
+    )
     try:
         request_policy = {"max_retries": max_retries}
         if timeout is not None:
@@ -1914,7 +2126,7 @@ def replan_task(
                     "content": f"GOAL:\n{user_prompt[:goal_context_chars]}\n\nSTATE:\n{json.dumps(replan_state)}",
                 },
             ],
-            max_tokens=TASK_REPLAN_MAX_TOKENS if max_tokens is None else max_tokens,
+            max_tokens=replan_budget if max_tokens is None else max_tokens,
             think=False,
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
             reasoning_trigger="task_local_replan",
@@ -2010,7 +2222,7 @@ def _deterministic_check(user_prompt, state, working_dir):
     return None
 
 
-VALIDATION_MAX_TOKENS = 768
+VALIDATION_MAX_TOKENS = _DEFAULT_CAPABILITY_PROFILE.validation_tokens
 
 
 def _validate_completion(
@@ -2064,13 +2276,19 @@ def _validate_completion(
         f"FILES IN WORKING DIRECTORY:\n{json.dumps(files)}"
     )
     ask = ask_llm if client is None else client.ask
+    settings = getattr(client, "settings", None)
+    validation_budget = (
+        VALIDATION_MAX_TOKENS
+        if settings is None
+        else settings.resolved_capability_profile().validation_tokens
+    )
     try:
         request_policy = {"max_retries": max_retries}
         if timeout is not None:
             request_policy["timeout"] = timeout
         result = ask(
             [{"role": "system", "content": SYSTEM_VALIDATE}, {"role": "user", "content": user_msg}],
-            max_tokens=VALIDATION_MAX_TOKENS if max_tokens is None else max_tokens,
+            max_tokens=validation_budget if max_tokens is None else max_tokens,
             think=True,
             think_level="high",
             reasoning_policy=state.get("reasoning_policy", DEFAULT_REASONING_POLICY),
@@ -2550,15 +2768,17 @@ def _config_hash(payload):
 
 def _resolve_run_llm_settings(settings):
     """Materialize compatibility defaults into one immutable run snapshot."""
+    capabilities = settings.resolved_capability_profile()
     resolved = _dataclass_replace(
         settings,
-        step_write_tokens=settings.write_retry_tokens(),
-        step_token_budget=settings.step_tokens(),
+        capability_profile=capabilities,
+        step_write_tokens=None,
+        step_token_budget=None,
         replan_timeout=(
             LLM_TIMEOUT_REPLAN if settings.replan_timeout is None else settings.replan_timeout
         ),
         max_retries=MAX_LLM_RETRIES if settings.max_retries is None else settings.max_retries,
-        reasoning_token_floors=settings.resolved_reasoning_token_floors(),
+        reasoning_token_floors=None,
     )
     for name in ("timeout", "replan_timeout"):
         value = getattr(resolved, name)
@@ -2570,19 +2790,6 @@ def _resolve_run_llm_settings(settings):
         or resolved.max_retries < 0
     ):
         raise ValueError("max_retries must be a non-negative integer")
-    for name in ("step_token_budget", "step_write_tokens"):
-        value = getattr(resolved, name)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            raise ValueError(f"{name} must be a positive integer")
-    floors = resolved.reasoning_token_floors
-    if (
-        not isinstance(floors, tuple)
-        or len(floors) != 3
-        or any(
-            not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in floors
-        )
-    ):
-        raise ValueError("reasoning_token_floors must contain three positive integers")
     return resolved
 
 
@@ -2635,6 +2842,11 @@ class RunConfig:
             allow_system_installs=e.get("ALLOW_SYSTEM_INSTALLS", "0") == "1",
             allow_network=e.get("ALLOW_NETWORK", "1") == "1",
             reasoning_policy=policy,
+            goal_context_chars=(
+                None
+                if not e.get("AGENT_GOAL_CONTEXT_CHARS")
+                else int(e["AGENT_GOAL_CONTEXT_CHARS"])
+            ),
             final_validate=e.get("AGENT_FINAL_VALIDATE", "auto"),
             compile_repair=e.get("AGENT_COMPILE_REPAIR", "1") == "1",
             step_policy=e.get("AGENT_STEP_POLICY", "heuristic").strip().lower(),
@@ -3679,11 +3891,6 @@ class _RunController:
         )
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
-        goal_context_chars = (
-            GOAL_CONTEXT_CHARS if cfg.goal_context_chars is None else cfg.goal_context_chars
-        )
-        if goal_context_chars < 1:
-            raise ValueError("goal_context_chars must be a positive integer")
         self.user_prompt = user_prompt
         self.working_dir = working_dir
         self.max_replans = MAX_REPLANS if cfg.max_replans is None else cfg.max_replans
@@ -3696,10 +3903,6 @@ class _RunController:
             if getattr(self, budget_name) < 1:
                 raise ValueError(f"{budget_name} must be a positive integer")
         self.reasoning_policy = reasoning_policy
-        self.goal_context_chars = goal_context_chars
-        # Freeze the executor/replanner view once so all policy arms receive the same
-        # task context even if module configuration changes while a run is active.
-        self.goal_context = user_prompt[:goal_context_chars]
         # Select the run's settings source before resolving it: invalid state
         # in an unused compatibility global must not block a pinned or injected
         # run. The default path retains the patchable ask_llm facade through a
@@ -3712,6 +3915,19 @@ class _RunController:
             else (cfg.llm if cfg.llm is not None else LLMSettings.current())
         )
         self._llm_meta = _resolve_run_llm_settings(source_settings)
+        goal_context_chars = (
+            GOAL_CONTEXT_CHARS if cfg.goal_context_chars is None else cfg.goal_context_chars
+        )
+        if (
+            not isinstance(goal_context_chars, int)
+            or isinstance(goal_context_chars, bool)
+            or goal_context_chars < 1
+        ):
+            raise ValueError("goal_context_chars must be a positive integer")
+        self.goal_context_chars = goal_context_chars
+        # Freeze the executor/replanner view once so all policy arms receive the same
+        # task context even if module configuration changes while a run is active.
+        self.goal_context = user_prompt[:goal_context_chars]
         # Dependency seams (issue #40): a pinned llm config builds this run's
         # own client, and injected sinks own the matching client telemetry.
         # Transport still resolves requests.post at call time. The ordinary
@@ -3815,12 +4031,13 @@ class _RunController:
             "task_replan": 0,
             "final_validation": 0,
         }
+        capabilities = meta.resolved_capability_profile()
         token_budgets = {
-            "step_tokens": meta.step_tokens(),
-            "step_write_tokens": meta.write_retry_tokens(),
-            "planner_max_tokens": PLANNER_MAX_TOKENS,
-            "task_replan_max_tokens": TASK_REPLAN_MAX_TOKENS,
-            "final_validation_max_tokens": VALIDATION_MAX_TOKENS,
+            "step_tokens": capabilities.step_tokens,
+            "step_write_tokens": capabilities.step_write_tokens,
+            "planner_max_tokens": capabilities.planner_tokens,
+            "task_replan_max_tokens": capabilities.task_replan_tokens,
+            "final_validation_max_tokens": capabilities.validation_tokens,
         }
         for name, value in token_budgets.items():
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
@@ -3833,6 +4050,11 @@ class _RunController:
             # Authorization credential never rides in it.
             "api": meta.api,
             "model": meta.model,
+            "capability_profile": capabilities.describe(),
+            # The executor transport is native tool calls; the constant stays
+            # in the hash-logged record so run configurations remain
+            # distinguishable from pre-removal JSON-envelope runs.
+            "action_transport": ACTION_TRANSPORT,
             "provider": meta.provider if meta.backend == "openrouter" else "",
             "reasoning_effort": meta.reasoning_effort if meta.backend == "openrouter" else "",
             "allow_provider_fallbacks": meta.allow_fallbacks,
@@ -4566,6 +4788,12 @@ def _main(argv=None):
         help="Explicit-reasoning policy (default: %(default)s)",
     )
     parser.add_argument(
+        "--capability-profile",
+        choices=CAPABILITY_PROFILE_NAMES,
+        help="Model-facing budget/context profile "
+        "(default: LLM_CAPABILITY_PROFILE or generic-feature-scale-v1)",
+    )
+    parser.add_argument(
         "--max-replans",
         type=_positive_int,
         default=MAX_REPLANS,
@@ -4586,8 +4814,9 @@ def _main(argv=None):
     parser.add_argument(
         "--goal-context-chars",
         type=_positive_int,
-        default=GOAL_CONTEXT_CHARS,
-        help="Frozen goal characters available to executor and task replanner",
+        default=None,
+        help="Goal characters available to executor and task replanner "
+        "(default: AGENT_GOAL_CONTEXT_CHARS or 300)",
     )
     args = parser.parse_args(argv)
 
@@ -4614,13 +4843,26 @@ def _main(argv=None):
 
     # Immutable per-run configuration loaded from the environment at the CLI
     # boundary (issue #40); parsed arguments override policy and budgets.
+    config = RunConfig.from_env()
+    if args.capability_profile is not None:
+        config = _dataclass_replace(
+            config,
+            llm=_dataclass_replace(
+                config.llm,
+                capability_profile=get_capability_profile(args.capability_profile),
+            ),
+        )
     config = _dataclass_replace(
-        RunConfig.from_env(),
+        config,
         reasoning_policy=args.reasoning_policy,
         max_replans=args.max_replans,
         max_tasks=args.max_tasks,
         max_steps=args.max_steps,
-        goal_context_chars=args.goal_context_chars,
+        goal_context_chars=(
+            config.goal_context_chars
+            if args.goal_context_chars is None
+            else args.goal_context_chars
+        ),
     )
     result = run_result(user_prompt, working_dir=working_dir, config=config)
     if args.result_json:

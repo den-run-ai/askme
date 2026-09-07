@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from _test_support import mock_response
+from _test_support import mock_llm_response
 
 import askme
 from actions import ActionExecutor, ActionResult
@@ -22,6 +22,7 @@ from askme import (
     RunConfig,
     RunDependencies,
     RunWorkspace,
+    get_capability_profile,
     run,
     run_result,
 )
@@ -86,6 +87,7 @@ def _local_settings(**overrides):
         "require_parameters": False,
         "reasoning_effort": "",
         "timeout": 120,
+        "capability_profile": get_capability_profile("legacy-e4b-m1-16k-v1"),
     }
     fields.update(overrides)
     return LLMSettings(**fields)
@@ -104,7 +106,7 @@ def _scripted_post(transcript, replies):
                 "authorization": (headers or {}).get("Authorization", ""),
             }
         )
-        return mock_response(remaining.pop(0))
+        return mock_llm_response(remaining.pop(0))
 
     return post
 
@@ -339,15 +341,15 @@ class TestInjectedDependencies:
     @pytest.mark.parametrize(
         ("settings", "expected_step_tokens"),
         [(_openrouter_settings(), 4096), (_local_settings(), 256)],
-        ids=["openrouter", "local"],
+        ids=["generic-profile", "legacy-e4b-profile"],
     )
     def test_pinned_config_builds_its_own_client_and_budgets(
         self, tmp_path, settings, expected_step_tokens
     ):
-        """config.llm alone pins the transport target and the step budget.
+        """config.llm alone pins the transport target and capability budget.
 
-        The executor budget follows the pinned backend regardless of which
-        backend the module-level STEP_TOKENS was derived for at import."""
+        The executor budget follows the pinned profile, independent of the
+        module-level compatibility budget selected at import."""
         transcript = []
         replies = [{"tasks": ["work"]}, {"action": "done"}]
         with patch("askme.requests.post", side_effect=_scripted_post(transcript, replies)):
@@ -386,7 +388,7 @@ class TestInjectedDependencies:
         lines = []
         events = []
         usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
-        responses = [mock_response(reply, usage=usage) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply, usage=usage) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             result = run_result(
                 "greet",
@@ -678,7 +680,7 @@ class TestCliResultJsonContract:
         workspace = tmp_path / "ws"
         workspace.mkdir()
         result_file, argv = self._cli(tmp_path, "greet", "--working-dir", str(workspace))
-        responses = [mock_response(reply) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)
         assert exit_code == 0
@@ -691,7 +693,7 @@ class TestCliResultJsonContract:
 
     def test_success_with_temporary_workspace(self, tmp_path):
         result_file, argv = self._cli(tmp_path, "greet")
-        responses = [mock_response(reply) for reply in PLAN_DONE]
+        responses = [mock_llm_response(reply) for reply in PLAN_DONE]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)
         assert exit_code == 0
@@ -719,9 +721,9 @@ class TestCliResultJsonContract:
             "1",
         )
         responses = [
-            mock_response({"tasks": ["work"]}),
-            mock_response({"action": "fail", "reasoning": "cannot"}),
-            mock_response({"task": ""}),  # task-local replan rejected: empty
+            mock_llm_response({"tasks": ["work"]}),
+            mock_llm_response({"action": "fail", "reasoning": "cannot"}),
+            mock_llm_response({"task": ""}),  # task-local replan rejected: empty
         ]
         with patch("askme.requests.post", side_effect=responses):
             exit_code = askme._main(argv)

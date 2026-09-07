@@ -212,23 +212,22 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 ## Architecture roadmap
 
 Issue text describes intended work, not necessarily landed behavior. Check the
-current issue and code state before implementing:
+current issue and code state before implementing. The extraction wave —
+observation integrity (#30/#42), cohesive handlers with one recorder (#36),
+LLM client isolation (#37), slot-cache removal (#38), and the structured run
+API (#40) — has landed and those issues are closed; the invariants above are
+their surviving guidance. Still open:
 
-- [#30](https://github.com/den-run-ai/askme/issues/30) and
-  [#42](https://github.com/den-run-ai/askme/issues/42) — repair observation
-  integrity before freezing it behind a refactor
 - [#31](https://github.com/den-run-ai/askme/issues/31) — evaluate an explicit
   inspect → modify → verify → finish lifecycle; do not assume it is already adopted
-- [#36](https://github.com/den-run-ai/askme/issues/36) — cohesive action handlers,
-  typed results/receipts, and one recorder
-- [#37](https://github.com/den-run-ai/askme/issues/37) — separate provider
-  transport, retry policy, and pure response decoding behind `ask_llm`
-- [#38](https://github.com/den-run-ai/askme/issues/38) — remove, rather than
-  extend or advertise, the obsolete manual slot-cache workaround
-- [#40](https://github.com/den-run-ai/askme/issues/40) — add a reusable structured
-  run API after the executor/client seams while retaining compatibility wrappers
-- [#41](https://github.com/den-run-ai/askme/issues/41) — preregister an ablation
-  before removing or retaining the benchmark-shaped C-header repair path
+- [#41](https://github.com/den-run-ai/askme/issues/41) — the preregistered
+  C-header compile-repair ablation; the boundary conversion landed, the
+  retain-vs-remove decision awaits the registered protocol
+  ([docs/ablation-compile-repair.md](docs/ablation-compile-repair.md), draft)
+- [#68](https://github.com/den-run-ai/askme/issues/68) — the E4B-era cleanup
+  decision ledger: its high-confidence interface corrections (completion
+  semantics, typed validation, capability profiles, response schemas) have
+  landed; the outcome-bearing simplifications remain gated on #62/#63/#64
 - [#69](https://github.com/den-run-ai/askme/issues/69) — the pre-evaluation
   implementation gate: policy/obligation/completion components, typed records,
   hash-logged per-run configuration, and offline parity; blocks #63 variants

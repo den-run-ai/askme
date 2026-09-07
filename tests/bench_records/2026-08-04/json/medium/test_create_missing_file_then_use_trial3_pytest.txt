@@ -1,0 +1,44 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (8248 earlier characters omitted):
+The goal is to create a file `data.txt` in a specific directory, write 'RECOVERED'
+[23:31:06]   tokens: prompt=815 completion=716 total=1531 thinking=high
+[23:31:06]   [8] write: data.txt
+[23:31:06]   -> OK (118.2s): Wrote data.txt
+[23:31:13]   tokens: prompt=423 completion=78 total=501
+[23:31:13]   Task-local replan failed (7.7s), will full replan.
+[23:31:13]   Task failed, will replan. (462.6s)
+[23:31:13] Exhausted 2 replan attempts. (800.3s total)
+[23:31:13] Errors: []
+[23:31:13] Output in: /private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-269/test_create_missing_file_then_0
+FAILED
+
+=================================== FAILURES ===================================
+___________ TestIntegrationMedium.test_create_missing_file_then_use ____________
+
+self = <test_agent_integration.TestIntegrationMedium object at 0x10aeeb6b0>
+tmp_path = PosixPath('/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/pytest-of-macmone/pytest-269/test_create_missing_file_then_0')
+
+    def test_create_missing_file_then_use(self, tmp_path):
+        """LLM tries to read a non-existent file, then creates and reads it."""
+        result = int_run(
+            f"Create a file called data.txt containing 'RECOVERED' in {tmp_path}, then read it to verify the content.",
+            str(tmp_path),
+            max_replans=MED_MAX_REPLANS,
+            max_tasks=MED_MAX_TASKS,
+            max_steps=MED_MAX_STEPS,
+        )
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: []
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:109: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestIntegrationMedium::test_create_missing_file_then_use
+================= 1 failed, 22 deselected in 800.36s (0:13:20) =================
+
+stderr:
+(empty)

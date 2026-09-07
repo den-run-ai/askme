@@ -5,8 +5,12 @@ release preparation) — offline fixture qualification in
 `tests/test_webapp_showcase.py`, live tests in `TestWebLocal` /
 `TestOpenRouterWeb` (`tests/test_agent_integration.py`), suite wiring in
 `tests/bench_harness.py` and the `llm.yml` smoke job. T2–T4 remain
-proposals. This document records no model outcomes; a single CI run of the
-suite is a health check, not a result.
+proposals. Historical hosted outcomes are in [PERFORMANCE.md](PERFORMANCE.md).
+The [later local evaluation](https://github.com/den-run-ai/askme/pull/89#issuecomment-5187957872)
+reported 11 runs and 2 strict passes; shipped-profile repair runs could land
+correct artifacts yet exhaust without `done`. Treat this as a negative local
+demo until a new registered evaluation demonstrates otherwise. A single CI
+run is a health check, not a reliability estimate.
 
 ## Why a new task family
 
@@ -47,11 +51,12 @@ These are current-code constraints, not preferences:
   terminating script*: it starts the app itself (subprocess or thread),
   probes it over loopback, prints a sentinel, stops the server, and exits
   0/1 — one bounded `shell` action.
-- **Local write budget is small.** `STEP_WRITE_TOKENS` is 512 on the local
-  backend (8192 on OpenRouter), so each file the agent writes should target
-  roughly ≤ 35 lines. Prefer two small files (`app.py`, `test_app.py`) over
-  one large one; anything larger deliberately exercises the
-  `incomplete_write`/append-resume machinery instead of the happy path.
+- **Write budgets depend on the capability profile.** The historical
+  `legacy-e4b-m1-16k-v1` profile caps writes at 512 tokens; the current default
+  `generic-feature-scale-v1` profile uses 8192. Prefer two small files
+  (`app.py`, `test_app.py`) over one large one. On the current tools-only
+  transport, truncated, unparseable tool arguments are rejected before a
+  write; they do not enter the old `incomplete_write`/append-resume path.
 - **Port 8080 is taken.** The reference local setup runs `llama-server` on
   `:8080`; tasks must pin a different loopback port (e.g. 8765) and the app
   must accept the port as its first CLI argument so held-out evaluation can
@@ -105,9 +110,9 @@ returns all notes, one per line, in insertion order. The smoke test POSTs
 
 This is the smallest task in the suite where the deliverable has *state
 over time* — a property no current integration test exercises. Budgets:
-hard shape (2/5/8). `app.py` will flirt with the 512-token local write
-budget by design; if it overflows, the run becomes a live exercise of the
-resume-anchor append path rather than a failure.
+hard shape (2/5/8). `app.py` can approach the legacy profile's 512-token
+write budget. A token-cut tool call can fail before any bytes are written;
+this task does not establish append-resume support on tools transport.
 
 ### T1c (repair) — fix the failing service test
 
@@ -169,6 +174,10 @@ harness was built around.
    `live_llm`, skip-by-default), selectable as the `web` suite in
    `tests/bench_harness.py` for 3-trial medians — in CI via the
    dispatch-only `web-bench-trials` job (`web_trials` ≥ 1 in `llm.yml`).
+   The refreshed dispatcher requires `requested=expected-served@effort`
+   model cells (empty `web_models` inherits `models`) and pins
+   `generic-feature-scale-v1`; its new runs do not replay the old profile
+   or JSON-transport measurements.
 3. **T1c as a new workflow fixture** (e.g. `tests/workflows/notes_health/`)
    registered additively under the frozen protocol's versioning rules — a
    new phase and manifest, not a rewrite of Phase 1. Still proposed.

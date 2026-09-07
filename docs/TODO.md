@@ -20,7 +20,7 @@
 
 ## Test Coverage Gaps
 
-- Finish `test_fix_missing_include` so it asserts the binary was rebuilt and run successfully, not just that the source file was edited.
+- ~~Finish `test_fix_missing_include` so it asserts the binary was rebuilt and run successfully, not just that the source file was edited.~~ → Both the local and OpenRouter variants now assert the fixed source, `complete` status, and the rebuilt binary's runtime output via `assert_executable_output(..., "FIXED")` (verified 2026-08-04).
 - Review other integration tests for partial assertions that allow success without proving the documented behavior.
 
 ## Documentation Drift

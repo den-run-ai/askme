@@ -10,12 +10,14 @@ same-author reference and a separately authored alternative must pass all three
 checks before an outcome-bearing run; the alternative's source and provenance
 live under `tests/workflow_alternatives/`.
 
-Each manifest freezes the agent budgets (`max_replans`, `max_tasks`,
-`max_steps`, `goal_context_chars`, and the outer `agent_timeout_seconds`) and
-final-validator policy. A prompt over its declared goal-context cap is rejected
-before the callback runs; the harness does not silently truncate task
-requirements. The selected `off` or `gated` reasoning policy and all limits are
-copied into every structured result.
+Each schema-v2 manifest freezes the named `capability_profile`, agent budgets
+(`max_replans`, `max_tasks`, `max_steps`, `goal_context_chars`, and the outer
+`agent_timeout_seconds`), and final-validator policy. A prompt over its declared
+goal-context cap is rejected before the callback runs; the harness does not
+silently truncate task requirements. The selected `off` or `gated` reasoning
+policy and all limits are copied into every structured result. Cold AskMe runs
+are valid only when `run_start` and result metadata agree on the manifest's
+profile and the same non-empty configuration hash.
 
 The runner copies only the seed into a fresh working directory. The held-out
 evaluator remains outside that copied workspace and is invoked after the agent
