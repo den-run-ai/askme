@@ -11,11 +11,40 @@
 
 - [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
 - [`slides.md`](slides.md) — Marp source with 511 words of notes across the seven main slides, plus one backup slide.
-- [`SPEAKER_NOTES.md`](SPEAKER_NOTES.md) — the personal delivery script (the story to speak on stage); supersedes the inline presenter notes in `slides.md` for delivery.
+- [`SPEAKER_NOTES.md`](SPEAKER_NOTES.md) — the corrected canonical delivery script; supersedes the historical inline notes in `slides.md`.
 - `slides.pdf` — rendered deck.
+- [Recording](https://www.youtube.com/watch?v=N1XoiJGyNpM) — published talk; read the errata below alongside it.
 - [`blog.md`](blog.md) — companion argument and citations.
 - [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
 - [`evals/draft-results.json`](evals/draft-results.json) — per-run provenance and raw summary.
+
+## Published-talk errata — 2026-09-07
+
+The recording, `slides.md` (including its inline notes), and `slides.pdf`
+preserve the published presentation. They have not been regenerated for these
+corrections; [#27](https://github.com/den-run-ai/askme/issues/27) still tracks
+alignment of the slide source, deck contract, and visually checked PDF.
+Use the corrected speaker script as the spoken source for future delivery.
+
+- **Local model:** Gemma 4 E4B is dense PLE, not MoE. The hosted Gemma and Qwen
+  records changed revisions, serving stacks, quantization, and budgets; they do
+  not isolate model size or measure the local deployment.
+- **Current interface:** the planner receives a curated summary, not full raw
+  state. The executor accepts one native tool call per turn, with six executable
+  handlers plus controller-owned `done` and `fail`. The historical sentinel
+  write transport was removed in interface revision 6 on Aug 4.
+- **Acceptance:** tool feedback reaches the agent; the published held-out
+  acceptance check ran after termination and did not guide recovery. The
+  rejected wrong-path artifact was the fastest **build trajectory**, not the
+  fastest run overall. The frozen 7/8 result is not a current reliability claim.
+- **Feature evidence:** two one-attempt cells produced applying but unresolved
+  patches, with 11/13 and 7/13 target tests passing under held-out scoring.
+  Neither agent ran the target tests or emitted `done`. Bundled changes and a
+  different serving stack prevent attributing this to one interface change;
+  the results do not establish general feature readiness or validate the three
+  design bets. Quantitative pi comparisons below remain exploratory archival
+  evidence from unmerged [PR #14](https://github.com/den-run-ai/askme/pull/14),
+  not a performance ceiling.
 
 ## Talk Arc
 
@@ -24,7 +53,7 @@
 3. Use the retained wrong-output-path miss to separate successful actions, reported completion, and an accepted workflow.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
-6. Show the FeatureBench progression directly: revision 3 moved the frozen canary from no write and an empty patch to applied, partially working code in both attempts; validation and clean termination are now the visible bottlenecks.
+6. Show the FeatureBench observations: after bundled revision-3 changes and a changed serving stack, both attempts produced applying but unresolved patches; target-test execution and clean termination remained gaps in those cells.
 7. Answer cautiously: bounded loops look promising, but realistic feature readiness remains open and belongs to the model–harness–task combination.
 8. Keep a backup comparison of AskMe, pi, and OpenHands technical boundaries for Q&A.
 
@@ -55,9 +84,9 @@ Code Bench remains an access-dependent full-app reference, and ProgramBench is
 only a later clean-room stress-test candidate. Slide 6 includes this one-task
 boundary diagnosis. [Issue #2](https://github.com/den-run-ai/askme/issues/2) is
 the closed protocol/history record; feature-scale interface work is active in
-[issue #7](https://github.com/den-run-ai/askme/issues/7) and continues in the
-revision-4 validate-after-write follow-up (#21; implemented, v7 requalification
-pending).
+[issue #7](https://github.com/den-run-ai/askme/issues/7). The revision-4
+validate-after-write follow-up [PR #21](https://github.com/den-run-ai/askme/pull/21)
+merged on Aug 2. No v7 requalification record is checked in as of Sep 7.
 
 On Aug 1, 2026, the revision-3 action interface (sentinel write transport,
 backend-aware budgets, write-forcing policy) requalified that same frozen task
@@ -66,8 +95,8 @@ changed serving stack, both cells produced applied but unresolved patches:
 Gemma 4 31B reached 11/13 F2P (84.62%), with the same two failures as the
 exploratory one-attempt pi reference, while Qwen3.6-27B reached 7/13 (53.85%)
 versus the pi reference's 10/13. Both agents exhausted without emitting `done`,
-but only Gemma entered a rewrite loop (18 writes, zero tests); Qwen wrote once
-and returned to observation. These remain
+but only Gemma entered a rewrite loop (18 writes); Qwen wrote once and
+returned to observation. Neither ran the target tests. These remain
 one-task adapter canaries — not FeatureBench scores, reliability estimates, or
 model comparisons — and carry recorded caveats: a serving-stack confound vs the
 SiliconFlow-served v4/pi records (v6 ran on CoreWeave; Gemma bf16, Qwen fp8;
@@ -76,6 +105,11 @@ local-neutrality bar (no local-neutrality claim licensed for revision 3), and
 three frozen Codex P2 findings on write-forcing mechanics affecting the Qwen
 cell's mechanism-level counts. Slide 6 carries this continuation; the dated
 records live under `tests/featurebench/results/`.
+
+Those are revision-3 results, not measurements of the current interface.
+Interface revision 6 removed the sentinel transport on Aug 4 and uses native
+tool calls. A new frozen protocol and requalified controls are needed before
+citing the v6 outcomes as current-main behavior.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
 

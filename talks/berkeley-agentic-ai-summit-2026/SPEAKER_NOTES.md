@@ -2,17 +2,15 @@
 
 Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026 · 5-minute lightning talk
 
-Personal delivery script — terse, fast transitions, no filler. Speak from this
-document; the slides and the inline presenter-note comments in
-[`slides.md`](slides.md) are intentionally untouched, and this script
-supersedes the inline notes for delivery. About 520 words — roughly 4:15–4:45
-spoken, leaving room for slide changes. The backup slide has no script — Q&A
-only.
+Corrected delivery script, updated 2026-09-07. This is the canonical spoken
+source; the published deck and its inline notes remain historical artifacts.
+See the [published-talk errata](README.md#published-talk-errata--2026-09-07)
+when viewing the recording or slides. The backup slide has no script — Q&A only.
 
-Key framing carried on slides 1 and 5: AskMe was developed for the small local
-Gemma 4 MoE that fits in 16GB of MacBook RAM; the evaluations use larger
-hosted Gemma 4 and Qwen3.6 variants because the Mac cannot hold them — same
-harness, bigger models, so hosted numbers are not local performance.
+Key framing: AskMe began with local Gemma 4 E4B, a dense PLE model that fits
+in 16GB of MacBook RAM. The hosted Gemma 4 and Qwen3.6 evaluations span later
+AskMe revisions, serving stacks, quantization, and budgets; they are not a
+controlled model-size comparison or evidence of local performance.
 
 ## Slide 1 — Title: Are Small LLMs Ready for Coding Agents? (~40s)
 
@@ -20,20 +18,21 @@ This started on a plane. No wifi, no coding agent, and the experiments I
 wanted would take weeks alone. So, the dream: small open models on my own
 MacBook, through llama.cpp, doing real coding work anywhere. This talk is a
 progress report on that dream. Small means a deployment class, not a parameter
-count. One caveat up front: AskMe is built for a small Gemma 4
-mixture-of-experts that fits in sixteen gigabytes of MacBook RAM. The
-evaluations you'll see use its larger hosted siblings — my Mac can't hold
-them. Same harness, bigger models: hosted numbers, not local performance.
+count. One caveat up front: AskMe began with Gemma 4 E4B, a dense PLE model
+on a sixteen-gigabyte Mac. These evaluations use hosted Gemma and Qwen models
+across later revisions and different serving configurations. They do not
+measure local performance or isolate model size.
 
 ## Slide 2 — AskMe gives a small model one structured move at a time (~40s)
 
 AskMe is an experimental coding-agent harness, small enough to read in one
 sitting. Three bets for small models. One: pass as little context as possible
-— the planner sees full state, the executor gets a slim curated view. Two:
-small granular actions — one JSON action per turn, an edit instead of a
-rewrite. Three: reasoning tokens only where they pay, mostly in recovery.
-Execute, feed the evidence back, and an independent check accepts the
-delivered workflow.
+— the planner gets a curated summary, the executor a smaller sliding view.
+Two: small granular actions, an edit instead of a rewrite. Today's interface
+accepts one native tool call per turn: six executable actions plus `done` and
+`fail`. Three: reasoning tokens only where they pay, mostly in recovery.
+Tool feedback guides AskMe; held-out acceptance scores the artifact after the
+run and is not returned to the agent for recovery.
 
 ## Slide 3 — A command passed. The workflow still failed. (~35s)
 
@@ -57,29 +56,30 @@ be right about.
 
 Does the loop hold? Four hosted variants — two Gemma 4s, two Qwen3.6s — two
 simple tasks each, one run each. All eight reported complete; the independent
-check accepted seven. The one rejection was the fastest run — that wrong-path
-build. One run per cell: no rankings. But acceptance caught exactly what the
-completion signal missed. Locally, the small MoE Gemma runs this same loop on
-my MacBook at about seven tokens a second.
+check accepted seven. The one rejection was the fastest build trajectory —
+that wrong-path build; an accepted repair was faster overall. This is a frozen
+July record, one run per cell, with no rankings or current reliability claim.
+Acceptance caught what the completion signal missed.
 
-## Slide 6 — Both models build app features — but fail on testing (~40s)
+## Slide 6 — Applying but unresolved patches on one feature task (~40s)
 
-Next: a real app feature. FeatureBench, one frozen task. July: zero writes,
-empty patch — my action interface blocked the edits. I rebuilt the write path
-— several changes at once, so no clean causal story. August first: both models
-delivered applied patches. Gemma passed eleven of thirteen target tests, Qwen
-seven. Real partial features. Then neither ran a single test or finished
-cleanly — Gemma rewrote one file eighteen times, Qwen drifted back to reading.
-One task, one attempt each: progress, not a score.
+Next: FeatureBench, one frozen feature task. Revision 2 left both cells with
+empty patches, for different reasons. After bundled revision-3 changes and a
+changed serving stack, both left applying but unresolved patches. Held-out
+scoring found eleven of thirteen target tests passing for Gemma, seven for
+Qwen. Neither ran the target tests or emitted `done`; Gemma rewrote one file
+eighteen times, Qwen returned to reading. One task, one attempt each, no causal
+attribution. These historical results do not validate today's native-tool
+transport.
 
 ## Slide 7 — Promising for bounded loops. Feature readiness is still open. (~35s)
 
 So: ready? Not yet. Bounded loops with independent acceptance — promising.
-Feature scale — the models build, but they don't test their own work and don't
-know when to stop. Those are the next harness problems. Two of three bets held
-up in bounded checks; the reasoning bet is unmeasured. The takeaway: judge
-delivered behavior — evaluate the model, harness, and task as one system. The
-plane version of this still doesn't exist. I'm building it.
+The feature canary exposed gaps in target-test execution and clean completion.
+It did not establish general feature readiness or isolate any of the three
+design bets. The takeaway: judge delivered behavior — evaluate the model,
+harness, task, and evaluator as one system. The reliable plane version remains
+the goal. I'm building it.
 
 ## Slide 8 — Backup: AskMe, pi, and OpenHands
 

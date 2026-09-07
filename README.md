@@ -21,7 +21,9 @@ gaps in [*Are Small LLMs Ready for Coding
 Agents?*](talks/berkeley-agentic-ai-summit-2026/README.md), a five-minute
 lightning talk at the 2026 Agentic AI Summit at UC Berkeley
 ([slides](talks/berkeley-agentic-ai-summit-2026/slides.pdf),
-[speaker script](talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md)).
+[recording](https://www.youtube.com/watch?v=N1XoiJGyNpM),
+[corrected speaker script](talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md),
+[published-deck errata](talks/berkeley-agentic-ai-summit-2026/README.md#published-talk-errata--2026-09-07)).
 The current answer is deliberately cautious: bounded loops look promising,
 but realistic feature readiness remains open.
 
@@ -36,15 +38,24 @@ runtime remains configurable for local servers and OpenRouter.
 
 ## Quick Start
 
-With [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.10+,
-and a [local model](docs/gemma4-setup.md) ready, run AskMe on a project you can
-safely edit. uv creates the environment from the committed lockfile:
+AskMe is **source-only: clone and run**, not an installable pip CLI package.
+With Python 3.10+ (including pip) and a [local model](docs/gemma4-setup.md)
+ready, install the exact uv version required by `pyproject.toml`; uv creates
+the environment from the committed lockfile:
 
 ```bash
+python3 -m pip install uv==0.12.1
+git clone https://github.com/den-run-ai/askme.git
+cd askme
+uv run --locked --no-dev askme.py --help
 uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
 ```
 
-For OpenRouter or other options, see [configuration](docs/configuration.md).
+Replace `/path/to/project` with a project you can safely edit: `--help` prints
+the CLI options without calling a model, and a completed run prints
+`All tasks complete.` with its output directory (completion is not independent
+test acceptance). For OpenRouter or other options, see
+[configuration](docs/configuration.md).
 
 ### Local llama.cpp setup
 
@@ -98,7 +109,7 @@ Full model/build/flag rationale and benchmark history:
 flowchart TD
     U([user prompt]) --> PF[preflight probe]
     PF --> PL[plan — LLM proposes task list]
-    PL --> EX["execute — one JSON action per step<br/>shell · write · edit · read · search · tree"]
+    PL --> EX["execute: one native tool call (six actions + done/fail)"]
     EX -- task failed --> RE[replan]
     RE --> PL
     EX -- "all done · validation skipped" --> DONE([done])

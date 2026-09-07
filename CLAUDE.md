@@ -150,11 +150,18 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 
 ### Truncation and observation integrity
 
-- A partial/truncated mutation is `incomplete_write`, never a complete or merely
-  unvalidated artifact. Preserve an actionable resume boundary and target; do
-  not append to stale content or allow `done` while an obligation remains.
-- Preserve every complete byte/line at a token cutoff and test content that can
-  resemble transport sentinels. Framing syntax must not silently eat file content.
+- The live native-tool decoder rejects malformed argument payloads, including
+  JSON cut off mid-content, before mutation; it does not salvage partial file
+  content or create a resume boundary. The write-budget retry may still fail
+  with `response_truncated`. A valid argument payload is not marked partial
+  merely because `finish_reason=length` was reported.
+  Restoring live salvage or retiring the retained recovery machinery is an open
+  decision in [#94](https://github.com/den-run-ai/askme/issues/94).
+- For trusted injected clients that supply partial-write metadata, a partial
+  mutation is `incomplete_write`, never a complete or merely unvalidated artifact.
+  Preserve every complete byte/line and an actionable resume boundary and target;
+  do not append to stale content or allow `done` while an obligation remains.
+  These recovery tests do not establish live native-tool truncation salvage.
 - A bounded `read`, `search`, or `tree` result must not look complete when any
   line, character, file, match, entry, or depth cap was hit. Carry compact
   truncation reasons through the action result, model history, and JSONL record.
