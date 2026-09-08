@@ -1,0 +1,23 @@
+{
+  "protocol": "serving-m1-qwen4b-20260908-v1",
+  "api": "http://127.0.0.1:8081/v1/chat/completions",
+  "model": "qwen3-4b-q4-k-m-qualification-v1",
+  "expected_model_path": "/private/tmp/askme-serving-DZc0TI/Qwen3-4B-Q4_K_M.gguf",
+  "provenance": {
+    "purpose": "Task-independent serving qualification for issue 109; not a rerun of requests-pickle-macos-qwen4b-v1",
+    "harness_base": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "machine": "MacBookAir10,1; physical Apple M1; 8 CPU; 17179869184 bytes; macOS 26.5 25F71",
+    "environment": "Interactive host with pre-existing swap; idle Gemma E4B server also present. Record memory before/after; no claim of isolated benchmark or matched hardware comparison.",
+    "llama_revision": "c34b92235b2d6a07963f896085f9ca077ff400b4",
+    "llama_version": "b9618",
+    "llama_launcher_sha256": "4dcc084538ea65e1bd2b07cd81c61d61b6664348b40729503165eed4ed162566",
+    "model_repository": "Qwen/Qwen3-4B-GGUF",
+    "model_revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+    "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "model_bytes": 2497280256,
+    "server_flags": ["--jinja", "--reasoning", "off", "--ctx-size", "8192", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--flash-attn", "on", "-ngl", "99", "-np", "1", "--seed", "20260908", "--host", "127.0.0.1", "--port", "8081", "-lv", "4"],
+    "api_cost_usd": 0,
+    "trials": "One complete qualification matrix, no selective reruns",
+    "decision": "Only a configuration passing every declared serving/format/cancellation check may enter a separately registered Requests task. Preserve failures and do not change thresholds after inference."
+  }
+}
