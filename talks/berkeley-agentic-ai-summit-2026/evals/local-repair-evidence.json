@@ -1,0 +1,118 @@
+{
+  "source_commit": "8d4e1eab8034d2b5e0b6418b6701a351201187ad",
+  "runtime_commit": "4e528a6a41600f8d5c58cc9210083f483a93b4c4",
+  "report": {
+    "path": "tests/bench_records/2026-08-04/e89-web-local/README.md",
+    "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/README.md",
+    "sha256": "fe18c107a9dc4dfe0dd23ba5053224349506a80e1e1591da5df96236cff4b2f3"
+  },
+  "protocol": {
+    "path": "tests/bench_records/2026-08-04/e89-web-local/PROTOCOL.md",
+    "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/PROTOCOL.md",
+    "sha256": "50ae79a4f48c41bbebec1a09d782bd8b4860957c999304408f907e2455c3ef07"
+  },
+  "shipped_trials": [
+    {
+      "record": {
+        "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/pilot-1trial/test_webapp_fix_failing_health_check_trial1.jsonl",
+        "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/pilot-1trial/test_webapp_fix_failing_health_check_trial1.jsonl",
+        "sha256": "ef56b33fdd74349d79d8216b1c37109b5472f0e259433cc0447738ae3eccbb9c"
+      },
+      "backend": "local",
+      "model": "gemma-4-e4b",
+      "capability_profile": "legacy-e4b-m1-16k-v1",
+      "step_policy": "heuristic",
+      "agent_status": "exhausted",
+      "wall_s": 254.45,
+      "successful_app_edits": 1
+    },
+    {
+      "record": {
+        "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial1.jsonl",
+        "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial1.jsonl",
+        "sha256": "552a30c3d2853ceeb950d08c4ffd568f459db57a778eec7f7d4c017466247897"
+      },
+      "backend": "local",
+      "model": "gemma-4-e4b",
+      "capability_profile": "legacy-e4b-m1-16k-v1",
+      "step_policy": "heuristic",
+      "agent_status": "exhausted",
+      "wall_s": 191.43,
+      "successful_app_edits": 1
+    },
+    {
+      "record": {
+        "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial2.jsonl",
+        "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial2.jsonl",
+        "sha256": "3c7162318af37f0d4ba6d3f4bcf2870c46a04a6f521deac95d67d93fc7b9b06c"
+      },
+      "backend": "local",
+      "model": "gemma-4-e4b",
+      "capability_profile": "legacy-e4b-m1-16k-v1",
+      "step_policy": "heuristic",
+      "agent_status": "exhausted",
+      "wall_s": 199.04,
+      "successful_app_edits": 1
+    },
+    {
+      "record": {
+        "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial3.jsonl",
+        "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/test_webapp_fix_failing_health_check_trial3.jsonl",
+        "sha256": "86daf367654095c66463ab33715941bcc2d66416742316a717d67f4856060ca0"
+      },
+      "backend": "local",
+      "model": "gemma-4-e4b",
+      "capability_profile": "legacy-e4b-m1-16k-v1",
+      "step_policy": "heuristic",
+      "agent_status": "exhausted",
+      "wall_s": 197.62,
+      "successful_app_edits": 1
+    }
+  ],
+  "summary_sources": [
+    {
+      "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/pilot-1trial/summary.json",
+      "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/pilot-1trial/summary.json",
+      "sha256": "762ab76e473c78045b540159b3f80247e0a173883de1e8c60636b85e93b534ad"
+    },
+    {
+      "path": "tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/summary.json",
+      "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/shipped-profile/t1c-3trials/summary.json",
+      "sha256": "cddcd7cd4cb75fe051df851cd0b10a997de3aa2c791b9d562293a1111d24655b"
+    },
+    {
+      "path": "tests/bench_records/2026-08-04/e89-web-local/raised-budget/summary.json",
+      "url": "https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/raised-budget/summary.json",
+      "sha256": "713514251726835ed92cdf5c18a388c5e45a01ffb5ead685633908ed77d41d06"
+    }
+  ],
+  "schema_version": 1,
+  "publication_checked_date": "2026-09-08",
+  "task": "T1c: one seeded Python HTTP health-check repair, repeated; not an external real-repository feature task",
+  "model_architecture": "Local Gemma 4 E4B QAT Q4_0, dense PLE; not the hosted Gemma 26B-A4B MoE",
+  "acceptance": {
+    "accepted_repairs_in_historical_report": 4,
+    "source": "Pinned report README: held-out assert_status_service on fresh ephemeral loopback ports passed on all four surviving workspaces; protected test_app.py remained unmodified.",
+    "retained_log_boundary": "The four JSONL records retain successful app.py edit receipts and exhausted endings, not full edit payloads or a machine-readable held-out replay transcript.",
+    "replayed_in_this_publication_pass": false
+  },
+  "diagnostic_raised_budget": {
+    "capability_profile": "generic-feature-scale-v1",
+    "shipped_profile": false,
+    "strict_passes": 2,
+    "trials": 2,
+    "agent_status": [
+      "complete",
+      "complete"
+    ],
+    "scope": "Original August 4 eleven-run report only. Later lifecycle-policy trials are a separate addendum, not part of this comparison."
+  },
+  "model_calls_in_this_publication_pass": 0,
+  "limits": [
+    "Historical runtime, not evidence of current-main performance or reliability.",
+    "One seeded task with a pilot plus three heuristic shipped-profile runs; not four distinct repairs/tasks.",
+    "The protocol was amended and an early-stopped arm's partial logs were discarded historically; this is descriptive pilot evidence, not a complete preregistered reliability panel.",
+    "The two diagnostic strict passes do not establish shipped-profile completion or a budget-only causal effect.",
+    "No matched human baseline, net time-savings measurement, model-family effect or causal harness benefit."
+  ]
+}

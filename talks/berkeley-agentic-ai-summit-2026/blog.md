@@ -201,6 +201,14 @@ or model-size experiment.
 
 ## The Claim That Survives
 
+There is a narrow local positive. The [August 4 E4B repair pilot](evals/local-repair-evidence.json)
+records four accepted repairs of one seeded health-check bug under the shipped
+profile, but all four agents exhausted instead of finishing. The original
+pilot's two clean completions used a larger diagnostic budget. This demonstrates
+small accepted repairs, not dependable autonomous coding or net time savings.
+It is separate from the hosted smoke and feature canaries, and is not a
+measurement of today's runtime.
+
 Smaller models make more of the model stack controllable. General-purpose and lifecycle-spanning agents make more of the workflow executable. A tight harness makes the combination operational.
 
 The action protocol should be simple and general. Easier interfaces and more general standards can be good; specialized skills should earn their complexity from repeated failure traces. Execution and test results should ground the next decision, reasoning should update the smallest necessary part of the plan, and acceptance should remain tied to real behavior.
