@@ -3,6 +3,19 @@
   "api": "http://127.0.0.1:8080/v1/chat/completions",
   "model": "gemma-4-e4b",
   "expected_model_path": "models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf",
+  "first_token_limit_s": 30,
+  "total_limit_s": 120,
+  "cancel_after_s": 1,
+  "idle_limit_s": 10,
+  "cases": [
+    {"name": "prefill600_decode128", "kind": "completion", "prompt_tokens": 600, "max_tokens": 128},
+    {"name": "prefill2000_decode128", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 128},
+    {"name": "prefill600_decode512", "kind": "completion", "prompt_tokens": 600, "max_tokens": 512},
+    {"name": "prefill2000_decode512", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 512},
+    {"name": "prefill2000_decode1024", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 1024},
+    {"name": "planner", "kind": "plan", "prompt_tokens": 600, "max_tokens": 384},
+    {"name": "native_action", "kind": "action", "prompt_tokens": 2000, "max_tokens": 512}
+  ],
   "provenance": {
     "purpose": "Task-independent existing Gemma E4B serving qualification for issue 109; E4B is dense PLE, not the 26B-A4B MoE",
     "harness_base": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
