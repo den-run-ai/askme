@@ -1,0 +1,28 @@
+{
+  "acceptance": {
+    "accepted": false,
+    "error": "acceptance_failed_or_invalid_evaluator_output",
+    "exit_code": 1,
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 51, in <module>\n    print(json.dumps(check(sys.argv[1])))\n                     ^^^^^^^^^^^^^^^^^^\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 24, in check\n    restored = pickle.loads(pickle.dumps(error, protocol=protocol))\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/d8/hvxvltxn0fl4rmnd52sncbth0000gn/T/askme-external-vo1tbrqk/evaluation/src/requests/exceptions.py\", line 41, in __init__\n    CompatJSONDecodeError.__init__(self, *args)\nTypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'\n",
+    "stdout": ""
+  },
+  "agent_status": "no_terminal_record",
+  "api_cost_usd": 0,
+  "changed_files": [],
+  "configured_timeout_s": 720,
+  "decision": "did_not_resolve",
+  "limitations": "One historical, potentially training-contaminated bug; stdlib json only; 7 GB CI host is not the 16 GB Gemma reference. No reliability inference.",
+  "observed_completion_tokens": 0,
+  "observed_prompt_tokens": 0,
+  "patch_applies": true,
+  "process": {
+    "exit_code": null,
+    "timed_out": true
+  },
+  "runner_cost": "standard public macOS runner; no API charge",
+  "scope_valid": true,
+  "trial_wall_s": 720.235029709,
+  "usage_complete": false,
+  "usage_note": "Observed totals are lower bounds; failed/interrupted HTTP attempts may not return usage. Raw request/response records are retained.",
+  "usage_records": 0
+}

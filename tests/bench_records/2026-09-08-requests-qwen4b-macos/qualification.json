@@ -1,0 +1,26 @@
+{
+  "baseline": {
+    "accepted": false,
+    "error": "acceptance_failed_or_invalid_evaluator_output",
+    "exit_code": 1,
+    "patch_nonempty": false,
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 51, in <module>\n    print(json.dumps(check(sys.argv[1])))\n                     ^^^^^^^^^^^^^^^^^^\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 24, in check\n    restored = pickle.loads(pickle.dumps(error, protocol=protocol))\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/d8/hvxvltxn0fl4rmnd52sncbth0000gn/T/askme-control-iuf9436x/repo/src/requests/exceptions.py\", line 41, in __init__\n    CompatJSONDecodeError.__init__(self, *args)\nTypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'\n",
+    "stdout": ""
+  },
+  "gold": {
+    "accepted": true,
+    "error": null,
+    "exit_code": 0,
+    "patch_nonempty": true,
+    "stderr": "",
+    "stdout": "{\"accepted\": true, \"checks\": 21}\n"
+  },
+  "noop": {
+    "accepted": false,
+    "error": "acceptance_failed_or_invalid_evaluator_output",
+    "exit_code": 1,
+    "patch_nonempty": true,
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 51, in <module>\n    print(json.dumps(check(sys.argv[1])))\n                     ^^^^^^^^^^^^^^^^^^\n  File \"/Users/runner/work/askme/askme/tests/external_repo/requests_pickle_v1/acceptance.py\", line 24, in check\n    restored = pickle.loads(pickle.dumps(error, protocol=protocol))\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/d8/hvxvltxn0fl4rmnd52sncbth0000gn/T/askme-control-1tpmgyja/repo/src/requests/exceptions.py\", line 41, in __init__\n    CompatJSONDecodeError.__init__(self, *args)\nTypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'\n",
+    "stdout": ""
+  }
+}

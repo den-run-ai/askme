@@ -1,0 +1,10 @@
+{
+  "protocol": "requests-pickle-macos-qwen4b-v1",
+  "run_id": 34175311656,
+  "run_attempt": 1,
+  "workflow_revision": "1f3eff01287af0a7707ae8e007c293efcbfddc2f",
+  "harness_revision": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+  "protocol_sha256": "595ab9451cb01e3e3c0c56e338340f4c0161044217faebd3766646da14d13c72",
+  "claim": "Only this run may produce the single v1 primary outcome. Never reset or reuse this claim; any later experiment requires a new protocol."
+}
+

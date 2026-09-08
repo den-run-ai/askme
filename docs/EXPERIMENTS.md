@@ -8,6 +8,10 @@ Active backlog of experiments for `askme.py`. Curated from observations in [PERF
 - **Wave.** When to run it. Execution sequence, not importance. See [Waves](#waves) below.
 - **Effort.** `S` ≤ 2h, `M` half-day, `L` 1–2 days.
 - **Status.** `planned` → `running` → `done` (moved to PERFORMANCE.md) or `archived`.
+- **Historical control evidence (2026-09-08 correction).** Old JSONL omitted
+  accepted `done`/`fail` control receipts. Absence from execution steps cannot
+  establish zero emissions. Describe the E23/E25 observations as duplicate-action
+  loops and exhaustion; measure control decisions explicitly in future runs.
 
 ## Waves
 
@@ -67,7 +71,7 @@ Updated 2026-08-03 after the upstream/status audit and the E23 QAT bench (see [g
 - **E02 repriced down.** Its hypothesis assumed #21468 kept every system-prompt token re-processing on every call. Cache reuse has been solid since #23468 (in b9618): warm calls reuse the prefix, so prompt-shrink saves mostly cold-call and completion-side tokens plus planner-budget headroom (the E14 gate). Still worth doing, but the "linear speedup across every call" claim is dead.
 - **E03 approach confirmed by upstream inaction.** #22396 (`--json-schema` broken for Gemma 4) was stale-closed 2026-07-05 without a fix, with a re-regression reported in May. Client-side JSON repair remains the durable approach. Retest grammar-based output only after a rebuild past the master PEG overhaul (#24869 et al.).
 - **E09 narrowed.** QAT Q4_0 was candidate 1 and is consumed by E23; remaining candidates are Gemma 4 12B Unified QAT (~6.98 GB, the largest dense candidate that fits) and Q8_0. No small-MoE Gemma 4 exists; 26B-A4B remains off the 16 GB shortlist.
-- **The E23 QAT stack shows a shifted failure mix, but does not make recovery obsolete.** E06 had no eligible failures and easy+medium had no JSON thinking retries, while E05 still handled `missing_tool` in all three `replan_fix_wrong_command` trials and deterministic C repair fired 11 times across the medium/hard records. The dominant observed local failures were done-emission loops (correct deliverable, no `done`, duplicate skips to exhaustion) plus content drift on whole-file rewrites. Dated evidence is recorded on the E20/E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal; mechanism removal remains gated on the planned ablations.
+- **The E23 QAT stack shows a shifted failure mix, but does not make recovery obsolete.** E06 had no eligible failures and easy+medium had no JSON thinking retries, while E05 still handled `missing_tool` in all three `replan_fix_wrong_command` trials and deterministic C repair fired 11 times across the medium/hard records. The dominant observed local failures were duplicate-action loops (deliverable reported correct, duplicate skips to exhaustion) plus content drift on whole-file rewrites. Dated evidence is recorded on the E20/E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal; mechanism removal remains gated on the planned ablations.
 - **E24 added (Wave 4, gated).** MTP self-speculation measured −13% (n-max=1) / −2.7% (n-max=3) on an M1 smoke test — currently a loss, mechanistically explained by llama.cpp #25250 (Metal small-batch mul_mat gap at exactly the draft-verification batch sizes) and #24768 (no adaptive n-max). Gated on either landing.
 
 Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions against local E4B, 2026-04-26/27). Prior update: 2026-04-26 E05/E06 rerun analysis.
@@ -112,7 +116,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 
 - **Context.** Added and executed 2026-08-03. Three things had invalidated all prior local numbers: (1) the llama.cpp binary changed 2026-06-12 (`a702f395` → b9618 `c34b92235`, adding the #23468 cache-reliability fix and MTP support) with no benchmark run since; (2) the installed GGUF (2026-04-06) predated Google's 2026-07-15 weight refresh; (3) b9618's `--reasoning auto` detects the GGUF template as thinking-capable and drains ~192-token action budgets into `reasoning_content`, producing empty/truncated JSON on top of every scaffold metric. Meanwhile the revision-3 scaffold had only OpenRouter/FeatureBench validation.
 - **Change.** Pulled the official post-refresh QAT Q4_0 (E09 candidate 1), launched b9618 with the gemma4-setup.md flags including `--reasoning off`, MTP off, and ran all three suites under the E01 harness, 3 trials each. Probed `--reasoning auto` behavior on the fresh template first.
-- **Result (2026-08-03).** Done — **QAT Q4_0 promoted to primary local model.** Pytest 22/27, agent-complete 25/27 vs the Apr/May Q4_K_M baseline's 27/27, but at 1.6–39× lower wall time on the agentic workloads: hard 9/9 at −38–66%, `fix_missing_include` 609s → 15.7s, `multi_step_build` replans eliminated, thinking retries 6–7 → 0–3 on `build_with_dependency`. All 5 pytest failures trace to two behavioral quirks: done-emission loops (evidence on the E20 disposition) and content drift on whole-file rewrites (evidence on the E07 disposition). `--reasoning auto` probe: the post-refresh template still triggers thinking — `--reasoning off` is permanent. Full tables: [PERFORMANCE.md E23 entry](PERFORMANCE.md#e23-qat-baseline--2026-08-03-local-build-9618-official-e4b-qat-q4_0). Bench ran the default heuristic step policy; a lifecycle-arm A/B on the done-emission class is the natural follow-up.
+- **Result (2026-08-03).** Done — **QAT Q4_0 promoted to primary local model.** Pytest 22/27, agent-complete 25/27 vs the Apr/May Q4_K_M baseline's 27/27, but at 1.6–39× lower wall time on the agentic workloads: hard 9/9 at −38–66%, `fix_missing_include` 609s → 15.7s, `multi_step_build` replans eliminated, thinking retries 6–7 → 0–3 on `build_with_dependency`. The 5 pytest failures fell into two observed classes: duplicate-action loops (evidence on the E20 disposition) and content drift on whole-file rewrites (evidence on the E07 disposition). `--reasoning auto` probe: the post-refresh template still triggers thinking — `--reasoning off` is permanent. Full tables: [PERFORMANCE.md E23 entry](PERFORMANCE.md#e23-qat-baseline--2026-08-03-local-build-9618-official-e4b-qat-q4_0). Bench ran the default heuristic step policy; a lifecycle-arm A/B on the duplicate-action loop class is the natural follow-up.
 - **Code.** `gemma4-setup.md` (model path + flags), no `askme.py` change.
 - **Effort.** S.
 - **Status.** Done (2026-08-03).
@@ -214,7 +218,8 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Metric / decision rule.** Paired local bench (E01 harness, both arms,
   same suites, ≥3 trials, identical budgets/policies) against the E23
   reference: pytest pass + agent-complete rate, wall time, parse retries,
-  done-emission-loop incidence, content-drift incidents, decode tok/s. If the
+  duplicate-action-loop incidence (historically labelled "done-emission-loop"),
+  content-drift incidents, decode tok/s. If the
   tools arm is non-inferior on pass rate and not materially slower, flip the
   default and schedule the JSON executor salvage machinery for removal per the
   #68 partial-writes item — after truncated-tool-call recovery obligations are
@@ -232,9 +237,9 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   two trials on n=18 against a baseline whose same-weights swing spans 22/27
   (E23) to 14/18 (this run). All 36 trials contract-valid; the tools arm
   produced zero malformed tool calls, and every tools failure is one of the
-  two documented QAT classes (content drift; done-emission loops after
+  two documented QAT classes (content drift; duplicate-action loops after
   completed work — both failed `fix_missing_include` trials had the fix
-  landed and the binary running before exhausting without `done`). Tools took
+  landed and the binary running before duplicate-action loops exhausted the run). Tools took
   the loop-prone `create_missing_file_then_use` 3/3 (json 1/3 with an 800s
   spiral) with tighter walls throughout. Full table:
   [PERFORMANCE.md E25 entry](PERFORMANCE.md#e25-transport-ab--2026-08-04-local-build-9618-e4b-qat-q4_0-legacy-profile--tools-non-inferior-json-executor-path-removed);
@@ -242,7 +247,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 - **Status.** Done (2026-08-04). Verdict: non-inferior within variance, not
   materially slower, structurally simpler — the JSON executor transport and
   sentinel salvage were removed the same day (interface revision 6, workflow
-  protocol revision 7). The done-emission class is transport-independent;
+  protocol revision 7). The duplicate-action loop class was observed under both transports;
   its sanctioned lever remains the #31 lifecycle arm.
 
 ### E15 — Command-family timeout ladder
@@ -314,7 +319,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
 ### E20 — Auto-done after consecutive duplicate-edit skip
 
 - **Hypothesis.** When an `edit` succeeds and the model re-emits the same `(file, find_string)` edit, the duplicate-edit-skip guard catches it but only injects a soft observation. The model can reason past this indefinitely, burning all remaining steps on no-op edits. Auto-completing the task after 2+ consecutive duplicate-skipped edits on the same target would break the loop.
-- **Evidence (2026-05-03, experience.md Run 6).** Edit succeeded at step 2 (find `return 0` → replace `return 1`). Steps 3-10: 8 duplicate-edit calls on the same `(buggy.py, "return 0")` target, all skipped, thinking=medium from step 5 onward (32-58s per call). Model never pivoted to `shell` or `done`. MAX_STEPS hit → `exhausted`. On-disk deliverable was correct — the framework reported failure on a task that was already done.
+- **Evidence (2026-05-03, experience.md Run 6).** Edit succeeded at step 2 (find `return 0` → replace `return 1`). Steps 3-10: 8 duplicate-edit calls on the same `(buggy.py, "return 0")` target, all skipped, thinking=medium from step 5 onward (32-58s per call). The recorded eight-step loop contained only duplicate-edit skips. MAX_STEPS hit → `exhausted`. On-disk deliverable was correct — the framework reported failure on a task that was already done.
 - **Change.** Track `last_successful_edit: {file, find_string}` in per-task execution state. When 2+ consecutive duplicate-skipped edits match the same `(file, find_string)`, force `done` for the task. Inject the successful edit evidence into `completed_tasks` for subsequent tasks.
 - **Metric.** Run 6-style edit-loop step count; `exhausted` rate on edit-heavy tasks; false-done rate (auto-done when edit was actually wrong).
 - **Upside.** High. Directly fixes the most expensive single-run failure (783s, 42K tokens) observed in experience.md. Simple, local, no model changes.
@@ -326,7 +331,7 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   never task acceptance. The duplicate-edit skip and its corrective
   observation remain; completion requires the model's own `done`, and a
   repeated no-op is reported as `stuck`, not success.
-- **Evidence (2026-08-03, E23 QAT bench — post-removal frequency data).** On the promoted QAT Q4_0 weights this failure class is now the dominant local one, and it extends beyond edits: 2 of 5 E23 pytest failures were "all steps succeeded, deliverable correct on disk, `done` never emitted, duplicate *read/write* skips until exhausted" (`create_and_read_file` trials 1 and 3), and a third occurrence of the same loop pattern (`create_missing_file_then_use` trial 1, 226.6s) recovered within budget and passed. Under the #68 design these runs correctly stay `exhausted`; the sanctioned counter-lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`), which steers repetition toward verification instead of acceptance — the E23 bench ran the default heuristic arm, so a lifecycle A/B on this failure class is the natural follow-up.
+- **Evidence (2026-08-03, E23 QAT bench — post-removal frequency data).** On the promoted QAT Q4_0 weights this failure class is now the dominant local one, and it extends beyond edits: 2 of 5 E23 pytest failures were "recorded executions succeeded and the deliverable was reported correct, but duplicate *read/write* skips exhausted the run" (`create_and_read_file` trials 1 and 3), and a third occurrence of the same loop pattern (`create_missing_file_then_use` trial 1, 226.6s) recovered within budget and passed. Under the #68 design these runs correctly stay `exhausted`; the sanctioned counter-lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`), which steers repetition toward verification instead of acceptance — the E23 bench ran the default heuristic arm, so a lifecycle A/B on this failure class is the natural follow-up.
 
 ### E17 — Expected-failure task completion semantics
 
@@ -418,7 +423,7 @@ Moved to [Archived / rejected](#archived--rejected).
   1. **Gemma 4 12B Unified QAT** — **DONE, NEGATIVE UNDER THE E4B-FITTED CONTRACT (2026-08-03); GENERIC-PROFILE QUALIFICATION OPEN.** With the then-default local 256-step/512-write-token limits it was 3.6–35× slower than E4B QAT with worse reliability (up to 6–8 JSON retries on `multi_step_build`, easy 6/9, medium partial with 2/3 exhaustion on `fix_python_syntax_error`). The run's requested-model provenance was mislabeled; token events reported the 12B served-model identity, but no artifact hash was retained. This rules out that contract, not the model across capability profiles. See [PERFORMANCE.md E09 12B entry](PERFORMANCE.md#e09-12b-qat-trial--2026-08-03-local-build-9618-gemma-4-12b-unified-qat-q4_0--negative-under-the-e4b-fitted-contract). Scaffold and provenance caveats are recorded there.
   2. **E4B Q8_0** (~8 GB) — remaining candidate, repriced **down**: the 12B result shows raw model quality did not convert to agent reliability under its tested contract on this hardware. Same-model higher precision is a different bet (fewer bad tokens, same style), but expectations are now modest.
 - **Change.** For each candidate: download, launch with the E23-validated flags (`--reasoning off`, MTP off), register and pin the requested model/capability profile/served identity, then run easy + medium under E01's harness and compare against the E23 reference.
-- **Metric.** Parse-retry count, edit-failure rate, done-emission-loop rate, content-drift incidents, agent_complete rate, total test time; decode tok/s as a guard metric (especially for 12B).
+- **Metric.** Parse-retry count, edit-failure rate, duplicate-action-loop rate, content-drift incidents, agent_complete rate, total test time; decode tok/s as a guard metric (especially for 12B).
 - **Risk.** Low. Model swaps revert trivially. For 12B: decode-speed regression may outweigh quality gains for the agent loop — measure both axes.
 - **Code.** `gemma4-setup.md` (model path), no `askme.py` change.
 - **Effort.** S per candidate.
