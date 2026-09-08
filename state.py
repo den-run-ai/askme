@@ -99,6 +99,10 @@ class RunProgress:
         return self.data.get("all_steps", [])
 
     @property
+    def optional_completed_tasks(self) -> list[str]:
+        return self.data.get("completed_tasks", [])
+
+    @property
     def optional_pending_empty_writes(self) -> dict[str, Any]:
         return self.data.get("pending_empty_writes", {})
 

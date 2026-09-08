@@ -98,6 +98,7 @@ def test_sparse_compatibility_mapping_is_not_populated_by_read_views():
     progress = state_module.RunProgress(data)
     assert progress.optional_last_steps == []
     assert progress.optional_all_steps == []
+    assert progress.optional_completed_tasks == []
     assert progress.optional_pending_empty_writes == {}
     progress.optional_last_steps.append({"action": "read"})
     assert progress.optional_last_steps == []
