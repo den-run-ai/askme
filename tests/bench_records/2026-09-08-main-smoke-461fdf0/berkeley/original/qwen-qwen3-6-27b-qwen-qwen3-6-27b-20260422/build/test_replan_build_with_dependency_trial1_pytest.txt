@@ -1,0 +1,42 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (3988 earlier characters omitted):
+ntegration.TestOpenRouterHard object at 0x7f8af6ba58b0>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-2/test_replan_build_with_depende0')
+
+    def test_replan_build_with_dependency(self, tmp_path):
+        result = or_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include \"msg.h\"' and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"REPLAN_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+        )
+        assert_file(tmp_path / "main.c", "msg.h")
+        assert_file(tmp_path / "msg.h", "REPLAN_OK")
+        assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+>       assert_executable_output(tmp_path / "main", "REPLAN_OK")
+
+tests/test_agent_integration.py:344: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+path = PosixPath('/tmp/pytest-of-runner/pytest-2/test_replan_build_with_depende0/main')
+expected = 'REPLAN_OK'
+
+    def assert_executable_output(path, expected):
+        """Verify a generated executable exists, runs, and prints expected output."""
+        p = Path(path)
+>       assert p.exists(), f"Expected executable not found: {p}"
+               ^^^^^^^^^^
+E       AssertionError: Expected executable not found: /tmp/pytest-of-runner/pytest-2/test_replan_build_with_depende0/main
+
+tests/_test_support.py:185: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestOpenRouterHard::test_replan_build_with_dependency - AssertionError: Expected executable not found: /tmp/pytest-of-runner/pytest-2/test_replan_build_with_depende0/main
+====================== 1 failed, 28 deselected in 56.48s =======================
+
+stderr:
+(empty)

@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "retained_at_utc": "2026-09-08T08:50:35.296720+00:00",
+  "source_revision": "461fdf01e8f644cc5dddad2eee77008c11447448",
+  "source_tree": "dbb7a80ef2c3a73ad6d0f0b698b2a4515ec40abb",
+  "run_url": "https://github.com/den-run-ai/askme/actions/runs/34205396477",
+  "job_url": "https://github.com/den-run-ai/askme/actions/runs/34205396477/job/101993600130",
+  "artifact": {
+    "id": 10047766962,
+    "name": "berkeley-protocol-logs",
+    "api_url": "https://api.github.com/repos/den-run-ai/askme/actions/artifacts/10047766962",
+    "created_at": "2026-09-08T08:43:09Z",
+    "expires_at": "2026-09-22T08:43:08Z",
+    "downloaded_zip_bytes": 19159,
+    "downloaded_zip_sha256": "28dd24badf5b773f8d16bcf91bdf91dd6559044947083674377fde949c4979d3",
+    "api_digest_matches_download": true,
+    "zip_retained_in_repository": false
+  },
+  "retention": {
+    "regular_files": 11,
+    "total_original_bytes": 108228,
+    "all_zip_members_byte_equal": true,
+    "method": "Text added with apply_patch; mechanically restored original absent final LF in four summaries; each retained file compared byte-for-byte with its original ZIP member."
+  },
+  "original_secret_scan": {
+    "tool": "gitleaks",
+    "version": "8.30.1",
+    "binary_sha256": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",
+    "official_release_archive_sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+    "scope": "All 11 extracted original artifact members, 108228 bytes",
+    "started_at_utc": "2026-09-08T08:45:53Z",
+    "completed_at_utc": "2026-09-08T08:45:54Z",
+    "environment": "env -i PATH=/usr/bin:/bin; stock config; empty ignore directory; --ignore-gitleaks-allow --redact=100 --max-archive-depth=3",
+    "exit_code": 0,
+    "findings": 0,
+    "limitation": "Secret scan is not proof of absence; no credentials or job-log environment headers are intentionally retained."
+  },
+  "source_files_at_execution_revision": [
+    {
+      "path": ".github/workflows/llm.yml",
+      "bytes": 17714,
+      "sha256": "3a65f0050f2a0cadb621d603b24252fccab1bfec6e6e9e9ccdbd31b29eedcf27"
+    },
+    {
+      "path": "tests/bench_harness.py",
+      "bytes": 31847,
+      "sha256": "b13cca6a2eb3033cc9e06a05db145308149a653036dc9bcd97f7cd3af18b7323"
+    },
+    {
+      "path": "tests/ci_llm_gate.py",
+      "bytes": 22524,
+      "sha256": "dc542da989fa16e4ecd4d5fa49e2528eb86aec9fb714a7ea199edcc090fa6b80"
+    },
+    {
+      "path": "tests/test_agent_integration.py",
+      "bytes": 24161,
+      "sha256": "920c8bd19cdeaf320d8d73818c5818b9c461ed5ea2144f4db8f1a09239e01e84"
+    },
+    {
+      "path": "tests/_test_support.py",
+      "bytes": 16141,
+      "sha256": "27b94bef2958000a4ea9b5c78f9a18e9b859c680d3359563fc08035fcea9357d"
+    },
+    {
+      "path": "tests/conftest.py",
+      "bytes": 2995,
+      "sha256": "5e8c0480b42a7db155d6f8649e20190577c20f43c920b30bc19fe0f7d0ccebf6"
+    },
+    {
+      "path": "askme.py",
+      "bytes": 38125,
+      "sha256": "47b2cddcc977b380212a81c9d6140bd216949248deacb0b0f58dd8c7cf9bb76b"
+    },
+    {
+      "path": "actions.py",
+      "bytes": 50094,
+      "sha256": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930"
+    },
+    {
+      "path": "llm.py",
+      "bytes": 46045,
+      "sha256": "5772ee9ca588fdbd6d0d039d99afd04ce120886d35aae0f313dfd1f93410c67e"
+    },
+    {
+      "path": "policies.py",
+      "bytes": 60979,
+      "sha256": "c1770e661333ec556c5f83333d91da7b61a7ae51a288a36379f5f2b3c7f519c6"
+    },
+    {
+      "path": "loop.py",
+      "bytes": 95279,
+      "sha256": "ebded3f4e6d8ebbdab598f8b32f72015ca1b0aff378ea85250f1b28dd4a88991"
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 1506,
+      "sha256": "c17a6f6718a938e2c3eda7628bf33371ca61a8b52f0bbf497df4fa00615c8cf6"
+    },
+    {
+      "path": "uv.lock",
+      "bytes": 94649,
+      "sha256": "6b57b6bc536fcddb16ea973100c55cf4c3598cebc9cf5c47824ad4574804ac26"
+    }
+  ],
+  "original_files": [
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/summary.json",
+      "bytes": 2952,
+      "sha256": "6b3cdb08ad318bd963c49f3876f7b8c9a178dd70f450397119a942c71987c061",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/summary.json",
+      "has_final_lf": false
+    },
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/test_replan_build_with_dependency_trial1.jsonl",
+      "bytes": 44221,
+      "sha256": "0aa59f6fc608ed80ee5436584b30e96da095b62e915316e5d8f9949ceb6aaeb5",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/test_replan_build_with_dependency_trial1.jsonl",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/test_replan_build_with_dependency_trial1_pytest.txt",
+      "bytes": 2111,
+      "sha256": "880e5ca4462dcd709ed9fb3ca8c1e49b59af73e38f3d7999255ab7025639d435",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/build/test_replan_build_with_dependency_trial1_pytest.txt",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/summary.json",
+      "bytes": 2904,
+      "sha256": "086729a61c26e124f81e68b0d888b40321ac35a2c36708a7267dcbca3ddb5ac6",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/summary.json",
+      "has_final_lf": false
+    },
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/test_fix_python_syntax_error_trial1.jsonl",
+      "bytes": 22339,
+      "sha256": "c31a34646baeb5f9bdac173dc94e3a357105b6751fa923aff542b7b2dee99b2f",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/test_fix_python_syntax_error_trial1.jsonl",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/test_fix_python_syntax_error_trial1_pytest.txt",
+      "bytes": 2112,
+      "sha256": "3f6469543e259015f2b942995c339946eda5d1ea3b9f40eb08cc1f467342f7ce",
+      "archive_member": "google-gemma-4-26b-a4b-it-google-gemma-4-26b-a4b-it-20260403/repair/test_fix_python_syntax_error_trial1_pytest.txt",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/summary.json",
+      "bytes": 2848,
+      "sha256": "ba622296da6d26203f424a32b683902d39d09656299aef5b71184bb00cbc3b18",
+      "archive_member": "qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/summary.json",
+      "has_final_lf": false
+    },
+    {
+      "path": "original/qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/test_replan_build_with_dependency_trial1.jsonl",
+      "bytes": 11095,
+      "sha256": "92d872b3e2585e048e15335bbea3c825af983121b68d70804498a9e169633591",
+      "archive_member": "qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/test_replan_build_with_dependency_trial1.jsonl",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/test_replan_build_with_dependency_trial1_pytest.txt",
+      "bytes": 2110,
+      "sha256": "abf5799a4b44ed2d0933323f0b751b9fbde22c815b4218ce20679db145e1cd55",
+      "archive_member": "qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/build/test_replan_build_with_dependency_trial1_pytest.txt",
+      "has_final_lf": true
+    },
+    {
+      "path": "original/qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/repair/summary.json",
+      "bytes": 2787,
+      "sha256": "5f529e41e41514870b52f47cf1fe467d25e02fe3c6401cddfbc5a2b86df9a66e",
+      "archive_member": "qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/repair/summary.json",
+      "has_final_lf": false
+    },
+    {
+      "path": "original/qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/repair/test_fix_python_syntax_error_trial1.jsonl",
+      "bytes": 12749,
+      "sha256": "50ece2f6326b871070d45126e9d840c70a93a385e85dbde2ca153d40741fe8e0",
+      "archive_member": "qwen-qwen3-6-27b-qwen-qwen3-6-27b-20260422/repair/test_fix_python_syntax_error_trial1.jsonl",
+      "has_final_lf": true
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "suite": "medium",
+  "backend": "openrouter",
+  "trials": 1,
+  "model": "google/gemma-4-26b-a4b-it",
+  "provider": "",
+  "reasoning_effort": "",
+  "reasoning_policy": "gated",
+  "capability_profile": "generic-feature-scale-v1",
+  "expected_served_model": "google/gemma-4-26b-a4b-it-20260403",
+  "allow_provider_fallbacks": null,
+  "require_provider_parameters": null,
+  "git_commit": "461fdf01e8f644cc5dddad2eee77008c11447448",
+  "git_dirty": false,
+  "total_wall_s": 110.0,
+  "trial_timeout_s": 1200,
+  "tests": {
+    "test_fix_python_syntax_error": {
+      "passed": 0,
+      "pytest_passed": 0,
+      "valid_trials": 1,
+      "valid_passes": 0,
+      "agent_complete": 0,
+      "total": 1,
+      "agent_status": [
+        "exhausted"
+      ],
+      "wall_s": [
+        109.64
+      ],
+      "trial_wall_s": [
+        109.95730760699999
+      ],
+      "replans": [
+        1
+      ],
+      "local_replans": [
+        2
+      ],
+      "local_replans_ok": [
+        2
+      ],
+      "steps": [
+        9
+      ],
+      "thinking_retries": [
+        1
+      ],
+      "llm_calls": [
+        24
+      ],
+      "prompt_tokens": [
+        20341
+      ],
+      "completion_tokens": [
+        4047
+      ],
+      "total_tokens": [
+        24388
+      ],
+      "openrouter_cost": [
+        0.00342619
+      ],
+      "usage_complete": [
+        true
+      ],
+      "served_models": [
+        [
+          "google/gemma-4-26b-a4b-it-20260403"
+        ]
+      ],
+      "served_model_observed": [
+        true
+      ],
+      "served_model_sources": [
+        [
+          "openrouter_metadata"
+        ]
+      ],
+      "served_model_provenance_valid": [
+        true
+      ],
+      "served_provider_observed": [
+        true
+      ],
+      "recorded_backends": [
+        "openrouter"
+      ],
+      "requested_models": [
+        "google/gemma-4-26b-a4b-it"
+      ],
+      "token_requested_models": [
+        [
+          "google/gemma-4-26b-a4b-it"
+        ]
+      ],
+      "token_requested_model_valid": [
+        true
+      ],
+      "requested_providers": [
+        ""
+      ],
+      "recorded_reasoning_efforts": [
+        ""
+      ],
+      "recorded_reasoning_policies": [
+        "gated"
+      ],
+      "recorded_allow_provider_fallbacks": [
+        false
+      ],
+      "recorded_require_provider_parameters": [
+        true
+      ],
+      "capability_profiles": [
+        "generic-feature-scale-v1"
+      ],
+      "config_hashes": [
+        "098c4ee7f770eb0e"
+      ],
+      "route_valid": [
+        true
+      ],
+      "contract_valid": [
+        true
+      ],
+      "served_providers": [
+        [
+          "Cloudflare",
+          "DeepInfra",
+          "NextBit",
+          "Parasail"
+        ]
+      ],
+      "pytest_diagnostics": [
+        "test_fix_python_syntax_error_trial1_pytest.txt"
+      ],
+      "timed_out": [
+        false
+      ],
+      "log_parse_errors": [
+        null
+      ]
+    }
+  }
+}
