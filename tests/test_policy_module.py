@@ -14,10 +14,11 @@ from _test_support import ScriptedClient
 import actions
 import askme
 import policies
+import state
 
 
 def test_policy_import_does_not_load_facade_client_or_environment(tmp_path):
-    for module in (policies, actions):
+    for module in (policies, actions, state):
         shutil.copy(Path(module.__file__), tmp_path)
     (tmp_path / ".env").write_text("ASKME_IMPORT_SENTINEL=loaded\n")
     env = {"PATH": os.defpath, "AGENT_FINAL_VALIDATE": "always"}

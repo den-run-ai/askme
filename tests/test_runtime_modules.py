@@ -12,7 +12,7 @@ def test_historical_monolith_does_not_borrow_current_modules(tmp_path):
     assert runtime_source_paths(source) == {"askme.py": source}
 
 
-@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop", "state"])
 def test_present_runtime_siblings_are_pinned_even_without_direct_import(tmp_path, module):
     source = tmp_path / "askme.py"
     source.write_text("pass\n")
@@ -21,7 +21,7 @@ def test_present_runtime_siblings_are_pinned_even_without_direct_import(tmp_path
     assert runtime_source_paths(source) == {"askme.py": source, dependency.name: dependency}
 
 
-@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop", "state"])
 def test_missing_runtime_import_never_falls_back_to_adapter_checkout(tmp_path, module):
     source = tmp_path / "askme.py"
     source.write_text(f"from {module} import Something\n")
@@ -39,7 +39,7 @@ def test_dependency_imports_are_checked_recursively_without_executing_source(tmp
     assert set(runtime_source_paths(source)) == {"askme.py", "llm.py", "actions.py"}
 
 
-@pytest.mark.parametrize("module", ["askme", "actions", "llm", "policies", "loop"])
+@pytest.mark.parametrize("module", ["askme", "actions", "llm", "policies", "loop", "state"])
 def test_runtime_symlinks_are_rejected(tmp_path, module):
     source = tmp_path / "askme.py"
     source.write_text("pass\n")
@@ -73,6 +73,19 @@ def test_unregistered_sibling_import_is_not_silently_left_out(tmp_path):
         runtime_source_paths(source)
 
 
+def test_transitive_state_dependency_is_required_and_pinned(tmp_path):
+    source = tmp_path / "askme.py"
+    source.write_text("import loop\nraise AssertionError('never execute discovery')\n")
+    (tmp_path / "loop.py").write_text("from state import RunState\n")
+    with pytest.raises(FileNotFoundError, match=r"state\.py"):
+        runtime_source_paths(source)
+    (tmp_path / "state.py").write_text("from actions import StepReceipt\n")
+    with pytest.raises(FileNotFoundError, match=r"actions\.py"):
+        runtime_source_paths(source)
+    (tmp_path / "actions.py").write_text("import json\n")
+    assert set(runtime_source_paths(source)) == {"askme.py", "loop.py", "state.py", "actions.py"}
+
+
 def test_current_runtime_inventory_and_imports_have_no_cycles():
     import ast
 
@@ -88,6 +101,10 @@ def test_current_runtime_inventory_and_imports_have_no_cycles():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.add(node.module)
         edges[name] = {module + ".py" for module in imports if module + ".py" in paths}
+
+    # State/recording is a leaf above action contracts, never a backdoor to
+    # policy decisions, request orchestration or the compatibility facade.
+    assert edges["state.py"] <= {"actions.py"}
 
     def visit(name, ancestors):
         assert name not in ancestors, f"Runtime import cycle: {(*ancestors, name)}"
