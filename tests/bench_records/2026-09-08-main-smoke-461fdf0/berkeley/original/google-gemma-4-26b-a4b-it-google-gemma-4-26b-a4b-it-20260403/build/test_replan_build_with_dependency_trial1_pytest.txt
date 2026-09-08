@@ -1,0 +1,48 @@
+Pytest failure diagnostics (bounded stream tails)
+
+stdout (11294 earlier characters omitted):
+ite: /tmp/pytest-of-runner/pytest-0/test_replan_build_with_depende0/main.c
+[08:39:36]   [8] skip (duplicate write, same content)
+[08:39:36]   Task failed, will replan. (30.9s)
+[08:39:36] Exhausted 3 replan attempts. (182.0s total)
+[08:39:36] Errors: []
+[08:39:36] Output in: /tmp/pytest-of-runner/pytest-0/test_replan_build_with_depende0
+FAILED
+
+=================================== FAILURES ===================================
+_____________ TestOpenRouterHard.test_replan_build_with_dependency _____________
+
+self = <test_agent_integration.TestOpenRouterHard object at 0x7fd1e7057ad0>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_replan_build_with_depende0')
+
+    def test_replan_build_with_dependency(self, tmp_path):
+        result = or_run(
+            f"In {tmp_path}: compile and run a C program. "
+            f"The program main.c should '#include \"msg.h\"' and call 'printf(\"%s\\n\", MSG);'. "
+            f"The header msg.h should '#define MSG \"REPLAN_OK\"'. "
+            f"Compile with 'cc -o {tmp_path}/main {tmp_path}/main.c', then run {tmp_path}/main.",
+            str(tmp_path),
+            max_replans=HARD_MAX_REPLANS,
+            max_tasks=HARD_MAX_TASKS,
+            max_steps=HARD_MAX_STEPS,
+        )
+        assert_file(tmp_path / "main.c", "msg.h")
+        assert_file(tmp_path / "msg.h", "REPLAN_OK")
+>       assert result["status"] == "complete", f"Agent failed. Errors: {result['state']['errors']}"
+E       AssertionError: Agent failed. Errors: []
+E       assert 'exhausted' == 'complete'
+E         
+E         - complete
+E         + exhausted
+
+tests/test_agent_integration.py:343: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agent_integration.py::TestOpenRouterHard::test_replan_build_with_dependency - AssertionError: Agent failed. Errors: []
+assert 'exhausted' == 'complete'
+  
+  - complete
+  + exhausted
+================= 1 failed, 28 deselected in 182.10s (0:03:02) =================
+
+stderr:
+(empty)

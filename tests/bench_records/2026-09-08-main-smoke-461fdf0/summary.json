@@ -1,0 +1,397 @@
+{
+  "schema": "askme-automatic-hosted-smoke-audit-v1",
+  "scope": "The easy openrouter-smoke job only; Berkeley advisory cells are retained separately under berkeley/.",
+  "classification": "Observed bounded noncompletion under an unpinned hosted route; no demonstrated runtime regression or infrastructure failure.",
+  "evidence_kind": "Automatic post-merge hosted smoke; retrospective preservation, not a newly registered capability experiment or local performance result.",
+  "source": {
+    "repository": "den-run-ai/askme",
+    "revision": "461fdf01e8f644cc5dddad2eee77008c11447448",
+    "reviewed_revision": "d2b9c68054f5ebddcdcfa5de82e3dba40d29934b",
+    "identical_git_tree": "dbb7a80ef2c3a73ad6d0f0b698b2a4515ec40abb",
+    "run_id": 34205396477,
+    "job_id": 101993600037,
+    "artifact_id": 10047577233,
+    "run_url": "https://github.com/den-run-ai/askme/actions/runs/34205396477",
+    "job_url": "https://github.com/den-run-ai/askme/actions/runs/34205396477/job/101993600037",
+    "artifact_url": "https://api.github.com/repos/den-run-ai/askme/actions/artifacts/10047577233",
+    "artifact_name": "openrouter-smoke-logs",
+    "artifact_zip_bytes": 4080,
+    "artifact_zip_sha256": "e78ecf5036da8dd9e114ea78b03b63029e5d14656c18f701ef68843be3f0a23c",
+    "artifact_created_at": "2026-09-08T08:37:53Z",
+    "artifact_expires_at": "2026-09-22T08:37:52Z",
+    "retained_jsonl": "smoke-google-gemma-4-26b-a4b-it.jsonl",
+    "retained_jsonl_bytes": 41354,
+    "retained_jsonl_sha256": "0c8974c1593041aee290441ca83a2f3c94aa51fe23fce8304d2233f90c0cf513",
+    "retention": "Original sole JSONL member bytes retained; archive, raw job log and workflow headers not copied."
+  },
+  "pytest": {
+    "source": "GitHub job log",
+    "failed": 1,
+    "passed": 2,
+    "deselected": 26,
+    "selected": 3,
+    "wall_s": 76.88,
+    "failure_assertion": "Agent failed. Errors: []"
+  },
+  "shared_config": {
+    "backend": "openrouter",
+    "api": "https://openrouter.ai/api/v1/chat/completions",
+    "model": "google/gemma-4-26b-a4b-it",
+    "capability_profile": {
+      "name": "generic-feature-scale-v1",
+      "step_tokens": 4096,
+      "step_write_tokens": 8192,
+      "planner_max_tokens": 768,
+      "task_replan_max_tokens": 96,
+      "final_validation_max_tokens": 768,
+      "reasoning_token_floors": {
+        "low": 1024,
+        "medium": 1536,
+        "high": 2048
+      },
+      "context_window": null,
+      "server_slots": null
+    },
+    "action_transport": "tools",
+    "provider": "",
+    "reasoning_effort": "",
+    "allow_provider_fallbacks": true,
+    "require_provider_parameters": false,
+    "timeout_s": 120,
+    "timeouts_s": {
+      "planner_initial": 120,
+      "planner_replan": 180,
+      "executor": 120,
+      "task_replan": 120,
+      "final_validation": 120
+    },
+    "retry_budgets": {
+      "planner": 2,
+      "executor": 2,
+      "task_replan": 0,
+      "final_validation": 0
+    },
+    "llm_provenance": "pinned_config",
+    "policy": {
+      "allow_system_installs": false,
+      "allow_network": true
+    },
+    "reasoning_policy": "gated",
+    "final_validate": "0",
+    "compile_repair": true,
+    "step_policy": "heuristic",
+    "guards": {
+      "write_pressure_observations": 3,
+      "observe_tail_reserve": 3,
+      "rewrite_pressure_writes": 2,
+      "rewrite_skip_writes": 3,
+      "max_task_local_replans": 1
+    },
+    "budgets": {
+      "step_tokens": 4096,
+      "step_write_tokens": 8192,
+      "planner_max_tokens": 768,
+      "task_replan_max_tokens": 96,
+      "final_validation_max_tokens": 768,
+      "llm_max_retries": 2,
+      "reasoning_token_floors": {
+        "low": 1024,
+        "medium": 1536,
+        "high": 2048
+      }
+    },
+    "limits": {
+      "max_replans": 2,
+      "max_tasks": 3,
+      "max_steps": 5,
+      "goal_context_chars": 300
+    },
+    "config_hash": "aaecbb735bf27043"
+  },
+  "aggregate": {
+    "jsonl_rows": 132,
+    "recorded_responses": 40,
+    "api_cost_usd": "0.004733180",
+    "cost_source": "Sum of observed tokens.openrouter_cost, not an account-balance reconciliation.",
+    "prompt_tokens": 35792,
+    "completion_tokens": 3632,
+    "total_tokens": 39424,
+    "responses_with_usage": 40,
+    "responses_with_cost": 40,
+    "finish_reasons": {
+      "stop": 7,
+      "tool_calls": 33
+    },
+    "request_attempt_indices": {
+      "0": 40
+    },
+    "providers": {
+      "Cloudflare": 33,
+      "Darkbloom": 2,
+      "DeepInfra": 1,
+      "Google": 1,
+      "NextBit": 2,
+      "Parasail": 1
+    },
+    "served_models": {
+      "google/gemma-4-26b-a4b-it-20260403": 40
+    },
+    "event_counts": {
+      "plan": 4,
+      "reasoning_decision": 40,
+      "run_end": 3,
+      "run_start": 3,
+      "step": 18,
+      "step_control": 4,
+      "step_skipped": 11,
+      "task_complete": 4,
+      "task_failed": 2,
+      "task_local_replan": 3,
+      "tokens": 40
+    }
+  },
+  "cases": [
+    {
+      "node_id": "tests/test_agent_integration.py::TestOpenRouterEasy::test_create_and_read_file",
+      "pytest_outcome": "failed",
+      "start_utc": "2026-09-08T08:36:35.095Z",
+      "end_utc": "2026-09-08T08:37:06.844Z",
+      "jsonl_rows": 46,
+      "recorded_responses": 14,
+      "api_cost_usd": "0.001700724",
+      "cost_source": "Sum of observed tokens.openrouter_cost, not an account-balance reconciliation.",
+      "prompt_tokens": 11448,
+      "completion_tokens": 1697,
+      "total_tokens": 13145,
+      "responses_with_usage": 14,
+      "responses_with_cost": 14,
+      "finish_reasons": {
+        "stop": 4,
+        "tool_calls": 10
+      },
+      "request_attempt_indices": {
+        "0": 14
+      },
+      "providers": {
+        "Cloudflare": 10,
+        "Darkbloom": 1,
+        "DeepInfra": 1,
+        "NextBit": 2
+      },
+      "served_models": {
+        "google/gemma-4-26b-a4b-it-20260403": 14
+      },
+      "event_counts": {
+        "plan": 2,
+        "reasoning_decision": 14,
+        "run_end": 1,
+        "run_start": 1,
+        "step": 5,
+        "step_skipped": 5,
+        "task_failed": 2,
+        "task_local_replan": 2,
+        "tokens": 14
+      },
+      "run_end": {
+        "status": "exhausted",
+        "replans": 2,
+        "wall_s": 31.75,
+        "errors": [],
+        "steps": {
+          "selected": 10,
+          "executed": 5,
+          "skipped": 5
+        }
+      },
+      "successful_action_counts": {
+        "shell": 2,
+        "write": 3
+      },
+      "failed_action_count": 0,
+      "skipped_action_reasons": {
+        "duplicate_write": 5
+      },
+      "controller_action_counts": {},
+      "completed_task_events": 0,
+      "task_local_replans": [
+        {
+          "task_index": 0,
+          "accepted": false,
+          "reject_reason": "passive_downgrade"
+        },
+        {
+          "task_index": 0,
+          "accepted": false,
+          "reject_reason": "passive_downgrade"
+        }
+      ]
+    },
+    {
+      "node_id": "tests/test_agent_integration.py::TestOpenRouterEasy::test_shell_and_write",
+      "pytest_outcome": "passed",
+      "start_utc": "2026-09-08T08:37:06.878Z",
+      "end_utc": "2026-09-08T08:37:16.306Z",
+      "jsonl_rows": 21,
+      "recorded_responses": 6,
+      "api_cost_usd": "0.000680640",
+      "cost_source": "Sum of observed tokens.openrouter_cost, not an account-balance reconciliation.",
+      "prompt_tokens": 5513,
+      "completion_tokens": 382,
+      "total_tokens": 5895,
+      "responses_with_usage": 6,
+      "responses_with_cost": 6,
+      "finish_reasons": {
+        "stop": 1,
+        "tool_calls": 5
+      },
+      "request_attempt_indices": {
+        "0": 6
+      },
+      "providers": {
+        "Cloudflare": 5,
+        "Parasail": 1
+      },
+      "served_models": {
+        "google/gemma-4-26b-a4b-it-20260403": 6
+      },
+      "event_counts": {
+        "plan": 1,
+        "reasoning_decision": 6,
+        "run_end": 1,
+        "run_start": 1,
+        "step": 3,
+        "step_control": 1,
+        "step_skipped": 1,
+        "task_complete": 1,
+        "tokens": 6
+      },
+      "run_end": {
+        "status": "complete",
+        "replans": 0,
+        "wall_s": 9.43,
+        "completed_tasks": 1,
+        "steps": {
+          "selected": 5,
+          "executed": 3,
+          "skipped": 1
+        }
+      },
+      "successful_action_counts": {
+        "shell": 3
+      },
+      "failed_action_count": 0,
+      "skipped_action_reasons": {
+        "duplicate_shell": 1
+      },
+      "controller_action_counts": {
+        "done": 1
+      },
+      "completed_task_events": 1,
+      "task_local_replans": []
+    },
+    {
+      "node_id": "tests/test_agent_integration.py::TestOpenRouterEasy::test_multi_step_build",
+      "pytest_outcome": "passed",
+      "start_utc": "2026-09-08T08:37:16.308Z",
+      "end_utc": "2026-09-08T08:37:51.839Z",
+      "jsonl_rows": 65,
+      "recorded_responses": 20,
+      "api_cost_usd": "0.002351816",
+      "cost_source": "Sum of observed tokens.openrouter_cost, not an account-balance reconciliation.",
+      "prompt_tokens": 18831,
+      "completion_tokens": 1553,
+      "total_tokens": 20384,
+      "responses_with_usage": 20,
+      "responses_with_cost": 20,
+      "finish_reasons": {
+        "stop": 2,
+        "tool_calls": 18
+      },
+      "request_attempt_indices": {
+        "0": 20
+      },
+      "providers": {
+        "Cloudflare": 18,
+        "Darkbloom": 1,
+        "Google": 1
+      },
+      "served_models": {
+        "google/gemma-4-26b-a4b-it-20260403": 20
+      },
+      "event_counts": {
+        "plan": 1,
+        "reasoning_decision": 20,
+        "run_end": 1,
+        "run_start": 1,
+        "step": 10,
+        "step_control": 3,
+        "step_skipped": 5,
+        "task_complete": 3,
+        "task_local_replan": 1,
+        "tokens": 20
+      },
+      "run_end": {
+        "status": "complete",
+        "replans": 0,
+        "wall_s": 35.53,
+        "completed_tasks": 3,
+        "steps": {
+          "selected": 18,
+          "executed": 10,
+          "skipped": 5
+        }
+      },
+      "successful_action_counts": {
+        "shell": 8,
+        "write": 2
+      },
+      "failed_action_count": 0,
+      "skipped_action_reasons": {
+        "duplicate_shell": 2,
+        "duplicate_write": 3
+      },
+      "controller_action_counts": {
+        "done": 3
+      },
+      "completed_task_events": 3,
+      "task_local_replans": [
+        {
+          "task_index": 0,
+          "accepted": true,
+          "reject_reason": null
+        }
+      ]
+    }
+  ],
+  "failed_case_analysis": {
+    "classification": "step_budget_exhaustion",
+    "phase": "First task in each of two full-plan attempts; second read/verify task never entered.",
+    "selected_actions": 10,
+    "executed_actions": 5,
+    "skipped_actions": 5,
+    "successful_writes": 3,
+    "successful_shells": 2,
+    "duplicate_write_skips": 5,
+    "selected_read_actions": 0,
+    "selected_done_actions": 0,
+    "task_local_replan_rejections": 2,
+    "rejection_reason": "passive_downgrade",
+    "recorded_errors": [],
+    "completion_assertion_passed": false,
+    "subsequent_file_assertion_reached": false,
+    "no_api_retry_observed": true,
+    "no_http_timeout_parse_or_action_error_observed": true,
+    "native_retry_budget_fix_exercised": false,
+    "interpretation": "Successful individual actions do not establish task completion. The controller correctly reported exhaustion without manufacturing an action error or false success."
+  },
+  "limitations": [
+    "No full HTTP request/response payloads, raw write content, or final workspace retained; an exact response replay and final-file-content assertion are unavailable.",
+    "Some logged action arguments are prefix-truncated. Do not reconstruct missing commands or write payloads.",
+    "The failed test stopped at its completion assertion before asserting hello.txt content.",
+    "Providers were unpinned; logged configuration allowed fallbacks, but the empty provider name caused the HTTP provider block to be omitted. Model ID alone does not establish a matched provider/quantization/control.",
+    "One automatic smoke run cannot estimate stochastic reliability or isolate the cause of noncompletion, a provider effect, or a refactor effect.",
+    "All recorded response costs and usage were present; the sum is API telemetry, not a reconciled account charge.",
+    "Two passing smoke cases are bounded checks, not a benchmark score or evidence of general capability.",
+    "No paid rerun, new model call, synthetic raw-content reconstruction, or gate change was performed for this audit."
+  ]
+}

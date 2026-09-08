@@ -15,7 +15,8 @@ AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
 entry point remains `python3 askme.py`; the runtime is split between `askme.py`
 (CLI, environment/configuration wiring, compatibility facade), `loop.py`
-(planning, run state, controller sequencing, recording), `llm.py` (provider
+(planning, run configuration and controller sequencing), `state.py` (shared
+run state and the single step recorder), `llm.py` (provider
 settings, client, response codecs), `policies.py` (step, write-obligation and
 completion decisions), and `actions.py` (action registry,
 handlers, typed results/receipts), and its longest functions should keep shrinking.
@@ -45,10 +46,16 @@ Start with:
   and re-exports, the public structured `run_result(...)` API, and the
   compatibility `run(...) -> bool`, `ask_llm(...)` and `execute(...)` APIs
 - `loop.py` — planner/executor sequencing, controller-owned `done`/`fail`,
-  one step recorder and shared run state, prompt builders, recovery proposals,
+  prompt builders, recovery proposals,
   immutable `RunConfig`/injectable `RunDependencies`, and workspace ownership.
   Explicit defaults and collaborators enter from the facade; no back-imports
   or module-global rebinding may replace that boundary.
+- `state.py` — `RunState`, the single `StepRecorder`, and `RunProgress` typed
+  access over one live compatibility dictionary and history, not mirrored
+  storage. `PendingWrite` projects newly created obligations into the existing
+  dictionary; legacy records retain their shape. This leaf imports only action
+  records and the standard library; it does not own policy decisions. `loop`
+  re-exports `RunState` and `StepRecorder` for existing imports and facade adapters.
 - `llm.py` — immutable provider settings, request/response codecs, transport,
   retry policy, and the injectable client; never imports the CLI facade or
   loads `.env`. `askme` adapts legacy call-time configuration and re-exports
@@ -57,9 +64,12 @@ Start with:
   `ActionExecutor`, workspace-path/output policies, error classification, and the
   typed `ActionResult`/`StepReceipt` structures
 - `policies.py` — selectable step strategies, run-wide incomplete-write
-  obligations, validation state and terminal decisions. Model validation and
-  legacy call-time timeout defaults enter through explicit callbacks; this
-  module imports neither the CLI facade nor the provider client.
+  obligations, validation state and terminal decisions. Explicit step,
+  write-obligation and completion contexts expose live inputs and narrow
+  callbacks; legacy controller-shaped constructors remain adapters. Model
+  validation and legacy call-time timeout defaults enter through callbacks;
+  this module imports shared state access and actions, neither the CLI facade
+  nor the provider client.
 - `tests/test_agent_*.py` — deterministic unit and action/controller regression tests
 - `tests/test_agent_integration.py` — local and OpenRouter integration suites
 - `tests/workflow_eval.py`, `tests/test_workflow_*.py`, `tests/workflows/` — native

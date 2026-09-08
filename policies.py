@@ -1,16 +1,17 @@
 """Step, write-obligation and completion policies for one AskMe run.
 
-Policy algorithms own their state and consume the controller's explicit
-collaborators. Model calls remain injected; importing this module does not load
+Policy algorithms own their decisions and consume explicit progress views and
+services. Model calls remain injected; importing this module does not load
 configuration, credentials, the CLI or the provider client. Completion claims,
 validation verdicts and terminal records remain separate evidence.
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 
 from actions import (
     OBSERVE_ACTIONS,
@@ -22,6 +23,7 @@ from actions import (
     _target_recovery_arg,
     _valid_nonempty_str,
 )
+from state import PendingWrite, RunProgress
 
 _VALIDATE_KEYWORDS = re.compile(
     r"\b(compile|build|test|run|execute|fix|debug|repair|verify|install|server|api|script|program)\b",
@@ -197,6 +199,11 @@ def _incomplete_write_visibility(all_steps, pending_empty_writes=None):
 
 
 def _completion_blocker(state, working_dir):
+    """Compatibility mapping boundary for the canonical typed completion gate."""
+    return _progress_completion_blocker(RunProgress(state), working_dir)
+
+
+def _progress_completion_blocker(progress: RunProgress, working_dir):
     """Single finish-eligibility gate for incomplete-write obligations (#31).
 
     Both completion sites — the executor's ``done`` claim and post-task
@@ -208,8 +215,8 @@ def _completion_blocker(state, working_dir):
     restrictive pending overwrite first, then the newest unresolved truncated
     write, then any remaining pending obligation.
     """
-    unresolved = _unresolved_incomplete_writes(state.get("all_steps", []), working_dir)
-    pending = state.get("pending_empty_writes", {})
+    unresolved = _unresolved_incomplete_writes(progress.optional_all_steps, working_dir)
+    pending = progress.optional_pending_empty_writes
     if not unresolved and not pending:
         return None
     restrictive = _restrictive_pending_empty(pending)
@@ -333,6 +340,15 @@ def _read_continuation_hint(continuation):
 
 
 def _should_validate(replan, history, state, user_prompt, final_validate=None):
+    """Compatibility mapping boundary for the shared validation decision."""
+    return _progress_should_validate(
+        replan, history, RunProgress(state), user_prompt, final_validate=final_validate
+    )
+
+
+def _progress_should_validate(
+    replan, history, progress: RunProgress, user_prompt, final_validate=None
+):
     """Decide whether to run final validation. Returns True if validation should run.
 
     ``final_validate`` is the run's resolved mode (issue #68). Direct
@@ -348,7 +364,7 @@ def _should_validate(replan, history, state, user_prompt, final_validate=None):
     # Any failed steps in history
     if any(e.get("event") == "step" and not e.get("result", {}).get("ok", True) for e in history):
         return True
-    completed = state.get("completed_tasks", [])
+    completed = progress.optional_completed_tasks
     if len(completed) >= 3:
         return True
     # Count total steps
@@ -368,6 +384,68 @@ def _has_new_validation_evidence(state):
     )
 
 
+class _PolicyRecorder(Protocol):
+    """Only the normal recorder's corrective-note and skipped-step surfaces."""
+
+    def skip(
+        self, task_index: int, step: int, act: str, action: Mapping[str, Any], reason: str
+    ) -> None: ...
+
+    def note(self, entry: dict[str, Any]) -> None: ...
+
+
+class _RewritePressure(Protocol):
+    """Run-wide rewrite pressure, independent of clocks, logging and run setup."""
+
+    @property
+    def consecutive_target_writes(self) -> int: ...
+
+    def validate_pressure_target(self) -> str | None: ...
+
+    def rewrite_skip_armed(self, target: str | None) -> bool: ...
+
+    def disarm_rewrite_damping(self) -> None: ...
+
+    def note_successful_full_write(self, target: str | None) -> None: ...
+
+    def break_rewrite_streak(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class _PolicyServices:
+    """Live data/recording access shared by step and write-obligation policies.
+
+    Getters do not capture mappings or bound recorder methods. A callback may
+    replace a compatibility collaborator before the next operation uses it.
+    """
+
+    progress: Callable[[], RunProgress]
+    working_dir: Callable[[], str]
+    recorder: Callable[[], _PolicyRecorder]
+    emit: Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class StepPolicyContext(_PolicyServices):
+    """Explicit collaborators for the selectable step-policy algorithms."""
+
+    max_steps: Callable[[], int]
+    observe_tail_reserve: Callable[[], int]
+    rewrite: Callable[[], _RewritePressure]
+    shell_timeout: Callable[[str], int]
+    timeout_bounds: Callable[[], tuple[int, int]]
+
+
+@dataclass(frozen=True)
+class WriteObligationContext(_PolicyServices):
+    """Shared incomplete-write services; no dispatch or terminal authority."""
+
+    disarm_rewrite: Callable[[], None]
+
+
+_StepPolicyType = TypeVar("_StepPolicyType", bound="StepPolicy")
+
+
 class StepPolicy:
     """Pluggable step/completion-pressure policy for one run (issue #31).
 
@@ -384,6 +462,7 @@ class StepPolicy:
     name = "base"
 
     def __init__(self, controller, *, shell_timeout=None, timeout_bounds=None):
+        """Legacy constructor; controller-free users compose ``from_context``."""
         self.controller = controller
         self._shell_timeout = _get_shell_timeout if shell_timeout is None else shell_timeout
         self._timeout_bounds = (
@@ -391,6 +470,39 @@ class StepPolicy:
             if timeout_bounds is None
             else timeout_bounds
         )
+        self._bind_context(self._legacy_context(lambda: self.controller))
+        self._uses_legacy_owner = True
+
+    def _legacy_context(self, owner) -> StepPolicyContext:
+        """One adapter for live owner lookup or a method-local captured owner."""
+        return StepPolicyContext(
+            progress=lambda: RunProgress(owner().state),
+            working_dir=lambda: owner().working_dir,
+            recorder=lambda: owner().recorder,
+            emit=lambda message: owner()._emit(message),
+            max_steps=lambda: owner().max_steps,
+            observe_tail_reserve=lambda: owner().guards.observe_tail_reserve,
+            rewrite=lambda: owner().run_state,
+            shell_timeout=lambda command: self._shell_timeout(command),
+            timeout_bounds=lambda: self._timeout_bounds(),
+        )
+
+    @classmethod
+    def from_context(cls: type[_StepPolicyType], context: StepPolicyContext) -> _StepPolicyType:
+        policy = cls.__new__(cls)
+        policy._bind_context(context)
+        return policy
+
+    def _bind_context(self, context: StepPolicyContext):
+        self._context = context
+        self._uses_legacy_owner = False
+
+    def _capture_context(self) -> StepPolicyContext:
+        """Match only legacy methods that selected their controller at entry."""
+        if not self._uses_legacy_owner:
+            return self._context
+        owner = self.controller
+        return self._legacy_context(lambda: owner)
 
     def write_pressure(self, attempt):
         """True when the executor prompt must demand a committing action."""
@@ -420,9 +532,9 @@ class StepPolicy:
         stuck repeats are suppressed or reported, never converted into
         completion. One implementation serves every arm; an arm may override
         only to tighten it."""
-        controller = self.controller
+        context = self._capture_context()
         action, act = ctx.action, ctx.act
-        last = controller.state["last_steps"][-1:] if controller.state["last_steps"] else []
+        last = context.progress().last_steps[-1:] if context.progress().last_steps else []
         if not last or last[0]["action"] != act:
             return None
         prev = last[0]
@@ -433,10 +545,10 @@ class StepPolicy:
             }
             if act == "write" and action.get("append"):
                 current_target_step["append"] = True
-            current_target = _mutation_target_key(current_target_step, controller.working_dir)
+            current_target = _mutation_target_key(current_target_step, context.working_dir())
             same_mutation_target = (
                 current_target is not None
-                and _mutation_target_key(prev, controller.working_dir) == current_target
+                and _mutation_target_key(prev, context.working_dir()) == current_target
             )
         if act in ("write", "edit") and same_mutation_target:
             # write: same content = duplicate; edit: same find+replace = duplicate
@@ -445,13 +557,13 @@ class StepPolicy:
                 # Chunked append is never a no-op — an identical consecutive
                 # chunk is a stuck loop, not a duplicate.
                 if prev.get("_append") and prev.get("_content", "") == action.get("content", ""):
-                    controller._emit(
+                    context.emit(
                         f"  [{ctx.step + 1}] auto-fail (same chunk appended twice to {action.get('arg', '')[:40]})"
                     )
-                    controller.state["errors"].append(
+                    context.progress().errors.append(
                         f"[stuck_loop] write {action.get('arg', '')[:60]}: same chunk appended twice"
                     )
-                    controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_append")
+                    context.recorder().skip(ctx.task_index, ctx.step, act, action, "stuck_append")
                     return _StepFlow.END_ATTEMPT
             elif (
                 act == "write"
@@ -475,18 +587,18 @@ class StepPolicy:
                 and not prev.get("ok")
                 and prev.get("_find", "") == action.get("find", "")
             ):
-                controller._emit(
+                context.emit(
                     f"  [{ctx.step + 1}] auto-fail (same edit failed twice on {action.get('arg', '')[:40]})"
                 )
-                controller.state["errors"].append(
+                context.progress().errors.append(
                     f"[stuck_loop] edit {action.get('arg', '')[:60]}: same find string failed twice"
                 )
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_edit")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, "stuck_edit")
                 return _StepFlow.END_ATTEMPT
             if is_dup:
                 attempt.dup_skip_count += 1
-                controller._emit(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
+                context.emit(f"  [{ctx.step + 1}] skip (duplicate {act}, same content)")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, f"duplicate_{act}")
                 if prev.get("_truncated_write"):
                     dup_msg = (
                         "File is incomplete — the earlier write was truncated. "
@@ -508,7 +620,7 @@ class StepPolicy:
                 elif act == "edit":
                     entry["_find"] = action.get("find", "")
                     entry["_replace"] = action.get("replace", "")
-                controller.recorder.note(entry)
+                context.recorder().note(entry)
                 # Defer thinking escalation: first duplicate skip gets a
                 # corrective observation only; escalate on 2+ consecutive skips.
                 # Saves ~10s of thinking time on harmless first-time duplicates.
@@ -534,19 +646,19 @@ class StepPolicy:
                 # still requires an explicit done.
                 attempt.dup_skip_count += 1
                 if attempt.dup_skip_count >= 2:
-                    controller._emit(
+                    context.emit(
                         f"  [{ctx.step + 1}] auto-fail (same successful shell repeated on {action.get('arg', '')[:40]})"
                     )
-                    controller.state["errors"].append(
+                    context.progress().errors.append(
                         f"[stuck_loop] shell {action.get('arg', '')[:60]}: same successful command repeated"
                     )
-                    controller.recorder.skip(
+                    context.recorder().skip(
                         ctx.task_index, ctx.step, act, action, "stuck_shell_repeat"
                     )
                     return _StepFlow.END_ATTEMPT
-                controller._emit(f"  [{ctx.step + 1}] skip (duplicate successful shell)")
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_shell")
-                controller.recorder.note(
+                context.emit(f"  [{ctx.step + 1}] skip (duplicate successful shell)")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, "duplicate_shell")
+                context.recorder().note(
                     {
                         "action": act,
                         "arg": action.get("arg", ""),
@@ -561,20 +673,18 @@ class StepPolicy:
             elif prev.get("error_type") == "timeout":
                 # Bump timeout for retry: read actual timeout from previous step,
                 # not from fresh action (which won't have prior bumps)
-                prev_timeout = prev.get("_timeout", self._shell_timeout(action.get("arg", "")))
-                timeout_long, timeout_max = self._timeout_bounds()
+                prev_timeout = prev.get("_timeout", context.shell_timeout(action.get("arg", "")))
+                timeout_long, timeout_max = context.timeout_bounds()
                 bumped = max(timeout_long, prev_timeout * 2)
                 action = action.with_updates(timeout=min(bumped, timeout_max))
                 ctx.action = action
-                controller._emit(
-                    f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)"
-                )
+                context.emit(f"  [{ctx.step + 1}] retrying after timeout ({action['timeout']}s)")
             else:
-                controller._emit(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
-                controller.state["errors"].append(
+                context.emit(f"  [{ctx.step + 1}] auto-fail (same shell failed twice)")
+                context.progress().errors.append(
                     f"Stuck: {act} {action.get('arg', '')[:60]} failed twice"
                 )
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_shell")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, "stuck_shell")
                 return _StepFlow.END_ATTEMPT
         elif act == "read" and prev.get("arg", "") == action.get("arg", ""):
             # Range-aware: new line windows and exact cursor continuations
@@ -586,16 +696,16 @@ class StepPolicy:
             elif prev.get("ok"):
                 attempt.dup_skip_count += 1
                 if attempt.dup_skip_count >= 2:
-                    controller._emit(
+                    context.emit(
                         f"  [{ctx.step + 1}] auto-fail (same read repeated on {action.get('arg', '')[:40]})"
                     )
-                    controller.state["errors"].append(
+                    context.progress().errors.append(
                         f"[stuck_loop] read {action.get('arg', '')[:60]}: same file read repeatedly"
                     )
-                    controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read")
+                    context.recorder().skip(ctx.task_index, ctx.step, act, action, "stuck_read")
                     return _StepFlow.END_ATTEMPT
-                controller._emit(f"  [{ctx.step + 1}] skip (duplicate read)")
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
+                context.emit(f"  [{ctx.step + 1}] skip (duplicate read)")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, "duplicate_read")
                 cont = prev.get("_continuation")
                 if cont:
                     obs = (
@@ -614,14 +724,14 @@ class StepPolicy:
                 }
                 if cont:
                     entry["_continuation"] = cont
-                controller.recorder.note(entry)
+                context.recorder().note(entry)
                 return _StepFlow.NEXT_STEP
             else:
-                controller._emit(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
-                controller.state["errors"].append(
+                context.emit(f"  [{ctx.step + 1}] auto-fail (same read failed twice)")
+                context.progress().errors.append(
                     f"[stuck_loop] read {action.get('arg', '')[:60]} failed twice"
                 )
-                controller.recorder.skip(ctx.task_index, ctx.step, act, action, "stuck_read_failed")
+                context.recorder().skip(ctx.task_index, ctx.step, act, action, "stuck_read_failed")
                 return _StepFlow.END_ATTEMPT
         return None
 
@@ -651,7 +761,7 @@ class HeuristicStepPolicy(StepPolicy):
         return attempt.write_pressure()
 
     def validate_pressure(self, attempt):
-        return self.controller.run_state.validate_pressure_target()
+        return self._context.rewrite().validate_pressure_target()
 
     def guard_action(self, ctx, attempt):
         flow = self._observe_tail_guard(ctx, attempt)
@@ -661,35 +771,35 @@ class HeuristicStepPolicy(StepPolicy):
 
     def _observe_tail_guard(self, ctx, attempt):
         """Reserve the final steps of a write-shaped task for commitment."""
-        controller = self.controller
+        context = self._capture_context()
         # Write-forcing tail reserve (issue #15): on a write-shaped task the
         # final steps are reserved for committing actions.
         if not (
             ctx.act in OBSERVE_ACTIONS
             and attempt.wants_write
             and attempt.commit_executed == 0
-            and controller.max_steps - ctx.step <= controller.guards.observe_tail_reserve
+            and context.max_steps() - ctx.step <= context.observe_tail_reserve()
         ):
             return None
         attempt.observe_blocked += 1
         if attempt.observe_blocked >= 2:
-            controller._emit(
+            context.emit(
                 f"  [{ctx.step + 1}] auto-fail (observation steps exhausted without a write)"
             )
-            controller.state["errors"].append(
+            context.progress().errors.append(
                 f"[stuck_loop] {ctx.act} {ctx.action.get('arg', '')[:60]}: observation steps exhausted without a write"
             )
-            controller.recorder.skip(
+            context.recorder().skip(
                 ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_exhausted"
             )
             return _StepFlow.END_ATTEMPT
-        controller._emit(
+        context.emit(
             f"  [{ctx.step + 1}] skip ({ctx.act} blocked: remaining steps reserved for write)"
         )
-        controller.recorder.skip(
+        context.recorder().skip(
             ctx.task_index, ctx.step, ctx.act, ctx.action, "observe_tail_reserved"
         )
-        controller.recorder.note(
+        context.recorder().note(
             {
                 "action": ctx.act,
                 "arg": ctx.action.get("arg", ""),
@@ -701,7 +811,7 @@ class HeuristicStepPolicy(StepPolicy):
 
     def _rewrite_loop_guard(self, ctx, attempt):
         """Skip a same-target full rewrite once the streak is armed."""
-        controller = self.controller
+        context = self._capture_context()
         # Rewrite damping (revision 4): after rewrite_skip_writes successful
         # full writes of the same target with no intervening successful
         # shell/edit, further full rewrites are skipped — verify, edit, or
@@ -710,23 +820,23 @@ class HeuristicStepPolicy(StepPolicy):
             ctx.act == "write"
             and not ctx.action.get("append")
             and not ctx.truncated_write
-            and controller.run_state.rewrite_skip_armed(ctx.logical_write_target)
+            and context.rewrite().rewrite_skip_armed(ctx.logical_write_target)
         ):
             return None
         attempt.dup_skip_count += 1
-        controller._emit(
+        context.emit(
             f"  [{ctx.step + 1}] skip (rewrite loop: "
             f"{ctx.action.get('arg', '')[:40]} already written "
-            f"{controller.run_state.consecutive_target_writes}x)"
+            f"{context.rewrite().consecutive_target_writes}x)"
         )
-        controller.recorder.skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "rewrite_loop")
-        controller.recorder.note(
+        context.recorder().skip(ctx.task_index, ctx.step, ctx.act, ctx.action, "rewrite_loop")
+        context.recorder().note(
             {
                 "action": ctx.act,
                 "arg": ctx.action.get("arg", ""),
                 "ok": True,
                 "output": (
-                    f"Already written {controller.run_state.consecutive_target_writes} times. "
+                    f"Already written {context.rewrite().consecutive_target_writes} times. "
                     "Do NOT write it again — verify with shell, make a "
                     "targeted edit, or emit done."
                 ),
@@ -735,7 +845,7 @@ class HeuristicStepPolicy(StepPolicy):
         return _StepFlow.NEXT_STEP
 
     def note_result(self, ctx, attempt, result):
-        run_state = self.controller.run_state
+        run_state = self._context.rewrite()
         if ctx.act == "write" and result.ok:
             if ctx.truncated_write:
                 # A partial (truncated) write is not a completed rewrite
@@ -755,7 +865,7 @@ class HeuristicStepPolicy(StepPolicy):
     def note_deterministic_repair(self, target):
         # The deterministic source fix is a successful targeted repair, so
         # it breaks an armed rewrite streak just like a model-selected edit.
-        self.controller.run_state.break_rewrite_streak()
+        self._context.rewrite().break_rewrite_streak()
 
 
 class LifecycleStepPolicy(StepPolicy):
@@ -784,8 +894,8 @@ class LifecycleStepPolicy(StepPolicy):
 
     name = "lifecycle"
 
-    def __init__(self, controller, *, shell_timeout=None, timeout_bounds=None):
-        super().__init__(controller, shell_timeout=shell_timeout, timeout_bounds=timeout_bounds)
+    def _bind_context(self, context: StepPolicyContext):
+        super()._bind_context(context)
         self.needs_verification = False
         self.unverified_target = None
 
@@ -794,23 +904,23 @@ class LifecycleStepPolicy(StepPolicy):
 
     def _target_has_open_obligation(self, target):
         """True while incomplete-write recovery legitimately rewrites it."""
-        state = self.controller.state
-        if target in state.get("pending_empty_writes", {}):
+        progress = self._context.progress()
+        if target in progress.optional_pending_empty_writes:
             return True
         return target in _unresolved_incomplete_writes(
-            state.get("all_steps", []), self.controller.working_dir
+            progress.optional_all_steps, self._context.working_dir()
         )
 
     def guard_done(self, ctx, attempt):
         if not self.needs_verification:
             return None
-        controller = self.controller
+        context = self._capture_context()
         name = Path(str(self.unverified_target or "file")).name
-        controller._emit(f"  [{ctx.step + 1}] skip (done before verifying {name})")
-        controller.recorder.skip(
+        context.emit(f"  [{ctx.step + 1}] skip (done before verifying {name})")
+        context.recorder().skip(
             ctx.task_index, ctx.step, ctx.act, ctx.action, "lifecycle_unverified_done"
         )
-        controller.recorder.note(
+        context.recorder().note(
             {
                 "action": "done",
                 "arg": "",
@@ -833,14 +943,14 @@ class LifecycleStepPolicy(StepPolicy):
             and not self._target_has_open_obligation(ctx.logical_write_target)
         ):
             return None
-        controller = self.controller
+        context = self._capture_context()
         name = Path(str(self.unverified_target)).name
         attempt.dup_skip_count += 1
-        controller._emit(f"  [{ctx.step + 1}] skip (rewrite of unverified {name})")
-        controller.recorder.skip(
+        context.emit(f"  [{ctx.step + 1}] skip (rewrite of unverified {name})")
+        context.recorder().skip(
             ctx.task_index, ctx.step, ctx.act, ctx.action, "lifecycle_verify_before_rewrite"
         )
-        controller.recorder.note(
+        context.recorder().note(
             {
                 "action": ctx.act,
                 "arg": ctx.action.get("arg", ""),
@@ -864,7 +974,7 @@ class LifecycleStepPolicy(StepPolicy):
                 self.unverified_target = ctx.logical_write_target
             else:
                 self.unverified_target = _mutation_target_key(
-                    {"arg": ctx.action.get("arg", "")}, self.controller.working_dir
+                    {"arg": ctx.action.get("arg", "")}, self._context.working_dir()
                 )
         elif ctx.act == "shell":
             self.needs_verification = False
@@ -904,15 +1014,42 @@ class WriteObligations:
 
     def __init__(self, controller):
         self.controller = controller
+        self._bind_context(self._legacy_context(lambda: self.controller))
+        self._uses_legacy_owner = True
+
+    def _legacy_context(self, owner) -> WriteObligationContext:
+        return WriteObligationContext(
+            progress=lambda: RunProgress(owner().state),
+            working_dir=lambda: owner().working_dir,
+            recorder=lambda: owner().recorder,
+            emit=lambda message: owner()._emit(message),
+            disarm_rewrite=lambda: owner().run_state.disarm_rewrite_damping(),
+        )
+
+    @classmethod
+    def from_context(cls, context: WriteObligationContext) -> "WriteObligations":
+        obligations = cls.__new__(cls)
+        obligations._bind_context(context)
+        return obligations
+
+    def _bind_context(self, context: WriteObligationContext):
+        self._context = context
+        self._uses_legacy_owner = False
+
+    def _capture_context(self) -> WriteObligationContext:
+        if not self._uses_legacy_owner:
+            return self._context
+        owner = self.controller
+        return self._legacy_context(lambda: owner)
 
     def completion_blocker(self):
         """The most actionable open obligation, or None (see
         :func:`_completion_blocker`)."""
-        return _completion_blocker(self.controller.state, self.controller.working_dir)
+        return _progress_completion_blocker(self._context.progress(), self._context.working_dir())
 
     def refuse_done(self, ctx):
         """Skip a ``done`` claim while any obligation is unresolved."""
-        controller = self.controller
+        context = self._capture_context()
         blocker = self.completion_blocker()
         if blocker is None:
             return None
@@ -928,11 +1065,11 @@ class WriteObligations:
                 "Resend a shorter write to that exact target with "
                 "append:false before using append:true."
             )
-        controller._emit(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
-        controller.recorder.skip(
+        context.emit(f"  [{ctx.step + 1}] skip (done with incomplete write: {incomplete_name})")
+        context.recorder().skip(
             ctx.task_index, ctx.step, ctx.act, ctx.action, "incomplete_write_done"
         )
-        controller.recorder.note(
+        context.recorder().note(
             {
                 "action": "done",
                 "arg": "",
@@ -946,14 +1083,14 @@ class WriteObligations:
 
     def prepare(self, ctx):
         """Classify write truncation and enforce zero-byte recovery order."""
-        controller = self.controller
+        context = self._capture_context()
         action, act = ctx.action, ctx.act
         # Sentinel transport truncation (issue #15): keep the complete lines
         # that arrived and steer the model to finish the file with chunked
         # append instead of failing the step.
         ctx.truncated_write = act == "write" and ctx.transport.content_truncated
         ctx.logical_write_target = (
-            _mutation_target_key({"arg": action.get("arg", "")}, controller.working_dir)
+            _mutation_target_key({"arg": action.get("arg", "")}, context.working_dir())
             if act == "write"
             else None
         )
@@ -963,13 +1100,13 @@ class WriteObligations:
                     "arg": action.get("arg", ""),
                     "append": bool(action.get("append")),
                 },
-                controller.working_dir,
+                context.working_dir(),
             )
             if act == "write"
             else None
         )
         pending_recovery = _pending_empty_recovery(
-            controller.state["pending_empty_writes"],
+            context.progress().pending_empty_writes,
             ctx.logical_write_target,
             ctx.operation_write_target,
             bool(action.get("append")),
@@ -980,13 +1117,11 @@ class WriteObligations:
             and pending_recovery
             and not pending_recovery.get("append_allowed", False)
         ):
-            controller._emit(
-                f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)"
-            )
-            controller.recorder.skip(
+            context.emit(f"  [{ctx.step + 1}] skip (append before first replacement chunk landed)")
+            context.recorder().skip(
                 ctx.task_index, ctx.step, act, action, "append_after_empty_overwrite"
             )
-            controller.recorder.note(
+            context.recorder().note(
                 {
                     "action": act,
                     "arg": action.get("arg", ""),
@@ -1003,16 +1138,14 @@ class WriteObligations:
             kept = action.get("content", "")
             kept = kept[: kept.rfind("\n") + 1]
             if not kept:
-                controller._emit(
-                    f"  [{ctx.step + 1}] skip (write truncated before a complete line)"
-                )
-                controller.recorder.skip(
+                context.emit(f"  [{ctx.step + 1}] skip (write truncated before a complete line)")
+                context.recorder().skip(
                     ctx.task_index, ctx.step, act, action, "truncated_write_empty"
                 )
                 # The recovery instruction asks for a clean resend; disarm
                 # rewrite damping before that resend even though this empty
                 # partial attempt wrote no bytes.
-                controller.run_state.disarm_rewrite_damping()
+                context.disarm_rewrite()
                 # Empty append attempts are obligations on the referent
                 # observed at dispatch time. Key them by that operation
                 # target so retargeting a leaf symlink cannot overwrite an
@@ -1022,7 +1155,7 @@ class WriteObligations:
                 )
                 recovery_arg = action.get("arg", "") or "file"
                 if pending_target is not None:
-                    existing = controller.state["pending_empty_writes"].get(pending_target)
+                    existing = context.progress().pending_empty_writes.get(pending_target)
                     append_allowed = bool(action.get("append"))
                     if isinstance(existing, dict):
                         append_allowed = existing.get("append_allowed", False) and append_allowed
@@ -1031,18 +1164,21 @@ class WriteObligations:
                             "arg": action.get("arg", ""),
                             "append": True,
                         },
-                        controller.working_dir,
+                        context.working_dir(),
                     )
                     append_targets = list(_pending_append_targets(existing))
                     if append_target is not None and append_target not in append_targets:
                         append_targets.append(append_target)
-                    recovery_arg = _target_recovery_arg(pending_target, controller.working_dir)
-                    controller.state["pending_empty_writes"][pending_target] = {
-                        "name": Path(action.get("arg", "") or "file").name,
-                        "append_allowed": append_allowed,
-                        "append_targets": append_targets,
-                        "recovery_arg": recovery_arg,
-                    }
+                    recovery_arg = _target_recovery_arg(pending_target, context.working_dir())
+                    context.progress().set_pending_write(
+                        pending_target,
+                        PendingWrite(
+                            name=Path(action.get("arg", "") or "file").name,
+                            append_allowed=append_allowed,
+                            append_targets=tuple(append_targets),
+                            recovery_arg=recovery_arg,
+                        ),
+                    )
                 # Nothing was written: the first dispatched chunk must stay a
                 # non-append write (append would land on a stale existing
                 # file), only later chunks may append.
@@ -1059,7 +1195,7 @@ class WriteObligations:
                         "with a shorter first chunk, then continue with "
                         "append:true chunks."
                     )
-                controller.recorder.note(
+                context.recorder().note(
                     {
                         "action": act,
                         "arg": action.get("arg", ""),
@@ -1075,7 +1211,7 @@ class WriteObligations:
     def note_successful_write(self, ctx, action):
         """A complete write clears the obligations it satisfies."""
         _clear_pending_empty_writes(
-            self.controller.state["pending_empty_writes"],
+            self._context.progress().pending_empty_writes,
             ctx.logical_write_target,
             ctx.operation_write_target,
             bool(action.get("append")),
@@ -1089,7 +1225,7 @@ class WriteObligations:
         exactly what :meth:`prepare` trimmed to the last complete line."""
         kept = action.get("content", "")
         anchor = kept.splitlines()[-1][-80:]
-        recovery_arg = _target_recovery_arg(ctx.operation_write_target, self.controller.working_dir)
+        recovery_arg = _target_recovery_arg(ctx.operation_write_target, self._context.working_dir())
         result.output += (
             f" (truncated after {kept.count(chr(10))} lines; "
             f"last written line: {anchor!r}; continue with "
@@ -1353,7 +1489,7 @@ class CompletionPolicy:
                 error_msg = f"[validation_failed] {reason}"
                 if missing:
                     error_msg += f" missing: {', '.join(missing)}"
-                context.current_view().state["errors"].append(error_msg)
+                RunProgress(context.current_view().state).errors.append(error_msg)
                 self.validation.mark_failed()
                 context.emit(f"  Validation failed: {reason}")
                 context.event(
@@ -1411,7 +1547,7 @@ class CompletionPolicy:
                 reason = (
                     "completion after failed validation requires new write, edit, or shell evidence"
                 )
-            context.current_view().state["errors"].append(f"[validation_failed] {reason}")
+            RunProgress(context.current_view().state).errors.append(f"[validation_failed] {reason}")
             context.emit(f"  Completion refused: {reason}")
             context.event({"event": "validation_pending", "reason": reason})
             return None
@@ -1435,21 +1571,21 @@ class CompletionPolicy:
             f"Exhausted {context.current_view().max_replans} replan attempts. "
             f"({outcome.wall_s:.1f}s total)"
         )
-        context.emit(f"Errors: {context.current_view().state['errors']}")
+        context.emit(f"Errors: {RunProgress(context.current_view().state).errors}")
         context.emit(f"Output in: {context.current_view().working_dir}")
         return outcome
 
     def _build_outcome(self, status, validation, replans):
         """Snapshot the terminal record from the run-scoped state."""
-        state = self._context.current_view().state
+        progress = RunProgress(self._context.current_view().state)
         return RunOutcome(
             status=status,
             validation=validation,
             replans=replans,
             wall_s=round(self._context.elapsed(), 2),
-            completed_tasks=len(state["completed_tasks"]),
-            selected_steps=state["selected_steps"],
-            executed_steps=state["executed_steps"],
-            skipped_steps=state["skipped_steps"],
-            errors=tuple(state["errors"][-5:]) if status == "exhausted" else (),
+            completed_tasks=len(progress.completed_tasks),
+            selected_steps=progress.selected_steps,
+            executed_steps=progress.executed_steps,
+            skipped_steps=progress.skipped_steps,
+            errors=tuple(progress.errors[-5:]) if status == "exhausted" else (),
         )

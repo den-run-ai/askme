@@ -11,7 +11,6 @@ import re
 import shlex
 import shutil
 import tempfile
-import time
 from dataclasses import dataclass, field
 from dataclasses import replace as _dataclass_replace
 from pathlib import Path
@@ -27,7 +26,6 @@ from actions import (
     ActionResult,
     ActionTransport,
     DecodedAction,
-    SkippedStep,
     StepReceipt,
     _mutation_target_key,
     _step_path,
@@ -41,7 +39,6 @@ from llm import (
     PlanResponse,
     TaskReplanResponse,
     ValidationResponse,
-    _ignore,
 )
 from policies import (
     _VALIDATE_KEYWORDS,
@@ -49,6 +46,19 @@ from policies import (
     _StepFlow,
     _unresolved_incomplete_writes,
     _write_visibility_flag,
+)
+from state import (
+    REWRITE_PRESSURE_WRITES as REWRITE_PRESSURE_WRITES,
+)
+from state import (
+    REWRITE_SKIP_WRITES as REWRITE_SKIP_WRITES,
+)
+from state import RunProgress
+from state import (
+    RunState as RunState,
+)
+from state import (
+    StepRecorder as StepRecorder,
 )
 
 MAX_REPLANS = 3
@@ -59,8 +69,6 @@ MAX_INPUT = 300
 GOAL_CONTEXT_CHARS = 300
 DEFAULT_REASONING_POLICY = "gated"
 WRITE_PRESSURE_OBSERVATIONS = 3
-REWRITE_PRESSURE_WRITES = 2
-REWRITE_SKIP_WRITES = 3
 MAX_TASK_LOCAL_REPLANS = 1
 STEP_POLICIES = ("heuristic", "lifecycle")
 
@@ -1293,175 +1301,6 @@ class RunConfig:
         )
 
 
-class StepRecorder:
-    """The single record-and-count path for controller steps (issue #36).
-
-    Counter semantics: ``selected`` counts every decoded model action,
-    including ``done``/``fail``; ``executed`` counts model actions dispatched
-    to handlers (deterministic repair/retry receipts are recorded but never
-    counted as executed); ``skipped`` counts selected actions a controller
-    guard suppressed before dispatch. Per attempt, selected == executed +
-    skipped + accepted control actions.
-    """
-
-    def __init__(self, state, history, event_sink=None):
-        self.state = state
-        self.history = history
-        # Direct module use is silent unless a sink is injected. The facade
-        # supplies its late-bound _run_log callback for compatibility.
-        self._event_sink = _ignore if event_sink is None else event_sink
-
-    def _event(self, event):
-        self._event_sink(event)
-
-    def selected(self):
-        self.state["selected_steps"] += 1
-
-    def executed(self):
-        self.state["executed_steps"] += 1
-
-    def control(self, task_index, step, act):
-        """Record an accepted model control action, never execution evidence.
-
-        Refused ``done`` claims use ``skip`` instead. Keeping this out of
-        last_steps/all_steps preserves duplicate context and validation
-        evidence while making accepted done/fail selections observable.
-        """
-        event = {"event": "step_control", "task_index": task_index, "step": step, "action": act}
-        self.history.append(dict(event))
-        self._event(event)
-
-    def skip(self, task_index, step, act, action, reason):
-        """Record a selected-but-not-dispatched action in run metrics + log."""
-        self.state["skipped_steps"] += 1
-        record = SkippedStep(
-            task_index=task_index,
-            step=step,
-            action=act,
-            arg=action.get("arg", ""),
-            reason=reason,
-        )
-        self._event(record.jsonl_event())
-
-    def note(self, entry):
-        """Model-visible corrective observation: enters the sliding window
-        only, never the run-wide structured record or the JSONL log."""
-        self.state["last_steps"].append(entry)
-
-    def record(self, receipt, task_index, step, wall_s=None):
-        """Append a receipt to every projection; returns the live entry."""
-        entry = receipt.entry
-        self.state["last_steps"].append(entry)
-        self.state["all_steps"].append(dict(entry))
-        self.history.append(receipt.history_event(task_index, step))
-        self._event(receipt.jsonl_event(task_index, step, wall_s))
-        return entry
-
-    def append_recovery_hint(self, hint):
-        """Suffix the newest recorded step's output with a recovery hint."""
-        for steps in (self.state["last_steps"], self.state["all_steps"]):
-            steps[-1]["output"] = steps[-1]["output"][:100] + f" → {hint}"
-
-
-class RunState:
-    """Typed owner of run-scoped controller data (issue #31).
-
-    ``data`` remains the structured state dict callers receive in the run
-    result and the planner/executor summaries are curated from; the single
-    :class:`StepRecorder` projects receipts into it and ``history``. The
-    rewrite-damping fields live here because they are run-scoped, not
-    attempt-scoped: a task-local retry or full replan must not let the
-    executor restart a same-target full-write streak; only the documented
-    successful shell/edit and truncation paths disarm it.
-    """
-
-    def __init__(
-        self,
-        reasoning_policy,
-        goal_context_chars,
-        clock=None,
-        event_sink=None,
-        rewrite_pressure_writes=None,
-        rewrite_skip_writes=None,
-        *,
-        recorder_factory=StepRecorder,
-    ):
-        self.clock = time.time if clock is None else clock
-        # Resolved per-run guard thresholds (issue #68); None keeps the
-        # module constants so direct constructions behave unchanged.
-        self.rewrite_pressure_writes = (
-            REWRITE_PRESSURE_WRITES if rewrite_pressure_writes is None else rewrite_pressure_writes
-        )
-        self.rewrite_skip_writes = (
-            REWRITE_SKIP_WRITES if rewrite_skip_writes is None else rewrite_skip_writes
-        )
-        self.data: dict[str, Any] = {
-            "completed_tasks": [],
-            "errors": [],
-            "validated_once": False,
-            "validation_attempts": 0,
-            "validation_recheck_needed": False,
-            "validated_step_count": 0,
-            "completed_step_groups": [],
-            "all_steps": [],
-            # Empty sentinel truncations dispatch no mutation, but a following
-            # `done` must not treat the failed write attempt as completion.
-            "pending_empty_writes": {},
-            "task_start_step_count": 0,
-            "reasoning_policy": reasoning_policy,
-            "goal_context_chars": goal_context_chars,
-            # Selected vs executed accounting (issue #7): the Qwen canary selected
-            # 14 reads but only 2 reached the dispatcher — that gap must be
-            # first-class in run metrics, not reconstructed from logs.
-            "selected_steps": 0,
-            "executed_steps": 0,
-            "skipped_steps": 0,
-        }
-        self.history = []
-        self.recorder = recorder_factory(self.data, self.history, event_sink=event_sink)
-        self.started = self.clock()
-        self.last_write_target = None
-        self.consecutive_target_writes = 0
-
-    def elapsed(self):
-        """Wall seconds since the run started."""
-        return self.clock() - self.started
-
-    def disarm_rewrite_damping(self):
-        """Forget the streak entirely (documented truncation-recovery paths)."""
-        self.last_write_target = None
-        self.consecutive_target_writes = 0
-
-    def break_rewrite_streak(self):
-        """A successful shell/edit ends the streak; observations never do."""
-        self.consecutive_target_writes = 0
-
-    def note_successful_full_write(self, target):
-        """Advance or restart the same-target full-write streak."""
-        if target == self.last_write_target:
-            self.consecutive_target_writes += 1
-        else:
-            self.last_write_target = target
-            self.consecutive_target_writes = 1
-
-    def rewrite_skip_armed(self, target):
-        """True when further full rewrites of ``target`` must be skipped."""
-        return (
-            self.last_write_target is not None
-            and self.consecutive_target_writes >= self.rewrite_skip_writes
-            and target == self.last_write_target
-        )
-
-    def validate_pressure_target(self):
-        """Basename the executor must verify once rewrites repeat, or None."""
-        if (
-            self.last_write_target is not None
-            and self.consecutive_target_writes >= self.rewrite_pressure_writes
-        ):
-            return Path(str(self.last_write_target)).name
-        return None
-
-
 class _RunController:
     """Thin coordinator over planning, task attempts, step decisions, and
     finalization (issue #31).
@@ -1701,6 +1540,11 @@ class _RunController:
         # construction (issue #69).
         self._budgets = self._config_payload["budgets"]
 
+    @property
+    def progress(self) -> RunProgress:
+        """Live typed access; preserve legacy replacement of controller.state."""
+        return RunProgress(self.state)
+
     def _emit(self, msg):
         """Console line through the injected sink, defaulting to log()."""
         (self._hooks.log if self._log_sink is None else self._log_sink)(msg)
@@ -1797,21 +1641,21 @@ class _RunController:
     def _preflight(self):
         # Preflight: probe environment and set the run's resolved policy
         env = self._hooks.preflight(self.working_dir)
-        self.state["environment"] = env
-        self.state["policy"] = dict(self._policy)
+        self.progress.environment = env
+        self.progress.policy = dict(self._policy)
         self._emit(f"Environment: platform={env['platform']} arch={env['arch']}")
         self._emit(f"Available tools: {env['available_tools']}")
         if env["missing_tools"]:
             self._emit(f"Missing tools: {env['missing_tools']}")
         self._emit(f"Package managers: {env['package_managers']}")
-        self._emit(f"Policy: allow_system_installs={self.state['policy']['allow_system_installs']}")
+        self._emit(f"Policy: allow_system_installs={self.progress.policy['allow_system_installs']}")
 
     def _plan(self, replan):
         """One planning attempt; returns the task list or None on failure."""
         self._emit("=" * 40)
         t_plan = self._clock()
         self._emit(f"Planning (attempt {replan + 1}/{self.max_replans})...")
-        self.state["planning_attempt"] = replan
+        self.progress.planning_attempt = replan
         try:
             plan = self._hooks.get_plan(
                 self.user_prompt,
@@ -1825,7 +1669,7 @@ class _RunController:
             )
         except (LLMTransportError, KeyError) as e:
             self._emit(f"  Planner transport error: {e}")
-            self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
+            self.progress.errors.append(f"[unknown] Planner transport error: {str(e)[:100]}")
             self.history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
             self._event(
                 {
@@ -1844,7 +1688,7 @@ class _RunController:
             parsed = PlanResponse.parse(plan, self.max_tasks)
         if parsed is None:
             error = "[malformed_plan] planner returned no valid tasks"
-            self.state["errors"].append(error)
+            self.progress.errors.append(error)
             self._emit(f"  Planner contract error: {error}")
             self.history.append({"event": "plan_error", "replan": replan, "error": error})
             self._event(
@@ -1857,7 +1701,7 @@ class _RunController:
             )
             return None
         tasks = list(parsed.tasks)
-        self.state["errors"] = []  # reset errors each replan; planner already saw them
+        self.progress.errors = []  # reset errors each replan; planner already saw them
         plan_wall = self._clock() - t_plan
         self._emit(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         self.history.append({"event": "plan", "replan": replan, "tasks": tasks})
@@ -1871,25 +1715,25 @@ class _RunController:
         all_done = True
         for i, task in enumerate(tasks):
             # Carry over last step from previous task so executor has cross-task context
-            prev_last = self.state["last_steps"][-1:] if self.state.get("last_steps") else []
+            prev_last = self.progress.last_steps[-1:] if self.progress.optional_last_steps else []
             t_task = self._clock()
             # Scope for no_write_executed: an earlier task's write must not
             # mask a stall in this one.
-            self.state["task_start_step_count"] = len(self.state["all_steps"])
+            self.progress.task_start_step_count = len(self.progress.all_steps)
             task, task_done, task_steps = self._run_task(i, task, tasks, prev_last)
             if task_done:
                 blocker = self.obligations.completion_blocker()
                 if blocker is not None:
                     incomplete_name, recovery_arg, _append_allowed = blocker
-                    self.state["errors"].append(
+                    self.progress.errors.append(
                         f"[incomplete_write] {incomplete_name} at "
                         f"{recovery_arg}: completion refused"
                     )
                     self._emit(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
             if task_done:
-                self.state["completed_tasks"].append(task)
-                self.state["completed_step_groups"].append(task_steps)
+                self.progress.completed_tasks.append(task)
+                self.progress.completed_step_groups.append(task_steps)
                 self._emit(f"  Task complete. ({self._clock() - t_task:.1f}s)")
                 self._event(
                     {
@@ -1931,9 +1775,9 @@ class _RunController:
         attempt = self._new_attempt(task)
         saved_errors = []
         for task_attempt in range(1 + self.guards.max_task_local_replans):
-            self.state["current_task"] = task
-            self.state["task_index"] = f"{i + 1}/{len(tasks)}"
-            self.state["last_steps"] = list(prev_last)
+            self.progress.current_task = task
+            self.progress.task_index = f"{i + 1}/{len(tasks)}"
+            self.progress.last_steps = list(prev_last)
             self._emit(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             # Reset per-attempt execution state (the task may be a replacement)
@@ -1958,12 +1802,12 @@ class _RunController:
 
             # E11: try task-local replan before falling through to full replan
             if task_attempt < self.guards.max_task_local_replans:
-                saved_errors = list(self.state["errors"])
+                saved_errors = list(self.progress.errors)
                 t_lr = self._clock()
                 replan = self._hooks.replan_task(
                     task,
-                    self.state["errors"],
-                    self.state["completed_tasks"],
+                    self.progress.errors,
+                    self.progress.completed_tasks,
                     self.state,
                     self.goal_context,
                     goal_context_chars=self.goal_context_chars,
@@ -1988,7 +1832,7 @@ class _RunController:
                     )
                     task = replacement
                     tasks[i] = replacement
-                    self.state["errors"] = []
+                    self.progress.errors = []
                     continue  # retry with replacement
                 else:
                     reject_reason = replan.reject_reason or "unknown"
@@ -2004,11 +1848,11 @@ class _RunController:
                             "reject_reason": reject_reason,
                         }
                     )
-                    self.state["errors"] = saved_errors
+                    self.progress.errors = saved_errors
             else:
                 # Replacement attempt also failed — merge original errors back
                 # so full replan sees both failure contexts
-                self.state["errors"] = saved_errors + self.state["errors"]
+                self.progress.errors = saved_errors + self.progress.errors
             # Fall through — task failed, no more local attempts
             break
         return task, attempt.done, attempt.steps
@@ -2048,7 +1892,7 @@ class _RunController:
             )
         except LLMTransportError as e:
             self._emit(f"  [{step + 1}] LLM transport error ({self._clock() - t_step:.1f}s): {e}")
-            self.state["errors"].append(
+            self.progress.errors.append(
                 f"[unknown] LLM transport error on task '{attempt.task}': {str(e)[:100]}"
             )
             return None
@@ -2066,7 +1910,7 @@ class _RunController:
             else:
                 etype = "unknown"
             self._emit(f"  [{step + 1}] LLM parse error ({self._clock() - t_step:.1f}s) [{etype}]")
-            self.state["errors"].append(
+            self.progress.errors.append(
                 f"[{etype}] LLM parse error on task '{attempt.task}': {str(e)[:100]}"
             )
             self._event(
@@ -2106,7 +1950,7 @@ class _RunController:
             label = raw_name if _valid_nonempty_str(raw_name) else "(no action)"
             envelope = parsed_action.error_type
             self._emit(f"  [{step + 1}] rejected [{envelope}]: {label}")
-            self.state["errors"].append(f"[{envelope}] {label}: {parsed_action.message}")
+            self.progress.errors.append(f"[{envelope}] {label}: {parsed_action.message}")
             self._event(
                 {
                     "event": "step_error",
@@ -2141,7 +1985,7 @@ class _RunController:
         if ctx.act == "fail":
             reason = ctx.action.get("reasoning", "no reason")
             self._emit(f"  FAIL ({self._clock() - ctx.started:.1f}s): {reason}")
-            self.state["errors"].append(f"Task '{attempt.task}': {reason}")
+            self.progress.errors.append(f"Task '{attempt.task}': {reason}")
             self.recorder.control(ctx.task_index, ctx.step, ctx.act)
             return _StepFlow.END_ATTEMPT
         flow = self.obligations.prepare(ctx)
@@ -2278,7 +2122,7 @@ class _RunController:
         if hint:
             err_output = f"{err_output} → {hint}"
             self.recorder.append_recovery_hint(hint)
-        self.state["errors"].append(f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}")
+        self.progress.errors.append(f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}")
         attempt.use_think = etype not in _NO_THINK_ERRORS
         attempt.reasoning_trigger = f"execution_error:{etype}"
         return None

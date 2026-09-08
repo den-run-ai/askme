@@ -106,6 +106,7 @@ def test_valid_structured_write_content_is_retained_with_inapplicable_literal_co
     assert result["action_contract_valid"] is True
     assert result["action"]["content"] == content
     assert result["literal_delimiter_count"] is None
+    assert result["artifact_acceptance"] == "not_evaluated"
     assert (destination / "response.bin").read_bytes() == raw
     assert json.loads((destination / "record.json").read_bytes()) == result
 

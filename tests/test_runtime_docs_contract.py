@@ -51,7 +51,7 @@ def test_architecture_does_not_present_historical_salvage_as_live_behavior():
     assert "_repair_json` salvages truncated JSON without retrying" not in document
 
 
-def test_setup_and_completion_docs_preserve_the_remaining_coupling_boundary():
+def test_setup_and_policy_docs_preserve_the_remaining_compatibility_boundary():
     document = (ROOT / "docs/ARCHITECTURE.md").read_text(encoding="utf-8")
     core = " ".join(
         document.split("## Core Files\n", 1)[1].split("**Key functions:**", 1)[0].split()
@@ -66,4 +66,25 @@ def test_setup_and_completion_docs_preserve_the_remaining_coupling_boundary():
     assert "`CompletionPolicy.from_context(...)`" in core
     assert "compatibility adapter remains" in core
     assert "`askme.CompletionPolicy(controller)`" in core
-    assert "`StepPolicy` and `WriteObligations` remain controller-bound" in core
+    assert "`StepPolicyContext` and `WriteObligationContext`" in core
+    assert "Legacy constructors still adapt a controller" in core
+    assert "retain those adapters" in core
+    assert "Live getters preserve historical collaborator replacement" in core
+    assert "`StepPolicy` and `WriteObligations` remain controller-bound" not in core
+
+
+def test_typed_state_docs_preserve_one_live_dict_and_projection_boundaries():
+    document = (ROOT / "docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+    core = " ".join(
+        document.split("## Core Files\n", 1)[1].split("**Key functions:**", 1)[0].split()
+    )
+    assert (
+        "`RunProgress` provides strict typed fields over the one live compatibility dictionary"
+        in core
+    )
+    assert "not a second state store" in core
+    assert "no defaults, coercion or runtime type validation" in core
+    assert "missing required key still raises `KeyError`" in core
+    assert "`PendingWrite` is a frozen typed record" in core
+    assert "legacy raw records are not converted" in core
+    assert "not a complete typed-state or serialized-schema migration" in core

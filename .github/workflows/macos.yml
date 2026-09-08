@@ -55,6 +55,7 @@ on:
       - llm.py
       - policies.py
       - loop.py
+      - state.py
       - tests/**
       - .github/workflows/macos.yml
       - pyproject.toml
