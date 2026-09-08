@@ -23,9 +23,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     env:
-      RECORDS: ${{ runner.temp }}/external-local-trial-${{ github.run_id }}
       TASK: tests/external_repo/requests_pickle_v1
     steps:
+      - name: Set evidence directory
+        run: echo "RECORDS=$RUNNER_TEMP/external-local-trial-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
