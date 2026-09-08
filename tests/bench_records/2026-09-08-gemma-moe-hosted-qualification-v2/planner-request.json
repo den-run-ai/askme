@@ -1,0 +1,28 @@
+{
+  "max_tokens": 768,
+  "messages": [
+    {
+      "content": "Planner. Propose tasks for the user request.\nRules:\n- Prefer 1-3 tasks, max 10; each is a complete goal, not one command\n- Short tasks (<15 words) with key details: includes, imports, filenames\n- Relative filenames only, except preserve an exact incomplete_write_target\n  supplied in state. Match state.environment.platform\n- Never redo completed_tasks\n- If required tool in missing_tools and allow_system_installs=false: single prerequisite/fail task listing missing tools\n- If allow_system_installs=true: may use package_managers\nOutput ONLY valid JSON. No markdown, no explanation.\nFormat: {\"tasks\":[\"task1\",\"task2\"]}",
+      "role": "system"
+    },
+    {
+      "content": "Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthe\nPlan creating hello.txt containing hi and checking its content.",
+      "role": "user"
+    }
+  ],
+  "model": "google/gemma-4-26b-a4b-it",
+  "provider": {
+    "allow_fallbacks": false,
+    "order": [
+      "DeepInfra"
+    ],
+    "quantizations": [
+      "fp8"
+    ],
+    "require_parameters": true
+  },
+  "reasoning": {
+    "enabled": false
+  },
+  "temperature": 0.1
+}

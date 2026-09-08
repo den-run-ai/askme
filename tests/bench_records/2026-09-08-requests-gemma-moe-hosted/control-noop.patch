@@ -1,0 +1,10 @@
+diff --git a/src/requests/exceptions.py b/src/requests/exceptions.py
+index e1cedf8..17094dd 100644
+--- a/src/requests/exceptions.py
++++ b/src/requests/exceptions.py
+@@ -139,3 +139,5 @@ class FileModeWarning(RequestsWarning, DeprecationWarning):
+ 
+ class RequestsDependencyWarning(RequestsWarning):
+     """An imported dependency doesn't match the expected version range."""
++
++# Harmless non-empty control.
