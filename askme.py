@@ -91,6 +91,7 @@ _action_envelope_error = _llm._action_envelope_error
 _action_tools = _llm._action_tools
 _capability_profile_from_env = _llm._capability_profile_from_env
 _decode_action_reply = _llm._decode_action_reply
+_decode_json_reply = _llm._decode_json_reply
 _decode_tool_call_reply = _llm._decode_tool_call_reply
 _default_capability_profile = _llm._default_capability_profile
 _extract_message_text = _llm._extract_message_text
