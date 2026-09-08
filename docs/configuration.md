@@ -12,7 +12,7 @@ settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `OPENROUTER_API_KEY` | (from `.env`) | API key for OpenRouter |
 | `OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | OpenRouter model |
 | `OPENROUTER_PROVIDER` | `Parasail` | Preferred OpenRouter provider; empty means automatic routing |
-| `OPENROUTER_ALLOW_FALLBACKS` | `1` | Whether OpenRouter may leave the preferred provider |
+| `OPENROUTER_ALLOW_FALLBACKS` | `1` | Allow backup providers; applies to named and automatic routing |
 | `OPENROUTER_REQUIRE_PARAMETERS` | `0` | Require the provider to advertise support for all request parameters |
 | `OPENROUTER_REASONING_EFFORT` | (unset) | Baseline reasoning effort (`low`/`medium`/`high`) for always-on reasoners like `openai/gpt-oss-20b`. Leave unset for hybrid models like Gemma 4 |
 | `LLM_API_URL` | `http://localhost:8080/v1/chat/completions` | Custom API URL (local only) |
@@ -33,6 +33,24 @@ that the model performs no internal reasoning. Each request attempt logs the
 requested policy, trigger, and effective reasoning level when `AGENT_RUN_LOG` is
 enabled. Per-call-site `gated`/`off` semantics are specified in
 [ARCHITECTURE.md](ARCHITECTURE.md#explicit-reasoning-policy).
+
+### OpenRouter routing constraints
+
+`OPENROUTER_ALLOW_FALLBACKS=0` and `OPENROUTER_REQUIRE_PARAMETERS=1` apply even
+when `OPENROUTER_PROVIDER` is empty. AskMe sends those settings in the HTTP
+`provider` object without an `order` field, leaving provider selection automatic.
+OpenRouter documents both [constraints without a provider order](https://openrouter.ai/docs/guides/routing/provider-selection).
+Default automatic routing (`OPENROUTER_ALLOW_FALLBACKS=1`,
+`OPENROUTER_REQUIRE_PARAMETERS=0`) still omits the provider object;
+named-provider requests retain their existing order and both flags. These
+options do not affect the local backend.
+
+This is a wire-contract correction ([#116](https://github.com/den-run-ai/askme/issues/116)),
+not a behavior-preserving extraction: earlier revisions omitted both flags
+when the provider name was empty, even if run metadata recorded them. Stricter
+automatic requests can now fail when their constraints cannot be satisfied.
+Historical flags must not be treated as enforced constraints; preserve old
+records and register a new protocol before new outcome-bearing comparisons.
 
 ## Capability profiles
 
