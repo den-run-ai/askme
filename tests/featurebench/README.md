@@ -35,9 +35,11 @@ One attempt per cell, as before.
 
 Both cells ran their single attempt on CoreWeave and produced **nonempty,
 cleanly applying patches** — the categorical change from v4's two empty-patch
-failures. Both agents still exhausted their planning attempts without emitting
-`done`, so agent completion is false in both cells; acceptance was evaluated
-on the delivered patches per the outcome contract.
+failures. Both agents still exhausted their planning attempts, so agent
+completion is false in both cells; acceptance was evaluated on the delivered
+patches per the outcome contract. The retained result JSON preserves historical
+claims about absent `done` emissions, but the checked-in raw-artifact hashes do
+not independently establish those claims. Exhaustion is the recorded outcome.
 
 - **Gemma 4 31B** — patch applied, **11/13 F2P (84.62%) — exactly the pi
   ceiling, with the identical two failing tests**. 56/56 responses finished

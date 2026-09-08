@@ -1,0 +1,50 @@
+{
+  "main": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+  "secret_scan": {
+    "checked_at_utc": "2026-09-08T00:59:29.851398+00:00",
+    "scanner": "gitleaks 8.30.1",
+    "binary_archive_sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+    "scope": "All fetched refs in nonshallow repository; git log --all",
+    "environment_config_unset": true,
+    "ignore_comments_disabled": true,
+    "empty_ignore_directory": true,
+    "redaction_percent": 100,
+    "findings": 0,
+    "scanner_commits": 277,
+    "main": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+    "pull_request_heads": {
+      "104": "b855639c95c04d10d308ea0db180339dde1ef77f",
+      "106": "7c2147c15e3d0372a3c06046dc614bc072a7a546",
+      "107": "bb67505c535aef7a7f9c964483dd38dad057d225"
+    },
+    "refs_record_sha256": "41654ef21ed7e55207a625ab63d3eb5b6cecd6b3fed838aad768b7f6974cdfcd"
+  },
+  "public_links": {
+    "checked_at_utc": "2026-09-08T01:01:08.469160+00:00",
+    "scope": [
+      "README.md",
+      "docs/SECURITY.md",
+      "docs/PERFORMANCE.md",
+      "talks/berkeley-agentic-ai-summit-2026/README.md",
+      "talks/berkeley-agentic-ai-summit-2026/evals/README.md",
+      "tests/featurebench/README.md",
+      "docs/releases/v0.1.0.md"
+    ],
+    "http_targets": 82,
+    "http_errors": 0,
+    "local_link_occurrences": 69,
+    "missing_local": 0,
+    "new_issue_route": "HTTP200 sign-in redirect; signed-in noncollaborator permission unverified",
+    "method": "Unauthenticated urllib GET requests without cookies; Markdown hyperlink targets in the listed entry documents. HTTP availability and local file existence only, not browser rendering or fragment-anchor validation."
+  },
+  "pdf": {
+    "checked_at_utc": "2026-09-08T00:59:37.861260+00:00",
+    "url": "https://raw.githubusercontent.com/den-run-ai/askme/main/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+    "anonymous": true,
+    "status": 200,
+    "bytes": 110226,
+    "sha256": "729fd867b51a8b40d3865301c3c60a139353498550a97125301219862f423e2f",
+    "matches_revision": "28534c62a498ae3dcda1899a9ec2f989a5745f9e"
+  },
+  "release_state": "Draft release notes on main; no tag or published release asserted"
+}

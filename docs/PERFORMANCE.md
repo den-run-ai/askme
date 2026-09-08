@@ -13,6 +13,13 @@ Benchmark history and test-run matrices for AskMe. Each entry is a point-in-time
 revision; the worktree diffs were not retained. See the records README for the
 exact base SHAs and other provenance limits.
 
+**Control-receipt correction (2026-09-08).** Historical JSONL did not record
+accepted controller-owned `done`/`fail` decisions as execution steps. Missing
+`done` step records therefore do not establish zero model emissions. The
+E23/E25 failure descriptions below report the observed duplicate-action loops
+and terminal exhaustion; they do not identify absent completion signals as the
+cause. Current runs record accepted controls separately as `step_control`.
+
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
 ## Research-preview candidate snapshot — 2026-09-08
@@ -39,9 +46,12 @@ passed. The [OpenRouter health check](https://github.com/den-run-ai/askme/action
 passed its protocol job, while the Gemma smoke suite passed 1/3 cases and
 exhausted on the other two. These outcomes are retained without selective reruns.
 The initial integrated macOS run found platform regressions tracked in
-[#105](https://github.com/den-run-ai/askme/issues/105); native confirmation of
-the fixes is pending in [#106](https://github.com/den-run-ai/askme/pull/106). The predeclared external real-repository macOS canary has
-not yet produced a retained result. Record its exact runner hardware,
+[#105](https://github.com/den-run-ai/askme/issues/105); [#106](https://github.com/den-run-ai/askme/pull/106) subsequently passed both
+native Python 3.10/3.14 suites (1,313 passed, 30 expected skips each) and the
+local-server contract in [run 34174642414](https://github.com/den-run-ai/askme/actions/runs/34174642414). The predeclared external real-repository macOS canary is running against
+reviewed main `28534c62a498ae3dcda1899a9ec2f989a5745f9e` in
+[run 34175311656](https://github.com/den-run-ai/askme/actions/runs/34175311656);
+no outcome is claimed until the complete records are retained. Record its exact runner hardware,
 AskMe/task/model/server revisions, configuration, controls, and every trial
 before using it as current-revision evidence. A macOS runner alone does not
 reproduce the 16 GB M1 reference deployment; a hosted health check does not
@@ -156,12 +166,12 @@ deferred (owner decision) — this comparison covers easy+medium only.
    Every tools failure is one of the two documented QAT behavior classes
    (E20/E07 dispositions): content drift on rewrites
    (`fix_python_syntax_error`, bad on both arms — json 1/3, tools 0/3) and
-   done-emission loops. Both failed tools `fix_missing_include` trials
+   duplicate-action loops. Both failed tools `fix_missing_include` trials
    completed the work — compile fixed, binary built and ran — then exhausted
-   re-emitting the same successful shell instead of `done`; the stuck guard
+   while repeating the same previously successful shell; the stuck guard
    and terminal exhaustion reported them correctly.
 2. **The classes redistributed, not multiplied.** Tools lost trials on
-   `fix_missing_include`/`multi_step_build` to done-emission loops; json lost
+   `fix_missing_include`/`multi_step_build` to duplicate-action loops; json lost
    `create_missing_file_then_use` to the same class (one 800.3s exhaustion
    spiral). Net −2 pytest for tools on n=18 against a baseline whose own
    day-to-day swing on identical weights spans 22/27 (E23) to 14/18 (this
@@ -174,8 +184,9 @@ deferred (owner decision) — this comparison covers easy+medium only.
    on pass rate within variance, not materially slower, structurally simpler
    (−249 lines, sentinel/repair/envelope machinery deleted) and
    industry-aligned — the JSON executor transport was removed (interface
-   revision 6, workflow protocol revision 7). The done-emission loop class is
-   transport-independent and remains the sanctioned #31 lifecycle-arm target.
+   revision 6, workflow protocol revision 7). The duplicate-action loop class
+   was observed under both transports and remains the sanctioned #31 lifecycle-arm
+   target.
 
 Raw records: [tests/bench_records/2026-08-04/](../tests/bench_records/2026-08-04/)
 — per-arm summaries, per-trial JSONL, pytest diagnostics, and the provenance
@@ -205,7 +216,8 @@ rejects the header as a second output) that E05 thinking escalation never
 broke; a recovery-policy gap, not a transport failure (every trial remained
 contract-valid with zero malformed tool calls, hard included). (4) One
 `multi_step_recovery` tools trial passed pytest while ending `exhausted` —
-the done-emission class again. The all-suite gap (18/27 vs 21/27) stays
+the duplicate-action exhaustion class again. The all-suite gap (18/27 vs 21/27)
+stays
 within the same two-plus-one known behavior classes; the shipped
 non-inferiority verdict stands on pass-rate shape, but hard is tools'
 weakest suite and the `cc` recovery loop is a concrete new data point for
@@ -249,7 +261,7 @@ Easy totals: 1568s vs 437s (**3.6×**), pytest 6/9 vs 7/9.
 **12B QAT failed this E4B-fitted agent contract on this 16 GB M1.** Under the
 256/512-token limits it paid up to 6–8 JSON retries on `multi_step_build` on top of ~2.5× slower
 dense decode, compounding to 3.6–35× wall time with more exhaustion. Neither
-E23 failure class was cleared (done-emission-style exhaustion recurred;
+E23 failure class was cleared (duplicate-action exhaustion recurred;
 content drift was untested because the suite stopped first). This is not a
 model-wide rejection: a conclusion under the new generic capability profile
 requires a newly registered run with requested, profile, and served identities
@@ -276,7 +288,7 @@ First local benchmark on the current stack (E23): build 9618 `c34b92235`, offici
 |---|---|---|---|---|---|---|
 | `fix_python_syntax_error` | **0/3** | 3/3 complete | 43.8s (42.9–52.8) | 124.8s, 3/3 | 0 | **Content drift, not agent failure**: fixed the syntax but rewrote `print("hello"` → `print("Hello")` in all 3 trials; program runs, case-sensitive postcondition (`"hello" in stdout`) fails. Root cause: whole-file `write` rewrite instead of minimal `edit` on first pass |
 | `fix_missing_include` | 3/3 | 3/3 | **15.7s** (15.68–15.71) | **609.1s** | 0 | **39× faster than the historical local bottleneck.** 2 steps, 4 LLM calls, zero failed edits, zero thinking retries, near-zero variance |
-| `create_missing_file_then_use` | 3/3 | 3/3 | 13.3s (13.2–226.6) | 29.0s | 1 in outlier trial | Trial 1 outlier (226.6s) shows the same done-emission loop pattern before recovering |
+| `create_missing_file_then_use` | 3/3 | 3/3 | 13.3s (13.2–226.6) | 29.0s | 1 in outlier trial | Trial 1 outlier (226.6s) shows the same duplicate-action loop pattern before recovering |
 
 ### Hard (3 trials each, vs 2026-05-03 Q4_K_M baseline)
 
@@ -291,7 +303,7 @@ First local benchmark on the current stack (E23): build 9618 `c34b92235`, offici
 ### Findings
 
 1. **The current stack transforms error-recovery tests — attribution is stack-level, not weights-isolated.** `fix_missing_include` collapses 609s → 15.7s and `multi_step_build` loses its every-trial replan. **Correction (2026-08-04, from the retained records): recovery machinery was not idle.** Deterministic C repair (issue #41) fired once in each of the three medium `fix_missing_include` trials (**3 repairs**) and 2, 2, and 4 times in the three hard `replan_build_with_dependency` trials (**8 repairs**). These records make repair part of the bundled stack; without the draft #41 on-vs-off arm they do not identify its causal contribution to speed or variance. The suite recorded zero `edit_failed` events and zero thinking retries in easy+medium, but E05 was not fully dormant: `missing_tool` triggered its no-think policy in all three `replan_fix_wrong_command` trials. Hard recorded **5 thinking-retry attempts** (2, 3, 0), not 10; 10 is the paired `reasoning_decision` + `tokens` line count. The comparison baselines are Apr/May runs on build `a702f395` with an older AskMe revision, older assertions, and no deterministic C repair, so the deltas bundle QAT weights + build 9618 (including the #23468 cache fix) + server `--reasoning off` + scaffold evolution + deterministic repair. No matched Q4_K_M-on-b9618 control was run (see `tests/bench_records/2026-08-03/README.md`, limitation 1); the draft #41 on-vs-off ablation is required to price the repair arm's contribution.
-2. **New dominant failure class: done-emission loops.** 2 of 5 pytest failures are "work done correctly, `done` never emitted, duplicate-skip until exhausted" (`create_and_read_file` trials 1 and 3), and a third occurrence of the same loop pattern in `create_missing_file_then_use` trial 1 recovered within budget and passed (226.6s vs 13.3s median) — so the pattern appeared in 3 runs but caused 2 of the 5 failures. It extends beyond edits to reads/writes. Recorded as dated evidence on the E20 and E07 dispositions; per the issue #68 design (repetition is never acceptance, exhaustion is terminal) these runs correctly stay `exhausted`, and the sanctioned lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`) — this bench ran the default heuristic arm.
+2. **Duplicate-action exhaustion.** 2 of 5 pytest failures are "recorded executions succeeded and the deliverable was reported correct, but duplicate-skip loops exhausted the run" (`create_and_read_file` trials 1 and 3), and a third occurrence of the same loop pattern in `create_missing_file_then_use` trial 1 recovered within budget and passed (226.6s vs 13.3s median) — so the pattern appeared in 3 runs but caused 2 of the 5 failures. It extends beyond edits to reads/writes. Recorded as dated evidence on the E20 and E07 dispositions; per the issue #68 design (repetition is never acceptance, exhaustion is terminal) these runs correctly stay `exhausted`, and the sanctioned lever to evaluate is the lifecycle step policy (`AGENT_STEP_POLICY=lifecycle`) — this bench ran the default heuristic arm.
 3. **New failure class: content drift on rewrite.** QAT prefers whole-file `write` over minimal `edit` for the first fix and takes liberties with content (capitalization). Systematic (3/3). An agent asked to fix an error should preserve program semantics — a genuine model-behavior regression; motivates a prompt nudge toward `edit` for fixes and the goal-output arm of E07.
 4. Suite scorecard: easy 7/9, medium 6/9, hard 9/9 pytest (agent-complete 25/27). The Apr/May Q4_K_M baseline was 27/27 — but at 1.6–39× the wall time on the tests that matter.
 
@@ -828,7 +840,7 @@ Benchmarked across 8 prompts on both OpenRouter (Gemma 4 26B, 48 calls) and loca
 The frozen cell was run once per model under the revision-3 action interface
 (issue #17; protocols v5 registered, then re-pinned to CoreWeave as v6 before
 any model call). Both attempts produced nonempty, cleanly applying patches and
-both exhausted planning attempts without `done`; neither ran the delivered
+both exhausted their planning attempts; neither ran the delivered target
 tests. The earlier v4 and exploratory pi runs used a different serving stack,
 so their outcomes are context rather than controlled causal baselines.
 
@@ -838,8 +850,8 @@ so their outcomes are context rather than controlled causal baselines.
 | Qwen3.6 27B | empty patch, 0 writes/27 steps | applied but unresolved, 7/13 F2P (53.85%), 1 write/33 steps, 103 s, $0.090 | 10/13 (76.92%) |
 
 1. **Gemma commit-without-validate loop.** The attempt had no truncated model
-   responses, but rewrote the same implementation file 18 times, ran zero
-   tests, emitted no `done`, and exhausted three planning attempts. Revision 4
+   responses, but rewrote the same implementation file 18 times, ran no
+   delivered target tests, and exhausted three planning attempts. Revision 4
    directly guards that observed trajectory with verification pressure,
    rewrite damping, and explicit incomplete-write state; it does not establish
    an outcome improvement.
