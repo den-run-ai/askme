@@ -1,6 +1,6 @@
 {
   "source_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
-  "description": "Frozen offline pre-extraction controller transcripts. No model calls or host shell commands. Runtime bytes are identical to release-prep c879334. Normalization replaces workspace prefixes and type-defining runtime module names only; clock and environment probe are injected. Regenerate only by an explicit reviewed baseline change using runtime_characterization.py against the named source.",
+  "description": "Frozen offline pre-extraction controller transcripts. No model calls or host shell commands. Runtime bytes are identical to release-prep c879334. Normalization replaces lexical and resolved workspace prefixes and type-defining runtime module names only; clock and environment probe are injected. The workspace-alias correction was recaptured from the unchanged named source and matched full Linux/macOS transcripts. Regenerate only by an explicit reviewed baseline change using runtime_characterization.py against the named source.",
   "capture": {
     "cases": {
       "accepted_fail": {
@@ -55,7 +55,7 @@
           "dispatched": "b6b6eb04612fdee8085055301bb1342d136b971dac7b0c9f39f81cd24170bff9",
           "events": "7fa403b341c6b6dfa5136597671ff9d070383dfb6add8bc74ee5147936974336",
           "lines": "9a6161e187c176efa26e2aa3f035b27c408d5649649983def25cb57c30c01363",
-          "result": "a076953681e36d210ae54f4de8e8074f68b597bd9d1bb5b369d4e913fd15ea4b"
+          "result": "efd2e0f3e61207e22574e251ebf18f283442a380dba41867e6b197bf3779f96b"
         },
         "workspace": {
           "result.txt": "66697273740a",
@@ -85,7 +85,7 @@
           "dispatched": "6bd48c5490047ec05848741ec6a6abbc5c7ace371d4e38ce1455758c4252070d",
           "events": "25a645ae78bd63553af49f4230c3594f317cf0a94e650c5b6e8120e753091b78",
           "lines": "c9f88b59f3bdefae2323efc1d9dff3e09895852d4ce847975018a9d9ca54ed94",
-          "result": "a721ba948394ed04b7e7f91ef7ea855bdb1ff75af067aea8121acee94b7ff109"
+          "result": "0cdebfd4a24a6bf1be305ee6cdf08df0524b39c8e9bda96f6e7afad04b027181"
         },
         "workspace": {
           "result.txt": "",
@@ -115,7 +115,7 @@
           "dispatched": "a7a4cb9de513a5d9d2b787d35961cd675b57f7351ae8d7363069cbc9bb47a66e",
           "events": "cda90eed81e4cccfaf0dceadf9df0f1c0f69632ae433036f4876b7b7b29cb482",
           "lines": "3b438b256c9f836e895e7fd7afd31b513da8231ede3c5fb7597815e130107de7",
-          "result": "7961b6978e1c7fee56fadb3e85ecda0bc90198ed848aa55339c9c25594caed69"
+          "result": "91ac9d17d039ca6b44a2dd05381c26f9f399e983b8ba37e6ea7aec29b4c39102"
         },
         "workspace": {
           "result.txt": "66696e616c0a",
@@ -170,11 +170,11 @@
         },
         "status": "complete",
         "transcript_sha256": {
-          "calls": "eb5ca8906662c5ea12db49a8594fd16c4ccd1688feb4625a8166d0d7fe23f29e",
+          "calls": "3b14e6dba1a993706e8a530b4ca235ef52d11a483ffeac382d43ba65765c5abd",
           "dispatched": "3fda9b75264ed0391923e10bbd87c9a733b986e4c3b1285c9ae6debc8a1ce8fb",
           "events": "e947c9d2b50d7774376030956dfe82faf0b653f5f4f8a3fd05131b627c807123",
           "lines": "988973cb640c6259d14dc933d12ef0add7bd320d495d19ba46fa6e413114faf9",
-          "result": "1899f25a4c3dff9c952c5a19ad988bdb2f75fd4e2411d5b907559599f4404cd3"
+          "result": "ba713909c87c9e571d3a54ae3bbadc11f82662fb518f61269b4c4f9eb06ba528"
         },
         "workspace": {
           "result.txt": "66697273740a6c6173740a",
@@ -204,7 +204,7 @@
           "dispatched": "6605e34d4e53e125d6cd879ce9efef2b139f3dafcb1ba58c68bc39c7e663abc0",
           "events": "887a51f8efedb877eeef2bbb97726e50525b9bff3ea2055631110b950af25f0e",
           "lines": "ad6aa4a9e13e4d07989a56da2a09653480f4864878eb822251e7a2ef41bdb236",
-          "result": "d9453cb9c3ac1dffd96ac8f49bbd3abdfb586a38ac9f23769148bce0239cef06"
+          "result": "9f05e8914230be4f99e7e8aa5c5efa31d9736a27b6130ec61880588fb8969293"
         },
         "workspace": {
           "result.txt": "66696e616c0a",
@@ -234,7 +234,7 @@
           "dispatched": "e309d623ff3e9e96e59637480e834cacf47022cecb70cd99321994496e6c4dac",
           "events": "82c5715af24af0aaf06d7c01f6902c171ff9cf7b42cae0ba3f4e01861b35a524",
           "lines": "9ae9b9d7ca3a75d13ada3258c115f84a20c23149972902abe4c8bc306e1b951c",
-          "result": "9891edc56b817405085a9e23d74a910d35475545f128795ea7076283ee68c9e3"
+          "result": "a438b27f1f5230404bf8a8e403961a0ddc188b195577db05e900586cf48c786e"
         },
         "workspace": {
           "result.txt": "66697273740a",
@@ -264,7 +264,7 @@
           "dispatched": "c701bf56a64846b4399b96e62e824e50df2673ff8c8b2891774f69e1985cf898",
           "events": "33dc74d59fb19234aeeb4897807bbfec5189226eba4144b856f740947e8594dd",
           "lines": "ee6a85279d6f8ca91e265545910b1afd507bc2089a8b38faaee70c5ce0595009",
-          "result": "2f63a3bf63c6e9ba8ac6fbed5698a601571c9279e4170d540a05f7fb3364038e"
+          "result": "9188e02450dba1d2dda43b6059f84841184dcca74d50b64ca4292afbefc73729"
         },
         "workspace": {
           "result.txt": "66696e616c0a",

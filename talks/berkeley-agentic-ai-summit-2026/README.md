@@ -17,6 +17,7 @@
 - [`blog.md`](blog.md) — companion argument and citations.
 - [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
 - [`evals/draft-results.json`](evals/draft-results.json) — per-run provenance and raw summary.
+- [`evals/local-repair-evidence.json`](evals/local-repair-evidence.json) — pinned August 4 local repair receipts, with acceptance, exhaustion and diagnostic budgets kept separate.
 
 ## Published-talk errata — 2026-09-07
 
@@ -26,6 +27,11 @@ publication correction. The deck labels historical results by date and does
 not present them as measurements of the current native-tool interface.
 Use the corrected PDF and script for sharing or future delivery. The points
 below remain relevant when viewing the recording.
+
+The revised conclusion also adds a separate **August 4 local repair pilot**,
+after the original talk date: narrow accepted repairs exist, but dependable
+autonomous coding and net time savings remain unproven. This is not a new
+inference run or a claim that the historical recording included that result.
 
 - **Local model:** Gemma 4 E4B is dense PLE, not MoE. The hosted Gemma and Qwen
   records changed revisions, serving stacks, quantization, and budgets; they do
@@ -55,16 +61,17 @@ below remain relevant when viewing the recording.
 4. Frame reasoning as a trajectory hypothesis: preserve progress, repair locally, and replan broadly only after a broken assumption.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
 6. Show the FeatureBench observations: after bundled revision-3 changes and a changed serving stack, both attempts produced applying but unresolved patches; target-test execution and clean termination remained gaps in those cells.
-7. Answer cautiously: bounded loops look promising, but realistic feature readiness remains open and belongs to the model–harness–task combination.
+7. Answer with the separate local E4B repair pilot: four accepted repairs of one seeded health-check bug, but four exhausted agents. Narrow repairs are possible; dependable autonomy, net time savings and causal harness benefit remain unproven.
 8. Keep a backup comparison of AskMe, pi, and OpenHands technical boundaries for Q&A.
 
 ## Evidence Boundary
 
-The talk keeps five kinds of statements separate:
+The talk keeps six kinds of statements separate:
 
 - **Strategic context.** The motivations for smaller models and broader workflow agents come from current model/deployment capabilities and harness research; they are not findings from this repository's smoke test.
 - **Measured result.** Four hosted models each ran two deliberately simple harness checks once. All eight agents reported completion; seven outputs met the exact acceptance contract. In the retained miss, a combined compile-and-run command exited zero at the wrong artifact path, but the required deliverable was absent.
 - **External boundary probe.** One qualified FeatureBench-fast task with Gemma 4 31B produced four reads, zero writes, and an empty patch. The 512-token structured-action budget bound that trajectory. This is a negative one-task canary, not a score or readiness result.
+- **Local positive, bounded.** The separate August 4 E89 pilot records four independently accepted repairs of one seeded health-check bug with local Gemma 4 E4B. All four shipped-profile heuristic runs exhausted; its two strict passes used a larger diagnostic budget. This is not a real-repository feature result or a reliability estimate.
 - **Supported conclusion.** The combined evidence exposes two different harness boundaries: one wrong delivered artifact and one feature-scale action that never reached execution. It does not validate a causal harness benefit.
 - **Hypothesis.** Fast feedback should let reasoning correct locally with few repeated errors and little unnecessary replanning. The current runs did not isolate reasoning mode, model size, or model family, so the deck leaves that causal claim open.
 
@@ -113,6 +120,25 @@ tool calls. A new frozen protocol and requalified controls are needed before
 citing the v6 outcomes as current-main behavior.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
+
+### Local repair evidence on slide 7
+
+The [pinned E89 report](https://github.com/den-run-ai/askme/blob/8d4e1eab8034d2b5e0b6418b6701a351201187ad/tests/bench_records/2026-08-04/e89-web-local/README.md)
+describes local Gemma 4 E4B QAT Q4_0 (dense PLE), tools-only runtime `4e528a6`.
+In four shipped-profile heuristic runs (one pilot plus three trials), the
+health-check repair passed independent acceptance while the agent exhausted.
+The original eleven-run pilot's two strict passes used the non-shipping
+`generic-feature-scale-v1` profile. Later lifecycle-policy trials are a separate
+addendum; they are not pooled into this stage example.
+
+The [local receipt](evals/local-repair-evidence.json) pins the report, protocol,
+summary and four JSONL hashes. Those JSONLs retain the successful edits and
+exhausted endings; the acceptance claim comes from the historical report's
+surviving-workspace check, not a newly replayed acceptance transcript. Protocol
+amendments, an early-stopped arm with discarded partial logs, changed budgets
+and one seeded task prevent a reliability or causal claim. No human baseline
+or net time-savings measurement exists. The September local serving probes did
+not attempt coding and are not substituted for this historical positive.
 
 ## Render
 

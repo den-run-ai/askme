@@ -386,7 +386,7 @@ class LLMClient(_llm.LLMClient):
             time.sleep if sleep is None else sleep,
             log if log_sink is None else log_sink,
             _run_log if event_sink is None else event_sink,
-            response_schemas=RESPONSE_SCHEMAS,
+            response_schemas_provider=lambda: RESPONSE_SCHEMAS,
         )
 
     def ask(
