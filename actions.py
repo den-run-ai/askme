@@ -93,6 +93,16 @@ class CapturedProcess:
             os.killpg(process.pid, signum)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin returns EPERM for a group containing only a zombie. Reap
+            # our exited child without waiting, then retry: ESRCH confirms the
+            # group disappeared; a real permission failure still propagates.
+            if process.poll() is None:
+                raise
+            try:
+                os.killpg(process.pid, signum)
+            except ProcessLookupError:
+                pass
 
     @classmethod
     def run(cls, command, *, timeout, cwd, shell=False, env=None):

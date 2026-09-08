@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TALK = ROOT / "talks" / "berkeley-agentic-ai-summit-2026"
 SLIDES = TALK / "slides.md"
 SPEC = TALK / "DECK_SPEC.md"
+NOTES = TALK / "SPEAKER_NOTES.md"
 BLOG = TALK / "blog.md"
 README = TALK / "README.md"
 ROOT_README = ROOT / "README.md"
@@ -42,8 +43,9 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "ASKME LOOP" in bridge_upper
     assert "EXTERNAL ACCEPTANCE LAYER" in bridge_upper
     assert "AskMe is an experimental coding-agent harness" in bridge
-    assert "one JSON action" in bridge
-    assert "fixed action vocabulary" in bridge
+    assert "one native tool call" in bridge
+    assert "eight native tools" in bridge
+    assert "one JSON action" not in bridge
     assert "external workflow acceptance" in bridge
     for stale_label in ("Pi", "Oh My Pi", "OpenHands", "Omnigent", "Databricks"):
         assert stale_label not in bridge
@@ -73,16 +75,21 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
 
     boundary = slides[5]
     assert "FeatureBench canary" in boundary
-    assert "Both models build app features — but fail on testing" in boundary
+    assert "Applied patches, unresolved feature task" in boundary
     assert "0 writes" in boundary
     assert "Empty patch" in boundary
-    assert "App features built" in boundary
+    assert "Patches applied" in boundary
     assert "11 / 13" in boundary
     assert "7 / 13" in boundary
-    assert "They never test their work" in boundary
-    assert "Neither finished cleanly" in boundary
-    assert "testing and finishing the work is the next gap" in boundary
-    assert "One task, one attempt per model — progress, not a benchmark score" in boundary
+    assert "No target-test run" in boundary
+    assert "Both agents exhausted their planning attempts" in boundary
+    assert "Neither emitted" not in boundary
+    assert "One task, one attempt per model" in boundary
+    assert "historical results" in boundary
+    assert "no causal attribution" in boundary
+    assert "changed serving stack" in boundary
+    assert "The action interface blocked every edit" not in boundary
+    assert "They never test their work" not in boundary
     assert "Qwen wrong-path result" not in boundary
     for roadmap_detail in ("reasoning-policy", "24-run", "Vals"):
         assert roadmap_detail not in boundary
@@ -95,6 +102,8 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "Evaluate the model, harness, and task as one system" in conclusion
     assert "not a general readiness verdict" in conclusion
     assert "validates this interface" not in conclusion
+    assert "do not isolate a harness effect" in conclusion
+    assert "Harness design changed the outcome" not in conclusion
 
     backup = slides[7]
     assert "Backup · harness boundaries" in backup
@@ -104,7 +113,9 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     for dimension in ("Action surface", "State + control", "Completion boundary"):
         assert dimension in backup
     assert "Trade-off, not ranking" in backup
-    assert "conditional fail-open validation" in backup
+    assert "8 native tools: 6 executable actions" in backup
+    assert "complete_unverified" in backup
+    assert "conditional fail-open validation" not in backup
     assert "optional persistence" in backup
     assert "finish</code> signals completion" in backup
     assert "Databricks" not in backup
@@ -126,7 +137,14 @@ def test_deck_contract_guards_notes_and_review_spec():
         flags=re.DOTALL,
     )
     assert len(note_blocks) == 7
-    assert sum(len(block.split()) for block in note_blocks) == 511
+    canonical = re.findall(
+        r"(?ms)^## Slide [1-7][^\n]*\n\n(.*?)(?=^## Slide |\Z)",
+        NOTES.read_text(encoding="utf-8"),
+    )
+    assert [block.strip() for block in note_blocks] == [block.strip() for block in canonical]
+    assert all("[Sources]" in block for block in note_blocks)
+    spoken_word_count = sum(len(block.split("[Sources]", 1)[0].split()) for block in note_blocks)
+    assert 450 <= spoken_word_count <= 650
     assert "FeatureBench canary" in text
     for benchmark in ("Vals", "ProgramBench"):
         assert benchmark not in text

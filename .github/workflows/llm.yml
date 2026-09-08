@@ -244,20 +244,22 @@ jobs:
               echo "model cell must contain exactly one non-empty requested=expected-served pair" >&2
               exit 1
             fi
-            EFFORT_ARGS=()
-            [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
+            # Keep the array nonempty: Bash 3.2 treats an empty array as
+            # unset under nounset (including the macOS contract test).
+            MODEL_ARGS=(--model "$MODEL" --provider "$PROVIDER")
+            [ -n "$EFFORT" ] && MODEL_ARGS+=(--reasoning-effort "$EFFORT")
             MODEL_COUNT=$((MODEL_COUNT + 1))
             SLUG="$(printf '%s' "$MODEL-$EXPECTED_SERVED_MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
             uv run --locked python tests/bench_harness.py --backend openrouter --suite hard \
               --test test_replan_build_with_dependency --trials "$TRIALS" \
-              --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
+              "${MODEL_ARGS[@]}" \
               --reasoning-policy gated \
               --capability-profile generic-feature-scale-v1 \
               --expected-served-model "$EXPECTED_SERVED_MODEL" \
               --log-dir "$BENCH_ROOT/$SLUG/build"
             uv run --locked python tests/bench_harness.py --backend openrouter --suite medium \
               --test test_fix_python_syntax_error --trials "$TRIALS" \
-              --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
+              "${MODEL_ARGS[@]}" \
               --reasoning-policy gated \
               --capability-profile generic-feature-scale-v1 \
               --expected-served-model "$EXPECTED_SERVED_MODEL" \
@@ -344,14 +346,15 @@ jobs:
               echo "model cell must contain exactly one non-empty requested=expected-served pair" >&2
               exit 1
             fi
-            EFFORT_ARGS=()
-            [ -n "$EFFORT" ] && EFFORT_ARGS=(--reasoning-effort "$EFFORT")
+            # Keep the array nonempty under Bash 3.2's nounset semantics.
+            MODEL_ARGS=(--model "$MODEL" --provider "$PROVIDER")
+            [ -n "$EFFORT" ] && MODEL_ARGS+=(--reasoning-effort "$EFFORT")
             SLUG="$(printf '%s' "$MODEL-$EXPECTED_SERVED_MODEL${EFFORT:+-$EFFORT}" | tr '/.:' '---')"
             for T in $TESTS; do
               CELLS=$((CELLS + 1))
               uv run --locked python tests/bench_harness.py --backend openrouter --suite web \
                 --test "$T" --trials "$WEB_TRIALS" \
-                --model "$MODEL" --provider "$PROVIDER" "${EFFORT_ARGS[@]}" \
+                "${MODEL_ARGS[@]}" \
                 --reasoning-policy gated \
                 --capability-profile generic-feature-scale-v1 \
                 --expected-served-model "$EXPECTED_SERVED_MODEL" \

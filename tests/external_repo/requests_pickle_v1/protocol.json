@@ -2,10 +2,10 @@
   "protocol": "requests-pickle-macos-qwen4b-v1",
   "registered_date": "2026-09-08",
   "trials": 1,
-  "harness_revision": "2293d49ab984b1575ef88c7b9b00b1d40e2d1fcc",
+  "harness_revision": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
   "runtime_sha256": {
     "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949",
-    "actions.py": "ce1f95172099cac79cdd8a8e718eae2ee994ca66e7a95c864ecad08514751ef4"
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930"
   },
   "target_repository": "https://github.com/psf/requests.git",
   "target_revision": "7a13c041dbef42f9f3feb14110f02626f6892e9a",

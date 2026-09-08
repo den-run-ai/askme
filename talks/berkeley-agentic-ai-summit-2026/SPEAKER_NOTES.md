@@ -2,10 +2,10 @@
 
 Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026 · 5-minute lightning talk
 
-Corrected delivery script, updated 2026-09-07. This is the canonical spoken
-source; the published deck and its inline notes remain historical artifacts.
-See the [published-talk errata](README.md#published-talk-errata--2026-09-07)
-when viewing the recording or slides. The backup slide has no script — Q&A only.
+Corrected delivery script, updated 2026-09-08. This is the canonical spoken
+source; the inline notes in `slides.md` are synchronized with it. Source blocks
+are reference material, not spoken copy. The [published-talk errata](README.md#published-talk-errata--2026-09-07)
+apply to the historical recording. The backup slide has no script — Q&A only.
 
 Key framing: AskMe began with local Gemma 4 E4B, a dense PLE model that fits
 in 16GB of MacBook RAM. The hosted Gemma 4 and Qwen3.6 evaluations span later
@@ -23,6 +23,10 @@ on a sixteen-gigabyte Mac. These evaluations use hosted Gemma and Qwen models
 across later revisions and different serving configurations. They do not
 measure local performance or isolate model size.
 
+[Sources]
+- [Local deployment and scope](../../README.md)
+- [Hosted experiment provenance](evals/draft-results.json)
+
 ## Slide 2 — AskMe gives a small model one structured move at a time (~40s)
 
 AskMe is an experimental coding-agent harness, small enough to read in one
@@ -34,14 +38,21 @@ accepts one native tool call per turn: six executable actions plus `done` and
 Tool feedback guides AskMe; held-out acceptance scores the artifact after the
 run and is not returned to the agent for recovery.
 
+[Sources]
+- [Runtime protocol and control boundaries](../../docs/ARCHITECTURE.md)
+- [Current native tool schemas](../../actions.py)
+
 ## Slide 3 — A command passed. The workflow still failed. (~35s)
 
-First lesson: success signals lie. This Qwen run compiled and ran its program
-at slash tmp slash test, saw exit zero, reported complete. Inside the loop,
-all green. The contract asked for dot slash main. The acceptance test found
-nothing. Passing command plus confident completion — still a missing
-deliverable. That run set the design rule: judge the delivered artifact, not
+First lesson: success signals can mislead. This Qwen run issued a combined
+compile-and-run command at slash tmp slash test, saw exit zero, and reported
+complete. The record does not preserve stdout or prove source contents. The
+contract asked for dot slash main; the post-run check found none. AskMe did
+not receive that failure for recovery. Judge the delivered artifact, not
 the agent's self-report.
+
+[Sources]
+- [Frozen July 10 per-cell outcomes and retained command](evals/draft-results.json)
 
 ## Slide 4 — Hypothesis: update only what fresh evidence invalidates (~35s)
 
@@ -52,6 +63,9 @@ trajectory quality — fewer repeated failures, fewer stuck steps, less plan
 churn — not longer monologues. Not measured yet; it's the bet I most want to
 be right about.
 
+[Sources]
+- [Harness hypotheses and evaluation limits](../../docs/EXPERIMENTS.md)
+
 ## Slide 5 — Acceptance caught the one bad deliverable (~40s)
 
 Does the loop hold? Four hosted variants — two Gemma 4s, two Qwen3.6s — two
@@ -61,16 +75,26 @@ that wrong-path build; an accepted repair was faster overall. This is a frozen
 July record, one run per cell, with no rankings or current reliability claim.
 Acceptance caught what the completion signal missed.
 
-## Slide 6 — Applying but unresolved patches on one feature task (~40s)
+[Sources]
+- [Frozen July 10 hosted matrix](evals/draft-results.json)
+- [Protocol and acceptance boundary](evals/README.md)
+
+## Slide 6 — Applied patches, unresolved feature task (~40s)
 
 Next: FeatureBench, one frozen feature task. Revision 2 left both cells with
 empty patches, for different reasons. After bundled revision-3 changes and a
 changed serving stack, both left applying but unresolved patches. Held-out
 scoring found eleven of thirteen target tests passing for Gemma, seven for
-Qwen. Neither ran the target tests or emitted `done`; Gemma rewrote one file
+Qwen. Neither ran the target tests; both agents exhausted their planning attempts.
+Gemma rewrote one file
 eighteen times, Qwen returned to reading. One task, one attempt each, no causal
 attribution. These historical results do not validate today's native-tool
 transport.
+
+[Sources]
+- [FeatureBench protocols and historical outcomes](../../tests/featurebench/README.md)
+- [Gemma August 1 result](../../tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v6.json)
+- [Qwen August 1 result](../../tests/featurebench/results/2026-08-01-qwen36-27b-canary-v6.json)
 
 ## Slide 7 — Promising for bounded loops. Feature readiness is still open. (~35s)
 
@@ -81,7 +105,18 @@ design bets. The takeaway: judge delivered behavior — evaluate the model,
 harness, task, and evaluator as one system. The reliable plane version remains
 the goal. I'm building it.
 
+[Sources]
+- [Evidence and unresolved claims](README.md#evidence-boundary)
+- [Dated measurements and limits](../../docs/PERFORMANCE.md)
+
 ## Slide 8 — Backup: AskMe, pi, and OpenHands
 
 No script. Backup slide for Q&A on how harness boundaries differ; the slide
 itself carries the comparison.
+
+[Sources]
+- [AskMe completion semantics](../../README.md)
+- [pi coding-agent documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
+- [OpenHands tool system](https://docs.openhands.dev/sdk/arch/tool-system)
+- [OpenHands conversation](https://docs.openhands.dev/sdk/arch/conversation)
+- External documentation checked 2026-09-08.

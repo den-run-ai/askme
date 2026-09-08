@@ -1,15 +1,72 @@
 """Offline wall-clock and descendant regressions for captured commands."""
 
+import errno
+import io
 import os
 import shlex
 import subprocess
 import sys
 import time
+from unittest.mock import Mock
 
 import bench_harness
 import pytest
 
 import actions
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group lifecycle")
+@pytest.mark.parametrize("denied_signal", [actions.signal.SIGTERM, actions.signal.SIGKILL])
+def test_timeout_reaps_zombie_group_before_retrying_darwin_permission_error(
+    tmp_path, monkeypatch, denied_signal
+):
+    # Darwin excludes zombies from killpg's eligible recipients and returns
+    # EPERM until the only remaining member (our direct child) is reaped.
+    command = ["timed-out-command"]
+    process = Mock(pid=12345, returncode=None, stdout=io.BytesIO(), stderr=io.BytesIO())
+    process.communicate.side_effect = subprocess.TimeoutExpired(
+        command, 0.2, output=b"partial stdout", stderr=b"partial stderr"
+    )
+
+    def reap():
+        process.returncode = -actions.signal.SIGTERM
+        return process.returncode
+
+    process.poll.side_effect = reap
+
+    def signal_group(_pid, signum):
+        if signum == denied_signal:
+            if process.returncode is None:
+                raise PermissionError(errno.EPERM, "Operation not permitted")
+            raise ProcessLookupError(errno.ESRCH, "No such process")
+
+    monkeypatch.setattr(actions.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(actions.os, "killpg", signal_group)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        actions.CapturedProcess.run(command, timeout=0.2, cwd=tmp_path)
+    assert caught.value.output == b"partial stdout"
+    assert caught.value.stderr == b"partial stderr"
+    assert process.stdout.closed and process.stderr.closed
+    process.wait.assert_called_once_with(timeout=actions.PROCESS_TERMINATION_GRACE)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group lifecycle")
+@pytest.mark.parametrize("returncode", [None, -actions.signal.SIGTERM])
+def test_timeout_does_not_hide_permission_denial_for_existing_group(
+    tmp_path, monkeypatch, returncode
+):
+    command = ["timed-out-command"]
+    process = Mock(pid=12345, stdout=io.BytesIO(), stderr=io.BytesIO())
+    process.poll.return_value = returncode
+    process.communicate.side_effect = subprocess.TimeoutExpired(command, 0.2)
+    denied = PermissionError(errno.EPERM, "Operation not permitted")
+    monkeypatch.setattr(actions.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(actions.os, "killpg", Mock(side_effect=denied))
+    with pytest.raises(PermissionError) as caught:
+        actions.CapturedProcess.run(command, timeout=0.2, cwd=tmp_path)
+    assert caught.value is denied
+    assert process.stdout.closed and process.stderr.closed
+    process.wait.assert_called_once_with(timeout=actions.PROCESS_TERMINATION_GRACE)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX process-group lifecycle")
