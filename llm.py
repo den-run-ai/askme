@@ -907,7 +907,8 @@ class LLMClient:
     Settings are explicit; omitted sinks are silent. The askme facade
     supplies its historical defaults without a back-import. Constructing
     clients explicitly gives two backends/models in one process without
-    global leakage.
+    global leakage. An explicit schema mapping stays bound to its client;
+    an optional provider supports late registry lookup for compatibility.
     """
 
     def __init__(
@@ -919,14 +920,22 @@ class LLMClient:
         event_sink=None,
         *,
         response_schemas=None,
+        response_schemas_provider=None,
     ):
+        if response_schemas is not None and response_schemas_provider is not None:
+            raise ValueError("Choose response_schemas or response_schemas_provider, not both")
         self.settings = settings
         self._schemas = RESPONSE_SCHEMAS if response_schemas is None else response_schemas
+        self._schemas_provider = response_schemas_provider
         # The default transport resolves requests.post at call time.
         self._post = post
         self._sleep = time.sleep if sleep is None else sleep
         self._log = _ignore if log_sink is None else log_sink
         self._event = _ignore if event_sink is None else event_sink
+
+    def _schema_registry(self):
+        """Resolve at admission and response validation, as the legacy facade did."""
+        return self._schemas if self._schemas_provider is None else self._schemas_provider()
 
     def ask(
         self,
@@ -955,8 +964,10 @@ class LLMClient:
         the plan's configured max_tasks) into that schema."""
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
-        if expect is not None and expect not in self._schemas:
-            raise ValueError(f"expect must be one of {', '.join(sorted(self._schemas))}")
+        if expect is not None:
+            schemas = self._schema_registry()
+            if expect not in schemas:
+                raise ValueError(f"expect must be one of {', '.join(sorted(schemas))}")
         cfg = self.settings
         budget = max_tokens
         for attempt in range(max_retries + 1):
@@ -1066,7 +1077,7 @@ class LLMClient:
                 raise
             if repaired:
                 self._log(f"  JSON repaired on attempt {attempt}")
-            if expect is not None and not self._schemas[expect](obj, expect_context):
+            if expect is not None and not self._schema_registry()[expect](obj, expect_context):
                 if attempt < max_retries:
                     self._log(f"  [retry {attempt + 1}] reply failed the {expect} schema")
                     continue

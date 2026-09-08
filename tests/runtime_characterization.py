@@ -169,9 +169,16 @@ def capture(module, spec, workspace):
             ),
         )
 
+    # Runtime mutation identities resolve symlinks, while prompts retain the
+    # supplied path. Normalize both roots, longest first: macOS /tmp resolves
+    # to /private/tmp, where replacing only /tmp would leave /private behind.
+    workspace_prefixes = sorted({str(workspace), str(workspace.resolve())}, key=len, reverse=True)
+
     def normalized(value):
         if isinstance(value, str):
-            return value.replace(str(workspace), "<workspace>")
+            for prefix in workspace_prefixes:
+                value = value.replace(prefix, "<workspace>")
+            return value
         if isinstance(value, dict):
             return {normalized(key): normalized(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):

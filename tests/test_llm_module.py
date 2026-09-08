@@ -232,6 +232,77 @@ def test_facade_schema_keeps_late_planner_limit_without_duplicating_contract(mon
     assert client.ask([], expect="plan") == reply
 
 
+def test_existing_facade_client_uses_rebound_response_schema_registry(monkeypatch):
+    reply = {"synthetic": "accepted"}
+    post = Mock(return_value=mock_response_raw(json.dumps(reply)))
+    client = askme.LLMClient(post=post)
+    monkeypatch.setattr(
+        askme,
+        "RESPONSE_SCHEMAS",
+        {"synthetic": lambda obj, context: obj == reply and context == {"version": 2}},
+    )
+    assert client.ask([], expect="synthetic", expect_context={"version": 2}) == reply
+
+    monkeypatch.setattr(askme, "RESPONSE_SCHEMAS", {"synthetic": lambda obj, context: False})
+    with pytest.raises(json.JSONDecodeError, match="synthetic response schema") as error:
+        client.ask([], expect="synthetic", max_retries=0)
+    assert error.value.malformed_action is True
+    assert post.call_count == 2
+
+    monkeypatch.setattr(askme, "RESPONSE_SCHEMAS", {})
+    with pytest.raises(ValueError, match="expect must be one of"):
+        client.ask([], expect="synthetic")
+    assert post.call_count == 2  # Removed schemas fail before transport.
+
+
+def test_facade_uses_latest_schema_when_a_response_arrives(monkeypatch):
+    monkeypatch.setattr(askme, "RESPONSE_SCHEMAS", {"synthetic": lambda obj, context: True})
+
+    def post(*args, **kwargs):
+        monkeypatch.setattr(askme, "RESPONSE_SCHEMAS", {"synthetic": lambda obj, context: False})
+        return mock_response_raw('{"synthetic": "now rejected"}')
+
+    client = askme.LLMClient(post=post)
+    with pytest.raises(json.JSONDecodeError, match="synthetic response schema"):
+        client.ask([], expect="synthetic", max_retries=0)
+
+
+def test_explicit_standalone_schema_registries_remain_independent(monkeypatch):
+    posts = [
+        Mock(
+            side_effect=[mock_response_raw('{"value":"one"}'), mock_response_raw('{"value":"two"}')]
+        ),
+        Mock(return_value=mock_response_raw('{"value":"two"}')),
+    ]
+    settings = llm.LLMSettings.from_env({})
+    clients = [
+        llm.LLMClient(
+            settings,
+            post=post,
+            response_schemas={
+                "synthetic": lambda obj, context, value=value: obj == {"value": value}
+            },
+        )
+        for value, post in zip(("one", "two"), posts)
+    ]
+    monkeypatch.setattr(askme, "RESPONSE_SCHEMAS", {})
+    monkeypatch.setattr(llm, "RESPONSE_SCHEMAS", {})
+    assert clients[0].ask([], expect="synthetic") == {"value": "one"}
+    assert clients[1].ask([], expect="synthetic") == {"value": "two"}
+    with pytest.raises(json.JSONDecodeError, match="synthetic response schema"):
+        clients[0].ask([], expect="synthetic", max_retries=0)
+    assert [post.call_count for post in posts] == [2, 1]
+
+
+def test_standalone_schema_configuration_rejects_ambiguous_sources():
+    with pytest.raises(ValueError, match="not both"):
+        llm.LLMClient(
+            llm.LLMSettings.from_env({}),
+            response_schemas={},
+            response_schemas_provider=lambda: {},
+        )
+
+
 def test_standalone_settings_compose_with_public_run_api(tmp_path):
     settings = llm.LLMSettings.from_env({"LLM_MODEL": "standalone-config"})
     assert get_type_hints(askme.RunConfig)["llm"] == llm.LLMSettings | None
