@@ -12,6 +12,20 @@ traversal.
 signals. They are not an operating-system sandbox. In particular,
 `ALLOW_NETWORK` is currently reserved and does not block network access.
 
+Shell actions and the synthetic benchmark trial runner own POSIX process groups.
+On a timeout they send TERM, allow 0.2 seconds for cleanup, then send KILL to the
+whole group even if its leader has exited. Output draining and child reaping have
+separate 0.2-second limits, so inherited pipes cannot make cleanup wait forever.
+Windows uses file-backed output capture and attempts `taskkill /T /F`, falling
+back to killing the direct child if that command fails.
+
+This lifecycle control does not reach descendants that create new sessions or
+process groups. In particular, an outer benchmark timeout cannot terminate an
+inner shell action's separate group. Whole-run cooperative cancellation and
+aggregate resource budgets remain open in #77. The synthetic benchmark summary
+records measured monotonic `trial_wall_s` separately from the agent's reported
+`wall_s`; timeout records are no longer assigned a fabricated 1200-second wall.
+
 ## Safe use
 
 - Treat prompts, repositories, issue text, generated commands, and tool output as
