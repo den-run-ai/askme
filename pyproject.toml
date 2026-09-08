@@ -59,7 +59,7 @@ include = [
 
 [tool.coverage.run]
 branch = true
-source = ["askme", "actions", "llm"]
+source = ["askme", "actions", "llm", "policies"]
 
 [tool.coverage.report]
 fail_under = 90

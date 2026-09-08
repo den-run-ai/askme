@@ -29,7 +29,8 @@ but realistic feature readiness remains open.
 
 Today, AskMe is a small Python agent with no frameworks and no dependencies
 beyond `requests`: `askme.py` owns the CLI and plan/execute/replan controller,
-`llm.py` owns provider calls and response decoding, and `actions.py` owns the
+`llm.py` owns provider calls and response decoding, `policies.py` owns step,
+write-obligation and completion decisions, and `actions.py` owns the
 action registry and handlers. It takes a prompt, plans tasks, executes them via
 shell/write/edit/read/search/tree actions, and replans on failure. Its
 capability-budget selection is provider/backend-independent by default; a
@@ -323,6 +324,7 @@ reference machine for that.
 
 - `askme.py` — CLI, controller and backwards-compatible public API
 - `llm.py` — immutable provider settings, response codecs and injectable client
+- `policies.py` — step strategies, incomplete-write obligations and completion/validation decisions
 - `actions.py` — canonical action registry, handlers and execution receipts
 - `tests/` — unit and integration tests, split by concern
 - `tests/bench_harness.py` — multi-trial benchmark harness
