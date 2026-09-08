@@ -14,6 +14,18 @@ from typing import Any
 _NO_JSON = object()
 
 
+class ScriptedClient:
+    """Injected planner/action/validator replies with captured call arguments."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = []
+
+    def ask(self, messages, **kwargs):
+        self.calls.append({"messages": messages, **kwargs})
+        return self.replies.pop(0)
+
+
 class FakeHttpResponse:
     """Strict requests.Response subset used by deterministic provider tests."""
 

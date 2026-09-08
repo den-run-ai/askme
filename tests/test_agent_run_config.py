@@ -10,7 +10,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from _test_support import mock_llm_response, mock_response_raw
+from _test_support import ScriptedClient, mock_llm_response, mock_response_raw
 
 import askme
 from askme import (
@@ -26,16 +26,6 @@ from askme import (
 )
 
 PLAN_DONE = [{"tasks": ["greet"]}, {"action": "done"}]
-
-
-class ScriptedClient:
-    def __init__(self, replies):
-        self.replies = list(replies)
-        self.calls = []
-
-    def ask(self, messages, **kwargs):
-        self.calls.append({"messages": messages, **kwargs})
-        return self.replies.pop(0)
 
 
 class ConfiguredScriptedClient(ScriptedClient):
