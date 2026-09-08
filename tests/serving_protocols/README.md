@@ -71,3 +71,13 @@ It cannot establish a local performance result or a causal model/harness
 comparison. Preserve a failed qualification and do not selectively rerun it.
 Register the exact task protocol, runtime, runner and serving-record hashes
 before its one task attempt, and requalify all three task controls.
+
+The first hosted preflight stopped after one planner response because its
+registration confused the endpoint's dated display name with the API's
+canonical returned model identifier. That failed registration and its
+$0.00004135 cost remain in the v1 record. The [v2
+amendment](2026-09-08-gemma-moe-hosted-v2.json) pins the observed canonical
+identifier on the same DeepInfra fp8 route and repeats the two serving
+checks before any task. It does not establish hosted checkpoint bytes.
+V2's cap is $0.04995; adding the known v1 cost and the $0.45 task cap
+keeps the combined ceiling below $0.50.
