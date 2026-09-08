@@ -664,9 +664,11 @@ class TestLLMTransport:
         with (
             patch("askme.get_plan", return_value={"tasks": ["do something"]}),
             patch("askme.get_step", side_effect=mock_get_step),
+            patch("askme.requests.post", return_value=mock_response({"task": ""})) as mock_post,
         ):
             result = _run_loop("test", str(tmp_path), max_replans=2)
         assert result["status"] == "complete"
+        assert mock_post.call_count == 1  # Task-local replanning stays scripted too.
 
     @patch("askme.requests.post")
     def test_json_error_key_still_retried(self, mock_post):

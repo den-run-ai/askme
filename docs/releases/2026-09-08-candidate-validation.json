@@ -1,5 +1,6 @@
 {
   "date_utc": "2026-09-08",
+  "later_isolation_correction": "These are retained passing results, not a hermeticity guarantee. A subsequent local-server audit found four unmocked task-replan requests in this suite and four in the preceding suite. See tests/bench_records/2026-09-08-offline-test-isolation/README.md and issue #111. The final guarded validation supersedes the offline claim without changing these counts or experimental outcomes.",
   "environment": "physical Apple M1, macOS 26.5, locked uv environment, Python 3.12.12",
   "tested_worktree_base": "2f7d656",
   "note": "The final source changes were uncommitted during the checks; source hashes below identify the tested bytes. No commit occurred during Git-identity-sensitive tests. Subsequent evidence/documentation commits do not change these source bytes.",
