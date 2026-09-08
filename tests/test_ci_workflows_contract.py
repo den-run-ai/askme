@@ -6,7 +6,12 @@ the unit matrix stays credential-free, and the paid LLM workflow always
 preflights, gates, and stays opt-in for pull requests.
 """
 
+import json
+import os
 import re
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,22 +94,22 @@ def test_workflows_do_not_persist_checkout_credentials():
 
 
 def test_llm_workflow_uses_the_openrouter_environment():
-    """Both paid jobs use a protected environment and secret-only credential."""
+    """All paid jobs use a protected environment and secret-only credential."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    assert text.count("environment: Openrouter") == 2
+    assert text.count("environment: Openrouter") == 3
     assert "vars.OPENROUTER_API_KEY" not in text
-    assert text.count("OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}") == 4
+    assert text.count("OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}") == 6
 
-    smoke, berkeley = _paid_job_sections(text)
-    for section in (smoke, berkeley):
+    for section in _paid_job_sections(text):
         assert not re.search(r"^    env:", section, flags=re.MULTILINE)
         assert section.index("Install dependencies") < section.index("OPENROUTER_API_KEY:")
 
 
-def _paid_job_sections(text: str) -> tuple[str, str]:
+def _paid_job_sections(text: str) -> tuple[str, str, str]:
     smoke_and_after = text.split("  openrouter-smoke:", 1)[1]
-    smoke, berkeley = smoke_and_after.split("  berkeley-protocol:", 1)
-    return smoke, berkeley
+    smoke, berkeley_and_after = smoke_and_after.split("  berkeley-protocol:", 1)
+    berkeley, webbench = berkeley_and_after.split("  web-bench-trials:", 1)
+    return smoke, berkeley, webbench
 
 
 def test_llm_workflow_preflights_before_spending():
@@ -112,25 +117,57 @@ def test_llm_workflow_preflights_before_spending():
     (conftest's skip markers would otherwise turn a bad credential into a
     green run)."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    smoke, berkeley = _paid_job_sections(text)
+    smoke, berkeley, webbench = _paid_job_sections(text)
     assert smoke.count("ci_llm_gate.py preflight") == 1
     assert berkeley.count("ci_llm_gate.py preflight") == 1
+    assert webbench.count("ci_llm_gate.py preflight") == 1
     assert smoke.index("ci_llm_gate.py preflight") < smoke.index(
         "uv run --locked pytest tests/test_agent_integration.py"
     )
-    assert berkeley.index("ci_llm_gate.py preflight") < berkeley.index(
-        "uv run --locked python tests/bench_harness.py"
-    )
+    for bench_section in (berkeley, webbench):
+        assert bench_section.index("ci_llm_gate.py preflight") < bench_section.index(
+            "uv run --locked python tests/bench_harness.py"
+        )
+
+
+def test_llm_workflow_smoke_suite_selector_covers_every_suite():
+    """The dispatch suite choices and the -k mapping must stay in step; a
+    choice without a case branch would exit 1 after the credential preflight."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    assert "options: [easy, medium, hard, web]" in text
+    for class_name in (
+        "TestOpenRouterEasy",
+        "TestOpenRouterMedium",
+        "TestOpenRouterHard",
+        "TestOpenRouterWeb",
+    ):
+        assert f'K="{class_name}"' in text
 
 
 def test_llm_workflow_guards_against_silent_skips():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     # pytest reports skip reasons, and the smoke job asserts the agent
-    # actually logged run events.
+    # actually logged run events — per matrix model, and again after the loop.
     assert "-rs" in text
     assert 'ASKME_RUN_LIVE_LLM_TESTS: "1"' in text
     assert "-m live_llm" in text
-    assert "test -s llm-logs/smoke.jsonl" in text
+    assert 'test -s "llm-logs/smoke-$SLUG.jsonl"' in text
+    assert 'for f in llm-logs/smoke-*.jsonl; do test -s "$f"; done' in text
+
+
+def test_llm_workflow_smoke_supports_model_matrix():
+    """The smoke job runs the selected suite once per SMOKE_MODELS entry with
+    the model (and optional '@effort' baseline) exported per iteration, keeps
+    running after a model fails so the matrix yields complete evidence, and
+    fails the job at the end when any model failed."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    smoke, _, _ = _paid_job_sections(text)
+    assert "SMOKE_MODELS: ${{ inputs.smoke_models || 'google/gemma-4-26b-a4b-it' }}" in smoke
+    assert 'OPENROUTER_MODEL="$MODEL"' in smoke
+    assert 'OPENROUTER_REASONING_EFFORT="$EFFORT"' in smoke
+    assert 'AGENT_RUN_LOG="$GITHUB_WORKSPACE/llm-logs/smoke-$SLUG.jsonl"' in smoke
+    assert "FAILED_MODELS" in smoke
+    assert "exit 1" in smoke
 
 
 def test_llm_workflow_gates_bench_results():
@@ -138,7 +175,7 @@ def test_llm_workflow_gates_bench_results():
     evaluates every cell. A one-trial result is advisory only after merge to
     main; scheduled/manual drift checks and opt-in PR runs stay strict."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
-    smoke, berkeley = _paid_job_sections(text)
+    smoke, berkeley, webbench = _paid_job_sections(text)
     gate = berkeley.split("      - name: Gate on protocol pass rule", 1)[1].split(
         "      - name: Upload bench logs and summaries", 1
     )[0]
@@ -149,6 +186,81 @@ def test_llm_workflow_gates_bench_results():
     assert gate.index("--advisory-cell-failures") < gate.index("ci_llm_gate.py report")
     assert "--expect-cells" in gate
     assert "--markdown-out" in gate
+    # The web trial matrix is always strict: dispatch-only, never advisory.
+    assert "continue-on-error" not in webbench
+    assert "--advisory-cell-failures" not in webbench
+    assert "--expect-cells" in webbench
+
+
+def test_llm_workflow_web_bench_is_dispatch_only_and_per_cell():
+    """web-bench-trials must never fire outside an explicit dispatch opt-in,
+    and must bench per (model, test) cell so ci_llm_gate sees every trial."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    _, _, webbench = _paid_job_sections(text)
+    assert (
+        "github.event_name == 'workflow_dispatch'"
+        " && inputs.web_trials != '' && inputs.web_trials != '0'"
+    ) in webbench
+    assert "--suite web" in webbench
+    assert '--test "$T"' in webbench
+    assert '--trials "$WEB_TRIALS"' in webbench
+    assert "EXPECTED_WEB_CELLS" in webbench
+    assert "web_trials:\n        description" in text
+    assert 'default: "0"' in text
+
+
+def test_web_bench_dispatch_passes_qualifying_cell_contract(tmp_path):
+    """Exercise the actual dispatch shell without calling a model or provider."""
+    text = LLM_WORKFLOW.read_text(encoding="utf-8")
+    step = text.split("      - name: Run web-suite trial matrix\n", 1)[1].split(
+        "      - name: Report web matrix (strict)\n", 1
+    )[0]
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    calls_path = tmp_path / "calls.jsonl"
+    uv = tmp_path / "uv"
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['CALLS_PATH'], 'a') as output:\n"
+        "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    github_env = tmp_path / "github-env"
+    bench_root = tmp_path / "bench-logs"
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        cwd=tmp_path,
+        env={
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "CALLS_PATH": str(calls_path),
+            "GITHUB_ENV": str(github_env),
+            "BENCH_ROOT": str(bench_root),
+            "WEB_MODELS": ("example/one=example/one-20260907@low,example/two=example/two-20260907"),
+            "WEB_TRIALS": "3",
+            "PROVIDER": "auto",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    assert len(calls) == 6
+    assert github_env.read_text().strip() == "EXPECTED_WEB_CELLS=6"
+    for index, args in enumerate(calls):
+        expected_model = "example/one" if index < 3 else "example/two"
+        assert args[args.index("--model") + 1] == expected_model
+        assert args[args.index("--expected-served-model") + 1] == expected_model + "-20260907"
+        assert args[args.index("--capability-profile") + 1] == "generic-feature-scale-v1"
+        assert args[args.index("--reasoning-policy") + 1] == "gated"
+        assert args[args.index("--suite") + 1] == "web"
+        assert args[args.index("--trials") + 1] == "3"
+        assert Path(args[args.index("--log-dir") + 1]).is_relative_to(bench_root)
+        if index < 3:
+            assert args[args.index("--reasoning-effort") + 1] == "low"
+        else:
+            assert "--reasoning-effort" not in args
 
 
 def test_llm_workflow_is_opt_in_for_pull_requests():
@@ -168,10 +280,10 @@ def test_llm_workflow_tracks_locked_dependencies_and_uses_uv_cache():
     for path in ("askme.py", "actions.py", "tests/**", "pyproject.toml", "uv.lock"):
         assert f"- {path}" in push_block
     assert "requirements" not in text
-    assert text.count("uv sync --locked") == 2
-    assert text.count("astral-sh/setup-uv@") == 2
-    assert text.count('version: "0.12.1"') == 2
-    assert text.count("cache-dependency-glob: uv.lock") == 2
+    assert text.count("uv sync --locked") == 3
+    assert text.count("astral-sh/setup-uv@") == 3
+    assert text.count('version: "0.12.1"') == 3
+    assert text.count("cache-dependency-glob: uv.lock") == 3
 
 
 def test_llm_workflow_supports_effort_pinned_cells():
@@ -190,7 +302,7 @@ def test_llm_workflow_bounds_spend():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in text
     assert "schedule:" in text
-    assert text.count("timeout-minutes:") == 2
+    assert text.count("timeout-minutes:") == 3
     assert "concurrency:" in text
     assert "cancel-in-progress: true" in text
     assert "permissions:" in text

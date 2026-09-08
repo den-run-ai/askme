@@ -516,10 +516,10 @@ def test_workflow_pins_each_berkeley_cell_contract():
         "google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,"
         "qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422"
     )
-    assert workflow.count(matrix) == 2
+    assert workflow.count(matrix) == 3
     assert "requested=expected-served model cells" in workflow
-    assert workflow.count("--capability-profile generic-feature-scale-v1") == 2
-    assert workflow.count("--reasoning-policy gated") == 2
-    assert workflow.count('--expected-served-model "$EXPECTED_SERVED_MODEL"') == 2
+    assert berkeley_run.count("--capability-profile generic-feature-scale-v1") == 2
+    assert berkeley_run.count("--reasoning-policy gated") == 2
+    assert berkeley_run.count('--expected-served-model "$EXPECTED_SERVED_MODEL"') == 2
     assert "set -u" in berkeley_run
     assert "set -e" not in berkeley_run
