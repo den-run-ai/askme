@@ -24,11 +24,12 @@ For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITE
 
 ## Research-preview candidate snapshot — 2026-09-08
 
-This status entry describes candidate revision
+The initial integration baseline was revision
 [`2293d49`](https://github.com/den-run-ai/askme/commit/2293d49ab984b1575ef88c7b9b00b1d40e2d1fcc),
-after PRs #100–#103, #96, #89, #47, and #98 merged. It introduces no new model
-measurement. Historical tables below retain their original revisions and
-protocol limits.
+after PRs #100–#103, #96, #89, #47, and #98 merged. The external attempt below evaluates the subsequently repaired runtime at
+`28534c62a498ae3dcda1899a9ec2f989a5745f9e`. Later publication/evaluation commits
+do not change those runtime bytes. Historical tables retain their original
+revisions and protocol limits.
 
 The candidate fixes cross-attempt verification suppression, records accepted
 `done`/`fail` control claims, bundles both pinned FeatureBench runtime modules,
@@ -39,8 +40,6 @@ fresh verification, same-attempt loops, control receipts, clean-container
 imports, dependency tampering, and timeout cleanup. These fixes do not establish
 an improvement in live-model completion rates.
 
-<!-- RELEASE_GATE: Refresh integrated checks and append the frozen macOS canary outcome before tagging. -->
-
 [Integrated Linux CI](https://github.com/den-run-ai/askme/actions/runs/34173996684)
 passed. The [OpenRouter health check](https://github.com/den-run-ai/askme/actions/runs/34173996654)
 passed its protocol job, while the Gemma smoke suite passed 1/3 cases and
@@ -48,14 +47,29 @@ exhausted on the other two. These outcomes are retained without selective reruns
 The initial integrated macOS run found platform regressions tracked in
 [#105](https://github.com/den-run-ai/askme/issues/105); [#106](https://github.com/den-run-ai/askme/pull/106) subsequently passed both
 native Python 3.10/3.14 suites (1,313 passed, 30 expected skips each) and the
-local-server contract in [run 34174642414](https://github.com/den-run-ai/askme/actions/runs/34174642414). The predeclared external real-repository macOS canary is running against
-reviewed main `28534c62a498ae3dcda1899a9ec2f989a5745f9e` in
-[run 34175311656](https://github.com/den-run-ai/askme/actions/runs/34175311656);
-no outcome is claimed until the complete records are retained. Record its exact runner hardware,
-AskMe/task/model/server revisions, configuration, controls, and every trial
-before using it as current-revision evidence. A macOS runner alone does not
-reproduce the 16 GB M1 reference deployment; a hosted health check does not
-measure local performance or reliability.
+local-server contract in [run 34174642414](https://github.com/den-run-ai/askme/actions/runs/34174642414). The one predeclared external Requests task evaluated reviewed main
+`28534c62a498ae3dcda1899a9ec2f989a5745f9e` in
+[run 34175311656](https://github.com/den-run-ai/askme/actions/runs/34175311656).
+It **did not resolve**: five planner requests, four recorded read timeouts,
+and a 720.235-second outer timeout; no HTTP response, coding action, terminal
+agent record or nonempty patch. Fresh acceptance still reproduces the pickle
+TypeError. Baseline/no-op controls failed and gold passed all 21 checks before
+inference. No usage returned, so token consumption is unknown; hosted API
+charge was $0. The green workflow result means evidence retention succeeded,
+not that the task passed.
+
+The [complete permanent record](../tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md)
+retains all requests/errors, original runner/evaluator, controls, patch, score,
+hashes, and hardware/model/configuration provenance. There was one primary
+attempt and no selective rerun. Independent offline replay confirms the
+controls, with no model calls or scoring amendment.
+
+The CI host reported VirtualMac2,1, 3 vCPU and 7 GiB, with a virtual Metal
+device detected; actual layer allocation is not recorded. It is not equivalent
+to the physical 16 GB M1 reference. This serving/deadline failure before coding
+cannot establish whether Qwen3-4B can solve the task. A hosted health check also
+does not measure local performance or reliability. Future serving qualification
+is tracked in [#109](https://github.com/den-run-ai/askme/issues/109).
 
 The September 7 [scheduled LLM run](https://github.com/den-run-ai/askme/actions/runs/34152793007)
 used earlier `fcd5bc0`. Credential preflights passed; the smoke gate and the
@@ -64,8 +78,8 @@ remain historical evidence and cannot be called resolved by the offline fixes.
 
 The release claim remains narrow: useful bounded coding examples exist;
 reliable feature work and causal harness benefits remain unestablished. A
-single predeclared external task will be published regardless of outcome,
-without turning it into a reliability, model-family, or model-size result.
+single predeclared external attempt is published as a failure, without turning
+it into a reliability, model-family, or model-size result.
 See the [draft preview notes](releases/v0.1.0.md) and [#85](https://github.com/den-run-ai/askme/issues/85).
 
 ## Web Showcase 3-Trial Matrix — 2026-08-04, OpenRouter (three small-active-class models)
@@ -647,7 +661,8 @@ First full pass after thinking-on-retry + duplicate guard + cross-task state fix
 | shell_and_write | 2 | 4 (t1:3, t2:1) | 0 | 0 | 60s |
 | multi_step_build | 3 | 6 (t1:2, t2:3, t3:1) | 0 | 1x write | 87s |
 
-- Done emission works reliably (was broken due to empty state bug, not model limitation).
+- The three easy runs reported completion after the cross-task state fix.
+  This snapshot is not a reliability estimate or an isolated model-versus-state comparison.
 - Duplicate guard fired once (multi_step_build, same write loop seen on 26B).
 - ~10x slower than OpenRouter 26B (~10s/step vs <1s).
 

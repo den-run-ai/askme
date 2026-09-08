@@ -1,0 +1,134 @@
+{
+  "acceptance.py": {
+    "bytes": 2008,
+    "sha256": "73614b3c0eab133f20da4f19c2f3144512d1d4098f5e9dd691142cefece8b5cb"
+  },
+  "agent.jsonl": {
+    "bytes": 3933,
+    "sha256": "e7f9abdcc51265206e869bb94a3bbe537e4f57af7dd3707f4d66d4d867d9a719"
+  },
+  "candidate.patch": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "claim.json": {
+    "bytes": 470,
+    "sha256": "49a95cf5ab3579d14da120bef2664a1440279372ef5fb3c0b8b3d7b41a8d5b93"
+  },
+  "compiler.txt": {
+    "bytes": 207,
+    "sha256": "6c263f4a0b378193483e8853193204a89db0eacf407199d789fb7e3125b8148b"
+  },
+  "control-baseline.patch": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "control-gold.patch": {
+    "bytes": 522,
+    "sha256": "ffe1df2306de8445975f33b7fa048215c58e5ee32f1dd5ff185dfbb2ac808509"
+  },
+  "control-noop.patch": {
+    "bytes": 407,
+    "sha256": "a003e3e50d62ad6047adf86a1bcded3a756bcb94d3a90d691be63784dee6c024"
+  },
+  "external_repo_trial.py": {
+    "bytes": 14301,
+    "sha256": "de83a32adb3ccf88e7b46edea1eeec23910899be15037e92d07b3909eadf64e8"
+  },
+  "gold.patch": {
+    "bytes": 496,
+    "sha256": "3009fdbfe863ae5850c9ba4490b7aacd5237745409233f66292611163298accb"
+  },
+  "hardware.txt": {
+    "bytes": 123,
+    "sha256": "2fad9e330ae2491aea695f2303f6771ea926830a78c4cd8d005b653db2a4dfa9"
+  },
+  "http.jsonl": {
+    "bytes": 14606,
+    "sha256": "093752a9558522290887fd01dccc1d6182cb24cd5326ae141037a0963a07197f"
+  },
+  "llama-binary-sha256.txt": {
+    "bytes": 99,
+    "sha256": "f350266dbc020f73fd97582c631751b61c1e66113766cf7779a451d49dbd6688"
+  },
+  "llama-server.log": {
+    "bytes": 5613,
+    "sha256": "a10986bb9bfc2bac843f20e0ce0b9c712adf8c92d0ed2e5e989ff85abee1a015"
+  },
+  "llama-version.txt": {
+    "bytes": 76,
+    "sha256": "a6765a9940ad01cce10f9b9aa2274039e33df0f7441ba15c46f21c0c21aa9129"
+  },
+  "model-identity.json": {
+    "bytes": 229,
+    "sha256": "db58c9387143715c047b3d762c9266a165686cb6f0308d0b1a333c0f678d031f"
+  },
+  "offline-verification.json": {
+    "bytes": 2368,
+    "sha256": "c19fbb3bd87e36a98c24dbd99e238048a33bf3cf9689e20e07b5ba6534bb31e9"
+  },
+  "patch-apply.txt": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "portable-evidence.tar.gz": {
+    "bytes": 15455,
+    "sha256": "db68958d8bc1d2f85819fd384e4825234d3534ce5559a68f9f7245a5905a19d6"
+  },
+  "prompt.md": {
+    "bytes": 931,
+    "sha256": "08162c00137d69bc14e77bc37302156acb1ddea945836914e04fbed6805e7f63"
+  },
+  "protocol-commit.txt": {
+    "bytes": 41,
+    "sha256": "c88c08ecfe868b8a7f58f65c3051c344fb98fb067b79f5223d70e2ab6ce8950b"
+  },
+  "protocol.json": {
+    "bytes": 2250,
+    "sha256": "595ab9451cb01e3e3c0c56e338340f4c0161044217faebd3766646da14d13c72"
+  },
+  "provenance.json": {
+    "bytes": 1248,
+    "sha256": "fd13c1668e2fa2918431b08b9e73dc167d1a31f07ae41ca5fe803350a32ca7c6"
+  },
+  "qualification.json": {
+    "bytes": 2121,
+    "sha256": "704c6a25c043997b38ecba4e4111395c12fbefd457d5a13102bbdd7a54146133"
+  },
+  "registration.json": {
+    "bytes": 3565,
+    "sha256": "e517cf0d5d220cf47a8aadfd341ef4c0f6c9f55de35f2026309812ac47458c7a"
+  },
+  "server-command.json": {
+    "bytes": 351,
+    "sha256": "7ad186d1488e1a44ce74f6116ef02866a831d4870566c6d1dde6c44bdd3efc99"
+  },
+  "server.pid": {
+    "bytes": 5,
+    "sha256": "0c213b6dca61d00767eeb5f1ec9016f33cbe2aaf1dac7ed289d3423aa94916c2"
+  },
+  "stderr.txt": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stdout.txt": {
+    "bytes": 2183,
+    "sha256": "a11ff12e7f0580ba1d4b4c20614f539ad1fdbf21e4b287922a9de3234d456b4e"
+  },
+  "summary.json": {
+    "bytes": 1745,
+    "sha256": "f6ac8ef63519f988cf94b17bf6a38d4e5d515550ba78e97d6e97009785f5589b"
+  },
+  "task-README.md": {
+    "bytes": 5210,
+    "sha256": "1c02bf350b57d282b56f9229a8fede635db7967829e4338f1aa2e245b2a19801"
+  },
+  "trial-started.json": {
+    "bytes": 51,
+    "sha256": "f145f062b27e593baa95f5ba744d9693403330ca4e626415fc7affce3b9f149c"
+  },
+  "workflow.yml": {
+    "bytes": 8564,
+    "sha256": "797c561cfad2d3a8bc6f3c3011bd24dd583a41d5204f872ede8e1b36a24dd4c1"
+  }
+}
