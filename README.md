@@ -326,9 +326,9 @@ reference machine for that.
 
 - `askme.py` — CLI, environment/configuration wiring and backwards-compatible public API
 - `loop.py` — planning, run configuration and controller sequencing
-- `state.py` — shared run state and the single step recorder; leaf over action records
+- `state.py` — shared run state, typed access over one live dictionary, and the single step recorder; leaf over action records
 - `llm.py` — immutable provider settings, response codecs and injectable client
-- `policies.py` — step strategies, incomplete-write obligations and completion/validation decisions
+- `policies.py` — step strategies, incomplete-write obligations and completion/validation decisions through explicit contexts, with legacy adapters
 - `actions.py` — canonical action registry, handlers and execution receipts
 - `tests/` — unit and integration tests, split by concern
 - `tests/bench_harness.py` — multi-trial benchmark harness

@@ -45,8 +45,8 @@ There is no framework or new runtime dependency. `askme.py` re-exports shared
 types and adapts its patchable defaults to explicit client settings and sinks.
 `ask_llm()` and `execute()` stay compatible, as do the script entry point and
 structured run API. Importing `llm`, `policies`, `loop` or `state` does not load `.env`
-or import `askme`. Policies depend only on the action contracts and the standard library;
-validation and legacy call-time timeout defaults enter through explicit
+or import `askme`. Policies depend on shared state access, action contracts and
+the standard library; validation and legacy call-time timeout defaults enter through explicit
 callbacks. The name `policies` includes selectable strategies as well as shared
 invariants; it does not imply host-level security enforcement.
 
@@ -58,13 +58,28 @@ algorithms are not copied into the adapters. `RunState`, its dictionary and
 history, and its single recorder remain shared by identity throughout the run.
 Stable records live with their owning module instead of in a separate catch-all
 records file. The dependency direction is facade → loop/client/policies/actions,
-loop → client/policies/state/actions, client/policies → actions, and
-state → actions; no runtime module imports the facade. `state.py` is a leaf
+loop → client/policies/state/actions, policies → state/actions, client → actions,
+and state → actions; no runtime module imports the facade. `state.py` is a leaf
 over action records and the standard library, not a home for policy decisions.
 `loop.RunState` and `loop.StepRecorder` remain re-exports of those same classes;
 the facade adapters and the single shared state/history/recorder identity stay
 intact. This extraction changes ownership, not serialized state or receipt
 semantics.
+
+`RunProgress` provides strict typed fields over the one live compatibility
+dictionary, not a second state store. Required fields preserve direct indexing:
+no defaults, coercion or runtime type validation are introduced, and a missing
+required key still raises `KeyError`. Named optional views preserve their
+existing fallback behavior. Fields resolve at use time, so replacing a list
+remains visible; owners create a fresh view when the dictionary itself changes.
+`PendingWrite` is a frozen typed record for newly created zero-byte write
+obligations. Its `describe()` projection enters the existing
+`pending_empty_writes` dictionary; legacy raw records are not converted or
+silently normalized. Receipt, environment, validation and serialized-result
+dictionaries remain explicit compatibility/projection boundaries. This is a
+typed access seam, not a complete typed-state or serialized-schema migration.
+`ValidationState` retains its historical binding to the original validation
+mapping even if a compatibility caller replaces the controller's state mapping.
 
 Within `loop.py`, `_RunController.__init__` sequences four private setup
 stages in place: `_configure_request` resolves the selected request and model
@@ -85,7 +100,15 @@ remains: `askme.CompletionPolicy(controller)` still passes the controller to a
 small legacy adapter that constructs this context and resolves only the fields
 the current terminal path needs. The terminal algorithm uses the context, but
 controller-shaped composition has not disappeared. `StepPolicy` and
-`WriteObligations` remain controller-bound; their coupling is unchanged here.
+`WriteObligations` now also expose `from_context(...)`, through
+`StepPolicyContext` and `WriteObligationContext`. Their algorithms use live
+progress, workspace, recorder and logging callbacks, with bounded rewrite and
+timeout services supplied to the step policy. They do not need a whole
+controller for explicit context composition. Legacy constructors still adapt a
+controller into those callbacks; the facade and ordinary controller composition
+retain those adapters. Live getters preserve historical collaborator replacement
+and access order rather than snapshotting a dictionary or bound recorder method.
+Dispatch and terminal authority remain outside the write-obligation context.
 
 The extraction is checked against frozen pre-move public names, signatures,
 CLI help and nine offline whole-run transcripts: model-visible calls,
@@ -120,7 +143,9 @@ structural parity evidence, not a model-capability or speed measurement.
 - `_run_loop(...)` — compatibility seam over `run_result()` and `_RunController`, the structured core loop with frozen task, step, replan, goal-context, and explicit-reasoning controls. Run-scoped controller data (the structured state dict, rewrite damping, wall clock, the one recorder) lives on `RunState`; attempt-scoped executor state (write pressure, duplicate/observation counters, thinking escalation) lives on `TaskAttemptState`; `done`/`fail` and one shared completion-blocker gate (`_completion_blocker`) remain controller concerns (issue #31)
 - `run(user_prompt, working_dir=None)` — backward-compatible public wrapper over `run_result()` returning a boolean
 
-**State** is an in-memory dict (no files). Planner and executor see different views.
+**State** remains one in-memory compatibility dict (no files), accessed through
+`RunProgress` where migrated. Planner and executor see different projections;
+typed access does not expand either model-visible view.
 
 Planner (`get_plan`) — curated full state (raw write payloads never included):
 ```json

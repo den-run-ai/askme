@@ -25,6 +25,7 @@
   "limits": [
     "One automatic hosted trial per cell; not a registered capability campaign or formal benchmark score.",
     "Auto-routed unpinned providers differ across cells; model/config hashes differ, and task step/replan limits differ. Not a matched causal comparison.",
+    "run_start logs allow_provider_fallbacks=false and require_provider_parameters=true, but the empty provider name makes the execution revision omit the HTTP provider block. These flags are logged settings, not evidence of enforced routing constraints.",
     "Agent completion and pytest acceptance are distinct; Qwen build reported complete but its executable was missing at the pytest check.",
     "No final workspace, full write payloads or full HTTP responses are retained in this artifact. No whole-workspace audit or exact response replay is claimed.",
     "Job success reflects advisory push policy, not four passing tasks. No local-model performance or general reliability inference is supported.",

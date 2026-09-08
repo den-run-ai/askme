@@ -39,14 +39,20 @@ Providers were automatic and unpinned. Recorded provider sets differ: Gemma
 build used Cloudflare, DeepInfra, Google, Parasail, SiliconFlow and Venice;
 Gemma syntax used Cloudflare, DeepInfra, NextBit and Parasail; Qwen build used
 Chutes, Phala and SiliconFlow; Qwen syntax used Chutes, SiliconFlow and Venice.
-The logged effective configuration disabled provider fallbacks and required
-provider parameter support. Original summary request overrides are null;
-they are not the effective values in `run_start`.
+The `run_start` configuration requested disabled provider fallbacks and required
+provider parameter support. These are logged settings, not proof that the
+constraints reached the provider: at the execution revision,
+[`_build_llm_request`](https://github.com/den-run-ai/askme/blob/461fdf01e8f644cc5dddad2eee77008c11447448/llm.py#L650)
+omits the entire HTTP `provider` block when the provider name is empty. An
+offline request-build check confirms this omission; no model request was made
+for the check. Original summary request overrides are null; neither those
+overrides nor the logged flags prove enforced routing constraints. Original
+route-validity verdicts are retained, not promoted to such a guarantee.
 
 The cells used native tools, `generic-feature-scale-v1`, gated reasoning,
 heuristic step policy, compile repair enabled and final LLM validation disabled.
 The build and syntax tasks used different plan/task limits; each model/task
-cell has its own recorded configuration hash. Full effective settings and
+cell has its own recorded configuration hash. Full logged settings and
 per-provider response counts are indexed in the derived summary. This is not
 a matched-provider/configuration causal comparison or local-model measurement.
 

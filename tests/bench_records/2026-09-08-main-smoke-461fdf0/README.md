@@ -62,8 +62,8 @@ task attempt. Token caps were planner 768, executor 4096, write retry 8192, and
 task-local replan 96. Full configuration is retained in the JSONL and summary.
 
 The requested model was `google/gemma-4-26b-a4b-it`; all 40 responses reported
-`google/gemma-4-26b-a4b-it-20260403`. The provider was **unpinned**, with fallbacks
-enabled. Actual response providers were Cloudflare 33, NextBit 2, Darkbloom 2,
+`google/gemma-4-26b-a4b-it-20260403`. The provider was **unpinned**; the logged
+configuration allowed fallbacks. Actual response providers were Cloudflare 33, NextBit 2, Darkbloom 2,
 DeepInfra 1, Parasail 1, and Google 1. The failed case alone used Cloudflare 10,
 NextBit 2, DeepInfra 1, and Darkbloom 1. The source's old Parasail/bf16 section
 comment does not establish the route or quantization of this run.
@@ -115,7 +115,11 @@ are preserved rather than rewritten.
 
 These cells requested `google/gemma-4-26b-a4b-it` or `qwen/qwen3.6-27b`; all
 recorded served IDs matched their declared dated variants. Providers were
-automatic/unpinned, but fallbacks were disabled here, unlike the easy smoke.
+automatic/unpinned. Unlike the easy smoke, the logged configuration requested
+disabled fallbacks and required parameter support. However, the execution
+revision omits the HTTP `provider` block when the provider name is empty, so
+these logged flags do not establish enforced routing constraints. See the
+[request-shaping limitation](berkeley/README.md#identity-configuration-and-accounting).
 
 Across these two jobs only, the 135 retained response-cost records sum to
 **$0.024087125**. This combines observed API telemetry, not reconciled account

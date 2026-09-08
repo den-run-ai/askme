@@ -388,7 +388,7 @@
     "No full HTTP request/response payloads, raw write content, or final workspace retained; an exact response replay and final-file-content assertion are unavailable.",
     "Some logged action arguments are prefix-truncated. Do not reconstruct missing commands or write payloads.",
     "The failed test stopped at its completion assertion before asserting hello.txt content.",
-    "Providers were unpinned with fallbacks enabled; model ID alone does not establish a matched provider/quantization/control.",
+    "Providers were unpinned; logged configuration allowed fallbacks, but the empty provider name caused the HTTP provider block to be omitted. Model ID alone does not establish a matched provider/quantization/control.",
     "One automatic smoke run cannot estimate stochastic reliability or isolate the cause of noncompletion, a provider effect, or a refactor effect.",
     "All recorded response costs and usage were present; the sum is API telemetry, not a reconciled account charge.",
     "Two passing smoke cases are bounded checks, not a benchmark score or evidence of general capability.",
