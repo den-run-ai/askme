@@ -1,0 +1,72 @@
+{
+  "protocol": {
+    "api_url": "https://openrouter.ai/api/v1/chat/completions",
+    "backend": "openrouter",
+    "cases": [
+      {
+        "approximate_prompt_tokens": 600,
+        "kind": "plan",
+        "max_tokens": 768,
+        "name": "planner"
+      },
+      {
+        "approximate_prompt_tokens": 2000,
+        "kind": "action",
+        "max_tokens": 512,
+        "name": "native_action"
+      }
+    ],
+    "cost_control": {
+      "cap_usd": "0.04995",
+      "completion_usd_per_token": "0.00000034",
+      "prompt_overhead_tokens": 16384,
+      "prompt_usd_per_token": "0.00000007"
+    },
+    "model_alias": "google/gemma-4-26b-a4b-it",
+    "openrouter": {
+      "expected_response_model": "google/gemma-4-26b-a4b-it",
+      "expected_response_provider": "DeepInfra",
+      "provider": "DeepInfra",
+      "quantizations": [
+        "fp8"
+      ]
+    },
+    "protocol": "serving-openrouter-gemma-moe-20260908-v2",
+    "provenance": {
+      "amendment": "The v1 preflight stopped after its planner response because the frozen expected response.model incorrectly used the endpoint's dated display name. The API returned the requested canonical alias from the correct DeepInfra route. V2 pins that observed API identifier; it does not prove hosted weight bytes or a dated checkpoint. Preserve v1 unchanged. No task attempt has occurred.",
+      "catalog": "https://openrouter.ai/api/v1/models/google/gemma-4-26b-a4b-it/endpoints",
+      "catalog_checked_utc": "2026-09-08",
+      "catalog_endpoint_name": "DeepInfra | google/gemma-4-26b-a4b-it-20260403",
+      "fallbacks": false,
+      "harness_runtime_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+      "planned_outcomes": "One planner reply and one native write reply on synthetic public inputs; one HTTP attempt each. No coding action executes. Both replies must pass route, cost, latency and exact contract checks before a new Requests task can run.",
+      "previous_attempt_cost_usd": "0.00004135",
+      "previous_protocol": "serving-openrouter-gemma-moe-20260908-v1",
+      "reasoning_policy": "off",
+      "require_parameters": true,
+      "route_supports": [
+        "tools",
+        "tool_choice",
+        "seed",
+        "reasoning",
+        "max_tokens"
+      ],
+      "selection": "Separate hosted control after physical serving cells exposed latency limits; it is not a rerun of any local task or an isolated model/harness comparison.",
+      "task_cap_reserved_usd": "0.45",
+      "total_hosted_study_cap_usd": "0.50"
+    },
+    "read_timeout_s": 60,
+    "seed": 20260908,
+    "trials_per_case": 1,
+    "wall_timeout_s": 150
+  },
+  "protocol_sha256": "b979ecb30028df2d674dd846b68633f7acc80501989363cf8daf7f363e19e52c",
+  "python": "3.12.12 (main, Oct 10 2025, 12:43:15) [Clang 20.1.4 ]",
+  "registered_at_unix": 1788848019.3113432,
+  "request_guard_sha256": "f137ede2462f908840e7cb1d8262d71dc138902c96148543f0e1852cf6d3fed5",
+  "runner_sha256": "def31d3d4315496222d8276d06ecad26ecccbb5b2619ef742a5144774bf3c5b1",
+  "runtime_sha256": {
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930",
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949"
+  }
+}

@@ -458,7 +458,7 @@ style: |
 
 <div class="title-speaker">
   <div><span class="name"><strong>Denis Akhiyarov</strong></span><span class="role">Sr Staff Research Scientist at ServiceNow</span></div>
-  <div class="title-links"><a href="https://x.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
+  <div class="title-links"><a href="https://github.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
 </div>
 
 <!--
@@ -468,9 +468,9 @@ wanted would take weeks alone. So, the dream: small open models on my own
 MacBook, through llama.cpp, doing real coding work anywhere. This talk is a
 progress report on that dream. Small means a deployment class, not a parameter
 count. One caveat up front: AskMe began with Gemma 4 E4B, a dense PLE model
-on a sixteen-gigabyte Mac. These evaluations use hosted Gemma and Qwen models
-across later revisions and different serving configurations. They do not
-measure local performance or isolate model size.
+on a sixteen-gigabyte Mac. The smoke and feature evaluations use hosted Gemma
+and Qwen across different revisions and serving configurations. A separate
+local repair pilot closes the talk. None isolates model size.
 
 [Sources]
 - [Local deployment and scope](../../README.md)
@@ -672,30 +672,33 @@ transport.
 
 <div class="eyebrow">Conclusion + limits</div>
 
-# Promising for bounded loops. Feature readiness is still open.
+# Local repairs are possible. Reliable autonomy is unproven.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>Historical smoke: 7 / 8 artifacts accepted. Feature canary: applied but unresolved patches; 11/13 and 7/13 target tests. Neither ran target tests; both agents exhausted.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>Action success, agent completion, and accepted artifacts are distinct. The changed outcomes do not isolate a harness effect.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Reliable feature work, local performance, and the benefit of each design choice. One task and changed configurations cannot settle them.</p></div>
+  <div class="conclusion-card observed"><strong>Observed locally</strong><p>Gemma 4 E4B (dense PLE), Aug 4: four repairs of one seeded health-check bug passed independent acceptance. All four agents exhausted.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Narrow, independently accepted small repairs exist. A correct artifact is not a clean agent finish.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Dependable autonomous coding, net time savings, and causal harness benefit. The historical pilots do not isolate a harness effect.</p></div>
 </div>
 
 <p class="tagline">Evaluate the model, harness, and task as one system.</p>
 
-<p class="closing">Current evidence supports boundary diagnosis—not a general readiness verdict.</p>
+<p class="closing">One seeded task—not a general readiness verdict or time-savings claim.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
 Speaker notes:
-So: ready? Not yet. Bounded loops with independent acceptance — promising.
-The feature canary exposed gaps in target-test execution and clean completion.
-It did not establish general feature readiness or isolate any of the three
-design bets. The takeaway: judge delivered behavior — evaluate the model,
-harness, task, and evaluator as one system. The reliable plane version remains
-the goal. I'm building it.
+So: can small local models do useful coding work? A narrow yes. In an August
+pilot, local Gemma E4B repaired one seeded health-check bug in four
+shipped-profile runs. Independent acceptance passed; all four agents exhausted.
+The two clean finishes used a larger, diagnostic budget.
+That is evidence of small accepted repairs, not dependable autonomy or measured
+net time savings. The feature canary remains unresolved. Judge delivered
+behavior, and evaluate the model, harness, task, and evaluator together.
+A causal harness benefit and the reliable plane version remain goals.
 
 [Sources]
+- [Frozen August 4 local repair receipt and evidence limits](evals/local-repair-evidence.json)
 - [Evidence and unresolved claims](README.md#evidence-boundary)
 - [Dated measurements and limits](../../docs/PERFORMANCE.md)
 -->

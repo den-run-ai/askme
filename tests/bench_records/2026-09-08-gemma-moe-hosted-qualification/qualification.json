@@ -1,0 +1,33 @@
+{
+  "api_cost_complete": true,
+  "api_cost_note": "Sum of response usage.cost; unknown attempts retain the registered token-price estimate. The upper bound depends on unchanged catalog pricing.",
+  "api_cost_unpriced_requests": 0,
+  "api_cost_upper_bound_usd": 4.135e-05,
+  "api_cost_usd": 4.135e-05,
+  "api_url": "https://openrouter.ai/api/v1/chat/completions",
+  "model_alias": "google/gemma-4-26b-a4b-it",
+  "process": {
+    "exit_code": 0,
+    "timed_out": false
+  },
+  "protocol": "serving-openrouter-gemma-moe-20260908-v1",
+  "qualified": false,
+  "reason": "serving_checks_failed",
+  "registration_sha256": "0bdb279d73df055fbbb9cec7cdf708ffd1a65e819c5f7a539f82e7fc9af1ef55",
+  "results": [
+    {
+      "error": {
+        "detail": "Actual hosted model differs from protocol",
+        "type": "ValueError"
+      },
+      "name": "planner",
+      "post_invocations": 1,
+      "qualified": false,
+      "wall_s": 1.7094489170704037
+    }
+  ],
+  "runtime_sha256": {
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930",
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949"
+  }
+}

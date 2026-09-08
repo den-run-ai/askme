@@ -1,0 +1,90 @@
+{
+  "date_utc": "2026-09-08",
+  "environment": "physical Apple M1, macOS 26.5, locked uv environment, Python 3.12.12",
+  "tested_worktree_base": "9110239884c1cfd99c8b2284cf6359026198ef47",
+  "note": "The test-isolation changes were uncommitted during verification. The hashes below identify the tested bytes; HEAD remained unchanged throughout the Git-sensitive tests. Runtime askme.py/actions.py remain byte-identical to main 6a212cf711afe7a327fecf4b7f4d7bf866e11d16.",
+  "supersedes_hermeticity_claim_of": "docs/releases/2026-09-08-candidate-validation.json",
+  "incident": "tests/bench_records/2026-09-08-offline-test-isolation/README.md",
+  "issue": "https://github.com/den-run-ai/askme/issues/111",
+  "source_sha256": {
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949",
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930",
+    "tests/conftest.py": "5e8c0480b42a7db155d6f8649e20190577c20f43c920b30bc19fe0f7d0ccebf6",
+    "tests/test_agent_core.py": "0baf30e0b974c5ee19cbdb00b0b2b0f9766d8684bca5fe68ca721bb45f2e003f",
+    "tests/test_agent_recovery.py": "dd4aae8c06e955ce03f76ef32527de82a67624b25ee3ffb41d3f832f0528e5f9",
+    "tests/test_http_isolation.py": "fc9be6da2f79baf19e019f56e13ab47d97dc91800a03bbbe0f423ba37787eacd"
+  },
+  "checks": [
+    {
+      "command": "uv run --locked ruff check askme.py actions.py tests",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run --locked ruff format --check askme.py actions.py tests",
+      "exit_code": 0,
+      "files": 80
+    },
+    {
+      "command": "uv run --locked ty check",
+      "exit_code": 0
+    },
+    {
+      "command": "ASKME_RUN_LIVE_LLM_TESTS=0 uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:/tmp/askme-hermetic-handoff.AoDuP0/coverage.xml",
+      "exit_code": 0,
+      "passed": 1421,
+      "skipped": 30,
+      "elapsed_s": 30.40,
+      "branch_aware_coverage_percent": 96.46,
+      "coverage_gate_percent": 90,
+      "lines_covered": 2770,
+      "lines_total": 2847,
+      "branches_covered": 993,
+      "branches_total": 1054
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "scope": "Pending tracked changes after the guarded handoff; frozen earlier evidence was unchanged."
+    }
+  ],
+  "regression_evidence": {
+    "blocked_diagnostic": "tests/bench_records/2026-09-08-offline-test-isolation/blocked-diagnostic.txt",
+    "diagnostic_plugin": "tests/bench_records/2026-09-08-offline-test-isolation/no_http.py",
+    "diagnostic_plugin_sha256": "01f3412846ec2e87fe07d180759d4c03a31e389a0805607b14c13be23ff0b087",
+    "before_fix": {
+      "failed": 2,
+      "passed": 1413,
+      "skipped": 30,
+      "elapsed_s": 28.81,
+      "failed_tests": [
+        "tests/test_agent_core.py::TestLLMTransport::test_transport_error_in_executor_triggers_replan",
+        "tests/test_agent_recovery.py::TestCompletionSemantics::test_parse_error_after_success_does_not_auto_complete"
+      ],
+      "network_behavior": "Both missing mocks were detected by pytest.fail before Requests transport; no request was sent."
+    },
+    "guard_regression_before_fix": "The new blocked-before-transport test failed before the autouse guard existed; an instrumented HTTPAdapter stopped the attempt, so this regression reproduction also sent no request.",
+    "focused_after_fix": "Eight tests passed, including the two corrected controller tests, blocked-before-transport behavior, usable provider mocks, and all four combinations of live opt-in and marker."
+  },
+  "resident_e4b_log_observation": {
+    "source": "Resident askme-llama-server.log; historical prompt/output contents were not read or published for this verification.",
+    "count_pattern": "processing task, is_child",
+    "before": {
+      "generation_launch_count": 1260,
+      "last_generation_task_id": 203708,
+      "size_bytes": 3332418,
+      "sha256": "1e599be410c355947176225952cbcca12e43754aff0eb50415d15f6adb4f5676"
+    },
+    "after": {
+      "generation_launch_count": 1260,
+      "last_generation_task_id": 203708,
+      "size_bytes": 3332418,
+      "sha256": "1e599be410c355947176225952cbcca12e43754aff0eb50415d15f6adb4f5676"
+    },
+    "new_generation_launches": 0,
+    "log_bytes_changed": false,
+    "verification_method": "Read-only log counts, final matching launch metadata, byte count and SHA-256 before/after. No model or slots HTTP request was made."
+  },
+  "guard_scope": "An autouse pytest fixture blocks Requests Session.send with pytest.fail, which ordinary client Exception fallbacks cannot swallow. Sending requires both ASKME_RUN_LIVE_LLM_TESTS=1 and the live_llm marker. Provider/HTTP mocks remain usable; there is no blanket loopback exception. Existing intentional ephemeral web-app HTTP tests use their own urllib/subprocess boundaries. This in-process guard is not an OS network sandbox.",
+  "live_test_boundary": "No paid/live pytest suite was enabled. The registered local serving cells and separate hosted task retain their original outcomes; the earlier eight accidental local calls remain disclosed and are not reclassified as experiment trials.",
+  "local_verification_logs": "/tmp/askme-hermetic-handoff.AoDuP0"
+}

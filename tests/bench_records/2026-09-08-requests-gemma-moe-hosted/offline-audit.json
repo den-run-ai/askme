@@ -1,0 +1,137 @@
+{
+  "acceptance_replay": {
+    "baseline": {
+      "accepted": false,
+      "error_last_line": "TypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'",
+      "exit_code": 1,
+      "stdout": ""
+    },
+    "fresh_candidate": {
+      "accepted": false,
+      "error_last_line": "TypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'",
+      "exit_code": 1,
+      "stdout": ""
+    },
+    "gold": {
+      "accepted": true,
+      "error_last_line": null,
+      "exit_code": 0,
+      "stdout": "{\"accepted\": true, \"checks\": 21}\n"
+    },
+    "noop": {
+      "accepted": false,
+      "error_last_line": "TypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'",
+      "exit_code": 1,
+      "stdout": ""
+    },
+    "preserved_workspace": {
+      "accepted": false,
+      "error_last_line": "TypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'",
+      "exit_code": 1,
+      "stdout": ""
+    }
+  },
+  "audit": "independent-offline-hosted-task-v1",
+  "counts": {
+    "agent_token_records": 27,
+    "completed_tasks": 0,
+    "cost_ledger_records": 27,
+    "executed_actions": 21,
+    "finish_reasons": {
+      "stop": 4,
+      "tool_calls": 23
+    },
+    "http_200_responses": 27,
+    "http_requests": 27,
+    "selected_actions": 23,
+    "skipped_actions": 2,
+    "source_mutations": 0,
+    "writes": 7,
+    "source_inspection_actions": 0
+  },
+  "decision_unchanged": "did_not_resolve",
+  "failure_analysis": [
+    "All actions remained at task_index 0; seven successful writes repeatedly created reproduction scripts, while no production-source file was inspected or modified.",
+    "The correct src/requests/exceptions.py path was present in the original user request and both plans. No read or cat of that path, or of the mistaken requests/exceptions.py path in a task-local replan, was selected.",
+    "A cat of root repro_json_error_pickle.py failed because the existing script was under tests/. The agent then created an extra root-level script outside the allowed production/test scope.",
+    "The tests/ reproduction raised the original TypeError with nonzero exit status; its next identical shell selection was guard-skipped. The root reproduction caught the error and exited zero, so that successful shell receipt did not establish a repaired library.",
+    "The last selected action listed src/requests but did not read exceptions.py. There was no subsequent model turn after its result; exhaustion followed with zero completed tasks.",
+    "No done or fail control was emitted. The task did not resolve: the production source is byte-identical to upstream and independent acceptance reproduces the original pickle TypeError."
+  ],
+  "metadata_correction": {
+    "billing_account_balance_reconciliation": "Not assessed by this audit; response-reported usage costs are distinct from account balance snapshots.",
+    "correct_cost_description": "Remote OpenRouter inference charged USD 0.00299655 according to all 27 response usage.cost records; local physical Mac ran the harness. No GitHub Actions runner was used.",
+    "correct_runner_description": "physical MacBookAir10,1 / Apple M1 / 16 GiB / macOS 26.5; remote inference",
+    "original_runner_cost": "standard public macOS runner; no API charge"
+  },
+  "model_calls": 0,
+  "original_files_sha256": {
+    "acceptance.py": "73614b3c0eab133f20da4f19c2f3144512d1d4098f5e9dd691142cefece8b5cb",
+    "agent-result.json": "d3672abd660d499f61d3d648e9295031aa682538aab3419fda62be89d785bf10",
+    "agent.jsonl": "b13dc15e0f4b4a4c7cde618291e98e6b58c986cd08b4108b111c27bc1251e4a4",
+    "candidate.patch": "d7abc18fc285244bdbecb89bb2d5f0e9be309abaa9185a2ced7a82b1fed4ee26",
+    "control-baseline.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "control-gold.patch": "ffe1df2306de8445975f33b7fa048215c58e5ee32f1dd5ff185dfbb2ac808509",
+    "control-noop.patch": "a003e3e50d62ad6047adf86a1bcded3a756bcb94d3a90d691be63784dee6c024",
+    "external_repo_trial.py": "f137ede2462f908840e7cb1d8262d71dc138902c96148543f0e1852cf6d3fed5",
+    "gold.patch": "3009fdbfe863ae5850c9ba4490b7aacd5237745409233f66292611163298accb",
+    "http.jsonl": "c8cc3d3dd15872f70d98162991de640d7d55b93d3cf067f21f7b1fd92c5b070d",
+    "patch-apply.txt": "048de2d89725030ac763574d712ccec2901f410abd420e037fe3039f7ff654ed",
+    "prompt.md": "08162c00137d69bc14e77bc37302156acb1ddea945836914e04fbed6805e7f63",
+    "protocol.json": "28912e16e8557fb46dd865bcb81604883372b4ca579ec3d8d321db910118dc76",
+    "qualification.json": "2b08934e73bf2458a2c9d76a32f50b2f99956288a50915a5f6d1370c92d199f4",
+    "registration.json": "3b3f7cdb953a19a42218819c76846541b0299b3e66b43cb4044d5037ad14d616",
+    "serving-qualification.json": "7074770165c5e378a9c09b0919af270040f4afd5c7c9ebe42b6fa692e00ada6b",
+    "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout.txt": "dfff4cea589b29323f36a564d1910b125cf1f0a5094a7d8c18a77fa1da59e223",
+    "summary.json": "011533e1db8123b478da1a593fa4f50ffffc614b079d7b515dc8fd98d8c5ee34",
+    "trial-started.json": "9e74db84280cdb977635be53178398e23693cb07b003fffc1f2a35978f66e889",
+    "workspace-baseline.json": "454cffc25d3559bbb61878b0dcf189d18b07e00e661e1111125f7403a291a49e",
+    "workspace.tar.gz": "14471fc6bdf850833474f9b97dfa535fd4ba1feb2388adc58da0d64a30800db0"
+  },
+  "original_files_unchanged": true,
+  "payload_audit": {
+    "all_27_responses_decode_with_actual_finish_reason": true,
+    "all_final_added_file_bytes_equal_last_write_payload": true,
+    "all_native_arguments_equal_decoded_fields": true,
+    "insertion_repairs": 0,
+    "malformed_native_calls": 0,
+    "write_targets": {
+      "repro_json_error_pickle.py": 1,
+      "tests/repro_json_error_pickle.py": 6
+    }
+  },
+  "registered_runtime_and_runner_hashes_verified": true,
+  "routing": {
+    "agent_served_identity_source": "openrouter_metadata",
+    "all_requests_match_declared_route": true,
+    "all_response_providers": "DeepInfra",
+    "all_selected_endpoint_metadata_models": "google/gemma-4-26b-a4b-it-20260403",
+    "all_top_level_response_models": "google/gemma-4-26b-a4b-it",
+    "checkpoint_bytes_verified": false
+  },
+  "score_amendment": false,
+  "usage": {
+    "agent_token_records_match_each_http_response": true,
+    "api_cost_usd": "0.00299655",
+    "complete_from_retained_http": true,
+    "completion_tokens": 3130,
+    "correction": "Original usage_complete=false is a conservative summary field. Every recorded request has a complete response with matching token and cost usage; no transport or HTTP failure occurred.",
+    "original_usage_complete": false,
+    "prompt_tokens": 27605
+  },
+  "workspace_audit": {
+    "archived_baseline_tree": "4a14378b74ac3d965f13e05d27670223b5739190",
+    "archived_git_diff_equals_candidate_patch": true,
+    "changed_files": [
+      "repro_json_error_pickle.py",
+      "tests/repro_json_error_pickle.py"
+    ],
+    "compared_file_count": 105,
+    "fresh_upstream_plus_patch_equals_entire_preserved_workspace_excluding_git": true,
+    "matches_pinned_upstream_tree": true,
+    "scope_valid": false,
+    "source_exceptions_unchanged_sha256": "0e1bde1417255634d1c6145db95a4ef866cc60c203da09a374b7cd12a36923f5"
+  },
+  "audit_python_version": "3.12.12"
+}

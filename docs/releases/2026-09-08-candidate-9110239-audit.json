@@ -1,0 +1,1619 @@
+{
+  "schema_version": 1,
+  "audit_date_utc": "2026-09-08",
+  "audited_candidate": "9110239884c1cfd99c8b2284cf6359026198ef47",
+  "status": "Dated publication/access and secret-scan checkpoint, not the final release gate",
+  "previous_audit": "2026-09-08-public-access.json",
+  "scope_note": "Adds the new serving/hosted evidence and changed publication entry points at immutable 9110239. It does not alter or replace the earlier main=6a212cf public-access record. The candidate was clean when exported and scanned. Later source or documentation changes require a fresh scan and any new audience-link checks.",
+  "known_followup_at_record_creation": "The coordinating agent reported that a nominally offline pytest gate made unintended local-server calls after the registered serving cells had finished. Test-isolation investigation/fix and revalidation are pending. Therefore the 1415-pass candidate-validation record is not promoted here to an offline-isolation guarantee, and 9110239 is not asserted to be the final release candidate.",
+  "secret_scan": {
+    "tool": "Gitleaks",
+    "version": "8.30.1",
+    "platform": "Darwin arm64",
+    "release_url": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+    "tool_archive_sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+    "official_checksums_sha256": "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae",
+    "tool_verification": "Downloaded archive and checksum-list digests matched the official GitHub release API; archive digest also matched the official checksum file. Temporary installation only.",
+    "started_at_utc": "2026-09-08T06:26:26Z",
+    "completed_at_utc": "2026-09-08T06:26:29Z",
+    "common_options": "GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML unset; no repository config; empty ignore directory; --redact=100 --ignore-gitleaks-allow --no-banner --no-color --timeout=120 --report-format=json.",
+    "full_history": {
+      "command": "gitleaks git REPOSITORY --log-opts=--all [common options]",
+      "nonshallow": true,
+      "all_branch_and_pr_heads_fetched": true,
+      "ref_list_sha256": "0903930510609b58b69f87e1d542a5fe4387016229035667692f63d5f150f114",
+      "ref_digest_command": "git for-each-ref --format='%(refname) %(objectname)' | shasum -a256",
+      "reachable_commits_from_git_rev_list": 346,
+      "scanner_commits": 266,
+      "scanned_bytes": 7991786,
+      "exit_code": 0,
+      "findings": 0,
+      "json_report": [],
+      "scope_note": "Every ref present at the recorded ref-list digest. Historical evidence is preserved; this scan is not a claim that later commits or future external pull requests were scanned."
+    },
+    "exact_tracked_export": {
+      "export_command": "git archive 9110239884c1cfd99c8b2284cf6359026198ef47 | tar -xf - -C NEW_EMPTY_TEMP_DIRECTORY",
+      "command": "gitleaks dir EXACT_TRACKED_EXPORT --max-archive-depth=3 [common options]",
+      "scanned_bytes": 12138801,
+      "exit_code": 0,
+      "findings": 0,
+      "json_report": [],
+      "scope_note": "Exact committed files, with recursive archive inspection through depth three. The original developer worktree's untracked .env and .claude data were not copied. This newly written audit record is not part of the earlier exact export."
+    },
+    "limits": "A zero-finding scan is not proof of the absence of every possible secret. No credentials were printed or included in this audit."
+  },
+  "archive_integrity": {
+    "method": "Open every tracked .tar.gz in the exact export, reject absolute/traversal/link/device/duplicate-file members, read every regular member through tarfile.extractfile, and check decompressed length. Compare all 174 local-serving member lengths and SHA-256 values to the retained manifest.",
+    "archives": [
+      {
+        "path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "bytes": 7644760,
+        "sha256": "14471fc6bdf850833474f9b97dfa535fd4ba1feb2388adc58da0d64a30800db0",
+        "regular_members": 247,
+        "directory_members": 122,
+        "decompressed_bytes": 8753181,
+        "workspace_files_excluding_git": 105,
+        "git_metadata_files": 142,
+        "all_members_safely_read": true
+      },
+      {
+        "path": "tests/bench_records/2026-09-08-requests-qwen4b-macos/portable-evidence.tar.gz",
+        "bytes": 15455,
+        "sha256": "db68958d8bc1d2f85819fd384e4825234d3534ce5559a68f9f7245a5905a19d6",
+        "regular_members": 27,
+        "directory_members": 0,
+        "decompressed_bytes": 55863,
+        "all_members_safely_read": true
+      },
+      {
+        "path": "tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "bytes": 221126,
+        "sha256": "98350855475e2dddc87fc1c4f61741b93b3061be574640bda673612fe159e3c1",
+        "regular_members": 174,
+        "directory_members": 2,
+        "decompressed_bytes": 3470873,
+        "all_members_safely_read": true,
+        "all_members_match_retained_sha256_manifest": true
+      }
+    ],
+    "unsafe_or_duplicate_members": 0
+  },
+  "public_access_delta": {
+    "started_at_utc": "2026-09-08T06:30:28.202Z",
+    "completed_at_utc": "2026-09-08T06:31:50.105Z",
+    "candidate_head": "9110239884c1cfd99c8b2284cf6359026198ef47",
+    "comparison_base": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "scope": {
+      "changed_entry_pages": [
+        "docs/PERFORMANCE.md",
+        "docs/configuration.md",
+        "docs/releases/v0.1.0.md"
+      ],
+      "new_readmes": [
+        "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "tests/serving_protocols/README.md"
+      ],
+      "changed_publication_assets": [
+        "docs/releases/2026-09-08-public-access.json",
+        "docs/releases/2026-09-08-candidate-validation.json",
+        "talks/berkeley-agentic-ai-summit-2026/README.md",
+        "talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md",
+        "talks/berkeley-agentic-ai-summit-2026/slides.md",
+        "talks/berkeley-agentic-ai-summit-2026/slides.pdf"
+      ]
+    },
+    "method": {
+      "browser": "Chrome/152.0.7977.77",
+      "puppeteer": "24.43.1",
+      "authentication": "Fresh temporary Chrome profile; new incognito browser context per URL; no credentials or existing user profile",
+      "navigation": "DOMContentLoaded followed by nonempty body predicate; no login or issue submission",
+      "limits": "Public navigation/content and raw-byte availability, not signed-in issue-creation permissions, all interactive behavior, or pixel-level third-party-page review."
+    },
+    "relative_link_occurrences": [
+      {
+        "source": "docs/PERFORMANCE.md",
+        "link": "../tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/PERFORMANCE.md",
+        "link": "../tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/configuration.md",
+        "link": "../tests/serving_protocols/README.md",
+        "resolved_path": "tests/serving_protocols/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/configuration.md",
+        "link": "../tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "resolved_path": "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/releases/v0.1.0.md",
+        "link": "../../tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/releases/v0.1.0.md",
+        "link": "../../tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "exists": true
+      },
+      {
+        "source": "docs/releases/v0.1.0.md",
+        "link": "2026-09-08-public-access.json",
+        "resolved_path": "docs/releases/2026-09-08-public-access.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "../../serving_protocols/2026-09-08-m1-e4b.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-m1-e4b.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "../../serving_protocols/2026-09-08-m1-qwen4b.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-m1-qwen4b.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "raw-evidence.tar.gz",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "raw-evidence-manifest.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/raw-evidence-manifest.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "frozen-serving-qualification.py",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/frozen-serving-qualification.py",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "e4b-qualification.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/e4b-qualification.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "qwen4b-qualification.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/qwen4b-qualification.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "host-before.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/host-before.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "e4b-server-excerpt.log",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/e4b-server-excerpt.log",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "qwen-server.log",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/qwen-server.log",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "power-observation.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/power-observation.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "../2026-09-08-requests-qwen4b-macos/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "link": "offline-audit.json",
+        "resolved_path": "tests/bench_records/2026-09-08-serving-qualification/offline-audit.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "../../external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "resolved_path": "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "../2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "../2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "summary.json",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/summary.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "offline-audit.json",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/offline-audit.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "http.jsonl",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/http.jsonl",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "agent.jsonl",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent.jsonl",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "agent-result.json",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent-result.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "candidate.patch",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/candidate.patch",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "workspace.tar.gz",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "link": "account-cost-check-later.json",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/account-cost-check-later.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "link": "qualification.json",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/qualification.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "link": "../../serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "link": "../../serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "link": "qualification.json",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "link": "../2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "link": "../2026-09-08-requests-gemma-moe-hosted/README.md",
+        "resolved_path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "link": "../requests_pickle_v1/README.md",
+        "resolved_path": "tests/external_repo/requests_pickle_v1/README.md",
+        "exists": true
+      },
+      {
+        "source": "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "link": "protocol.json",
+        "resolved_path": "tests/external_repo/requests_pickle_hosted_gemma_v2/protocol.json",
+        "exists": true
+      },
+      {
+        "source": "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "link": "../../bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+        "resolved_path": "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+        "exists": true
+      },
+      {
+        "source": "tests/serving_protocols/README.md",
+        "link": "2026-09-08-gemma-moe-hosted.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-gemma-moe-hosted.json",
+        "exists": true
+      },
+      {
+        "source": "tests/serving_protocols/README.md",
+        "link": "2026-09-08-gemma-moe-hosted-v2.json",
+        "resolved_path": "tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "exists": true
+      }
+    ],
+    "browser_rows": [
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/configuration.md",
+        "sources": [
+          "docs/configuration.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:34.416Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/configuration.md",
+        "title": "askme/docs/configuration.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 10349,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.55
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/PERFORMANCE.md",
+        "sources": [
+          "docs/PERFORMANCE.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:30.987Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/PERFORMANCE.md",
+        "title": "askme/docs/PERFORMANCE.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 62979,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.685
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/2026-09-08-candidate-validation.json",
+        "sources": [
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:38.453Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/2026-09-08-candidate-validation.json",
+        "title": "askme/docs/releases/2026-09-08-candidate-validation.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3391,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.498
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/2026-09-08-public-access.json",
+        "sources": [
+          "docs/releases/v0.1.0.md",
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:41.400Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/2026-09-08-public-access.json",
+        "title": "askme/docs/releases/2026-09-08-public-access.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 39630,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.635
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/v0.1.0.md",
+        "sources": [
+          "docs/releases/v0.1.0.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:38.786Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/docs/releases/v0.1.0.md",
+        "title": "askme/docs/releases/v0.1.0.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 5634,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.916
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md",
+        "sources": [
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:40.803Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md",
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 20624,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.743
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/README.md",
+        "sources": [
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:39.863Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/README.md",
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 9998,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.5
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.md",
+        "sources": [
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:42.078Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.md",
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/slides.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 17012,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.597
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "sources": [
+          "changed publication asset"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:43.248Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/slides.pdf at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 384,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": false,
+        "elapsed_s": 5.826
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+          "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:31.369Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+        "title": "askme/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3340,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.915
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:15.429Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+        "title": "askme/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 1029,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.774
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/qualification.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:27.515Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/qualification.json",
+        "title": "askme/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/qualification.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 1679,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 3.863
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:13.533Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+        "title": "askme/tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 1227,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.901
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/account-cost-check-later.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:25.851Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/account-cost-check-later.json",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/account-cost-check-later.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 874,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.672
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent-result.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:22.037Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent-result.json",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent-result.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 10059,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 3.097
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent.jsonl",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:20.588Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent.jsonl",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/agent.jsonl at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 27547,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.666
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/candidate.patch",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:23.062Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/candidate.patch",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/candidate.patch at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 2571,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.345
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/http.jsonl",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:18.618Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/http.jsonl",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/http.jsonl at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 179440,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.681
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/offline-audit.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:17.919Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/offline-audit.json",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/offline-audit.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 8318,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.783
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "sources": [
+          "docs/PERFORMANCE.md",
+          "docs/releases/v0.1.0.md",
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:30.989Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 5484,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.738
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/summary.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:16.136Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/summary.json",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/summary.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3048,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.764
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:25.137Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 403,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": false,
+        "elapsed_s": 1.66
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:07.804Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md",
+        "title": "askme/tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 5650,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.158
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/e4b-qualification.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:53.295Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/e4b-qualification.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/e4b-qualification.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 10863,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 3.079
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/e4b-server-excerpt.log",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:57.088Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/e4b-server-excerpt.log",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/e4b-server-excerpt.log at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 22936,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.069
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/frozen-serving-qualification.py",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:51.043Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/frozen-serving-qualification.py",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/frozen-serving-qualification.py at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 8939,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.585
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/host-before.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:56.391Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/host-before.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/host-before.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 7088,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.862
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/offline-audit.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:10.587Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/offline-audit.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/offline-audit.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 4458,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.363
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/power-observation.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:07.789Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/power-observation.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/power-observation.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 1432,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.178
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/qwen-server.log",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:59.142Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/qwen-server.log",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/qwen-server.log at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 41930,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.053
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/qwen4b-qualification.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:53.997Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/qwen4b-qualification.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/qwen4b-qualification.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 18277,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.558
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence-manifest.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:48.271Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence-manifest.json",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/raw-evidence-manifest.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 30656,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.547
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:47.555Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 432,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": false,
+        "elapsed_s": 5.73
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "sources": [
+          "docs/PERFORMANCE.md",
+          "docs/releases/v0.1.0.md",
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:33.670Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/README.md",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "interactive",
+        "body_text_chars": 6761,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.769
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_hosted_gemma_v2/protocol.json",
+        "sources": [
+          "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:34.662Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_hosted_gemma_v2/protocol.json",
+        "title": "askme/tests/external_repo/requests_pickle_hosted_gemma_v2/protocol.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3495,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.223
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "sources": [
+          "docs/configuration.md",
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md",
+          "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:37.687Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_hosted_gemma_v2/README.md",
+        "title": "askme/tests/external_repo/requests_pickle_hosted_gemma_v2/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 4390,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.647
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_v1/README.md",
+        "sources": [
+          "tests/external_repo/requests_pickle_hosted_gemma_v2/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:32.083Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/external_repo/requests_pickle_v1/README.md",
+        "title": "askme/tests/external_repo/requests_pickle_v1/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 6334,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.177
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification/README.md",
+          "tests/bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/README.md",
+          "tests/serving_protocols/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:28.220Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json",
+        "title": "askme/tests/serving_protocols/2026-09-08-gemma-moe-hosted-v2.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 2761,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.304
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-gemma-moe-hosted.json",
+        "sources": [
+          "tests/serving_protocols/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:37.367Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-gemma-moe-hosted.json",
+        "title": "askme/tests/serving_protocols/2026-09-08-gemma-moe-hosted.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 1902,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.71
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-m1-e4b.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:42.831Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-m1-e4b.json",
+        "title": "askme/tests/serving_protocols/2026-09-08-m1-e4b.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 2832,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.984
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-m1-qwen4b.json",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:44.807Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/2026-09-08-m1-qwen4b.json",
+        "title": "askme/tests/serving_protocols/2026-09-08-m1-qwen4b.json at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3022,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.948
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/README.md",
+        "sources": [
+          "docs/configuration.md",
+          "tests/serving_protocols/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:36.132Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/serving_protocols/README.md",
+        "title": "askme/tests/serving_protocols/README.md at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 4934,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": true,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.952
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/2f7d656",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:12.835Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/commit/2f7d656",
+        "title": "eval: retain hosted preflights and qualified task registration · den-run-ai/askme@2f7d656 · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 15398,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.82
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/3635c09",
+        "sources": [
+          "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:10.602Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/commit/3635c09",
+        "title": "eval: preregister one qualified hosted Requests repair · den-run-ai/askme@3635c09 · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 13805,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.238
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+        "sources": [
+          "docs/releases/v0.1.0.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:40.028Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/commit/6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+        "title": "Merge pull request #108 from den-run-ai/release/final-evidence-sep8 · den-run-ai/askme@6a212cf · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 17382,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.025
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/d29b68c7c6c13b4b0957003757ea523ee7edde3a",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:45.511Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/commit/d29b68c7c6c13b4b0957003757ea523ee7edde3a",
+        "title": "Add registered local serving qualification before task inference · den-run-ai/askme@d29b68c · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 3621,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.053
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/109",
+        "sources": [
+          "tests/serving_protocols/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:34.674Z",
+        "http_status": 200,
+        "final_url": "https://github.com/den-run-ai/askme/issues/109",
+        "title": "Qualify real-model serving latency before a new macOS external-task protocol · Issue #109 · den-run-ai/askme",
+        "ready_state": "complete",
+        "body_text_chars": 7625,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 2.018
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L2233-L2241",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:04.315Z",
+        "http_status": 200,
+        "final_url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L2233-L2241",
+        "title": "llama.cpp/tools/server/server-context.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 7317,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": "#L2233-L2241",
+        "fragment_target_present": false,
+        "complete": true,
+        "elapsed_s": 2.194
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L3286-L3302",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:02.964Z",
+        "http_status": 200,
+        "final_url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L3286-L3302",
+        "title": "llama.cpp/tools/server/server-context.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 38956,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": "#L3286-L3302",
+        "fragment_target_present": false,
+        "complete": true,
+        "elapsed_s": 3.315
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L139-L167",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:01.963Z",
+        "http_status": 200,
+        "final_url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L139-L167",
+        "title": "llama.cpp/tools/server/server-queue.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 18413,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": "#L139-L167",
+        "fragment_target_present": false,
+        "complete": true,
+        "elapsed_s": 1.636
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L430-L445",
+        "sources": [
+          "tests/bench_records/2026-09-08-serving-qualification/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:30:59.869Z",
+        "http_status": 200,
+        "final_url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L430-L445",
+        "title": "llama.cpp/tools/server/server-queue.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "ready_state": "complete",
+        "body_text_chars": 8094,
+        "user_login": "",
+        "sign_in_present": true,
+        "rendered_article": false,
+        "fragment": "#L430-L445",
+        "fragment_target_present": false,
+        "complete": true,
+        "elapsed_s": 2.35
+      },
+      {
+        "url": "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/tree/main",
+        "sources": [
+          "tests/serving_protocols/README.md"
+        ],
+        "checked_at_utc": "2026-09-08T06:31:36.621Z",
+        "http_status": 200,
+        "final_url": "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/tree/main",
+        "title": "google/gemma-4-26B-A4B-it-qat-q4_0-gguf at main",
+        "ready_state": "interactive",
+        "body_text_chars": 8626,
+        "user_login": null,
+        "sign_in_present": false,
+        "rendered_article": false,
+        "fragment": null,
+        "fragment_target_present": null,
+        "complete": true,
+        "elapsed_s": 1.14
+      }
+    ],
+    "public_bytes": [
+      {
+        "path": "talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "url": "https://raw.githubusercontent.com/den-run-ai/askme/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "status": 200,
+        "bytes": 289330,
+        "sha256": "0966f3db376be47df9707698e4c8b24b243f3990c218d3ba0091a1136fb5e8c9",
+        "byte_identical_to_exact_tracked_export": true
+      },
+      {
+        "path": "tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "url": "https://raw.githubusercontent.com/den-run-ai/askme/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "status": 200,
+        "bytes": 221126,
+        "sha256": "98350855475e2dddc87fc1c4f61741b93b3061be574640bda673612fe159e3c1",
+        "byte_identical_to_exact_tracked_export": true
+      },
+      {
+        "path": "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "url": "https://raw.githubusercontent.com/den-run-ai/askme/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "status": 200,
+        "bytes": 7644760,
+        "sha256": "14471fc6bdf850833474f9b97dfa535fd4ba1feb2388adc58da0d64a30800db0",
+        "byte_identical_to_exact_tracked_export": true
+      }
+    ],
+    "summary": {
+      "distinct_navigation_targets": 52,
+      "http_200": 52,
+      "github_pages_logged_out": 51,
+      "changed_and_new_entry_pages": 9,
+      "entry_pages_with_rendered_markdown": 9,
+      "relative_link_occurrences": 42,
+      "missing_relative_targets": 0,
+      "binary_assets_downloaded_and_byte_verified": 3,
+      "highlighted_source_ranges_verified": 4
+    },
+    "initial_collection_note": "The initial complete flag requires HTTP 200 and over 500 visible body characters. Two archive landing pages and the PDF landing page fell below that text-only threshold; this was not an HTTP or access failure. Follow-up confirms archive Raw/View raw links and a logged-out PDF preview iframe, and all three raw downloads are byte-identical to the scanned export. The initial generic fragment-id lookup does not understand GitHub line-range fragments; follow-up verifies both endpoint code cells and every highlighted line.",
+    "followup_browser_checks": [
+      {
+        "checked_at_utc": "2026-09-08T06:33:03.118Z",
+        "http_status": 200,
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz",
+        "title": "askme/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "body_text_chars": 509,
+        "user_login": "",
+        "range": null,
+        "download_links": [
+          {
+            "label": "Raw",
+            "href": "https://github.com/den-run-ai/askme/raw/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz"
+          },
+          {
+            "label": "View raw",
+            "href": "https://github.com/den-run-ai/askme/raw/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz"
+          }
+        ],
+        "pdf_preview_frames": []
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:03.796Z",
+        "http_status": 200,
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/slides.pdf at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "body_text_chars": 392,
+        "user_login": "",
+        "range": null,
+        "download_links": [],
+        "pdf_preview_frames": [
+          "https://viewscreen.githubusercontent.com/view/pdf?browser=chrome&bypass_fastly=true&color_mode=auto&commit=9110239884c1cfd99c8b2284cf6359026198ef47&device=unknown_device&docs_host=https%3A%2F%2Fdocs.github.com&enc_url=68747470733a2f2f7261772e67697468756275736572636f6e74656e742e636f6d2f64656e2d72756e2d61692f61736b6d652f393131303233393838346331636664393963386232323834636636333539303236313938656634372f74616c6b732f6265726b656c65792d6167656e7469632d61692d73756d6d69742d323032362f736c696465732e706466&logged_in=false&nwo=den-run-ai%2Faskme&path=talks%2Fberkeley-agentic-ai-summit-2026%2Fslides.pdf&platform=mac&repository_id=1203182586&repository_type=Repository&version=152#6017af18-3870-476f-876a-e64e06263235"
+        ]
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:06.899Z",
+        "http_status": 200,
+        "url": "https://github.com/den-run-ai/askme/blob/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+        "title": "askme/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz at 9110239884c1cfd99c8b2284cf6359026198ef47 · den-run-ai/askme · GitHub",
+        "body_text_chars": 432,
+        "user_login": "",
+        "range": null,
+        "download_links": [
+          {
+            "label": "Raw",
+            "href": "https://github.com/den-run-ai/askme/raw/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz"
+          },
+          {
+            "label": "View raw",
+            "href": "https://github.com/den-run-ai/askme/raw/9110239884c1cfd99c8b2284cf6359026198ef47/tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz"
+          }
+        ],
+        "pdf_preview_frames": []
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:08.674Z",
+        "http_status": 200,
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L2233-L2241",
+        "title": "llama.cpp/tools/server/server-context.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "body_text_chars": 18172,
+        "user_login": "",
+        "range": {
+          "start": 2233,
+          "end": 2241,
+          "start_code_cell_present": true,
+          "end_code_cell_present": true,
+          "highlighted_line_numbers": [
+            2233,
+            2234,
+            2235,
+            2236,
+            2237,
+            2238,
+            2239,
+            2240,
+            2241
+          ]
+        },
+        "download_links": null,
+        "pdf_preview_frames": []
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:12.070Z",
+        "http_status": 200,
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-context.cpp#L3286-L3302",
+        "title": "llama.cpp/tools/server/server-context.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "body_text_chars": 16771,
+        "user_login": "",
+        "range": {
+          "start": 3286,
+          "end": 3302,
+          "start_code_cell_present": true,
+          "end_code_cell_present": true,
+          "highlighted_line_numbers": [
+            3286,
+            3287,
+            3288,
+            3289,
+            3290,
+            3291,
+            3292,
+            3293,
+            3294,
+            3295,
+            3296,
+            3297,
+            3298,
+            3299,
+            3300,
+            3301,
+            3302
+          ]
+        },
+        "download_links": null,
+        "pdf_preview_frames": []
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:13.816Z",
+        "http_status": 200,
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L139-L167",
+        "title": "llama.cpp/tools/server/server-queue.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "body_text_chars": 14373,
+        "user_login": "",
+        "range": {
+          "start": 139,
+          "end": 167,
+          "start_code_cell_present": true,
+          "end_code_cell_present": true,
+          "highlighted_line_numbers": [
+            139,
+            140,
+            141,
+            142,
+            143,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167
+          ]
+        },
+        "download_links": null,
+        "pdf_preview_frames": []
+      },
+      {
+        "checked_at_utc": "2026-09-08T06:33:18.326Z",
+        "http_status": 200,
+        "url": "https://github.com/ggml-org/llama.cpp/blob/c34b92235b2d6a07963f896085f9ca077ff400b4/tools/server/server-queue.cpp#L430-L445",
+        "title": "llama.cpp/tools/server/server-queue.cpp at c34b92235b2d6a07963f896085f9ca077ff400b4 · ggml-org/llama.cpp · GitHub",
+        "body_text_chars": 8094,
+        "user_login": "",
+        "range": {
+          "start": 430,
+          "end": 445,
+          "start_code_cell_present": true,
+          "end_code_cell_present": true,
+          "highlighted_line_numbers": [
+            430,
+            431,
+            432,
+            433,
+            434,
+            435,
+            436,
+            437,
+            438,
+            439,
+            440,
+            441,
+            442,
+            443,
+            444,
+            445
+          ]
+        },
+        "download_links": null,
+        "pdf_preview_frames": []
+      }
+    ]
+  },
+  "remaining_before_formal_publication": [
+    "Complete the offline-test isolation fix and rerun the deterministic gate without backend access; retain the unexpected-call observation as a correction.",
+    "Scan the actual final committed candidate, including this audit and any later code/evidence, before publication.",
+    "Review and resolve findings against the actual final PR head, with CI evidence.",
+    "Verify issue-creation access from an independent signed-in non-collaborator account; logged-out public reads and a login redirect do not establish that permission.",
+    "Obtain the release publication decision and create the v0.1.0 tag/Release as a separate authorized step. No tag, release, merge, or GitHub write was performed by this audit."
+  ]
+}

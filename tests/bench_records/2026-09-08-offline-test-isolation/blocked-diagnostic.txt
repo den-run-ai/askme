@@ -1,0 +1,27 @@
+Blocked diagnostic before the test-isolation fix
+
+The retained no_http.py plugin replaced requests.sessions.Session.send with
+pytest.fail before any request reached transport. The explicitly disabled
+live-test setting was ASKME_RUN_LIVE_LLM_TESTS=0.
+
+Command shape: uv run --locked pytest tests/ -q -p no_http
+The temporary plugin directory was supplied on PYTHONPATH.
+
+Exact pytest failure identities:
+FAILED tests/test_agent_core.py::TestLLMTransport::test_transport_error_in_executor_triggers_replan
+FAILED tests/test_agent_recovery.py::TestCompletionSemantics::test_parse_error_after_success_does_not_auto_complete
+
+Both failed with:
+E       Failed: OFFLINE HTTP TRIPWIRE blocked POST localhost/v1/chat/completions
+
+The two call stacks passed through:
+_run_task -> replan_task -> ask_llm -> LLMClient.ask -> _llm_http_attempt
+-> requests.post -> Session.request -> blocked Session.send
+
+Exact diagnostic result:
+2 failed, 1413 passed, 30 skipped in 28.81s
+
+The retained diagnostic intentionally excludes request headers, body contents,
+query strings, credential values and unrelated historical server output.
+No model request was sent by this diagnostic. The original successful-but-
+non-hermetic runs remain separately disclosed in README.md.

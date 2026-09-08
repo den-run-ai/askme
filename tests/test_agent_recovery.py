@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _test_support import mock_llm_response
 
 import askme
 from askme import (
@@ -850,6 +851,7 @@ class TestCompletionSemantics:
         with (
             patch("askme.get_plan", return_value=plan_resp),
             patch("askme.get_step", side_effect=step_side_effect),
+            patch("askme.requests.post", return_value=mock_llm_response({"task": ""})) as mock_post,
             patch("askme.execute", return_value={"ok": True, "output": "hi"}),
             patch(
                 "askme.preflight_probe",
@@ -865,6 +867,7 @@ class TestCompletionSemantics:
         ):
             result = run("write and compile hello.c", working_dir=str(tmp_path))
         assert result is False
+        assert mock_post.call_count == askme.MAX_REPLANS
 
 
 # --- Final validation tests ---

@@ -1,0 +1,77 @@
+{
+  "hardware": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "hw.model: MacBookAir10,1\nhw.memsize: 17179869184\nhw.physicalcpu: 8\nhw.logicalcpu: 8\nmachdep.cpu.brand_string: Apple M1\n"
+  },
+  "llama_binary_sha256": {
+    "libggml-base.0.10.0.dylib": "857e942db0c0c1f01330ea34f1ca7a3b0ff141c8608292ad044d2c9d5227e8d2",
+    "libggml-base.0.15.1.dylib": "d45cf35dbdd8f7f2ca2c0406c9f573e5f7e719f2748a0fa725a4fc8b9a8e4f3a",
+    "libggml-base.0.9.11.dylib": "ae506c80d3b1547de8f63c8e3e060f2b3a272a02b83cf3bbe83f875dfd75b56d",
+    "libggml-blas.0.10.0.dylib": "33b7baa4888667d45636958fe4f497bd583d0ad465288e08e81f5489d28f3f5a",
+    "libggml-blas.0.15.1.dylib": "4ad43000793171ab489d08f20904ba73ddc3a8c574c722802f1c9639ae0b1f22",
+    "libggml-blas.0.9.11.dylib": "a3ed8901d17737c2f450a8e9893dbda0c71699537a7119fd34254611651dfdbd",
+    "libggml-cpu.0.10.0.dylib": "18630534ca7a531d96df50075e1d6e459a073f9185c63a420cb9b5482c8028ed",
+    "libggml-cpu.0.15.1.dylib": "603b6d11687ad344d92def822a68b49c8f26d6bc6c805a5a4b9478a9b0f79709",
+    "libggml-cpu.0.9.11.dylib": "cda988198bd7eeb8e5dc000baf19498992a3d14b25a2188c5cb984c1eb13f571",
+    "libggml-metal.0.10.0.dylib": "0fea2b020aba0beca860d40a08d05da87b58831a761bb5e1bd2f23335fbac9ce",
+    "libggml-metal.0.15.1.dylib": "e53d5835a0f1afe8f27b7c62e8ca36be298b77bdb5f56335c3c7ad326c6527d1",
+    "libggml-metal.0.9.11.dylib": "3c3772e46d0557feb5a771fc684c05edfab4c04e3e0c84e0b4649fd36563b18a",
+    "libggml.0.10.0.dylib": "ef2229fa982874bcfc48911b0120a8c6b199fd90d0675e2d91ba4adb45a2046d",
+    "libggml.0.15.1.dylib": "74ccd1d4e9dd426f0956aefaae27407f86c914b0ed7a870bbf49a3e3b82ad971",
+    "libggml.0.9.11.dylib": "05b5ef16d1c8ac757b7ed5773be793ef9425f2becfffc1e900a2e9e3dec64f21",
+    "libllama-batched-bench-impl.dylib": "b712534df27adcf9a8a0be6afc47ce936e192cbd163b8c23495f789d79eb9ac7",
+    "libllama-bench-impl.dylib": "a255c8f51c0d576a3aad7d802eeadf78653e652d341fc9f0109c025a56e92885",
+    "libllama-cli-impl.dylib": "bf93f6e356a9ab6029479e13f9f3fdd9e2614b35ef042456e0a8f8f415afc093",
+    "libllama-common.0.0.8923.dylib": "64a7555f1d2abd6be04a94f78ec5310bac85017b896a6f3b2b267f48dc13ce8c",
+    "libllama-common.0.0.9618.dylib": "027b08c532b324c635ccb2adbad8487ba350c9a09de35ccf0f082692662c638c",
+    "libllama-completion-impl.dylib": "5c2206edb9429673848a3bea6e23fa70cda7311489bcca45362f5d4b67d9b859",
+    "libllama-fit-params-impl.dylib": "a93567b71bb442bcf3cd02c22f51c81fa833f0937b4046b430a2b89f7aeaac1d",
+    "libllama-perplexity-impl.dylib": "186ded5ab89429c01af48cd0397da22f6076ec384fcd480db5256a97c9c8cc2a",
+    "libllama-quantize-impl.dylib": "a2d1d69c86bcdf06248f57a515188f1c40008feb52f24f560602bc4750336597",
+    "libllama-server-impl.dylib": "0881d25f1fcf2da525142f027a56b335d7b64a4faf09184654b806b95459fc0c",
+    "libllama.0.0.8667.dylib": "5847e65a6a7f6816d03f1f98c3a1ff4478e01e6fe05e671073408025df303ab9",
+    "libllama.0.0.8677.dylib": "39c0aaefed58cb2816e84222a08da3fa0b673d544037a6cd90fc97b225ab0b24",
+    "libllama.0.0.8695.dylib": "c64d1664c2cd2a7809a5108931846bede2338c20b1d8af77bcecd5adb674ff12",
+    "libllama.0.0.8702.dylib": "b18ae8412961fc7ef878fd4617c9743cc43b7eccf0b9a11617cccf423703decc",
+    "libllama.0.0.8720.dylib": "6c017b1a3e8d25797ed31bb56e2eea368c95a2c44ed987e2b35fa7f9a845015d",
+    "libllama.0.0.8824.dylib": "608a373ff4052844b97ba1f2279d15f2e06412557c916ad154815bc3c1d0b058",
+    "libllama.0.0.8923.dylib": "f768a862301ea1d65f145be9882da952031a1483d5b192d7f019295def813f59",
+    "libllama.0.0.9618.dylib": "778fa542c9799e5cc69fddbe7f63455a462b75af48095849ead34a095d862c68",
+    "libmtmd.0.0.8667.dylib": "753ffc14eae556aeb3b682204c57cbaa6d3978d962d2536a66073a040296d5fa",
+    "libmtmd.0.0.8677.dylib": "5a931cc0ef85bfa7bda86c5d0146be3c8e98d5220fbe9dbf9f751e4d5c0355bc",
+    "libmtmd.0.0.8695.dylib": "213e1017ce9891fe7ee9aacb564b2a5b6a6530830fb8727f5dd282aaeed25e13",
+    "libmtmd.0.0.8702.dylib": "1fbd5a3de0a0445487efeedbb38ef755ec918141784531356380b4f712138788",
+    "libmtmd.0.0.8720.dylib": "e1af395f0b01420eb14084cd55ca6abfea9dbdea03fa4752258dc7474a55c6ae",
+    "libmtmd.0.0.8824.dylib": "de7b3f7f076a50f074ac32dbea89ec90d5b483bdf70c5d5e3d6a351924e55257",
+    "libmtmd.0.0.8923.dylib": "4923047efaaf0e02c2d07c81a21da22674b6f40159237bb5ff62950390c5ced8",
+    "libmtmd.0.0.9618.dylib": "3a0afdada5b6b3f1fd6804b3182da3428a129454ce8466712bdb12928d94ab2b",
+    "llama-server": "4dcc084538ea65e1bd2b07cd81c61d61b6664348b40729503165eed4ed162566"
+  },
+  "llama_version": {
+    "error": "metadata_command_timeout",
+    "timeout_s": 10
+  },
+  "os": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "ProductName:\t\tmacOS\nProductVersion:\t\t26.5\nBuildVersion:\t\t25F71\n"
+  },
+  "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+  "pressure": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 64%\n"
+  },
+  "recorded_at_unix": 1788847254.2856388,
+  "swap": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "vm.swapusage: total = 9216.00M  used = 8257.56M  free = 958.44M  (encrypted)\n"
+  },
+  "vm_stat": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     5101.\nPages active:                                 323552.\nPages inactive:                               321654.\nPages speculative:                              1112.\nPages throttled:                                   0.\nPages wired down:                             130871.\nPages purgeable:                                8079.\n\"Translation faults\":                     2746975590.\nPages copy-on-write:                       160582955.\nPages zero filled:                        1478307763.\nPages reactivated:                         134610750.\nPages purged:                               19454254.\nFile-backed pages:                            406789.\nAnonymous pages:                              239529.\nPages stored in compressor:                  1313339.\nPages occupied by compressor:                 230438.\nDecompressions:                            115477354.\nCompressions:                              136247362.\nPageins:                                    87499781.\nPageouts:                                    2609930.\nSwapins:                                     2950302.\nSwapouts:                                    4070738.\n"
+  }
+}

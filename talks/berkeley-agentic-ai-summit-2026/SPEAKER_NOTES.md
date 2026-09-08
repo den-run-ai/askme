@@ -9,8 +9,9 @@ apply to the historical recording. The backup slide has no script — Q&A only.
 
 Key framing: AskMe began with local Gemma 4 E4B, a dense PLE model that fits
 in 16GB of MacBook RAM. The hosted Gemma 4 and Qwen3.6 evaluations span later
-AskMe revisions, serving stacks, quantization, and budgets; they are not a
-controlled model-size comparison or evidence of local performance.
+AskMe revisions, serving stacks, quantization, and budgets. The separate August
+local repair pilot on slide 7 is narrow positive evidence, not a controlled
+model-size comparison, current-runtime result or proof of net time savings.
 
 ## Slide 1 — Title: Are Small LLMs Ready for Coding Agents? (~40s)
 
@@ -19,9 +20,9 @@ wanted would take weeks alone. So, the dream: small open models on my own
 MacBook, through llama.cpp, doing real coding work anywhere. This talk is a
 progress report on that dream. Small means a deployment class, not a parameter
 count. One caveat up front: AskMe began with Gemma 4 E4B, a dense PLE model
-on a sixteen-gigabyte Mac. These evaluations use hosted Gemma and Qwen models
-across later revisions and different serving configurations. They do not
-measure local performance or isolate model size.
+on a sixteen-gigabyte Mac. The smoke and feature evaluations use hosted Gemma
+and Qwen across different revisions and serving configurations. A separate
+local repair pilot closes the talk. None isolates model size.
 
 [Sources]
 - [Local deployment and scope](../../README.md)
@@ -96,16 +97,19 @@ transport.
 - [Gemma August 1 result](../../tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v6.json)
 - [Qwen August 1 result](../../tests/featurebench/results/2026-08-01-qwen36-27b-canary-v6.json)
 
-## Slide 7 — Promising for bounded loops. Feature readiness is still open. (~35s)
+## Slide 7 — Local repairs are possible. Reliable autonomy is unproven. (~45s)
 
-So: ready? Not yet. Bounded loops with independent acceptance — promising.
-The feature canary exposed gaps in target-test execution and clean completion.
-It did not establish general feature readiness or isolate any of the three
-design bets. The takeaway: judge delivered behavior — evaluate the model,
-harness, task, and evaluator as one system. The reliable plane version remains
-the goal. I'm building it.
+So: can small local models do useful coding work? A narrow yes. In an August
+pilot, local Gemma E4B repaired one seeded health-check bug in four
+shipped-profile runs. Independent acceptance passed; all four agents exhausted.
+The two clean finishes used a larger, diagnostic budget.
+That is evidence of small accepted repairs, not dependable autonomy or measured
+net time savings. The feature canary remains unresolved. Judge delivered
+behavior, and evaluate the model, harness, task, and evaluator together.
+A causal harness benefit and the reliable plane version remain goals.
 
 [Sources]
+- [Frozen August 4 local repair receipt and evidence limits](evals/local-repair-evidence.json)
 - [Evidence and unresolved claims](README.md#evidence-boundary)
 - [Dated measurements and limits](../../docs/PERFORMANCE.md)
 

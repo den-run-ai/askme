@@ -1,0 +1,88 @@
+{
+  "dependencies": {
+    "certifi": "2026.7.22",
+    "charset-normalizer": "3.4.9",
+    "idna": "3.18",
+    "requests": "2.34.2",
+    "urllib3": "2.7.0"
+  },
+  "harness_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+  "machine": "arm64",
+  "platform": "macOS-26.5-arm64-arm-64bit",
+  "protocol": {
+    "api_url": "https://openrouter.ai/api/v1/chat/completions",
+    "backend": "openrouter",
+    "capability_profile": {
+      "context_window": null,
+      "name": "generic-feature-scale-v1",
+      "planner_tokens": 768,
+      "server_slots": null,
+      "step_tokens": 4096,
+      "step_write_tokens": 8192,
+      "task_replan_tokens": 96,
+      "validation_tokens": 768
+    },
+    "cost_control": {
+      "cap_usd": "0.45",
+      "completion_usd_per_token": "0.00000034",
+      "prompt_overhead_tokens": 16384,
+      "prompt_usd_per_token": "0.00000007"
+    },
+    "decision_rule": "Resolved only if a nonempty patch applies to a fresh pinned checkout, changes no unrelated production files, and passes every independent acceptance check. Agent completion is reported separately. Publish the sole attempt even if exhausted, timed out, regressed, over-budget, or invalid. Do not selectively rerun.",
+    "gold_reference": "https://github.com/psf/requests/pull/6629",
+    "harness_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "limitations": "One deliberately selected historical Requests bug, possibly in training data; stdlib json only. Hosted MoE, route, quantization and output budgets differ from local Qwen v1 and E4B serving cells. No matched causal comparison, reliability estimate, model-size claim, or local performance claim. Hosted response identity is an API alias, not verified weight bytes.",
+    "model_alias": "google/gemma-4-26b-a4b-it",
+    "openrouter": {
+      "expected_response_model": "google/gemma-4-26b-a4b-it",
+      "expected_response_provider": "DeepInfra",
+      "provider": "DeepInfra",
+      "quantizations": [
+        "fp8"
+      ]
+    },
+    "protocol": "requests-pickle-openrouter-gemma-moe-v2",
+    "provider": "OpenRouter / DeepInfra only / fp8 requested / no fallbacks / required parameters",
+    "registered_date": "2026-09-08",
+    "run_config": {
+      "allow_network": false,
+      "allow_system_installs": false,
+      "compile_repair": false,
+      "final_validate": "auto",
+      "goal_context_chars": 300,
+      "max_replans": 2,
+      "max_steps": 8,
+      "max_task_local_replans": 1,
+      "max_tasks": 3,
+      "reasoning_policy": "off",
+      "step_policy": "heuristic"
+    },
+    "runner": "physical MacBookAir10,1 / Apple M1 / 16 GiB / macOS 26.5; remote inference",
+    "runtime_sha256": {
+      "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930",
+      "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949"
+    },
+    "seed": 20260908,
+    "serving_qualification": {
+      "path": "../../bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+      "protocol": "serving-openrouter-gemma-moe-20260908-v2",
+      "sha256": "7074770165c5e378a9c09b0919af270040f4afd5c7c9ebe42b6fa692e00ada6b"
+    },
+    "target_repository": "https://github.com/psf/requests.git",
+    "target_revision": "7a13c041dbef42f9f3feb14110f02626f6892e9a",
+    "temperature": 0.1,
+    "trials": 1,
+    "upstream_issue": "https://github.com/psf/requests/issues/6628",
+    "wall_timeout_seconds": 720
+  },
+  "python": "3.12.12 (main, Oct 10 2025, 12:43:15) [Clang 20.1.4 ]",
+  "registered_at_unix": 1788848238.930709,
+  "runner_sha256": "f137ede2462f908840e7cb1d8262d71dc138902c96148543f0e1852cf6d3fed5",
+  "source_sha256": {
+    "README.md": "ea76279195fcc61cbe0cb6077227a0a55480f042e7af782ab370ce141c9595b7",
+    "acceptance.py": "73614b3c0eab133f20da4f19c2f3144512d1d4098f5e9dd691142cefece8b5cb",
+    "gold.patch": "3009fdbfe863ae5850c9ba4490b7aacd5237745409233f66292611163298accb",
+    "prompt.md": "08162c00137d69bc14e77bc37302156acb1ddea945836914e04fbed6805e7f63",
+    "protocol.json": "28912e16e8557fb46dd865bcb81604883372b4ca579ec3d8d321db910118dc76"
+  }
+}

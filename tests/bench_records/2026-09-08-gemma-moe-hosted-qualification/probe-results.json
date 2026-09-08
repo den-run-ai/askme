@@ -1,0 +1,12 @@
+[
+  {
+    "error": {
+      "detail": "Actual hosted model differs from protocol",
+      "type": "ValueError"
+    },
+    "name": "planner",
+    "post_invocations": 1,
+    "qualified": false,
+    "wall_s": 1.7094489170704037
+  }
+]

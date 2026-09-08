@@ -1,0 +1,55 @@
+diff --git a/repro_json_error_pickle.py b/repro_json_error_pickle.py
+new file mode 100644
+index 0000000..ba557af
+--- /dev/null
++++ b/repro_json_error_pickle.py
+@@ -0,0 +1,12 @@
++import pickle
++import requests
++
++try:
++    error = requests.exceptions.JSONDecodeError('Extra data', '{}{}', 2)
++    pickled_error = pickle.dumps(error)
++    unpickled_error = pickle.loads(pickled_error)
++    print("Successfully unpickled JSONDecodeError")
++except Exception as e:
++    print(f"Failed to unpickle JSONDecodeError: {e}")
++    import traceback
++    traceback.print_exc()
+diff --git a/tests/repro_json_error_pickle.py b/tests/repro_json_error_pickle.py
+new file mode 100644
+index 0000000..a2ae00f
+--- /dev/null
++++ b/tests/repro_json_error_pickle.py
+@@ -0,0 +1,31 @@
++import pickle
++from requests.exceptions import JSONDecodeError
++
++def reproduce():
++    try:
++        # Constructing JSONDecodeError('Extra data', '{}{}', 2)
++        # Based on the error description, it seems it needs these arguments.
++        # In requests, JSONDecodeError is a subclass of requests.exceptions.RequestException
++        # and it's often used to wrap json.decoder.JSONDecodeError.
++        
++        error = JSONDecodeError('Extra data', '{}{}', 2)
++        print(f"Created error: {error}")
++        
++        pickled_error = pickle.dumps(error)
++        print("Pickling successful")
++        
++        unpickled_error = pickle.loads(pickled_error)
++        print("Unpickling successful")
++        
++        assert isinstance(unpickled_error, JSONDecodeError)
++        print("Assertion passed: unpickled error is JSONDecodeError")
++        
++    except TypeError as e:
++        print(f"Caught expected TypeError during unpickling: {e}")
++        raise e
++    except Exception as e:
++        print(f"Caught unexpected exception: {type(e).__name__}: {e}")
++        raise e
++
++if __name__ == "__main__":
++    reproduce()

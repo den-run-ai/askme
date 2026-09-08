@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "audit_date_utc": "2026-09-08",
+  "audited_candidate": "982b3cabd8c953d34c6a7d4e4767bcd470c2865d",
+  "previous_audits": [
+    "2026-09-08-public-access.json",
+    "2026-09-08-candidate-9110239-audit.json"
+  ],
+  "scope": "Final test-isolation source candidate, exact tracked export, all fetched Git history, and only the new/changed isolation publication-link delta. This is an appended audit; earlier public-access, model measurements, PDF visual checks and negative outcomes remain historical.",
+  "remote_head_verified": {
+    "method": "git ls-remote origin refs/heads/agent/qwen-serving-release-20260908",
+    "head": "982b3cabd8c953d34c6a7d4e4767bcd470c2865d"
+  },
+  "secret_scan": {
+    "tool": "Gitleaks",
+    "version": "8.30.1",
+    "platform": "Darwin arm64",
+    "official_tool_release": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+    "verified_archive_sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+    "verification_reference": "2026-09-08-public-access.json",
+    "common_options": "GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML unset; no repository configuration; empty ignore directory; --redact=100 --ignore-gitleaks-allow --no-banner --no-color --timeout=120 --report-format=json.",
+    "full_history": {
+      "started_at_utc": "2026-09-08T06:40:04Z",
+      "completed_at_utc": "2026-09-08T06:40:06Z",
+      "fetch_command": "git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/pull/*/head:refs/remotes/origin/pull/*/head'",
+      "fetch_note": "Refreshed all branch and PR-head refs, including newly created PR #110, before this final history scan.",
+      "command": "gitleaks git REPOSITORY --log-opts=--all [common options]",
+      "nonshallow": true,
+      "ref_list_sha256": "386ab6b916bd46a93aca0bee8675b0833d671149dc4ed02165ba00afd2c9df5d",
+      "ref_digest_command": "git for-each-ref --format='%(refname) %(objectname)' | shasum -a256",
+      "reachable_commits_from_git_rev_list": 347,
+      "scanner_commits": 267,
+      "scanned_bytes": 8100809,
+      "exit_code": 0,
+      "findings": 0,
+      "json_report": []
+    },
+    "exact_tracked_export": {
+      "started_at_utc": "2026-09-08T06:39:07Z",
+      "completed_at_utc": "2026-09-08T06:39:11Z",
+      "export_command": "git archive 982b3cabd8c953d34c6a7d4e4767bcd470c2865d | tar -xf - -C NEW_EMPTY_TEMP_DIRECTORY",
+      "command": "gitleaks dir EXACT_TRACKED_EXPORT --max-archive-depth=3 [common options]",
+      "scanned_bytes": 12247824,
+      "exit_code": 0,
+      "findings": 0,
+      "json_report": [],
+      "scope_note": "Exact committed files with archive extraction/inspection through depth three. No untracked original developer .env/.claude data was copied. This new audit file was not yet part of that export."
+    },
+    "limits": "Zero findings are not a proof that every possible secret is absent. After adding this record, scan the actual final head once more and report that result in the PR/tool output rather than creating an endless chain of self-referential audit commits."
+  },
+  "retained_validation_binding": {
+    "record": "2026-09-08-hermetic-validation.json",
+    "all_six_recorded_source_hashes_match_exact_committed_export": true,
+    "checked_files": [
+      "askme.py",
+      "actions.py",
+      "tests/conftest.py",
+      "tests/test_agent_core.py",
+      "tests/test_agent_recovery.py",
+      "tests/test_http_isolation.py"
+    ],
+    "retained_result": {
+      "passed": 1421,
+      "skipped": 30,
+      "branch_aware_coverage_percent": 96.46,
+      "ruff_passed": true,
+      "format_passed": true,
+      "ty_passed": true
+    },
+    "observation_boundary": "This audit verifies the retained test record's source hashes against 982b3ca; it did not repeat tests or make model calls. The guarded handoff record retains the byte-identical pre/post resident-server log check.",
+    "earlier_checkpoint_followup": "The missing-mock/isolation blocker named in the 9110239 checkpoint is addressed by the committed guard, scripted replan responses, deterministic regressions and guarded validation record. The earlier accidental calls remain explicitly disclosed."
+  },
+  "unchanged_artifact_binding": {
+    "comparison_base": "9110239884c1cfd99c8b2284cf6359026198ef47",
+    "byte_identical_files": [
+      "askme.py",
+      "actions.py",
+      "talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+      "tests/bench_records/2026-09-08-serving-qualification/raw-evidence.tar.gz",
+      "tests/bench_records/2026-09-08-requests-gemma-moe-hosted/workspace.tar.gz"
+    ],
+    "note": "Runtime, PDF and both new archive bytes were directly compared to the earlier audited commit. Their previous anonymous raw-byte and archive-member integrity checks remain applicable; no model record or generated PDF was rewritten in this audit."
+  },
+  "public_access_delta": {
+    "started_at_utc": "2026-09-08T06:39:41.105Z",
+    "completed_at_utc": "2026-09-08T06:39:54.364Z",
+    "browser": "Chrome/152.0.7977.77",
+    "puppeteer": "24.43.1",
+    "method": "Fresh temporary Chrome profile, new incognito context per URL, no existing profile/cookies/credentials. DOMContentLoaded plus visible body predicate; no login, issue creation or model HTTP request.",
+    "comparison_base": "9110239884c1cfd99c8b2284cf6359026198ef47",
+    "source_documents": [
+      "docs/releases/v0.1.0.md",
+      "tests/bench_records/2026-09-08-offline-test-isolation/README.md"
+    ],
+    "scope_note": "All new direct Markdown links from the release notes and the new incident README, plus the amended earlier validation, final guarded validation and previous candidate audit JSON. Existing unchanged links remain covered by the earlier audits.",
+    "distinct_targets": 9,
+    "http_200": 9,
+    "github_pages_logged_out": 9,
+    "relative_link_occurrences": 7,
+    "missing_relative_targets": 0,
+    "entry_pages_with_rendered_markdown": 2,
+    "checks": [
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/docs/releases/2026-09-08-candidate-9110239-audit.json",
+        "checked_at_utc": "2026-09-08T06:39:52.481Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 10862,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/docs/releases/2026-09-08-candidate-validation.json",
+        "checked_at_utc": "2026-09-08T06:39:49.254Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 3707,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/docs/releases/2026-09-08-hermetic-validation.json",
+        "checked_at_utc": "2026-09-08T06:39:45.320Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 5796,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/docs/releases/v0.1.0.md",
+        "checked_at_utc": "2026-09-08T06:39:43.340Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 6461,
+        "rendered_markdown_article": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/tests/bench_records/2026-09-08-offline-test-isolation/blocked-diagnostic.txt",
+        "checked_at_utc": "2026-09-08T06:39:50.266Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 1764,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/tests/bench_records/2026-09-08-offline-test-isolation/local-server-excerpt.log",
+        "checked_at_utc": "2026-09-08T06:39:47.976Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 15778,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/tests/bench_records/2026-09-08-offline-test-isolation/no_http.py",
+        "checked_at_utc": "2026-09-08T06:39:51.759Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 920,
+        "rendered_markdown_article": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/982b3cabd8c953d34c6a7d4e4767bcd470c2865d/tests/bench_records/2026-09-08-offline-test-isolation/README.md",
+        "checked_at_utc": "2026-09-08T06:39:43.341Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 3751,
+        "rendered_markdown_article": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/111",
+        "checked_at_utc": "2026-09-08T06:39:46.512Z",
+        "http_status": 200,
+        "user_login": "",
+        "sign_in_present": true,
+        "body_text_chars": 2886,
+        "rendered_markdown_article": false
+      }
+    ],
+    "all_task_browser_processes_stopped": true,
+    "limits": "Public read access and rendered content, not signed-in non-collaborator issue-creation permissions, all interactive behavior, or a pixel-level visual review."
+  },
+  "remaining_before_formal_publication": [
+    "Scan the actual final committed head after adding this audit; record the result in the PR/tool output.",
+    "Complete CI and resolve review findings against the exact final PR head.",
+    "Independently verify issue creation from a signed-in non-collaborator account; logged-out read access does not prove this permission.",
+    "Publish the v0.1.0 tag/Release only after the release decision. This audit performed no GitHub write, tag, release or merge."
+  ]
+}

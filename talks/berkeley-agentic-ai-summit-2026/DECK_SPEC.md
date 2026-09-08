@@ -15,7 +15,7 @@ recorded here before the slides are edited.
 - **Exact title:** Are Small LLMs Ready for Coding Agents?
 - **Speaker:** Denis Akhiyarov
 - **Role:** Sr Staff Research Scientist at ServiceNow
-- **Social:** [@den-run-ai](https://x.com/den-run-ai)
+- **GitHub profile:** [@den-run-ai](https://github.com/den-run-ai)
 - **Project:** [github.com/den-run-ai/askme](https://github.com/den-run-ai/askme)
 - **Venue/date:** Agentic AI Summit 2026, UC Berkeley, Aug 1, 2026
 - **Format:** five minutes, seven main slides plus one backup slide
@@ -64,12 +64,19 @@ Keep one explicit evidence chain visible across the last three slides:
    attempts left applying but unresolved patches: 11/13 target tests for Gemma
    and 7/13 for Qwen under post-run held-out scoring. Neither ran the target
    tests; both agents exhausted their planning attempts.
-4. **Supported conclusion:** action success, agent completion, and accepted
-   artifacts are distinct. The changed outcomes do not isolate a harness effect.
-5. **Unresolved:** readiness, reasoning-policy benefit, model speed or
+4. **Historical local positive:** the August 4 E89 report records four
+   independently accepted repairs of one seeded health-check bug with local
+   Gemma 4 E4B (dense PLE), shipped profile and heuristic policy. All four
+   agents exhausted. The two strict passes in that original eleven-run pilot
+   used the non-shipping raised-budget profile; do not mix those arms.
+5. **Supported conclusion:** narrow, independently accepted small repairs
+   exist; action success, agent completion, and accepted artifacts are distinct.
+   The changed outcomes do not isolate a harness effect.
+6. **Unresolved:** dependable autonomous coding, net time savings,
+   reasoning-policy benefit, model speed or
    reliability, Qwen versus Gemma, dense versus MoE, and larger versus smaller.
 
-Do not collapse these four levels into a single "the smoke validates" claim.
+Do not collapse these evidence levels into a single "the smoke validates" claim.
 
 - Keep the four-model comparison visible: Gemma 4 26B A4B, Gemma 4 31B,
   Qwen3.6-27B, and Qwen3.6-35B-A3B. The paired dense/MoE shapes are useful
@@ -142,7 +149,7 @@ Do not collapse these four levels into a single "the smoke validates" claim.
 
 ### 1. Author and question
 
-**Must show:** exact title, speaker name, ServiceNow role, Twitter/X handle,
+**Must show:** exact title, speaker name, ServiceNow role, GitHub handle,
 AskMe repository, venue/date, and one short subtitle drawn from the central
 message.
 
@@ -217,14 +224,22 @@ in issue #2 and the companion material.
 
 ### 7. Answer posture and takeaway
 
-Return to the title question. The bounded answer is that small LLMs are
-promising for bounded coding loops, while realistic feature readiness is not
-demonstrated. Treat readiness as a property of the model, harness, task, and
-evaluator together. The historical evidence records a change from empty
-to applied patches and exposes target-test execution and termination gaps in
-those attempts. Bundled changes and a changed serving stack prevent causal
-attribution; it does not validate a transport-only causal benefit or settle
-general model readiness.
+Return to the title question with a concrete local positive: small local
+repairs are possible; dependable autonomous coding and net time savings are
+not established. Name local Gemma 4 E4B (dense PLE), the August 4 date, four
+accepted repairs of one seeded health-check bug, and all four exhausted agents.
+Do not present four different tasks, four strict passes, or the diagnostic
+raised-budget arm as the shipped profile. Pin the original E89 report at
+`8d4e1eab8034d2b5e0b6418b6701a351201187ad`; later lifecycle trials are a separate
+addendum. Keep detailed protocol amendments, source hashes and the two diagnostic
+strict passes in the notes/companion receipt, not additional stage cards.
+
+Treat readiness as a property of the model, harness, task, and evaluator
+together. Preserve the feature-task failure on slide 6. Bundled changes and a
+changed serving stack prevent causal attribution; it does not validate a
+transport-only causal benefit or settle general model readiness. The September
+serving-only probes are not coding attempts and must not become this positive
+example.
 
 ### 8. Backup: AskMe, pi, and OpenHands
 
@@ -257,6 +272,18 @@ External acceptance stays separate.
 - Keep audit mechanics in sources or the companion documents.
 
 ## Feedback ledger and precedence
+
+- The later 2026-09-08 instruction explicitly expands the conclusion beyond
+  hyperlink-only hygiene: add the verified local E89 positive while retaining
+  its exhausted-agent and diagnostic-budget distinctions. State that narrow
+  accepted repairs exist, not dependable autonomy or measured net time savings.
+  Update the canonical script, synchronized inline notes, contract and PDF.
+  This supersedes the earlier instruction to keep all spoken wording unchanged.
+
+- The 2026-09-08 public-access audit corrects the author link to the verified
+  GitHub profile, `https://github.com/den-run-ai`. Keep the visible handle,
+  spoken script, and evidence claims unchanged; regenerate the PDF so its
+  clickable author link matches the source and companion README.
 
 - The 2026-09-08 publication pass supersedes stale claims in the August deck:
   show one native tool call and eight tools, name the historical experiment
@@ -319,7 +346,7 @@ External acceptance stays separate.
 ## Pre-render drift check
 
 - [ ] Exact title and complete speaker identity are present on slide 1.
-- [ ] `@den-run-ai` links to `https://x.com/den-run-ai`.
+- [ ] `@den-run-ai` links to `https://github.com/den-run-ai`.
 - [ ] Slide 1 is visually calm and contains no table.
 - [ ] Slide 2 names the small-model → AskMe loop → accepted-workflow connection.
 - [ ] Slide 2 defines AskMe as an experimental coding-agent harness.
@@ -338,6 +365,10 @@ External acceptance stays separate.
 - [ ] Slide 6 separates that progress from the remaining validation and clean
       termination failures.
 - [ ] Slide 6 labels the canary one task, one attempt/model, and not a score.
+- [ ] Slide 7 names the local E4B health-check repair, four accepted artifacts
+      and four exhausted agents; diagnostic strict passes stay distinct.
+- [ ] Dependable autonomous coding, net time savings and causal harness benefit
+      remain unproven; September serving-only probes are not coding evidence.
 - [ ] The unfinished reasoning-policy pilot is absent from the stage narrative
       and is not presented as a prerequisite for a shareable talk.
 - [ ] No FeatureBench score, reliability estimate, or external readiness claim
