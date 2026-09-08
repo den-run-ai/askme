@@ -27,10 +27,10 @@ lightning talk at the 2026 Agentic AI Summit at UC Berkeley
 The current answer is deliberately cautious: bounded loops look promising,
 but realistic feature readiness remains open.
 
-Today, AskMe is a minimal two-module Python agent with no frameworks and no
-dependencies beyond `requests`: `askme.py` owns the CLI, LLM calls, and the
-plan/execute/replan controller, and `actions.py` owns the action registry and
-handlers. It takes a prompt, plans tasks, executes them via
+Today, AskMe is a small Python agent with no frameworks and no dependencies
+beyond `requests`: `askme.py` owns the CLI and plan/execute/replan controller,
+`llm.py` owns provider calls and response decoding, and `actions.py` owns the
+action registry and handlers. It takes a prompt, plans tasks, executes them via
 shell/write/edit/read/search/tree actions, and replans on failure. Its
 capability-budget selection is provider/backend-independent by default; a
 named legacy profile preserves the original Gemma 4 E4B/M1 setup, and the
@@ -166,15 +166,15 @@ run logging, context budgets, and the automation/evaluation CLI — lives in
 uv sync --locked
 
 # Fast local quality checks
-uv run --locked ruff check askme.py actions.py tests
-uv run --locked ruff format --check askme.py actions.py tests
+uv run --locked ruff check *.py tests
+uv run --locked ruff format --check *.py tests
 uv run --locked ty check
 
 # Deterministic suite (live LLM tests are opt-in and skip by default)
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
+uv run --locked pytest tests/ --cov --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Integration — local (requires llama-server on :8080)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestIntegration and not Medium and not Hard"
@@ -321,7 +321,9 @@ reference machine for that.
 
 ## Files
 
-- `askme.py` — the agent
+- `askme.py` — CLI, controller and backwards-compatible public API
+- `llm.py` — immutable provider settings, response codecs and injectable client
+- `actions.py` — canonical action registry, handlers and execution receipts
 - `tests/` — unit and integration tests, split by concern
 - `tests/bench_harness.py` — multi-trial benchmark harness
 - `tests/ci_local_gate.py` — macOS/llama.cpp hardware, server, and transport gate

@@ -13,19 +13,10 @@ import json
 from unittest.mock import patch
 
 import pytest
+from _test_support import ScriptedClient
 
 import askme
 from askme import RunConfig, RunDependencies, run_result
-
-
-class ScriptedClient:
-    def __init__(self, replies):
-        self.replies = list(replies)
-        self.calls = []
-
-    def ask(self, messages, **kwargs):
-        self.calls.append({"messages": messages, **kwargs})
-        return self.replies.pop(0)
 
 
 def _deps(client, events=None, lines=None):

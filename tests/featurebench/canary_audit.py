@@ -25,31 +25,58 @@ REQUIRED_CODE_FILES = {
     "tests/featurebench/askme_adapter.py",
     "tests/featurebench/canary_audit.py",
 }
+RUNTIME_MODULES = ("askme", "actions", "llm", "policies", "loop")
 
 
 def runtime_source_paths(askme_source: Path) -> dict[str, Path]:
     """Identify the runtime in the selected snapshot, including legacy monoliths.
 
-    Never borrow dependencies from the adapter checkout: --askme-source can
-    point at a different, historically pinned repository revision.
+    Never import the inspected code or borrow files from the adapter checkout.
+    All supported sibling modules present in the selected snapshot are pinned,
+    including actions-era snapshots whose entry point does not import actions.
+    Walk their static imports too: a missing transitive dependency must fail
+    before execution instead of being supplied by the launching Python path.
     """
     if askme_source.is_symlink() or not askme_source.is_file():
         raise FileNotFoundError(f"AskMe source is missing or a symlink: {askme_source}")
     paths = {"askme.py": askme_source}
-    actions_path = askme_source.with_name("actions.py")
-    tree = ast.parse(askme_source.read_bytes(), filename=str(askme_source))
-    imports_actions = any(
-        isinstance(node, ast.Import)
-        and any(alias.name == "actions" for alias in node.names)
-        or isinstance(node, ast.ImportFrom)
-        and node.module == "actions"
-        for node in ast.walk(tree)
-    )
-    if imports_actions or actions_path.exists() or actions_path.is_symlink():
-        if actions_path.is_symlink() or not actions_path.is_file():
-            raise FileNotFoundError(f"Pinned runtime dependency missing or symlink: {actions_path}")
-        paths["actions.py"] = actions_path
-    return paths
+    pending = ["askme"]
+    for module in RUNTIME_MODULES[1:]:
+        path = askme_source.with_name(module + ".py")
+        if path.exists() or path.is_symlink():
+            pending.append(module)
+    inspected = set()
+    while pending:
+        module = pending.pop()
+        if module in inspected:
+            continue
+        inspected.add(module)
+        path = askme_source if module == "askme" else askme_source.with_name(module + ".py")
+        if path.is_symlink() or not path.is_file():
+            raise FileNotFoundError(f"Pinned runtime dependency missing or symlink: {path}")
+        paths[module + ".py"] = path
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    raise ValueError("Pinned runtime imports must name plain sibling modules")
+                imports = [node.module] if node.module else []
+            else:
+                continue
+            for imported in imports:
+                top = imported.split(".", 1)[0]
+                if top in RUNTIME_MODULES:
+                    if imported != top:
+                        raise ValueError("Pinned runtime imports must name plain sibling modules")
+                    pending.append(top)
+                elif any(
+                    candidate.exists() or candidate.is_symlink()
+                    for candidate in (path.with_name(top + ".py"), path.with_name(top))
+                ):
+                    raise ValueError(f"Unsupported runtime dependency: {top}")
+    return {name: paths[name] for name in sorted(paths)}
 
 
 class CanaryAuditError(RuntimeError):
@@ -494,7 +521,7 @@ def _audit_integrity(
     # Old monolith records did not carry a runtime map. Preserve their audit
     # contract; split runtimes require independent pins for every module.
     if (
-        "actions.py" in runtime_hashes
+        len(runtime_hashes) > 1
         or expected["runtime_files"] is not None
         or manifest is not None
         and "runtime_files" in manifest
@@ -503,7 +530,7 @@ def _audit_integrity(
     ):
         hashes["runtime_files"] = runtime_hashes
         expected_runtime = expected["runtime_files"]
-        if expected_runtime is None and "actions.py" not in runtime_hashes:
+        if expected_runtime is None and set(runtime_hashes) == {"askme.py"}:
             expected_runtime = {"askme.py": expected["base_source_sha256"]}
         _expect_equal(
             audit,

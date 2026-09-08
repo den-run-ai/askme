@@ -191,6 +191,13 @@ def test_outer_deadline_retains_partial_results_and_registration(tmp_path, monke
     assert result["process"]["timed_out"]
     assert len(result["results"]) == 1
     assert json.loads((output / "qualification.json").read_text()) == result
+    registration = json.loads((output / "registration.json").read_text())
+    assert registration["runtime_sha256"] == {
+        path.name: gate.digest(path) for path in gate.ROOT.glob("*.py")
+    }
+    assert registration["runtime_discovery_sha256"] == gate.digest(
+        Path(gate.runtime_source_paths.__code__.co_filename)
+    )
     with pytest.raises(FileExistsError):
         gate.run(protocol(), output, process_runner=runner)
 
@@ -209,6 +216,32 @@ def test_worker_refuses_changed_code_before_http(tmp_path, monkeypatch):
     gate.save(tmp_path / "protocol.json", protocol())
     monkeypatch.setattr(gate, "run_probes", lambda *args: pytest.fail("No HTTP after mismatch"))
     with pytest.raises(ValueError, match="changed"):
+        gate.worker(tmp_path)
+
+
+@pytest.mark.parametrize("changed", ["omit", "extra", "traversal"])
+def test_hosted_worker_rejects_incomplete_runtime_pins_before_http(tmp_path, monkeypatch, changed):
+    gate.save(tmp_path / "protocol.json", protocol())
+    runtime = {path.name: gate.digest(path) for path in gate.ROOT.glob("*.py")}
+    if changed == "omit":
+        del runtime["actions.py"]
+    else:
+        runtime["../outside.py" if changed == "traversal" else "unregistered.py"] = "0" * 64
+    gate.save(
+        tmp_path / "registration.json",
+        {
+            "protocol_sha256": gate.digest(tmp_path / "protocol.json"),
+            "runner_sha256": gate.digest(Path(gate.__file__)),
+            "request_guard_sha256": gate.digest(gate.ROOT / "tests" / "external_repo_trial.py"),
+            "runtime_discovery_sha256": gate.digest(
+                Path(gate.runtime_source_paths.__code__.co_filename)
+            ),
+            "runtime_sha256": runtime,
+            "protocol": protocol(),
+        },
+    )
+    monkeypatch.setattr(gate, "run_probes", lambda *args: pytest.fail("No HTTP after mismatch"))
+    with pytest.raises(ValueError, match="runtime changed"):
         gate.worker(tmp_path)
 
 

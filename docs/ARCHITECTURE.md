@@ -35,10 +35,21 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 
 ## Core Files
 
-`askme.py` (CLI, LLM client, controller loop, recording) and `actions.py`
-(action registry, handlers, typed results/receipts) — no seed files, no
-framework. `askme.py` re-exports the action layer's public names, and
-`execute()` stays its compatibility facade.
+`askme.py` keeps the CLI, controller and public compatibility surface;
+`llm.py` owns immutable provider settings, codecs and the injectable client;
+`actions.py` owns the canonical action registry, handlers and typed receipts.
+There is no framework or new runtime dependency. `askme.py` re-exports shared
+types and adapts its patchable defaults to explicit client settings and sinks.
+`ask_llm()` and `execute()` stay compatible, as do the script entry point and
+structured run API. Importing `llm` does not load `.env` or import `askme`.
+
+The extraction is checked against frozen pre-move public names, signatures,
+CLI help and nine offline whole-run transcripts: model-visible calls,
+dispatched actions, event/console logs, structured results and all workspace
+file bytes. Type-defining module names and temporary workspace paths are
+normalized; budgets, prompts, decisions and receipt semantics are not.
+Existing behavioral and facade-interception tests remain in place. This is
+structural parity evidence, not a model-capability or speed measurement.
 
 **Key functions:**
 - `preflight_probe(working_dir)` — environment probe (platform, arch, tools, package managers, dir listing)
@@ -144,10 +155,12 @@ builder, a one-shot transport step that only classifies its outcome
 decoder per response family: native tool-call decoding for executor actions,
 and reasoning/fence stripping with JSON extraction/semantics-preserving
 repair for planner, task-replan, and validation text replies. `ask_llm(...)` remains the
-compatibility facade and still owns retry/backoff policy, the parse-retry
-budget escalation, and the typed errors callers see; its signature, defaults,
-and error contract are unchanged. Per-run immutable configuration and
-injectable clients (the rest of #37, with #40) come after the remaining seams.
+compatibility facade; `llm.LLMClient.ask` owns retry/backoff policy, parse-retry
+budget escalation and typed errors. The facade's signature, defaults and error
+contract are unchanged. Per-run immutable configuration and injectable clients
+are implemented (#37/#40), not future work. Explicit client settings and
+transport/sink injection support independent clients without importing the
+CLI's mutable compatibility defaults into the implementation module.
 The frozen evaluation contract lives in
 [`tests/workflows/PROTOCOL.md`](../tests/workflows/PROTOCOL.md).
 

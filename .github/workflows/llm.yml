@@ -68,6 +68,9 @@ on:
     paths:
       - askme.py
       - actions.py
+      - llm.py
+      - policies.py
+      - loop.py
       - tests/**
       - .github/workflows/llm.yml
       - pyproject.toml

@@ -280,12 +280,12 @@ def _codes(result):
     return {violation["code"] for violation in result["violations"]}
 
 
-def _pin_split_runtime(paths):
-    dependency = paths["source"].with_name("actions.py")
+def _pin_split_runtime(paths, module="actions"):
+    dependency = paths["source"].with_name(module + ".py")
     dependency.write_text("PINNED_RUNTIME = True\n", encoding="utf-8")
     runtime = {
         name: hashlib.sha256(paths["source"].with_name(name).read_bytes()).hexdigest()
-        for name in ("askme.py", "actions.py")
+        for name in ("askme.py", module + ".py")
     }
     protocol = json.loads(paths["protocol"].read_text())
     protocol["sources"]["askme"]["runtime_files"] = runtime
@@ -304,13 +304,14 @@ def _pin_split_runtime(paths):
     return runtime
 
 
-def test_audit_requires_every_runtime_module_hash_across_retained_records(tmp_path):
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_audit_requires_every_runtime_module_hash_across_retained_records(tmp_path, module):
     paths = _fixture(tmp_path)
-    runtime = _pin_split_runtime(paths)
+    runtime = _pin_split_runtime(paths, module)
 
     valid = _audit(paths)
     assert valid["infrastructure_valid"] is True, valid["violations"]
-    paths["source"].with_name("actions.py").write_text("PINNED_RUNTIME = False\n")
+    paths["source"].with_name(module + ".py").write_text("PINNED_RUNTIME = False\n")
     changed = _audit(paths)
     assert changed["infrastructure_valid"] is False
     assert {
@@ -323,9 +324,10 @@ def test_audit_requires_every_runtime_module_hash_across_retained_records(tmp_pa
 
 
 @pytest.mark.parametrize("record", ["protocol", "manifest", "provenance", "launcher"])
-def test_audit_rejects_missing_modular_runtime_pins(tmp_path, record):
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_audit_rejects_missing_modular_runtime_pins(tmp_path, record, module):
     paths = _fixture(tmp_path)
-    _pin_split_runtime(paths)
+    _pin_split_runtime(paths, module)
     if record == "launcher":
         path = paths["attempt"] / "askme-policy.jsonl"
         events = [json.loads(line) for line in path.read_text().splitlines()]

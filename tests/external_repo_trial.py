@@ -16,6 +16,8 @@ from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from featurebench.canary_audit import runtime_source_paths
+
 TASK = Path(__file__).parent / "external_repo/requests_pickle_v1"
 DEFAULT_API_URL = "http://127.0.0.1:8080/v1/chat/completions"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -166,9 +168,11 @@ def prepare(source, harness, output, task_dir=TASK):
     revision = git(harness, "rev-parse", "HEAD").strip()
     if revision != protocol["harness_revision"]:
         raise ValueError("Harness revision differs from the predeclared revision")
-    for name, expected in protocol["runtime_sha256"].items():
-        if digest(harness / name) != expected:
-            raise ValueError(f"Runtime digest mismatch: {name}")
+    runtime = {
+        name: digest(path) for name, path in runtime_source_paths(harness / "askme.py").items()
+    }
+    if runtime != protocol["runtime_sha256"]:
+        raise ValueError("Runtime digest mismatch: protocol must pin every runtime module")
     for name in ("protocol.json", "prompt.md", "gold.patch", "acceptance.py"):
         shutil.copyfile(task_dir / name, output / name)
     if serving_path is not None:
@@ -183,6 +187,7 @@ def prepare(source, harness, output, task_dir=TASK):
         "machine": platform.machine(),
         "source_sha256": {p.name: digest(p) for p in task_dir.iterdir() if p.is_file()},
         "runner_sha256": digest(__file__),
+        "runtime_discovery_sha256": digest(runtime_source_paths.__code__.co_filename),
         "dependencies": {
             name: importlib.metadata.version(name)
             for name in ("requests", "urllib3", "certifi", "charset-normalizer", "idna")
@@ -484,9 +489,15 @@ def run_trial(source, harness, output, task_dir=TASK):
         raise ValueError("Registered protocol changed")
     if git(harness, "rev-parse", "HEAD").strip() != protocol["harness_revision"]:
         raise ValueError("Registered harness revision changed")
-    for name, expected in protocol["runtime_sha256"].items():
-        if digest(harness / name) != expected:
-            raise ValueError(f"Registered runtime changed: {name}")
+    runtime = {
+        name: digest(path) for name, path in runtime_source_paths(harness / "askme.py").items()
+    }
+    if runtime != protocol["runtime_sha256"]:
+        raise ValueError("Registered runtime changed: protocol must pin every runtime module")
+    if digest(runtime_source_paths.__code__.co_filename) != registration.get(
+        "runtime_discovery_sha256"
+    ):
+        raise ValueError("Registered runtime discovery changed")
     for name, expected in registration["source_sha256"].items():
         if digest(task_dir / name) != expected:
             raise ValueError(f"Registered evaluator/task changed: {name}")
