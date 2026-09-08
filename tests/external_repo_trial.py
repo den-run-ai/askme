@@ -55,12 +55,14 @@ def export_source(source, revision, target):
         "-qm",
         "Pinned upstream task baseline",
     )
+    return git(target, "rev-parse", "HEAD").strip()
 
 
-def patch(workspace):
+def patch(workspace, baseline):
     # Include untracked files, test edits, removals, mode changes, and binary data.
+    # HEAD is model-controlled: a committed repair must remain in the candidate.
     git(workspace, "add", "--all")
-    return git(workspace, "diff", "--cached", "--binary", "HEAD")
+    return git(workspace, "diff", "--cached", "--binary", baseline)
 
 
 def allowed_changes(paths):
@@ -107,13 +109,13 @@ def qualify(source, output, protocol):
     for arm in ("baseline", "noop", "gold"):
         with tempfile.TemporaryDirectory(prefix="askme-control-") as directory:
             workspace = Path(directory) / "repo"
-            export_source(source, protocol["target_revision"], workspace)
+            baseline = export_source(source, protocol["target_revision"], workspace)
             if arm == "gold":
                 command(["git", "apply", str(TASK / "gold.patch")], workspace)
             elif arm == "noop":
                 file = workspace / "src/requests/exceptions.py"
                 file.write_text(file.read_text() + "\n# Harmless non-empty control.\n")
-            control_patch = patch(workspace)
+            control_patch = patch(workspace, baseline)
             records[arm] = {**evaluate(workspace), "patch_nonempty": bool(control_patch)}
             (output / f"control-{arm}.patch").write_text(control_patch)
     save(output / "qualification.json", records)
@@ -284,7 +286,15 @@ def run_trial(source, harness, output):
 
     with tempfile.TemporaryDirectory(prefix="askme-external-") as directory:
         workspace = Path(directory) / "repo"
-        export_source(source, protocol["target_revision"], workspace)
+        baseline = export_source(source, protocol["target_revision"], workspace)
+        save(
+            output / "workspace-baseline.json",
+            {
+                "commit": baseline,
+                "tree": git(workspace, "rev-parse", "HEAD^{tree}").strip(),
+                "upstream_revision": protocol["target_revision"],
+            },
+        )
         env = {
             key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG") if key in os.environ
         }
@@ -325,9 +335,9 @@ def run_trial(source, harness, output):
         elapsed = time.monotonic() - started
         for name, text in (("stdout.txt", stdout), ("stderr.txt", stderr)):
             (output / name).write_bytes(text.encode() if isinstance(text, str) else text)
-        candidate_patch = patch(workspace)
+        candidate_patch = patch(workspace, baseline)
         (output / "candidate.patch").write_text(candidate_patch)
-        changes = git(workspace, "diff", "--cached", "--name-only", "HEAD").splitlines()
+        changes = git(workspace, "diff", "--cached", "--name-only", baseline).splitlines()
         shutil.make_archive(str(output / "workspace"), "gztar", workspace)
         evaluation = Path(directory) / "evaluation"
         export_source(source, protocol["target_revision"], evaluation)

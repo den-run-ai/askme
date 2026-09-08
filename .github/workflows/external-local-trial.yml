@@ -30,6 +30,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the immutable protocol-wide claim
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: den-run-ai/askme
+          ref: 1cd6a9a0384202791f611f3f3c0fb040863591e8
+          path: trial-claim
+          persist-credentials: false
+      - name: Reject every unclaimed run before model setup
+        env:
+          TRIAL_WORKFLOW_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tests/external_trial_claim.py trial-claim/claim.json \
+            tests/external_repo/requests_pickle_v1/protocol.json
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 28534c62a498ae3dcda1899a9ec2f989a5745f9e

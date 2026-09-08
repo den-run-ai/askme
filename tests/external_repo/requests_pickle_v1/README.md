@@ -45,13 +45,23 @@ AskMe is not a sandbox: this separation prevents ordinary evaluator leakage, not
 host-level access by an adversarial agent. Network/install restrictions are prompt
 policies. The standard runner contains no API keys and is discarded after the job.
 
-Run only after the protocol is committed and reviewed. The dedicated workflow has
-no schedule or push trigger. Either dispatch it manually once, or apply the exact
-`external-local-trial` label once to its same-repository PR. Routine PR activity
-does not trigger the trial. GitHub job reruns are rejected (`run_attempt == 1`),
-and a local exclusive start marker prevents overwriting an attempt. Do not remove
-and reapply the label or dispatch again to select a better result. Any subsequent
-experiment requires a new versioned protocol and retains this outcome.
+**The v1 primary run is already claimed by GitHub run 34175311656, attempt 1.**
+The durable [claim](https://github.com/den-run-ai/askme/blob/1cd6a9a0384202791f611f3f3c0fb040863591e8/claim.json)
+was committed before that run's first outcome-bearing model request. Never reset
+or reuse it. The updated workflow checks out this immutable claim from the explicit
+canonical repository and checks run ID, attempt, workflow revision, protocol name,
+harness revision and protocol-file digest before building or downloading a model.
+A fresh dispatch or label event receives a different ID and is rejected even though
+its attempt number is 1. The worker has no API write credentials or claim-reset path.
+
+The already-running original workflow predates this guard. Its frozen runner hash
+and evidence remain the record of what executed. Historical workflow revisions
+cannot retroactively enforce a newly added check against a maintainer deliberately
+dispatching old code; doing that is outside the authorized experiment. V1 is retired
+after its sole claimed outcome. Any subsequent inference requires a new versioned
+protocol and claim, while retaining this outcome. Ordinary PR updates, pushes and
+schedules do not start the trial. The local exclusive marker additionally prevents
+overwriting an attempt's records.
 
 The complete artifact retains registration, protocol/prompt/evaluator/runner,
 gold and no-op patches, control outputs, raw HTTP requests and response bodies,
@@ -62,6 +72,13 @@ An outer timeout can leave no terminal event; report it as a timeout, never fabr
 a completion. Report observed token totals as lower bounds if the attempt is killed
 or transport telemetry is incomplete. Process groups are cleanup, not containment;
 detached descendants remain part of AskMe's documented execution limitation.
+
+The revised recorder captures the initial workspace commit before model execution
+and diffs against that immutable commit, so a model-created Git commit cannot hide
+its repair. It also retains the baseline identity. This correction does not rewrite
+the original run's runner or records. If that run committed changes, independently
+reconstruct and score the retained workspace against its original upstream tree,
+and publish the correction as an explicit scoring amendment without another model run.
 
 Publish the attempt even if it fails. Wording is predeclared:
 
