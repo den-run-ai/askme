@@ -1,16 +1,38 @@
 # Gemma 4 E4B — Legacy Capability-Profile Reference
 
-Mac M1 16GB. Reference status recorded 2026-08-04; headline evidence caveat
-corrected 2026-09-07. This guide describes the explicit
+Mac M1 16GB (base M1, not Pro/Max — this matters for Metal kernel tuning, see
+[Metal FA-vec tuning](#metal-fa-vec-per-device-tuning--base-m1-is-untuned-2026-08-29)).
+Reference audit dated 2026-08-29; reconciled with current AskMe guidance on 2026-09-08. This guide describes the explicit
 `legacy-e4b-m1-16k-v1` AskMe profile; it is not the generic runtime default.
 
 Upstream issue states, build recommendations, and measurements below are
-dated reference snapshots, not a fresh upstream-status audit. The current
-AskMe transport correction below supersedes the old adoption-deferred advice;
-it does not change those historical external observations.
+dated reference snapshots, not a fresh upstream-status audit. Current AskMe
+transport guidance supersedes historical adoption gates; re-verify external
+facts and register a protocol before any new build/model comparison.
 
 **Recorded local build:** `c34b92235` (build 9618, master as of 2026-06-13; pulled + rebuilt 2026-06-12). Includes all Phase 6 fixes plus, from the `a702f395 → c34b92235` delta: **Gemma 4 MTP speculative decoding** ([#23398](https://github.com/ggml-org/llama.cpp/pull/23398) for 31B/26B-A4B, [#24282](https://github.com/ggml-org/llama.cpp/pull/24282) for E2B/E4B assistants), the **state-save fix [#23468](https://github.com/ggml-org/llama.cpp/pull/23468) that makes Gemma 4 cache reuse fully reliable** (build ~9484), SWA checkpoint improvements (#23981, #24110, #24411), structured-output parser fix (#22302), fast Walsh-Hadamard KV rotation (#22631), Gemma4ForCausalLM conversion (#23682), and the 12B Unified conversion fix (#24118). PERFORMANCE.md local baselines predate this binary — see the build caveat there.
-**Fetched master snapshot as of 2026-08-03:** `ee0445c99` — 632 commits ahead of local. Contains a large grammar/PEG overhaul (#24869, #24839, #24835, #24653, #24624, #24329), server prompt-cache work (#24176 checkpoints at every user message, #25070 prompt-cache RAM limit, #25649 state-ownership refactor), and a reasoning-leak template fix (#24674). A rebuild is worth an isolated A/B, but gate on [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma-family decode regression, reported on M5/macOS 27 — M1 impact unknown). Do not replace stable b9618 without a side-by-side.
+**Fetched master snapshot as of 2026-08-29:** `57291f264` — **1071 commits ahead of local** (439 of them landed after the prior 2026-08-03 `ee0445c99` snapshot, which was 632 ahead). Carries the grammar/PEG overhaul (#24869, #24839, #24835, #24653, #24624, #24329) plus later PEG hardening (#26780 suppress incomplete escape sequences), server prompt-cache work (#24176 checkpoints at every user message, #25070 prompt-cache RAM limit, #25649 state-ownership refactor, #24124 `--kv-unified-per-slot`), a reasoning-leak template fix (#24674), and the new **per-device Metal flash-attn-vec tuning framework** (#26570) plus its ongoing device campaign.
+
+**Rebuild-gate status (2026-08-29): the [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) gate has substantially weakened.** Two independent reproduction attempts failed to see it: M2 Pro / macOS 26.5.2 found overlapping intervals with the sign flipping between runs, and M5 Max / 128 GB / macOS 26.6 measured b10219 **faster** (+1.7% llama-bench, +3.7% on the issue's exact server config, non-overlapping distributions). The issue remains open, never bisected, with a single reporter on M5 / 24 GB / macOS 27. The methodological warning from that thread still stands and is the reason to keep A/B discipline: measuring the two builds back-to-back with a rebuild in between produced a *spurious* 13% regression that disappeared with separate build directories and interleaved rounds. Build master in a **separate git worktree**, not a second build dir in the same tree — a second build dir would still compile the b9618 *source*, and checking master out in place would disturb the stable tree and replace the binary the managed server was launched from:
+
+```bash
+cd /Users/macmone/code/llama.cpp
+git fetch origin master
+git worktree add ../llama.cpp-master origin/master   # pin the SHA for a registered run
+cd ../llama.cpp-master
+cmake -B build -DLLAMA_CURL=ON -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release -G Ninja
+cmake --build build -j$(sysctl -n hw.ncpu)
+```
+
+This keeps b9618 launchable throughout, so the A/B can interleave rounds instead of measuring one build then the other.
+
+This is build-only preparation. E27 remains an incomplete draft: its
+[response-level evidence gate](EXPERIMENTS.md#e27--master-rebuild-ab-against-b9618)
+must be satisfied and a new matched-control protocol registered before any
+outcome-bearing calls. The unchanged E01 harness cannot measure recovered
+malformed calls, and `peg_probe_v2.py` is not a live driver or E01 integration.
+
+**Verified compatible (2026-08-29):** every flag in the recommended launch command still exists on master — `--swa-full`, `-fa/--flash-attn [on|off|auto]`, `-ctk/-ctv/--cache-type-{k,v}`, `--cache-reuse`, `-rea/--reasoning [on|off|auto]`, `--spec-type`, `--spec-draft-n-max`. No command edits are needed to rebuild.
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 **Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
 **Phase 4 (EOS fix): COMPLETE** — #21492 merged, rebuilt, 157/157 unit tests pass, 3/3 easy integration pass (10:02). See [Phase 4 results](#phase-4-eos-fix--complete-2026-04-08).
@@ -50,7 +72,7 @@ and the [frozen workflow protocol](../tests/workflows/PROTOCOL.md).
 - llama.cpp has a dedicated Gemma 4 chat/tool-call parser (`COMMON_CHAT_FORMAT_PEG_GEMMA4`)
 - No thinking mode by default (unlike Qwen 3.5) — responses are direct, no `<think>` overhead. If enabled via the reasoning-budget sampler (#21697), note that `<think>...</think>` is emitted before JSON content and breaks structured parsers on the non-streaming path — see [unsloth #5044](https://github.com/unslothai/unsloth/issues/5044)
 - Q8_0 (8 GB) is viable if you want higher quality and delete Qwen 3.5 9B later
-- **Weight refresh (2026-07-15/16):** Google re-published all Gemma 4 checkpoints under the same names with tool-calling JSON reliability, truncated-response, and chat-template fixes. The installed Q4_K_M is dated 2026-04-06 — pre-refresh. Re-pull before the next benchmark; prefer the official **QAT Q4_0** ([google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), ~5.15 GB, quantization-aware-trained rather than post-quantized). The stale template is also what triggers server-side thinking auto-detection — see `--reasoning off` below.
+- **Weight refresh (2026-07-15/16):** Google re-published all Gemma 4 checkpoints under the same names with tool-calling JSON reliability, truncated-response, and chat-template fixes. The installed Q4_K_M is dated 2026-04-06 — pre-refresh. Re-pull before the next benchmark; prefer the official **QAT Q4_0** ([google/gemma-4-E4B-it-qat-q4_0-gguf](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), ~5.15 GB, quantization-aware-trained rather than post-quantized). The stale template is also what triggers server-side thinking auto-detection — see `--reasoning off` below. **Currency re-checked 2026-08-29:** the QAT repo reports `lastModified` 2026-07-17 and the installed GGUF was pulled 2026-08-03, so the primary weights are current — no re-pull needed. Its embedded template was read directly and is Google's canonical **2026-07-09** revision, which carries the `{#- OpenAI Chat Completions:` marker that master's outdated-template detector looks for, so a rebuild will not silently enter the `convert_tool_responses_gemma4` compatibility path. (The legacy Q4_K_M row remains pre-refresh; that is history, not a pending action.)
 - **Gemma 4 12B Unified** (released 2026-06-03; dense, encoder-free multimodal, 256K ctx; official [QAT Q4_0 GGUF](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf) ~6.98 GB) — the 2026-08-03 agent-loop trial was negative under the E4B-fitted contract: 3.6–35× slower than E4B QAT with more exhaustion (see PERFORMANCE.md E09 12B entry). That result is contract-conditional; a newly registered, explicitly pinned capability-profile run is required before a model-wide verdict. It remains a higher-capacity dense candidate that fits in 16 GB. No small-MoE Gemma 4 exists — **26B-A4B remains the family's only MoE** (Q4 ≥13.6 GB before KV cache) and stays off the 16 GB shortlist; no verified acceptable llama.cpp run on 16 GB Apple Silicon exists.
 
 ### Download
@@ -194,6 +216,62 @@ curl http://localhost:8080/slots/0?action=restore -X POST \
   -d '{"filename": "agent-system-prompt"}'
 ```
 
+## Metal FA-vec Per-Device Tuning — Base M1 Is Untuned (2026-08-29)
+
+Upstream [#26570](https://github.com/ggml-org/llama.cpp/pull/26570) added a
+per-device tuned `(Q, NE)` dispatch table for the Metal flash-attention *vec*
+kernels, plus an offline tuner shipped in `tools/tuning`. A device campaign has
+been filling that table one SKU at a time: M1 Pro, M1 Max, M2, M2 Ultra, M3 Max,
+M4, M4 Pro, M4 Max, M5, M5 Pro, M5 Max.
+
+**`GGML_METAL_DEVICE_M1` (base M1 — this machine) is declared in the device enum
+but has zero rows in the table**, so it falls through to the untuned baseline
+config. Counted on master `57291f264`:
+
+| Table coverage | Rows |
+|---|---|
+| `GGML_TYPE_Q4_0` KV (this deployment's KV type) | 326 |
+| head size 256/256 (Gemma 4 iSWA sliding layers) | 158 |
+| head size 512/512 (Gemma 4 global layers) | 142 |
+| `GGML_METAL_DEVICE_M1_PRO` / `_M1_MAX` | 210 / 187 |
+| **`GGML_METAL_DEVICE_M1`** | **0** |
+
+The table covers this setup's KV type and both Gemma 4 head dimensions for other
+Apple SKUs. That snapshot contains no base-M1 per-device rows; other effects of
+a rebuild are unknown until measured.
+
+**Dated experiment proposal (2026-08-29):** the tuner can emit candidate rows for
+the tested device. Validate their numerics and measured performance before any
+adoption or upstream contribution; no benefit is established here.
+The E26 sweep remains gated on E27 qualification and its separate registration;
+the commands below are not authorization or a completed measurement protocol.
+
+```bash
+# from the master worktree created above
+cd /Users/macmone/code/llama.cpp-master
+cmake --build build --target ggml-metal-tuning -j$(sysctl -n hw.ncpu)
+cmake --build build --target test-backend-ops -j$(sysctl -n hw.ncpu)
+# full grid is 6 dtypes x 10 head sizes x 4 KV depths x 9 batch widths (hours);
+# --dtype/--dk shard it, and shard outputs concatenate to the same rows
+./build/bin/ggml-metal-tuning fa-vec --dtype f16,q4_0 --dk 256,512 \
+  > fa_vec_rows.txt 2> fa_vec_sweep.log
+./build/bin/test-backend-ops test -o FLASH_ATTN_EXT -b MTL0
+```
+
+Calibrated expectation: the tuner applies a **no-harm rule** — a candidate only
+replaces the baseline for a bucket if it is no slower at *every* point that
+bucket covers. That is an acceptance rule on the sampled tuning points, not a
+guarantee of non-regression or an end-to-end MTP benefit. The sweep log records
+every config the rule refused. The tuner also
+re-measures an anchor config every four candidates and discards/retries work when
+thermal drift exceeds `--cool-drift`, which matters on a fanless-class 16 GB M1.
+
+Note the coupling to MTP below: the fa-vec grid is explicitly built around a
+"GQA spec-decode shape … enough query heads to keep the GPU busy so the Q>1
+K/V-reuse benefit is visible" — motivating tuning as an experimental factor in
+E24. Matched untuned and tuned controls can both support a fair MTP comparison;
+tuning is neither a prerequisite nor evidence of an MTP benefit.
+
 ## MTP Speculative Decoding — Supported, Not Yet a Win on M1 (2026-08-03)
 
 Native Gemma 4 MTP ("assistant" drafter) support is in build 9618: [#23398](https://github.com/ggml-org/llama.cpp/pull/23398) (merged 2026-06-07; 31B + 26B-A4B; flags `--spec-type draft-mtp --spec-draft-n-max N`) and [#24282](https://github.com/ggml-org/llama.cpp/pull/24282) (merged 2026-06-08; E2B/E4B assistants with their extra `masked_embedding.*` tensors). Google publishes official drafter weights; the E4B drafter is downloaded at `models/gemma4-e4b/gemma-4-e4b-assistant.gguf` (98.7 MB, 2026-06-12). Server-only for now — `llama-bench` and `llama-speculative` cannot load assistant models.
@@ -206,7 +284,17 @@ Three-prompt, single-pass smoke test on b9618 (4K ctx, q4_0 KV — not an AskMe 
 | MTP `--spec-draft-n-max 1` | 11.84 tok/s | −13.0% |
 | MTP `--spec-draft-n-max 3` | 13.24 tok/s | −2.7% |
 
-**Verdict: keep MTP off for AskMe.** The loss has a clear upstream explanation: draft verification runs at exactly the batch sizes (4–16) where Metal's mul_mat path is unoptimized — [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) documents ~2x headroom there and names speculative decoding as the affected workload — and there is no adaptive draft length yet ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768), feature request for Google's heuristic n-max). Also watch [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) — tool-call format corruption reported specifically under MTP. Revisit (EXPERIMENTS.md E24) when #25250 or #24768 lands. For calibration: Ollama's advertised ~90% MTP gain on Apple Silicon was measured on a 12B NVFP4 model on an M5 Max — not transferable to M1.
+**Verdict: keep MTP off for AskMe.** The loss was observed in that smoke; one untested candidate explanation is the following upstream bottleneck hypothesis: draft verification runs at exactly the batch sizes (4–16) where Metal's mul_mat path is unoptimized — [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) documents ~2x headroom there and names speculative decoding as the affected workload — and there is no adaptive draft length yet ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768), feature request for Google's heuristic n-max). Also watch [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) — tool-call format corruption reported specifically under MTP. Revisit (EXPERIMENTS.md E24) when #25250 or #24768 lands. For calibration: Ollama's advertised ~90% MTP gain on Apple Silicon was measured on a 12B NVFP4 model on an M5 Max — not transferable to M1.
+
+**Gate update (2026-08-29): both named gates were stale-bot-closed as `not_planned`, neither was fixed — the E24 gate condition as written can no longer trigger.**
+
+- [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) (Metal small-batch mul_mat) closed 2026-08-17 for inactivity with one comment and no fix. Confirmed unaddressed in the code: the entire 1071-commit local→master delta contains exactly one Metal mul_mat commit, [#27450](https://github.com/ggml-org/llama.cpp/pull/27450), a correctness clamp for `K` not a multiple of 32. **That snapshot keeps the bottleneck hypothesis testable; it does not establish the cause of the measured −13% / −2.7% or predict performance on another build.**
+- [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) (adaptive n-max) closed for inactivity, **but implementation exists unmerged**: [PR #25726](https://github.com/ggml-org/llama.cpp/pull/25726) adds `--spec-draft-adaptive-length-threshold` and `--spec-draft-adaptive-length-bias`, and its author reports a bias of 1 working better specifically on Gemma 4. Open, awaiting maintainer review.
+- [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) (MTP tool-call format corruption) also stale-closed unfixed. Root cause was identified in-thread as the model emitting a space instead of the `thought` token after `<|channel>`; the corresponding fix [PR #25100](https://github.com/ggml-org/llama.cpp/pull/25100) was closed **unmerged**.
+
+MTP fixes that *did* land in the delta and would arrive with a rebuild: draft-mtp with embeddings ([#27400](https://github.com/ggml-org/llama.cpp/pull/27400)), MTP draft-type auto-detection ([#27005](https://github.com/ggml-org/llama.cpp/pull/27005)), spec-type auto-detection from draft GGUF metadata ([#26814](https://github.com/ggml-org/llama.cpp/pull/26814)), `--models-dir` MTP assistant loading ([#24431](https://github.com/ggml-org/llama.cpp/pull/24431)), MTP layer memory allocation ([#26605](https://github.com/ggml-org/llama.cpp/pull/26605)), and **spec-decode counters on the server `/metrics` endpoint ([#26389](https://github.com/ggml-org/llama.cpp/pull/26389))** — the last is useful instrumentation for any future E24 A/B. Open MTP defect reports are on other cells, not E4B/Metal: [#26782](https://github.com/ggml-org/llama.cpp/issues/26782) (12B `draft-mtp` memory access fault) and [#27801](https://github.com/ggml-org/llama.cpp/issues/27801) (26B MTP head, RPC server crash).
+
+**Verdict unchanged: keep MTP off.** What changed is the gate, not the measurement. E24 should be re-gated on either PR #25726 merging *or* base-M1 fa-vec tuning landing (the tuner targets the same Q>1 batch widths MTP verification runs at), rather than on two closed issues.
 
 ## Critical Issue: `--cache-reuse` for Gemma 4 — FIXED UPSTREAM (2026-04-24)
 
@@ -292,10 +380,11 @@ Pulled in the 98-commit delta between `85dde8dc4` (then-local) and fetched maste
 | [#22337](https://github.com/ggml-org/llama.cpp/issues/22337) | E4B/E2B fails as speculative draft model with 31B target | **Stale-closed 2026-07-28, never fixed** | Classic `-md` drafting across PLE/non-PLE architectures still broken; superseded by native MTP (#23398/#24282) |
 | [#21321](https://github.com/ggml-org/llama.cpp/issues/21321) | Generates `<unused24>` tokens | **Closed/completed** (2026-04) | Resolved upstream |
 | [#22396](https://github.com/ggml-org/llama.cpp/issues/22396) | `--json-schema` broken for Gemma 4 | **Stale-closed 2026-07-05, unfixed** (re-regression reported 2026-05-20 on builds 9244/9253) | Historical motivation for client-side JSON repair (E03), which now serves non-action text replies only. Native executor arguments are validated, not repaired or salvaged. Re-verify this upstream issue before a new build comparison |
-| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) | Metal Gemma-family decode regression ~13% (b9730 → b10219) | Open (2026-08-02) | Single reporter on **M5 / 24 GB / macOS 27**; Qwen unaffected; M1 impact unknown. A/B any rebuild in isolation — do not replace stable b9618 untested |
-| [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) | PEG template intermittently unparseable on long multi-line tool-call string args | Open (2026-07-22) | Recorded PEG parser concern (with #25072, #24658). Relevant to the native action path adopted in interface revision 6; qualify the chosen model/server before a new run. The historical upstream issue state has not been re-verified here |
-| [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) | Metal small-batch mul_mat compute-bound at bs 4–16 (~2x headroom) | Open, active 2026-08-02 | Why MTP currently loses on M1 — first gate for retrying MTP (E24) |
-| [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) | MTP heuristic/adaptive n-max (feature request) | Open (2026-06-18) | Second MTP gate — removes manual draft-length tuning |
+| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) | Metal Gemma-family decode regression ~13% (b9730 → b10219) | Open, **not reproduced** (last activity 2026-08-05) | Single reporter on **M5 / 24 GB / macOS 27**, never bisected. Two independent attempts failed to reproduce: M2 Pro/macOS 26.5.2 overlapping intervals, M5 Max/macOS 26.6 measured b10219 *faster*. Weak as a rebuild blocker; keep A/B discipline (separate build dirs, interleaved rounds) because the thread also shows back-to-back measurement fabricating a 13% delta from thermal drift |
+| [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) | PEG template intermittently unparseable on long multi-line tool-call string args | **Open, stale-labelled, unfixed** (last activity 2026-08-22) | **Now a live risk, not a deferred-feature gate: AskMe has been tools-only since 2026-08-04 (interface revision 6).** Verified on master `57291f264` that the implicated rules are unchanged (`common/chat.cpp`: `gemma4-string` = `<\|"\|>` + `until("<\|\"\|>")` + `<\|"\|>`, no escape mechanism). Reporter's analysis names three defects — (1) trailing output after a complete tool call voids the *whole* parse, discarding a well-formed call; (2) no escape for the string delimiter, so a stray `<\|"\|>` inside a long payload terminates the string early; (3) `<\|"\|>` missing from gemma4 `preserved_tokens`. Maintainer required a runnable curl reproduction, which was never supplied, so the issue went stale. Critically the reporter states plain curl with ~9 KB args was clean 10/10 and failures appeared **only inside a fuller agent conversation** (long system prompt, several tools, a prior tool round) — a synthetic history condition, not AskMe's actual two-message executor request. The local diagnostic added that history explicitly; its retained successful arguments do not support full action-schema revalidation. Local probe results: see [PERFORMANCE.md](PERFORMANCE.md) |
+| [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) | Metal small-batch mul_mat compute-bound at bs 4–16 (~2x headroom) | **Stale-bot-closed `not_planned` 2026-08-17, never fixed** | An untested candidate explanation for the historical MTP loss, not demonstrated causality. Confirmed unaddressed: the 1071-commit delta to master holds exactly one Metal mul_mat commit (#27450, a correctness clamp). The E24 gate as written can no longer trigger — re-gate on PR #25726 or on base-M1 fa-vec tuning |
+| [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) | MTP heuristic/adaptive n-max (feature request) | **Stale-bot-closed `not_planned`**, but implemented in open [PR #25726](https://github.com/ggml-org/llama.cpp/pull/25726) | PR adds `--spec-draft-adaptive-length-threshold` / `--spec-draft-adaptive-length-bias`; author reports bias 1 helping specifically on Gemma 4. Unmerged, awaiting review — this is the live MTP gate now |
+| [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) | Gemma 4 tool calling fails `peg-gemma4` format check | **Stale-bot-closed `not_planned` 2026-08-13, unfixed** | Root cause identified in-thread: model emits a space instead of the `thought` token after `<\|channel>`. Fix [PR #25100](https://github.com/ggml-org/llama.cpp/pull/25100) closed **unmerged**. Reported under MTP but not MTP-exclusive; second live tool-calling risk for the tools-only transport |
 
 ## Cross-Ecosystem Status (2026-04-20, updated 2026-08-03)
 
@@ -648,19 +737,24 @@ Then launch the server with the current q4_0 flags **plus** `--swa-full --cache-
 
 | PR/Issue | Status / what to do |
 |----------|----------------------|
-| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma decode regression) | **Rebuild gate.** ~13% E4B decode loss b9730→b10219, reported on M5/macOS 27 only. Before adopting any newer build, A/B against b9618 in isolation |
-| [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) (Metal small-batch mul_mat) / [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) (adaptive n-max) | **MTP gates.** When either lands, rerun the MTP A/B (E24) — current smoke test shows −13%/−2.7% |
-| [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) / [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) (PEG tool-call parsing) | Historical adoption gate, superseded by interface revision 6. Native action support now requires qualification of the actual model/server route; these dated reports remain regression candidates, not evidence of a current upstream disposition. #25072 was specifically MTP-adjacent |
+| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma decode regression) | **Rebuild gate — substantially weakened (2026-08-29).** Two independent reproductions failed; see the header. The proposed matched b9618 A/B still requires E27's response-level evidence gate and a new registration; use separate build dirs and interleaved rounds |
+| [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) (Metal small-batch mul_mat) / [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) (adaptive n-max) | **Both stale-bot-closed `not_planned` (2026-08-17 / 2026-08-30), neither fixed — this gate can no longer trigger as written.** Re-gate E24 on [PR #25726](https://github.com/ggml-org/llama.cpp/pull/25726) merging, or on base-M1 fa-vec tuning landing |
+| **NEW: [#26570](https://github.com/ggml-org/llama.cpp/pull/26570) Metal fa-vec per-device tuning** | **Dated tuning proposal, not a measured benefit or current recommendation.** Base M1 has zero table rows while M1 Pro/Max have 210/187; the table already covers q4_0 KV and both Gemma 4 head sizes. Offline tuner ships in `tools/tuning` — see [the section above](#metal-fa-vec-per-device-tuning--base-m1-is-untuned-2026-08-29) |
+| [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) / [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) (PEG tool-call parsing) | **Historical August 29 parser-risk audit, not a deferred adoption gate.** Native action support is implemented; qualify the actual model/server route. The audit recorded #25986 open and #25072 stale-closed with its fix unmerged. Those upstream dispositions are not a fresh September status check |
+| Gemma 4 chat template currency | **Checked 2026-08-29 — no action needed.** Master added an outdated-template detector (marker `{#- OpenAI Chat Completions:`) that silently applies `convert_tool_responses_gemma4` workarounds. The installed QAT GGUF carries Google's canonical **2026-07-09** template and *does* contain the marker, so a rebuild will not enter the workaround path. Re-check on any GGUF swap |
 | [#21915](https://github.com/ggml-org/llama.cpp/issues/21915) (KV-quant gibberish) | **Stale-closed 2026-07-08, never fixed.** Demoted to occasional second-message sanity check on rebuilds. If ever repro'd on E4B/Metal, revert KV to f16 |
 | [#21831](https://github.com/ggml-org/llama.cpp/issues/21831) (full prompt re-processing) | **Gemma 4 side fixed** (#23468, in b9618). Residual is Qwen MoE ([#22746](https://github.com/ggml-org/llama.cpp/issues/22746)) — only matters if local Qwen is attempted. Checkpoint workaround no longer needed for Gemma |
-| [PR #25352](https://github.com/ggml-org/llama.cpp/pull/25352) (E8 lattice 2-bit KV, CUDA + Metal) | The successor to TurboQuant for KV compression — first candidate with Metal support. If merged, evaluate vs q4_0 KV |
+| [PR #25352](https://github.com/ggml-org/llama.cpp/pull/25352) (E8 lattice 2-bit KV, CUDA + Metal) | **Closed UNMERGED 2026-08-04 — dead, stop watching.** No KV-quant successor is pending; q4_0 KV stays the recommendation |
+| [PR #27390](https://github.com/ggml-org/llama.cpp/pull/27390) (Metal: dequantize quantized KV to F16 before FA) | **Does not yet apply here.** Only `Q8_0` is instantiated; the commit notes extending to Q4_0 is "one instantiation + one gate case". [#27438](https://github.com/ggml-org/llama.cpp/pull/27438) then gates it to large batches only. Watch for a Q4_0 instantiation — it would change the q4_0-KV + `--flash-attn on` path this deployment runs |
 | [SGLang #22277](https://github.com/sgl-project/sglang/issues/22277) (shared KV + quantized KV crash) | **Auto-closed stale 2026-07-06 without a fix** — PR #22615 still open with failing CI. Treat shared-KV + fp8-KV as still broken on SGLang |
 | [vLLM #38887](https://github.com/vllm-project/vllm/issues/38887) / [FA #2427](https://github.com/Dao-AILab/flash-attention/issues/2427) (head_dim=512 blocker) | Still open; vLLM fix PR #38891 unmerged. SGLang merged its per-layer-backend equivalent (#32625, 2026-07-30). Not relevant to Metal |
 | [vLLM #39133](https://github.com/vllm-project/vllm/issues/39133) (31B KV sizing) | **Resolved 2026-07-25** via #40946 (+ #45040); the hard blocker is gone. Hybrid prefix-cache *reuse* on vLLM still broken (#50457 open) |
 
 ### Phase 8: Future optimizations
 
-- **TurboQuant KV** — [#21089](https://github.com/ggml-org/llama.cpp/pull/21089) (3.5-bit TBQ3_0/TBQ4_0 KV types) was **closed unmerged 2026-06-02** (no demonstrated KLD win over existing quants; Hadamard rotation already captures much of the benefit). The live successor is [#25352](https://github.com/ggml-org/llama.cpp/pull/25352) — E8 lattice 2-bit KV cache, **CUDA + Metal**, open as of 2026-08-03.
+- **TurboQuant KV** — [#21089](https://github.com/ggml-org/llama.cpp/pull/21089) (3.5-bit TBQ3_0/TBQ4_0 KV types) was **closed unmerged 2026-06-02** (no demonstrated KLD win over existing quants; Hadamard rotation already captures much of the benefit). Its successor [#25352](https://github.com/ggml-org/llama.cpp/pull/25352) (E8 lattice 2-bit KV, CUDA + Metal) was likewise **closed unmerged 2026-08-04**. As of 2026-08-29 there is no pending KV-quant candidate to evaluate against q4_0; this line of optimization is dormant upstream.
+- **Metal fa-vec per-device tuning** — a candidate local experiment identified in the August 29 audit, not a measured improvement or current adoption recommendation. See [the dedicated section](#metal-fa-vec-per-device-tuning--base-m1-is-untuned-2026-08-29).
+- **Weights are current (checked 2026-08-29)** — `google/gemma-4-E4B-it-qat-q4_0-gguf` on Hugging Face reports `lastModified` 2026-07-17; the installed GGUF was pulled 2026-08-03. No re-pull needed.
 - **Model swaps** — official E4B QAT Q4_0 (~5.15 GB, post-refresh weights) and Gemma 4 12B Unified QAT (~6.98 GB) are the E09/E23 candidates; see EXPERIMENTS.md.
 
 ## Verification Checklist

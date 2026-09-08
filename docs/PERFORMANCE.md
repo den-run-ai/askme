@@ -123,6 +123,70 @@ single predeclared external attempt is published as a failure, without turning
 it into a reliability, model-family, or model-size result.
 See the [draft preview notes](releases/v0.1.0.md) and [#85](https://github.com/den-run-ai/askme/issues/85).
 
+## PEG Tool-Call Parser Probe — 2026-08-29, Local (build 9618 `c34b92235`, E4B QAT Q4_0)
+
+**Diagnostic probe; interpretation corrected 2026-09-07.** This is not an
+AskMe evaluation, benchmark, or reliability estimate. The producer, both
+32-trial JSONL files, and transcripts remain unchanged in
+[`tests/bench_records/2026-08-29-peg-probe/`](../tests/bench_records/2026-08-29-peg-probe/README.md).
+The updated `analyze.py` classifies only evidence those records retain.
+
+**Method.** Direct `/v1/chat/completions` calls to local b9618, E4B QAT Q4_0,
+`--reasoning off`, temperature 0.1, and AskMe's real eight tool definitions and
+`SYSTEM_STEP`. The added assistant tool call and `role: tool` history form a
+**synthetic reproduction condition** suggested by upstream #25986. AskMe's
+actual executor sends two messages: system and the current user/state digest.
+Neither this probe nor E25 establishes that AskMe uses prior tool-message history.
+
+**Correction to the acceptance counter.** The frozen producer's `ok` parses
+only the first call and does not enforce cardinality, expected tool, or action
+schema. The analyzer now checks recorded call count, expected tool, parse
+status, and object-shape metadata. Successful argument values were not fully
+retained, so full AskMe schema validation cannot be reconstructed. "Parse OK"
+below always means **schema unverified**, not an accepted AskMe action.
+
+| Arm | Budget | n | Parse OK, schema unverified | Budget truncation | Uncapped parse failures | Hit cap | Payload |
+|---|---|---|---|---|---|---|---|
+| `A_short_args` | 512 | 16 | 16 | 0 | 0 | 0/16 | short args |
+| `B_long_write_512` | 512 | 16 | 14 | 2 | 0 | 4/16 | 1426–1644 chars |
+| `B_long_write_2048` | 2048 | 16 | 16 | 0 | 0 | 0/16 | 3904–5507 chars |
+| `C_delimiter_payload` | 1024 | 16 | 16 | 0 | 0 | 0/16 | 272–344 chars |
+| **Total** | — | **64** | **62** | **2** | **0** | **4/64** | — |
+
+All 64 rows record one expected tool call. The 62 parseable rows record object
+keys. Schema-invalid argument values could not be distinguished
+from valid ones by these metadata alone; no schema acceptance rate is claimed.
+The two recorded parse failures both hit exactly 512 completion tokens and have
+unterminated `content` strings. There are zero recorded HTTP 5xx; the original
+report also states zero `unparsed peg-gemma4` lines in the server log.
+
+**Token-cap behavior.** Four 512-budget trials hit the cap; two remained
+JSON-parseable and two did not. At the audited AskMe runtime, invalid native
+arguments are rejected and may be retried within configured budgets. Parseable
+arguments with `finish_reason=length` are accepted with default transport
+metadata, not marked `incomplete_write`; artifact completeness remains unknown
+([#94](https://github.com/den-run-ai/askme/issues/94)). The probe did not execute
+actions or measure recovery. At 2048 tokens, none of 16 trials capped; that is a
+bounded payload observation, not evidence of a task-quality improvement.
+
+**Limits.** The upstream trailing-output condition was not provoked, and arm C
+did not emit its requested delimiter in **16/16** trials. Both conditions remain
+untested. One model/quant, build, synthetic conversation depth, temperature,
+and no MTP cannot establish a general parser-failure or AskMe rejection rate.
+The earlier roughly 4.6% bound on a broad "parser-clean" counter should not be
+cited as that evidence. Run-2 timings overlapped local tests and are not
+performance data.
+
+**Next qualification.** Preserve the producer and raw records. A newly versioned
+probe must retain complete responses, check one expected tool and its action
+schema, and separate actual AskMe requests from the synthetic-history arm.
+Pin runtime/model/server revisions and rerun when the build or GGUF changes.
+The September 8 reconciliation adds an offline-tested
+[`peg_probe_v2.py` collector core](../tests/peg_probe_v2.py), not a live campaign.
+Its complete-body retention and schema checks do not upgrade these historical
+rows or establish artifact completeness. A registered bounded driver is still
+required before new model calls.
+
 ## Web Showcase 3-Trial Matrix — 2026-08-04, OpenRouter (three small-active-class models)
 
 First multi-trial measurement of the showcase web suite
@@ -216,21 +280,26 @@ deferred (owner decision) — this comparison covers easy+medium only.
 
 **Findings.**
 
-1. **No transport-level failures.** All 36 trials were contract-valid; the
-   tools arm produced zero malformed, corrupted, or unparseable tool calls.
-   Every tools failure is one of the two documented QAT behavior classes
+1. **Run-contract validity is not response-level parser evidence.** All 36
+   trials passed the recorded metadata, usage, model/provider route,
+   capability-profile and config-hash checks. Run-contract validity does not
+   measure malformed-call incidence: raw replies and typed decoder failures
+   were not retained, and retry attempts do not identify their causes.
+   Observed tools failure trajectories included documented QAT behavior classes
    (E20/E07 dispositions): content drift on rewrites
    (`fix_python_syntax_error`, bad on both arms — json 1/3, tools 0/3) and
    duplicate-action loops. Both failed tools `fix_missing_include` trials
    completed the work — compile fixed, binary built and ran — then exhausted
    while repeating the same previously successful shell; the stuck guard
    and terminal exhaustion reported them correctly.
-2. **The classes redistributed, not multiplied.** Tools lost trials on
+2. **Observed terminal failure patterns.** Tools lost trials on
    `fix_missing_include`/`multi_step_build` to duplicate-action loops; json lost
    `create_missing_file_then_use` to the same class (one 800.3s exhaustion
    spiral). Net −2 pytest for tools on n=18 against a baseline whose own
    day-to-day swing on identical weights spans 22/27 (E23) to 14/18 (this
-   run) — inside run-to-run variance, and no new failure class.
+   run). The original comparison interpreted that gap as within run-to-run
+   variance; these records do not establish an exhaustive response-level
+   failure taxonomy.
 3. **Tools runs are tighter.** Worst tools wall 547s vs json 800s; tools took
    the loop-prone `create_and_read_file` with zero retries/replans at a 61–78s
    range where json spread 44–281s. Easy-suite decode overhead from grammar
@@ -241,7 +310,8 @@ deferred (owner decision) — this comparison covers easy+medium only.
    industry-aligned — the JSON executor transport was removed (interface
    revision 6, workflow protocol revision 7). The duplicate-action loop class
    was observed under both transports and remains the sanctioned #31 lifecycle-arm
-   target.
+   target. This preserves the dated owner adoption decision, not a formal
+   statistical non-inferiority or reliability estimate.
 
 Raw records: [tests/bench_records/2026-08-04/](../tests/bench_records/2026-08-04/)
 — per-arm summaries, per-trial JSONL, pytest diagnostics, and the provenance
@@ -268,13 +338,14 @@ hung and blocked the harness's 1200s subprocess kill via inherited pipes —
 process-group cleanup before the next long bench. (3) All three tools build
 failures are one semantic loop — repeated `cc -o main main.c msg.h` (clang
 rejects the header as a second output) that E05 thinking escalation never
-broke; a recovery-policy gap, not a transport failure (every trial remained
-contract-valid with zero malformed tool calls, hard included). (4) One
+broke; a recovery-policy target, with any contribution from intermediate
+decoder failures unmeasured. All 27 tools trials, hard included, passed the
+recorded run contract; this is not a malformed-call incidence measurement. (4) One
 `multi_step_recovery` tools trial passed pytest while ending `exhausted` —
 the duplicate-action exhaustion class again. The all-suite gap (18/27 vs 21/27)
-stays
-within the same two-plus-one known behavior classes; the shipped
-non-inferiority verdict stands on pass-rate shape, but hard is tools'
+has observed terminal outcomes fitting the known behavior patterns; the historical
+shipped non-inferiority verdict was based on pass-rate shape, not measured parser
+reliability. Hard is tools'
 weakest suite and the `cc` recovery loop is a concrete new data point for
 the #31 lifecycle / recovery-policy arms.
 

@@ -12,6 +12,11 @@ Active backlog of experiments for `askme.py`. Curated from observations in [PERF
   accepted `done`/`fail` control receipts. Absence from execution steps cannot
   establish zero emissions. Describe the E23/E25 observations as duplicate-action
   loops and exhaustion; measure control decisions explicitly in future runs.
+- **Dated upstream audit (2026-08-29; reconciled 2026-09-08).** The E24 gate
+  changes and E26/E27 proposals retain that audit's source snapshots and issue
+  dispositions, not a fresh upstream-status check. They are planning entries,
+  not execution registrations or measured gains; re-verify and preregister the
+  chosen runtime/model/server configuration before any outcome-bearing calls.
 
 ## Waves
 
@@ -37,6 +42,8 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 |-----|-----|---------------------------------------------------------|------|----------|--------|----------|
 | 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
 | —   | E23 | Local revision-3 baseline: QAT Q4_0, `--reasoning off`  | 1    | P0       | S      | done     |
+| —   | E27 | Master rebuild A/B against b9618 (1071 commits behind)  | 1    | P1       | S+M    | draft; evidence gate |
+| —   | E26 | Base-M1 Metal fa-vec tuning table (gated on E27)         | 1    | P1       | M      | planned  |
 | —   | E21 | gpt-oss-20b low/med/high effort as CI/prototyping model | 1    | P1       | S      | running  |
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
 | 2   | E05 | Error-class-specific retry policy                       | 2    | P1       | M      | done     |
@@ -72,7 +79,7 @@ Updated 2026-08-03 after the upstream/status audit and the E23 QAT bench (see [g
 - **E03 approach confirmed by upstream inaction.** #22396 (`--json-schema` broken for Gemma 4) was stale-closed 2026-07-05 without a fix, with a re-regression reported in May. Client-side JSON repair remains the durable approach. Retest grammar-based output only after a rebuild past the master PEG overhaul (#24869 et al.).
 - **E09 narrowed.** QAT Q4_0 was candidate 1 and is consumed by E23; remaining candidates are Gemma 4 12B Unified QAT (~6.98 GB, the largest dense candidate that fits) and Q8_0. No small-MoE Gemma 4 exists; 26B-A4B remains off the 16 GB shortlist.
 - **The E23 QAT stack shows a shifted failure mix, but does not make recovery obsolete.** E06 had no eligible failures and easy+medium had no JSON thinking retries, while E05 still handled `missing_tool` in all three `replan_fix_wrong_command` trials and deterministic C repair fired 11 times across the medium/hard records. The dominant observed local failures were duplicate-action loops (deliverable reported correct, duplicate skips to exhaustion) plus content drift on whole-file rewrites. Dated evidence is recorded on the E20/E07 dispositions and in ARCHITECTURE.md Current Constraints. Per the issue #68 design, repetition is never acceptance and exhaustion is terminal; mechanism removal remains gated on the planned ablations.
-- **E24 added (Wave 4, gated).** MTP self-speculation measured −13% (n-max=1) / −2.7% (n-max=3) on an M1 smoke test — currently a loss, mechanistically explained by llama.cpp #25250 (Metal small-batch mul_mat gap at exactly the draft-verification batch sizes) and #24768 (no adaptive n-max). Gated on either landing.
+- **E24 added (Wave 4, gated).** MTP self-speculation measured −13% (n-max=1) / −2.7% (n-max=3) in that M1 smoke test. llama.cpp #25250 (Metal small-batch mul_mat) and #24768 (adaptive draft length) motivated candidate bottleneck hypotheses, not a demonstrated cause. The original issue-based gates are superseded by the dated August 29 proposal below.
 
 Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions against local E4B, 2026-04-26/27). Prior update: 2026-04-26 E05/E06 rerun analysis.
 
@@ -235,9 +242,9 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   profile, isolated worktree at `d0c2826b`; hard deferred by owner decision):
   json 14/18 pytest / 15/18 agent-complete, tools 12/18 / 12/18 — the gap is
   two trials on n=18 against a baseline whose same-weights swing spans 22/27
-  (E23) to 14/18 (this run). All 36 trials contract-valid; the tools arm
-  produced zero malformed tool calls, and every tools failure is one of the
-  two documented QAT classes (content drift; duplicate-action loops after
+  (E23) to 14/18 (this run). All 36 trials passed the recorded run contract.
+  Observed tools failure trajectories included the documented QAT classes
+  (content drift; duplicate-action loops after
   completed work — both failed `fix_missing_include` trials had the fix
   landed and the binary running before duplicate-action loops exhausted the run). Tools took
   the loop-prone `create_missing_file_then_use` 3/3 (json 1/3 with an 800s
@@ -249,6 +256,36 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   sentinel salvage were removed the same day (interface revision 6, workflow
   protocol revision 7). The duplicate-action loop class was observed under both transports;
   its sanctioned lever remains the #31 lifecycle arm.
+- **Residual upstream risk surfaced 2026-08-29 (not known at decision time).**
+  Removing the JSON transport left `peg-gemma4` on the critical path with no
+  fallback, and two upstream parser defects are open/unfixed:
+  [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) (long multi-line
+  tool-call string arguments intermittently unparseable; trailing output after a
+  complete call voids the whole parse; no escape for the `<|"|>` string
+  delimiter) and [#25072](https://github.com/ggml-org/llama.cpp/issues/25072)
+  (stale-closed, fix PR #25100 unmerged). The implicated grammar rules were
+  verified unchanged on master `57291f264`. The historical owner adoption
+  decision above is not a response-level parser qualification: counting the
+  hard-suite addendum, the tools arm ran 27 real agent trials across
+  easy+medium+hard, all passing the recorded metadata, usage, model/provider
+  route, capability-profile and config-hash checks. **Run-contract validity does
+  not measure malformed-call incidence**: raw replies and typed decoder failures
+  were not retained, and retry attempts do not identify their causes. These were
+  real agent trajectories, but `get_step()` sends only
+  system and current user/state messages; it does not replay prior assistant
+  tool calls or tool results. The separate PEG probe used synthetic tool history,
+  so neither record qualifies the other request shape. The residual exposure
+  includes these specific edges:
+  1. **Write-budget scale.** All local qualification ran under
+     `legacy-e4b-m1-16k-v1`, whose 512-token write cap bounds payloads to roughly
+     1.5 KB. `generic-feature-scale-v1` allows 8192 — a ~16× larger payload class
+     that has never been exercised against this parser locally, and #25986 is
+     specifically about *long* multi-line string arguments.
+  2. **Model/quant.** The reporter's failing cell was 26B-A4B UD-Q4_K_XL, not
+     E4B QAT Q4_0.
+
+  A dated local probe targeting edge (1) is recorded in
+  [PERFORMANCE.md](PERFORMANCE.md). Re-check on any build or GGUF change.
 
 ### E15 — Command-family timeout ladder
 
@@ -508,14 +545,44 @@ Moved to [Archived / rejected](#archived--rejected).
 ### E24 — MTP speculative decoding A/B on E4B **[gated on upstream Metal fixes]**
 
 - **Context.** Added 2026-08-03. Native Gemma 4 MTP landed upstream ([#23398](https://github.com/ggml-org/llama.cpp/pull/23398), [#24282](https://github.com/ggml-org/llama.cpp/pull/24282), both in b9618); the official E4B drafter (98.7 MB) is downloaded. A 2026-08-03 smoke test measured **−13% decode at `--spec-draft-n-max 1` and −2.7% at n-max 3** vs 13.61 tok/s baseline — MTP is currently a small loss on M1.
-- **Hypothesis.** The loss is upstream-mechanical, not architectural: draft verification runs at batch sizes 4–16, exactly where Metal's mul_mat path has ~2x headroom ([#25250](https://github.com/ggml-org/llama.cpp/issues/25250)), and there is no adaptive n-max ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768)). When either lands, MTP should flip positive for the agent's long JSON generations.
-- **Change.** After the gate lands: A/B `--spec-type draft-mtp --spec-draft-n-max {1,3}` vs no-MTP on easy + medium under the E01 harness, against the E23 reference. Measure end-to-end task success and wall time, not just decode tok/s. Verify JSON quality — [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) reports format corruption specifically under MTP.
-- **Metric.** Wall time, agent_complete rate, parse-retry count, decode tok/s.
+- **Hypothesis.** Small-batch Metal throughput or draft-length selection could contribute to the loss: the audit associated draft verification's batch sizes with reported mul_mat headroom ([#25250](https://github.com/ggml-org/llama.cpp/issues/25250)) and the adaptive n-max proposal ([#24768](https://github.com/ggml-org/llama.cpp/issues/24768)). Neither establishes the measured slowdown's cause or predicts a net MTP gain; a controlled A/B must test that hypothesis.
+- **Gate re-registration (2026-08-29).** Both named gates were **stale-bot-closed as `not_planned` without a fix**, so the original trigger can never fire. #25250 is confirmed unaddressed in code — the 1071-commit local→master delta contains exactly one Metal mul_mat commit (#27450, a correctness clamp) — so the *hypothesis* survives while the *gate* does not. Replacement gates, either sufficient:
+  1. [PR #25726](https://github.com/ggml-org/llama.cpp/pull/25726) merges (adaptive draft length via `--spec-draft-adaptive-length-threshold`/`-bias`; its author reports bias 1 helping specifically on Gemma 4), **or**
+  2. E26 lands base-M1 fa-vec tunings — the fa-vec tuning grid is explicitly built on a "GQA spec-decode shape … Q>1 K/V-reuse" basis, i.e. it tunes the same batch widths MTP verification runs at, which motivates testing a possible bottleneck; shape overlap does not establish an MTP handicap or a removable cause of the measured loss.
+
+  Re-run on a build that also carries the landed MTP fixes (#27400 embeddings, #27005/#26814 auto-detection, #26605 layer memory), and take acceptance rate from the new spec-decode `/metrics` counters ([#26389](https://github.com/ggml-org/llama.cpp/pull/26389)) rather than inferring it from wall time.
+- **Change.** After the gate lands and a new protocol is registered: A/B `--spec-type draft-mtp --spec-draft-n-max {1,3}` vs a matched no-MTP control on easy + medium under the E01 harness; E23 remains historical context. Measure end-to-end task success and wall time, not just decode tok/s. Format quality requires the response-level evidence gate below; the dated [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) report motivates that check.
+- **Metric.** Wall time, agent_complete rate, untyped retry-attempt count, decode tok/s. E27's response-level evidence gate applies to any claimed parse-failure metric; E01 retries alone do not identify decoder failures.
 - **Upside.** Potentially the largest local decode lever if the Metal small-batch gap closes (~2x headroom documented upstream).
 - **Risk.** Low — server-flag A/B, trivially revertible. Format-corruption risk (#25072) is why agent-level metrics gate adoption, not raw tok/s.
 - **Code.** `gemma4-setup.md` (server flags), no `askme.py` change.
 - **Effort.** S.
-- **Status.** Planned, **gated** on #25250 or #24768.
+- **Status.** Planned, **re-gated 2026-08-29** on PR #25726 merging or E26 landing. The former gate (#25250 / #24768) is void — both closed `not_planned`, unfixed.
+
+### E26 — Base-M1 Metal fa-vec tuning table
+
+- **Context.** Added 2026-08-29. Upstream [#26570](https://github.com/ggml-org/llama.cpp/pull/26570) added a per-device tuned `(Q, NE)` dispatch table for Metal flash-attn-vec kernels plus an offline tuner in `tools/tuning`, and a device campaign has been filling it (M1 Pro, M1 Max, M2, M2 Ultra, M3 Max, M4, M4 Pro/Max, M5, M5 Pro/Max). **`GGML_METAL_DEVICE_M1` is declared but has zero rows**, so this machine falls through to the untuned baseline. The table already covers this deployment's exact operating point for other SKUs: 326 `GGML_TYPE_Q4_0` KV rows, 158 rows at head 256/256 (Gemma 4 iSWA sliding layers), 142 at 512/512 (global layers).
+- **Hypothesis.** Base M1 is leaving flash-attention throughput on the table purely for lack of a tuning entry, and the shipped tuner can recover it without any source change beyond generated table rows.
+- **Change.** Build `ggml-metal-tuning` on a master build dir, sweep at minimum `--dtype f16,q4_0 --dk 256,512` (the Gemma 4 operating point; the full grid is 6 dtypes × 10 head sizes × 4 KV depths × 9 batch widths and takes hours), validate numerics with `test-backend-ops test -o FLASH_ATTN_EXT -b MTL0`, then A/B a server built with the rows against one without.
+- **Metric.** Decode and prompt-eval tok/s at the deployment's real shape, then agent-level wall time under the E01 harness. Post the sweep log alongside the rows — it records every config the no-harm rule refused.
+- **Upside.** A hardware-specific candidate from the August 29 audit, with possible upstream contribution value; no local throughput or MTP benefit has been measured.
+- **Risk.** Low, but **calibrate expectations down**: the tuner's no-harm rule only replaces a baseline bucket when a candidate is no slower at *every* covered point, but this sampled-point criterion does not guarantee non-regression or an end-to-end benefit. Thermal drift is the main threat to validity on a 16 GB M1 — the tuner re-anchors every four candidates and retries, and any A/B must use separate build dirs with interleaved rounds (see the #26470 thread, where back-to-back measurement fabricated a 13% delta).
+- **Gates.** Requires a separately built master and E27's registered qualification, not merely a newer binary. E27's incomplete evidence gate is not satisfied here. Blocks the re-gated E24.
+- **Code.** `ggml/src/ggml-metal/ggml-metal-tuning.cpp` (generated rows) in the llama.cpp tree; no `askme.py` change.
+- **Effort.** M (sweep is hours of wall time, mostly unattended).
+- **Status.** Planned.
+
+### E27 — Master rebuild A/B against b9618
+
+- **Context.** Added 2026-08-29. Local is b9618 `c34b92235` (2026-06-12), now **1071 commits** behind master `57291f264`. The prior rebuild blocker ([#26470](https://github.com/ggml-org/llama.cpp/issues/26470)) has substantially weakened — two independent reproductions failed, one measuring the newer build *faster*. All flags in the documented launch command were verified present on master, so no command changes are required.
+- **Hypothesis.** A rebuild could improve decode or tool-call robustness, but can also regress; test the effects of post-b9618 PEG hardening (#24329, #24869, #26780, #24624) and the reasoning-leak template fix (#24674).
+- **Execution gate (clarified 2026-09-08).** This is an incomplete draft, blocked before outcome-bearing calls, not an executable registration. First implement and offline-qualify a response-retaining driver, then separately register its exact revision, both build controls and matched runtime, model, settings and request shape, plus budgets, trial count and decision rule. It must retain complete request/response bodies for every response attempt, including recovered retries, and typed decoder failures separately from HTTP errors and budget telemetry; define the denominator and distinguish native actions from non-action JSON. The current E01 harness does not provide this evidence. [`tests/peg_probe_v2.py`](../tests/peg_probe_v2.py) is an offline-tested collector core, not a live driver or automatic E01 instrumentation. Neither the required integration nor a new protocol is provided here.
+- **Change.** Build master in a **separate git worktree** (`git worktree add ../llama.cpp-master origin/master`), not a second build dir in the same tree — a second build dir would still compile the b9618 source, and checking master out in place would disturb the stable tree and replace the binary the managed server runs from. Only after the execution gate is satisfied, A/B decode/prompt-eval and easy+medium suites with newly measured b9618 and candidate-build controls. Pin both build SHAs in the registration; `origin/master` moves. E23 is historical context, not the matched control.
+- **Metric (conditional on that gate).** Decode and prompt-eval tok/s, pytest pass + agent-complete rate and wall time. Malformed-tool-call incidence requires the registered response-level evidence and denominator, not run-contract validity or retry counts. An isolated diagnostic probe measures only its registered request scope; it cannot supply an agent-trajectory incidence estimate unless every relevant trajectory attempt is retained and classified.
+- **Risk.** Low and fully revertible while both build dirs exist. The measurement is the risk, not the build: use separate build dirs and interleaved rounds.
+- **Blocks.** E26 (the tuner only exists on master) and the re-gated E24.
+- **Effort.** S (build) + M (paired bench).
+- **Status.** Incomplete draft; execution and malformed-call measurement remain blocked on the evidence gate above.
 
 ## Planning
 

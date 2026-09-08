@@ -1,0 +1,40 @@
+ok  A_short_args #1 3.2s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #2 4.7s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #3 4.4s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #4 4.5s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #5 4.5s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #6 4.5s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #7 4.4s len=None lines=None delim=None fr=tool_calls
+ok  A_short_args #8 4.2s len=None lines=None delim=None fr=tool_calls
+ok  B_long_write_512 #1 50.3s len=1427 lines=56 delim=False fr=tool_calls
+ok  B_long_write_512 #2 50.5s len=1590 lines=66 delim=False fr=tool_calls
+ok  B_long_write_512 #3 65.1s len=1575 lines=63 delim=False fr=tool_calls
+ok  B_long_write_512 #4 69.2s len=1629 lines=66 delim=False fr=length
+ok  B_long_write_512 #5 74.1s len=1518 lines=61 delim=False fr=tool_calls
+FAIL B_long_write_512 #6 100.6s args_not_json
+ok  B_long_write_512 #7 95.7s len=1427 lines=56 delim=False fr=tool_calls
+FAIL B_long_write_512 #8 74.0s args_not_json
+ok  B_long_write_2048 #1 152.9s len=4673 lines=145 delim=False fr=tool_calls
+ok  B_long_write_2048 #2 136.1s len=5003 lines=149 delim=False fr=tool_calls
+ok  B_long_write_2048 #3 183.9s len=5392 lines=163 delim=False fr=tool_calls
+ok  B_long_write_2048 #4 145.1s len=4775 lines=154 delim=False fr=tool_calls
+ok  B_long_write_2048 #5 147.4s len=5274 lines=178 delim=False fr=tool_calls
+ok  B_long_write_2048 #6 129.4s len=4532 lines=148 delim=False fr=tool_calls
+ok  B_long_write_2048 #7 128.6s len=4406 lines=136 delim=False fr=tool_calls
+ok  B_long_write_2048 #8 157.8s len=5507 lines=169 delim=False fr=tool_calls
+ok  C_delimiter_payload #1 21.5s len=272 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #2 11.4s len=285 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #3 11.2s len=290 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #4 12.2s len=284 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #5 12.5s len=285 lines=9 delim=False fr=tool_calls
+ok  C_delimiter_payload #6 14.0s len=344 lines=10 delim=False fr=tool_calls
+ok  C_delimiter_payload #7 12.6s len=273 lines=10 delim=False fr=tool_calls
+ok  C_delimiter_payload #8 12.2s len=285 lines=9 delim=False fr=tool_calls
+
+===== SUMMARY =====
+A_short_args: 8/8 clean  failures=-
+B_long_write_512: 6/8 clean  failures={'args_not_json': 2}
+B_long_write_2048: 8/8 clean  failures=-
+C_delimiter_payload: 8/8 clean  failures=-
+
+records: /Users/macmone/code/llama.cpp/agent/tests/bench_records/2026-08-29-peg-probe/peg_probe_results.jsonl
