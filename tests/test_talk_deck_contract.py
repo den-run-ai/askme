@@ -1,5 +1,6 @@
 """Regression guard for the Berkeley talk's reviewer-approved narrative."""
 
+import json
 import re
 from pathlib import Path
 
@@ -96,7 +97,7 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
 
     conclusion = slides[6]
     assert "Conclusion + limits" in conclusion
-    assert "Promising for bounded loops. Feature readiness is still open." in conclusion
+    assert "Local repairs are possible. Reliable autonomy is unproven." in conclusion
     for label in ("Observed", "Supported", "Still open"):
         assert label in conclusion
     assert "Evaluate the model, harness, and task as one system" in conclusion
@@ -104,6 +105,13 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "validates this interface" not in conclusion
     assert "do not isolate a harness effect" in conclusion
     assert "Harness design changed the outcome" not in conclusion
+    assert "Gemma 4 E4B (dense PLE), Aug 4" in conclusion
+    assert "four repairs of one seeded health-check bug" in conclusion
+    assert "passed independent acceptance" in conclusion
+    assert "All four agents exhausted" in conclusion
+    assert "Narrow, independently accepted small repairs exist" in conclusion
+    assert "net time savings" in conclusion
+    assert "larger, diagnostic budget" in conclusion
 
     backup = slides[7]
     assert "Backup · harness boundaries" in backup
@@ -257,3 +265,27 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "AskMe is experimental automation, **not a sandbox**" in root_readme
     assert "not an operating-system sandbox" in security
     assert "ALLOW_NETWORK" in security and "does not block network access" in security
+
+
+def test_local_repair_conclusion_keeps_historical_acceptance_and_completion_distinct():
+    evidence = json.loads((TALK / "evals" / "local-repair-evidence.json").read_text())
+    assert evidence["source_commit"] == "8d4e1eab8034d2b5e0b6418b6701a351201187ad"
+    assert len(evidence["shipped_trials"]) == 4
+    for trial in evidence["shipped_trials"]:
+        assert trial["backend"] == "local"
+        assert trial["model"] == "gemma-4-e4b"
+        assert trial["capability_profile"] == "legacy-e4b-m1-16k-v1"
+        assert trial["step_policy"] == "heuristic"
+        assert trial["agent_status"] == "exhausted"
+        assert trial["successful_app_edits"] == 1
+        assert len(trial["record"]["sha256"]) == 64
+    assert evidence["acceptance"]["accepted_repairs_in_historical_report"] == 4
+    assert evidence["acceptance"]["replayed_in_this_publication_pass"] is False
+    assert evidence["diagnostic_raised_budget"]["strict_passes"] == 2
+    assert evidence["diagnostic_raised_budget"]["shipped_profile"] is False
+    assert evidence["model_calls_in_this_publication_pass"] == 0
+
+    notes = _single_line(NOTES.read_text(encoding="utf-8"))
+    assert "The two clean finishes used a larger, diagnostic budget" in notes
+    assert "not dependable autonomy or measured net time savings" in notes
+    assert "local-repair-evidence.json" in notes
