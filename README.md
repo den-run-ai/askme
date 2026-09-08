@@ -28,8 +28,9 @@ The current answer is deliberately cautious: bounded loops look promising,
 but realistic feature readiness remains open.
 
 Today, AskMe is a small Python agent with no frameworks and no dependencies
-beyond `requests`: `askme.py` owns the CLI and plan/execute/replan controller,
-`llm.py` owns provider calls and response decoding, `policies.py` owns step,
+beyond `requests`: `askme.py` keeps the CLI and compatibility API, `loop.py`
+owns planning, run state and controller sequencing, `llm.py` owns provider
+calls and response decoding, `policies.py` owns step,
 write-obligation and completion decisions, and `actions.py` owns the
 action registry and handlers. It takes a prompt, plans tasks, executes them via
 shell/write/edit/read/search/tree actions, and replans on failure. Its
@@ -322,7 +323,8 @@ reference machine for that.
 
 ## Files
 
-- `askme.py` — CLI, controller and backwards-compatible public API
+- `askme.py` — CLI, environment/configuration wiring and backwards-compatible public API
+- `loop.py` — planning, run configuration/state, recording and controller sequencing
 - `llm.py` — immutable provider settings, response codecs and injectable client
 - `policies.py` — step strategies, incomplete-write obligations and completion/validation decisions
 - `actions.py` — canonical action registry, handlers and execution receipts

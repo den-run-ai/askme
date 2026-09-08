@@ -35,18 +35,31 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 
 ## Core Files
 
-`askme.py` keeps the CLI, controller and public compatibility surface;
+`askme.py` keeps the CLI, environment/configuration wiring and public
+compatibility surface; `loop.py` owns planning, run state, recording and
+controller sequencing;
 `llm.py` owns immutable provider settings, codecs and the injectable client;
 `policies.py` owns step strategies, write obligations and completion decisions;
 `actions.py` owns the canonical action registry, handlers and typed receipts.
 There is no framework or new runtime dependency. `askme.py` re-exports shared
 types and adapts its patchable defaults to explicit client settings and sinks.
 `ask_llm()` and `execute()` stay compatible, as do the script entry point and
-structured run API. Importing `llm` or `policies` does not load `.env` or import
-`askme`. Policies depend only on the action contracts and the standard library;
+structured run API. Importing `llm`, `policies` or `loop` does not load `.env`
+or import `askme`. Policies depend only on the action contracts and the standard library;
 validation and legacy call-time timeout defaults enter through explicit
 callbacks. The name `policies` includes selectable strategies as well as shared
 invariants; it does not imply host-level security enforcement.
+
+The controller receives explicit raw defaults and named collaborators. Legacy
+configuration is resolved only when selected: a pinned run configuration or
+injected client takes precedence over unused facade settings. The compatibility
+callbacks retain late lookup where callers historically patched the facade;
+algorithms are not copied into the adapters. `RunState`, its dictionary and
+history, and its single recorder remain shared by identity throughout the run.
+Stable records live with their owning module instead of in a separate catch-all
+records file. The dependency direction is facade → loop/client/policies/actions,
+loop → client/policies/actions, and client/policies → actions; no runtime module
+imports the facade.
 
 The extraction is checked against frozen pre-move public names, signatures,
 CLI help and nine offline whole-run transcripts: model-visible calls,
