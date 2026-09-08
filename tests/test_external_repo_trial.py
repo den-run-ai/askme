@@ -1,6 +1,7 @@
 """Fail-closed evidence checks for the credential-free external task runner."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,182 @@ import pytest
 
 from tests import external_repo_trial as trial
 from tests.external_trial_claim import validate_claim
+
+
+@pytest.fixture
+def custom_trial(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    target = source / "src/requests/exceptions.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("answer = 'broken'\n")
+    trial.git(source, "init", "-q")
+    trial.git(source, "add", "--all")
+    trial.git(
+        source,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "upstream baseline",
+    )
+    harness = Path(__file__).parent.parent
+    task_dir = tmp_path / "custom-task"
+    shutil.copytree(trial.TASK, task_dir)
+    target.write_text("answer = 'fixed'\n")
+    (task_dir / "gold.patch").write_text(trial.git(source, "diff"))
+    target.write_text("answer = 'broken'\n")
+    (task_dir / "acceptance.py").write_text(
+        "import json, pathlib, sys\n"
+        "content = (pathlib.Path(sys.argv[1]) / 'src/requests/exceptions.py').read_text()\n"
+        "accepted = content == \"answer = 'fixed'\\n\"\n"
+        "print(json.dumps({'accepted': accepted, 'checks': 21}))\n"
+        "sys.exit(0 if accepted else 1)\n"
+    )
+    protocol = json.loads((task_dir / "protocol.json").read_text())
+    protocol.update(
+        protocol="requests-physical-local-v2",
+        target_revision=trial.git(source, "rev-parse", "HEAD").strip(),
+        harness_revision=trial.git(harness, "rev-parse", "HEAD").strip(),
+        runtime_sha256={name: trial.digest(harness / name) for name in ("askme.py", "actions.py")},
+        api_url="http://127.0.0.1:18090/v1/chat/completions",
+        wall_timeout_seconds=93,
+        runner="physical-test-machine",
+        runner_cost="existing local hardware",
+        api_cost_usd=0,
+        limitations="One task on physical hardware; no reliability inference.",
+    )
+    serving_path = tmp_path / "serving.json"
+    trial.save(
+        serving_path,
+        {
+            "qualified": True,
+            "protocol": "serving-local-v2",
+            "model_alias": protocol["model_alias"],
+            "api_url": protocol["api_url"],
+        },
+    )
+    protocol["serving_qualification"] = {
+        "path": "../serving.json",
+        "sha256": trial.digest(serving_path),
+        "protocol": "serving-local-v2",
+    }
+    trial.save(task_dir / "protocol.json", protocol)
+
+    return SimpleNamespace(
+        source=source,
+        harness=harness,
+        output=tmp_path / "records",
+        task_dir=task_dir,
+        protocol=protocol,
+        serving_path=serving_path,
+    )
+
+
+def test_custom_task_uses_qualified_endpoint_budget_and_retains_one_attempt(
+    custom_trial, monkeypatch
+):
+    from actions import CapturedProcess
+
+    case = custom_trial
+    trial.prepare(case.source, case.harness, case.output, case.task_dir)
+    assert (
+        case.output / "serving-qualification.json"
+    ).read_bytes() == case.serving_path.read_bytes()
+
+    def worker(args, *, cwd, env, timeout):
+        assert args[args.index("--task-dir") + 1] == str(case.task_dir)
+        assert env["LLM_API_URL"] == case.protocol["api_url"]
+        assert timeout == case.protocol["wall_timeout_seconds"]
+        (Path(cwd) / "src/requests/exceptions.py").write_text("answer = 'fixed'\n")
+        return SimpleNamespace(returncode=0, stdout="fixed", stderr="")
+
+    monkeypatch.setattr(CapturedProcess, "run", worker)
+    result = trial.run_trial(case.source, case.harness, case.output, case.task_dir)
+    assert result["decision"] == "resolved_this_one_task"
+    assert result["configured_timeout_s"] == 93
+    for field in ("runner", "runner_cost", "api_cost_usd", "limitations"):
+        assert result[field] == case.protocol[field]
+    with pytest.raises(FileExistsError):
+        trial.run_trial(case.source, case.harness, case.output, case.task_dir)
+
+
+@pytest.mark.parametrize("mode", ["prepare", "run", "worker"])
+@pytest.mark.parametrize("explicit_task", [False, True])
+def test_cli_selects_task_directory(tmp_path, monkeypatch, mode, explicit_task):
+    argv = [
+        "external_repo_trial.py",
+        mode,
+        "--source",
+        str(tmp_path / "source"),
+        "--harness",
+        str(tmp_path / "harness"),
+        "--output",
+        str(tmp_path / "output"),
+    ]
+    task_dir = tmp_path / "custom-task" if explicit_task else trial.TASK
+    if explicit_task:
+        argv.extend(["--task-dir", str(task_dir)])
+    observed = []
+    function = {"prepare": "prepare", "run": "run_trial", "worker": "worker"}[mode]
+    monkeypatch.setattr(trial, function, lambda *args: observed.append(args))
+    monkeypatch.setattr(trial.sys, "argv", argv)
+    trial.main()
+    assert len(observed) == 1
+    assert observed[0][-1] == task_dir.resolve()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("qualified", False),
+        ("qualified", "true"),
+        ("protocol", "different-serving-protocol"),
+        ("model_alias", "different-model"),
+        ("api_url", "http://127.0.0.1:8080/v1/chat/completions"),
+    ],
+)
+def test_serving_gate_rejects_unqualified_or_mismatched_records(custom_trial, field, value):
+    case = custom_trial
+    record = json.loads(case.serving_path.read_text())
+    record[field] = value
+    trial.save(case.serving_path, record)
+    case.protocol["serving_qualification"]["sha256"] = trial.digest(case.serving_path)
+    trial.save(case.task_dir / "protocol.json", case.protocol)
+    with pytest.raises(ValueError, match="[Ss]erving"):
+        trial.prepare(case.source, case.harness, case.output, case.task_dir)
+    assert not (case.output / "trial-started.json").exists()
+
+
+@pytest.mark.parametrize("changed", ["original", "retained", "task", "runtime", "runner"])
+def test_registered_evidence_changes_block_before_task_attempt(custom_trial, monkeypatch, changed):
+    case = custom_trial
+    trial.prepare(case.source, case.harness, case.output, case.task_dir)
+    if changed == "original":
+        case.serving_path.write_text(case.serving_path.read_text() + "\n")
+    elif changed == "retained":
+        path = case.output / "serving-qualification.json"
+        path.write_text(path.read_text() + "\n")
+    elif changed == "task":
+        (case.task_dir / "acceptance.py").write_text("raise AssertionError('changed')\n")
+    elif changed == "runtime":
+        actual_digest = trial.digest
+        monkeypatch.setattr(
+            trial,
+            "digest",
+            lambda path: (
+                "changed" if Path(path) == case.harness / "askme.py" else actual_digest(path)
+            ),
+        )
+    else:
+        registration = json.loads((case.output / "registration.json").read_text())
+        registration["runner_sha256"] = "changed"
+        trial.save(case.output / "registration.json", registration)
+    with pytest.raises(ValueError):
+        trial.run_trial(case.source, case.harness, case.output, case.task_dir)
+    assert not (case.output / "trial-started.json").exists()
 
 
 def test_committed_repair_is_replayed_against_original_workspace(tmp_path, monkeypatch):
@@ -56,7 +233,8 @@ def test_committed_repair_is_replayed_against_original_workspace(tmp_path, monke
         assert trial.git(workspace, "status", "--porcelain") == ""
         return SimpleNamespace(returncode=0, stdout="committed repair", stderr="")
 
-    def independent_check(workspace):
+    def independent_check(workspace, task_dir):
+        assert task_dir == trial.TASK
         return {
             "accepted": (workspace / "src/requests/exceptions.py").read_text()
             == "answer = 'fixed'\n"
