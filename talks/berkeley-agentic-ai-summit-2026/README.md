@@ -10,9 +10,9 @@
 ## Contents
 
 - [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
-- [`slides.md`](slides.md) — Marp source with 511 words of notes across the seven main slides, plus one backup slide.
-- [`SPEAKER_NOTES.md`](SPEAKER_NOTES.md) — the corrected canonical delivery script; supersedes the historical inline notes in `slides.md`.
-- `slides.pdf` — rendered deck.
+- [`slides.md`](slides.md) — corrected Marp source with synchronized notes across seven main slides, plus one backup slide.
+- [`SPEAKER_NOTES.md`](SPEAKER_NOTES.md) — canonical delivery script, synchronized with the inline notes in `slides.md`.
+- [`slides.pdf`](slides.pdf) — corrected publication deck, regenerated Sep 8, 2026.
 - [Recording](https://www.youtube.com/watch?v=N1XoiJGyNpM) — published talk; read the errata below alongside it.
 - [`blog.md`](blog.md) — companion argument and citations.
 - [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
@@ -20,11 +20,12 @@
 
 ## Published-talk errata — 2026-09-07
 
-The recording, `slides.md` (including its inline notes), and `slides.pdf`
-preserve the published presentation. They have not been regenerated for these
-corrections; [#27](https://github.com/den-run-ai/askme/issues/27) still tracks
-alignment of the slide source, deck contract, and visually checked PDF.
-Use the corrected speaker script as the spoken source for future delivery.
+The recording preserves the original delivery. The slide source, canonical
+script, deck contract, and visually checked PDF were aligned in the Sep 8
+publication correction. The deck labels historical results by date and does
+not present them as measurements of the current native-tool interface.
+Use the corrected PDF and script for sharing or future delivery. The points
+below remain relevant when viewing the recording.
 
 - **Local model:** Gemma 4 E4B is dense PLE, not MoE. The hosted Gemma and Qwen
   records changed revisions, serving stacks, quantization, and budgets; they do
@@ -39,7 +40,7 @@ Use the corrected speaker script as the spoken source for future delivery.
   fastest run overall. The frozen 7/8 result is not a current reliability claim.
 - **Feature evidence:** two one-attempt cells produced applying but unresolved
   patches, with 11/13 and 7/13 target tests passing under held-out scoring.
-  Neither agent ran the target tests or emitted `done`. Bundled changes and a
+  Neither agent ran the target tests; both exhausted their planning attempts. Bundled changes and a
   different serving stack prevent attributing this to one interface change;
   the results do not establish general feature readiness or validate the three
   design bets. Quantitative pi comparisons below remain exploratory archival
@@ -94,7 +95,7 @@ under preregistered v6 protocols. Under the bundled interface changes and a
 changed serving stack, both cells produced applied but unresolved patches:
 Gemma 4 31B reached 11/13 F2P (84.62%), with the same two failures as the
 exploratory one-attempt pi reference, while Qwen3.6-27B reached 7/13 (53.85%)
-versus the pi reference's 10/13. Both agents exhausted without emitting `done`,
+versus the pi reference's 10/13. Both agents exhausted their planning attempts,
 but only Gemma entered a rewrite loop (18 writes); Qwen wrote once and
 returned to observation. Neither ran the target tests. These remain
 one-task adapter canaries — not FeatureBench scores, reliability estimates, or

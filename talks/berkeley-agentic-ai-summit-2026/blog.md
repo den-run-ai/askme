@@ -163,7 +163,7 @@ the same two failures as the exploratory one-attempt pi reference, and
 Qwen3.6-27B reached 7/13 (53.85%) versus the pi reference's 10/13. These are
 observed outcomes under bundled changes; they do not isolate a causal effect
 of the harness, sentinel transport, or write forcing from the serving changes.
-Both agents exhausted their planning attempts without emitting `done`, but
+Both agents exhausted their planning attempts, but
 their downstream failures differed: Gemma rewrote one file 18 times, while
 Qwen wrote once and returned to observation. Neither ran the target tests.
 These remain one-task adapter
