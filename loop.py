@@ -1480,16 +1480,47 @@ class _RunController:
         self._hooks = hooks
         cfg = RunConfig() if config is None else config
         deps = RunDependencies() if dependencies is None else dependencies
-        reasoning_policy = (
-            defaults.reasoning_policy if cfg.reasoning_policy is None else cfg.reasoning_policy
+        # Keep validation/factory ordering: an unused invalid fallback must not
+        # invalidate a pinned run, and no state/policy is created before setup.
+        injected_settings = self._configure_request(user_prompt, working_dir, cfg, deps, defaults)
+        self._bind_dependencies(cfg, deps)
+        step_policy = self._configure_policies(cfg, deps, defaults, injected_settings)
+        self._freeze_call_contract(step_policy)
+        self.run_state = self._hooks.make_run_state(
+            self.reasoning_policy,
+            self.goal_context_chars,
+            clock=self._clock,
+            event_sink=deps.event_sink,
+            rewrite_pressure_writes=self.guards.rewrite_pressure_writes,
+            rewrite_skip_writes=self.guards.rewrite_skip_writes,
         )
+        self.state = self.run_state.data
+        self.history = self.run_state.history
+        self.recorder = self.run_state.recorder
+        # The policy components are constructed last so they can hold
+        # run-scoped state over the same run_state/guards the controller
+        # sequences (issues #31/#69): the selected pressure arm, the shared
+        # incomplete-write obligations, and the terminal/validation policy.
+        self.step_policy = self._hooks.step_policies()[step_policy](self)
+        self.obligations = self._hooks.make_obligations(self)
+        self.completion = self._hooks.make_completion(self)
+
+    @staticmethod
+    def _config_value(config, defaults, name):
+        """Only None selects a fallback; false/zero values stay explicit."""
+        selected = getattr(config, name)
+        return getattr(defaults, name) if selected is None else selected
+
+    def _configure_request(self, user_prompt, working_dir, cfg, deps, defaults):
+        """Resolve limits and the selected model before client construction."""
+        reasoning_policy = self._config_value(cfg, defaults, "reasoning_policy")
         if reasoning_policy not in REASONING_POLICIES:
             raise ValueError(f"reasoning_policy must be one of {', '.join(REASONING_POLICIES)}")
         self.user_prompt = user_prompt
         self.working_dir = working_dir
-        self.max_replans = defaults.max_replans if cfg.max_replans is None else cfg.max_replans
-        self.max_tasks = defaults.max_tasks if cfg.max_tasks is None else cfg.max_tasks
-        self.max_steps = defaults.max_steps if cfg.max_steps is None else cfg.max_steps
+        self.max_replans = self._config_value(cfg, defaults, "max_replans")
+        self.max_tasks = self._config_value(cfg, defaults, "max_tasks")
+        self.max_steps = self._config_value(cfg, defaults, "max_steps")
         # The public config path enforces the same positive-budget contract
         # as the CLI's _positive_int (Codex P2, PR #65): a zero budget would
         # silently report a plausible failure without doing any work.
@@ -1506,14 +1537,10 @@ class _RunController:
         source_settings = (
             injected_settings
             if injected_settings is not None
-            else (cfg.llm if cfg.llm is not None else hooks.current_llm_settings())
+            else (cfg.llm if cfg.llm is not None else self._hooks.current_llm_settings())
         )
         self._llm_meta = self._hooks.resolve_llm_settings(source_settings)
-        goal_context_chars = (
-            defaults.goal_context_chars
-            if cfg.goal_context_chars is None
-            else cfg.goal_context_chars
-        )
+        goal_context_chars = self._config_value(cfg, defaults, "goal_context_chars")
         if (
             not isinstance(goal_context_chars, int)
             or isinstance(goal_context_chars, bool)
@@ -1524,6 +1551,10 @@ class _RunController:
         # Freeze the executor/replanner view once so all policy arms receive the same
         # task context even if module configuration changes while a run is active.
         self.goal_context = user_prompt[:goal_context_chars]
+        return injected_settings
+
+    def _bind_dependencies(self, cfg, deps):
+        """Bind one client/executor/clock while preserving workspace ownership."""
         # Dependency seams (issue #40): a pinned llm config builds this run's
         # own client, and injected sinks own the matching client telemetry.
         # Transport still resolves requests.post at call time. The ordinary
@@ -1531,11 +1562,7 @@ class _RunController:
         # no longer change between calls in one run.
         if deps.llm_client is not None:
             self._client = deps.llm_client
-        elif cfg.llm is not None:
-            self._client = self._hooks.make_client(
-                settings=self._llm_meta, log_sink=deps.log_sink, event_sink=deps.event_sink
-            )
-        elif deps.log_sink is not None or deps.event_sink is not None:
+        elif cfg.llm is not None or deps.log_sink is not None or deps.event_sink is not None:
             self._client = self._hooks.make_client(
                 settings=self._llm_meta,
                 log_sink=deps.log_sink,
@@ -1548,14 +1575,20 @@ class _RunController:
         # directory while the result identifies another. Scripted stand-ins
         # without a working_dir attribute stay accepted.
         executor_dir = getattr(deps.action_executor, "working_dir", None)
-        if executor_dir is not None and Path(executor_dir).resolve() != Path(working_dir).resolve():
+        if (
+            executor_dir is not None
+            and Path(executor_dir).resolve() != Path(self.working_dir).resolve()
+        ):
             raise ValueError(
                 "action_executor is bound to a different directory than the run workspace"
             )
         self._action_executor = deps.action_executor
-        self._clock = hooks.clock_factory() if deps.clock is None else deps.clock
+        self._clock = self._hooks.clock_factory() if deps.clock is None else deps.clock
         self._log_sink = deps.log_sink
         self._event_sink = deps.event_sink
+
+    def _configure_policies(self, cfg, deps, defaults, injected_settings):
+        """Resolve provenance, execution policy and guards in their original order."""
         # Provenance of the hashed LLM identity (PR #72 review): an injected
         # duck-typed client without settings leaves the payload describing
         # the module snapshot, so the record must say the identity is opaque
@@ -1569,55 +1602,31 @@ class _RunController:
         else:
             self._llm_provenance = "module_snapshot"
         self._policy = {
-            "allow_system_installs": (
-                defaults.allow_system_installs
-                if cfg.allow_system_installs is None
-                else cfg.allow_system_installs
-            ),
-            "allow_network": (
-                defaults.allow_network if cfg.allow_network is None else cfg.allow_network
-            ),
+            "allow_system_installs": self._config_value(cfg, defaults, "allow_system_installs"),
+            "allow_network": self._config_value(cfg, defaults, "allow_network"),
         }
         # Outcome-affecting settings resolve once here (issue #68): validation
         # mode, the #41 compile-repair arm, and the guard thresholds are
         # frozen for the run — mid-run changes to the module globals cannot
         # change this run's policy, and the hash below pins what actually ran.
-        self.final_validate = (
-            defaults.final_validate if cfg.final_validate is None else cfg.final_validate
-        )
-        self.compile_repair = (
-            defaults.compile_repair if cfg.compile_repair is None else cfg.compile_repair
-        )
-        step_policy = defaults.step_policy if cfg.step_policy is None else cfg.step_policy
+        self.final_validate = self._config_value(cfg, defaults, "final_validate")
+        self.compile_repair = self._config_value(cfg, defaults, "compile_repair")
+        step_policy = self._config_value(cfg, defaults, "step_policy")
         if step_policy not in self._hooks.step_policies():
             raise ValueError(f"step_policy must be one of {', '.join(STEP_POLICIES)}")
         self.guards = GuardThresholds(
-            write_pressure_observations=(
-                defaults.write_pressure_observations
-                if cfg.write_pressure_observations is None
-                else cfg.write_pressure_observations
+            write_pressure_observations=self._config_value(
+                cfg, defaults, "write_pressure_observations"
             ),
-            observe_tail_reserve=(
-                defaults.observe_tail_reserve
-                if cfg.observe_tail_reserve is None
-                else cfg.observe_tail_reserve
-            ),
-            rewrite_pressure_writes=(
-                defaults.rewrite_pressure_writes
-                if cfg.rewrite_pressure_writes is None
-                else cfg.rewrite_pressure_writes
-            ),
-            rewrite_skip_writes=(
-                defaults.rewrite_skip_writes
-                if cfg.rewrite_skip_writes is None
-                else cfg.rewrite_skip_writes
-            ),
-            max_task_local_replans=(
-                defaults.max_task_local_replans
-                if cfg.max_task_local_replans is None
-                else cfg.max_task_local_replans
-            ),
+            observe_tail_reserve=self._config_value(cfg, defaults, "observe_tail_reserve"),
+            rewrite_pressure_writes=self._config_value(cfg, defaults, "rewrite_pressure_writes"),
+            rewrite_skip_writes=self._config_value(cfg, defaults, "rewrite_skip_writes"),
+            max_task_local_replans=self._config_value(cfg, defaults, "max_task_local_replans"),
         )
+        return step_policy
+
+    def _freeze_call_contract(self, step_policy):
+        """Snapshot budgets and the credential-free metadata/hash once per run."""
         meta = self._llm_meta
         self._timeouts = {
             "planner_initial": meta.timeout,
@@ -1691,24 +1700,6 @@ class _RunController:
         # call so no outcome-affecting module global is read after run
         # construction (issue #69).
         self._budgets = self._config_payload["budgets"]
-        self.run_state = self._hooks.make_run_state(
-            reasoning_policy,
-            goal_context_chars,
-            clock=self._clock,
-            event_sink=deps.event_sink,
-            rewrite_pressure_writes=self.guards.rewrite_pressure_writes,
-            rewrite_skip_writes=self.guards.rewrite_skip_writes,
-        )
-        self.state = self.run_state.data
-        self.history = self.run_state.history
-        self.recorder = self.run_state.recorder
-        # The policy components are constructed last so they can hold
-        # run-scoped state over the same run_state/guards the controller
-        # sequences (issues #31/#69): the selected pressure arm, the shared
-        # incomplete-write obligations, and the terminal/validation policy.
-        self.step_policy = self._hooks.step_policies()[step_policy](self)
-        self.obligations = self._hooks.make_obligations(self)
-        self.completion = self._hooks.make_completion(self)
 
     def _emit(self, msg):
         """Console line through the injected sink, defaulting to log()."""

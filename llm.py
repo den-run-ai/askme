@@ -435,11 +435,12 @@ def _repair_json(text):
 
 
 def _validate_action_contract(obj):
-    """Return True for planner/validator dicts and complete action dicts.
+    """Legacy compatibility predicate; not used by the runtime client.
 
-    Required fields and per-action contracts come from ACTION_SPECS (issue
-    #36). Unknown actions pass here so the run loop can record them as an
-    executed step with a typed dispatch error, not a decode failure.
+    Retained for direct callers and their tests. Non-action objects and unknown
+    action names preserve the historical permissive result. Production calls
+    instead use the response-specific schemas below and the canonical action
+    parser, which rejects unknown actions before controller accounting.
     """
     typed = isinstance(obj, (ActionEnvelope, DecodedAction))
     if not typed and (not isinstance(obj, dict) or "action" not in obj):
@@ -589,7 +590,8 @@ _STRICT_JSON_SUFFIX = (
 _STRICT_TOOL_SUFFIX = "Call exactly one tool now. No reasoning, no text outside the tool call."
 
 # Truncated write/edit payloads are the most common large-output parse failure;
-# detect the attempted action so the retry gets a payload-sized budget.
+# detect the attempted action for historical JSON-text callers. Native tool
+# retries use explicit attempted_action metadata, never these diagnostics.
 _WRITE_ATTEMPT_RE = re.compile(r'"action"\s*:\s*"(?:write|edit)"')
 
 
@@ -744,7 +746,7 @@ def _extract_message_text(rj):
     return text
 
 
-def _decode_action_reply(text, finish_reason):
+def _decode_json_reply(text, finish_reason):
     """Pure decode of one JSON text reply (plan/replan/validation) into a dict.
 
     Owns reasoning/fence stripping and JSON extraction/repair. Actions no
@@ -788,6 +790,10 @@ def _decode_action_reply(text, finish_reason):
         raise
 
 
+# Historical import name; native actions do not pass through this decoder.
+_decode_action_reply = _decode_json_reply
+
+
 def _tool_reply_error(reason, cleaned):
     error = json.JSONDecodeError(reason, cleaned or "", 0)
     setattr(error, "cleaned_text", cleaned or "")
@@ -797,11 +803,11 @@ def _tool_reply_error(reason, cleaned):
 def _decode_tool_call_reply(rj, finish_reason):
     """Decode one native tool-call reply into the action-envelope contract.
 
-    Mirrors :func:`_decode_action_reply`'s return/raise contract so the
+    Mirrors :func:`_decode_json_reply`'s return/raise contract so the
     client's retry policy, budget escalation, and typed classification apply
-    unchanged. The synthesized ``cleaned_text`` embeds the attempted action
-    name in envelope form so a truncated write/edit argument payload still
-    triggers the caller's write-budget escalation."""
+    unchanged. Argument-decode failures carry the native function name in
+    ``attempted_action``; ``cleaned_text`` remains a diagnostic, not a source
+    of retry policy. Envelope/schema failures retain their separate behavior."""
     msg = (rj.get("choices") or [{}])[0].get("message") or {}
     calls = msg.get("tool_calls") or []
     if not calls:
@@ -823,17 +829,23 @@ def _decode_tool_call_reply(rj, finish_reason):
     cleaned = f'{{"action": "{name}", "arguments": {raw_arguments[:400]}}}'
     if not isinstance(name, str) or not name:
         raise _tool_reply_error("tool call is missing a function name", cleaned)
+
+    def argument_error(reason):
+        error = _tool_reply_error(reason, cleaned)
+        # The validated name is a string, but need not name a known action.
+        # Neither raw argument content nor diagnostic formatting can forge it.
+        setattr(error, "attempted_action", name)
+        return error
+
     try:
         args = json.loads(raw_arguments) if raw_arguments.strip() else {}
     except json.JSONDecodeError:
         suffix = " (truncated)" if finish_reason == "length" else ""
-        raise _tool_reply_error(
-            f"tool call arguments are not valid JSON{suffix}", cleaned
-        ) from None
+        raise argument_error(f"tool call arguments are not valid JSON{suffix}") from None
     if not isinstance(args, dict):
-        raise _tool_reply_error("tool call arguments must be a JSON object", cleaned)
+        raise argument_error("tool call arguments must be a JSON object")
     if "action" in args:
-        raise _tool_reply_error("tool call arguments may not carry an action field", cleaned)
+        raise argument_error("tool call arguments may not carry an action field")
     envelope = {"action": name, **args}
     return _accept_or_raise(envelope, cleaned, ActionTransport()), cleaned, False
 
@@ -1053,7 +1065,7 @@ class LLMClient:
                 if expect == "action":
                     obj, _decoded_text, repaired = _decode_tool_call_reply(rj, finish_reason)
                 else:
-                    obj, _decoded_text, repaired = _decode_action_reply(text, finish_reason)
+                    obj, _decoded_text, repaired = _decode_json_reply(text, finish_reason)
             except json.JSONDecodeError as parse_err:
                 cleaned = getattr(parse_err, "cleaned_text", "")
                 if attempt < max_retries:
@@ -1061,7 +1073,11 @@ class LLMClient:
                     # needs room for content, not more reasoning. The bound
                     # follows this client's capability profile (Codex P2, PR #61).
                     write_budget = cfg.write_retry_tokens()
-                    if budget < write_budget and _WRITE_ATTEMPT_RE.search(cleaned):
+                    if budget < write_budget and (
+                        getattr(parse_err, "attempted_action", None) in ("write", "edit")
+                        if expect == "action"
+                        else _WRITE_ATTEMPT_RE.search(cleaned)
+                    ):
                         budget = write_budget
                         self._log(f"  write/edit payload budget -> {budget}")
                     think_str = f" thinking={sent_effort}" if sent_effort else ""

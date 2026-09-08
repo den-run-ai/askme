@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol
 
 from actions import (
     OBSERVE_ACTIONS,
@@ -1135,6 +1135,128 @@ class ValidationState:
         return _has_new_validation_evidence(self.data)
 
 
+class CompletionVerdict(Protocol):
+    """Structural validation result; policies do not depend on the provider module."""
+
+    @property
+    def valid(self) -> bool: ...
+
+    @property
+    def reason(self) -> str: ...
+
+    @property
+    def missing(self) -> tuple[str, ...]: ...
+
+    @property
+    def deterministic(self) -> bool: ...
+
+
+class CompletionDecision(Protocol):
+    """Validation-mode decision, including the compatibility keyword argument."""
+
+    def __call__(
+        self,
+        replan: int,
+        history: list[dict[str, Any]],
+        state: dict[str, Any],
+        user_prompt: str,
+        final_validate: str | None = None,
+    ) -> bool: ...
+
+
+class _CompletionInputs(Protocol):
+    """Fields read by the policy; implementations may resolve them lazily."""
+
+    @property
+    def state(self) -> dict[str, Any]: ...
+
+    @property
+    def history(self) -> list[dict[str, Any]]: ...
+
+    @property
+    def user_prompt(self) -> str: ...
+
+    @property
+    def working_dir(self) -> str: ...
+
+    @property
+    def final_validate(self) -> str | None: ...
+
+    @property
+    def max_replans(self) -> int: ...
+
+
+@dataclass(frozen=True)
+class CompletionView:
+    """Current completion inputs, retaining the run's state and history by identity.
+
+    This is a view, not a new state owner or serialized copy. Supplying a fresh
+    view at use time preserves changes made through the compatibility facade.
+    """
+
+    state: dict[str, Any]
+    history: list[dict[str, Any]]
+    user_prompt: str
+    working_dir: str
+    final_validate: str | None
+    max_replans: int
+
+
+@dataclass(frozen=True)
+class CompletionContext:
+    """Narrow terminal-policy services, separate from transport and controller setup.
+
+    ``validate`` owns request configuration and returns a verdict or no verdict;
+    the policy owns when to call it and how that result affects completion.
+    Callbacks remain live, including views and sinks. They must not copy state
+    or expose held-out acceptance evidence to the policy.
+    """
+
+    current_view: Callable[[], _CompletionInputs]
+    validate: Callable[[], CompletionVerdict | None]
+    decide_validation: CompletionDecision
+    elapsed: Callable[[], float]
+    emit: Callable[[str], None]
+    event: Callable[[dict[str, Any]], None]
+
+
+class _LegacyCompletionView:
+    """Resolve only fields actually used by the legacy terminal path.
+
+    Minimal duck-typed controllers can omit unrelated services and fields:
+    exhaustion needs no prompt or validation mode, while ``try_finish`` needs
+    no replan limit. Explicit properties preserve both that behavior and the
+    original order of reads around callbacks; no fallback values are invented.
+    """
+
+    def __init__(self, controller):
+        self._controller = controller
+
+    @property
+    def state(self) -> dict[str, Any]:
+        return self._controller.state
+
+    @property
+    def history(self) -> list[dict[str, Any]]:
+        return self._controller.history
+
+    @property
+    def user_prompt(self) -> str:
+        return self._controller.user_prompt
+
+    @property
+    def working_dir(self) -> str:
+        return self._controller.working_dir
+
+    @property
+    def final_validate(self) -> str | None:
+        return self._controller.final_validate
+
+    @property
+    def max_replans(self) -> int:
+        return self._controller.max_replans
+
+
 class CompletionPolicy:
     """Terminal policy for one run (issue #69): validation gating, verdict
     handling, the evidence-gated recheck, and the typed terminal outcome
@@ -1145,23 +1267,76 @@ class CompletionPolicy:
     to success."""
 
     def __init__(self, controller, *, validator, decide_validation=None):
+        """Compatibility adapter; new composition can use ``from_context``."""
         self.controller = controller
         self._validator = validator
         self._decide_validation = (
             _should_validate if decide_validation is None else decide_validation
         )
-        self.validation = ValidationState(controller.state)
+        self._bind_context(
+            CompletionContext(
+                current_view=self._legacy_view,
+                validate=self._legacy_validate,
+                decide_validation=lambda *args, **kwargs: self._decide_validation(*args, **kwargs),
+                elapsed=lambda: self.controller.run_state.elapsed(),
+                emit=lambda message: self.controller._emit(message),
+                event=lambda event: self.controller._event(event),
+            ),
+            validation_data=controller.state,
+        )
+
+    @classmethod
+    def from_context(cls, context: CompletionContext) -> "CompletionPolicy":
+        """Compose the canonical policy without a controller or provider client."""
+        policy = cls.__new__(cls)
+        policy._bind_context(context)
+        return policy
+
+    def _bind_context(
+        self, context: CompletionContext, *, validation_data: dict[str, Any] | None = None
+    ):
+        """Share the one implementation with facade constructors.
+
+        ValidationState historically binds the original dictionary even when a
+        compatibility caller later replaces its controller's state attribute.
+        An explicit initial dictionary preserves that binding without reading
+        unused view fields during construction.
+        """
+        self._context = context
+        self.validation = ValidationState(
+            context.current_view().state if validation_data is None else validation_data
+        )
+
+    def _legacy_view(self) -> _LegacyCompletionView:
+        return _LegacyCompletionView(self.controller)
+
+    def _legacy_validate(self):
+        """Translate the old controller-shaped API only at the compatibility edge."""
+        controller = self.controller
+        validate_kwargs = controller._llm_kwargs()
+        if controller._log_sink is not None:
+            validate_kwargs["log_sink"] = controller._log_sink
+        return self._validator(
+            controller.user_prompt,
+            controller.state,
+            controller.working_dir,
+            max_tokens=controller._budgets["final_validation_max_tokens"],
+            timeout=controller._timeouts["final_validation"],
+            max_retries=controller._retries["final_validation"],
+            **validate_kwargs,
+        )
 
     def try_finish(self, replan):
         """Validate an all-done pass; a :class:`RunOutcome` ends the run."""
-        controller = self.controller
+        context = self._context
+        view = context.current_view()
         status, validation = "complete", "skipped"
-        wants_validation = self._decide_validation(
+        wants_validation = context.decide_validation(
             replan,
-            controller.history,
-            controller.state,
-            controller.user_prompt,
-            final_validate=controller.final_validate,
+            view.history,
+            view.state,
+            view.user_prompt,
+            final_validate=view.final_validate,
         )
         first_validation = self.validation.attempts == 0
         recheck_validation = (
@@ -1171,28 +1346,17 @@ class CompletionPolicy:
         )
         if wants_validation and (first_validation or recheck_validation):
             self.validation.note_attempt()
-            validate_kwargs = controller._llm_kwargs()
-            if controller._log_sink is not None:
-                validate_kwargs["log_sink"] = controller._log_sink
-            vresult = self._validator(
-                controller.user_prompt,
-                controller.state,
-                controller.working_dir,
-                max_tokens=controller._budgets["final_validation_max_tokens"],
-                timeout=controller._timeouts["final_validation"],
-                max_retries=controller._retries["final_validation"],
-                **validate_kwargs,
-            )
+            vresult = context.validate()
             if vresult is not None and vresult.valid is False:
                 reason = vresult.reason or "validation failed"
                 missing = list(vresult.missing)
                 error_msg = f"[validation_failed] {reason}"
                 if missing:
                     error_msg += f" missing: {', '.join(missing)}"
-                controller.state["errors"].append(error_msg)
+                context.current_view().state["errors"].append(error_msg)
                 self.validation.mark_failed()
-                controller._emit(f"  Validation failed: {reason}")
-                controller._event(
+                context.emit(f"  Validation failed: {reason}")
+                context.event(
                     {
                         "event": "validation",
                         "valid": False,
@@ -1205,10 +1369,8 @@ class CompletionPolicy:
             elif vresult is None and recheck_validation:
                 # Once validation explicitly failed, an unavailable second
                 # verdict cannot erase that known failure.
-                controller._emit(
-                    "  Validation recheck produced no verdict; failure remains pending."
-                )
-                controller._event(
+                context.emit("  Validation recheck produced no verdict; failure remains pending.")
+                context.event(
                     {
                         "event": "validation",
                         "valid": None,
@@ -1222,8 +1384,8 @@ class CompletionPolicy:
                 # typed ``complete_unverified`` instead of claiming
                 # "Validation passed" from missing evidence.
                 status, validation = "complete_unverified", "unavailable"
-                controller._emit("  Validation produced no verdict; completing unverified.")
-                controller._event(
+                context.emit("  Validation produced no verdict; completing unverified.")
+                context.event(
                     {
                         "event": "validation",
                         "valid": None,
@@ -1234,8 +1396,8 @@ class CompletionPolicy:
             else:
                 validation = "deterministic" if vresult.deterministic else "passed"
                 self.validation.clear_failure()
-                controller._emit("  Validation passed.")
-                controller._event(
+                context.emit("  Validation passed.")
+                context.event(
                     {
                         "event": "validation",
                         "valid": True,
@@ -1249,13 +1411,13 @@ class CompletionPolicy:
                 reason = (
                     "completion after failed validation requires new write, edit, or shell evidence"
                 )
-            controller.state["errors"].append(f"[validation_failed] {reason}")
-            controller._emit(f"  Completion refused: {reason}")
-            controller._event({"event": "validation_pending", "reason": reason})
+            context.current_view().state["errors"].append(f"[validation_failed] {reason}")
+            context.emit(f"  Completion refused: {reason}")
+            context.event({"event": "validation_pending", "reason": reason})
             return None
         outcome = self._build_outcome(status, validation, replan)
-        controller._emit(f"All tasks complete. ({outcome.wall_s:.1f}s total)")
-        controller._emit(f"Output in: {controller.working_dir}")
+        context.emit(f"All tasks complete. ({outcome.wall_s:.1f}s total)")
+        context.emit(f"Output in: {context.current_view().working_dir}")
         return outcome
 
     def exhausted(self):
@@ -1266,24 +1428,25 @@ class CompletionPolicy:
         though the plan never finished; that is evaluation-contaminating
         false success, so the run now reports ``exhausted`` unconditionally.
         """
-        controller = self.controller
+        context = self._context
         validation = "failed" if self.validation.recheck_needed else "skipped"
-        outcome = self._build_outcome("exhausted", validation, controller.max_replans)
-        controller._emit(
-            f"Exhausted {controller.max_replans} replan attempts. ({outcome.wall_s:.1f}s total)"
+        outcome = self._build_outcome("exhausted", validation, context.current_view().max_replans)
+        context.emit(
+            f"Exhausted {context.current_view().max_replans} replan attempts. "
+            f"({outcome.wall_s:.1f}s total)"
         )
-        controller._emit(f"Errors: {controller.state['errors']}")
-        controller._emit(f"Output in: {controller.working_dir}")
+        context.emit(f"Errors: {context.current_view().state['errors']}")
+        context.emit(f"Output in: {context.current_view().working_dir}")
         return outcome
 
     def _build_outcome(self, status, validation, replans):
         """Snapshot the terminal record from the run-scoped state."""
-        state = self.controller.state
+        state = self._context.current_view().state
         return RunOutcome(
             status=status,
             validation=validation,
             replans=replans,
-            wall_s=round(self.controller.run_state.elapsed(), 2),
+            wall_s=round(self._context.elapsed(), 2),
             completed_tasks=len(state["completed_tasks"]),
             selected_steps=state["selected_steps"],
             executed_steps=state["executed_steps"],
