@@ -15,7 +15,7 @@ recorded here before the slides are edited.
 - **Exact title:** Are Small LLMs Ready for Coding Agents?
 - **Speaker:** Denis Akhiyarov
 - **Role:** Sr Staff Research Scientist at ServiceNow
-- **Social:** [@den-run-ai](https://x.com/den-run-ai)
+- **GitHub profile:** [@den-run-ai](https://github.com/den-run-ai)
 - **Project:** [github.com/den-run-ai/askme](https://github.com/den-run-ai/askme)
 - **Venue/date:** Agentic AI Summit 2026, UC Berkeley, Aug 1, 2026
 - **Format:** five minutes, seven main slides plus one backup slide
@@ -142,7 +142,7 @@ Do not collapse these four levels into a single "the smoke validates" claim.
 
 ### 1. Author and question
 
-**Must show:** exact title, speaker name, ServiceNow role, Twitter/X handle,
+**Must show:** exact title, speaker name, ServiceNow role, GitHub handle,
 AskMe repository, venue/date, and one short subtitle drawn from the central
 message.
 
@@ -258,6 +258,11 @@ External acceptance stays separate.
 
 ## Feedback ledger and precedence
 
+- The 2026-09-08 public-access audit corrects the author link to the verified
+  GitHub profile, `https://github.com/den-run-ai`. Keep the visible handle,
+  spoken script, and evidence claims unchanged; regenerate the PDF so its
+  clickable author link matches the source and companion README.
+
 - The 2026-09-08 publication pass supersedes stale claims in the August deck:
   show one native tool call and eight tools, name the historical experiment
   dates, restrict feature claims to the two observed attempts, and remove
@@ -319,7 +324,7 @@ External acceptance stays separate.
 ## Pre-render drift check
 
 - [ ] Exact title and complete speaker identity are present on slide 1.
-- [ ] `@den-run-ai` links to `https://x.com/den-run-ai`.
+- [ ] `@den-run-ai` links to `https://github.com/den-run-ai`.
 - [ ] Slide 1 is visually calm and contains no table.
 - [ ] Slide 2 names the small-model → AskMe loop → accepted-workflow connection.
 - [ ] Slide 2 defines AskMe as an experimental coding-agent harness.

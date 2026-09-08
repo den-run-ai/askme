@@ -1,0 +1,38 @@
+{
+  "date_utc": "2026-09-08",
+  "environment": "physical Apple M1, macOS 26.5, locked uv environment, Python 3.12.12",
+  "tested_worktree_base": "2f7d656",
+  "note": "The final source changes were uncommitted during the checks; source hashes below identify the tested bytes. No commit occurred during Git-identity-sensitive tests. Subsequent evidence/documentation commits do not change these source bytes.",
+  "source_sha256": {
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949",
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930",
+    "tests/external_repo_trial.py": "4285d7861d208ddb8e2321a28bf1aa9eca65c95b37f1872a3ade38429886537f",
+    "tests/serving_qualification.py": "286eeb99e60580afd2e3c24aaf6c6b568ad638a464afa88342736221f3d7ea58",
+    "tests/hosted_serving_qualification.py": "def31d3d4315496222d8276d06ecad26ecccbb5b2619ef742a5144774bf3c5b1"
+  },
+  "checks": [
+    {"command": "uv run --locked ruff check askme.py actions.py tests", "exit_code": 0},
+    {"command": "uv run --locked ruff format --check askme.py actions.py tests", "exit_code": 0, "files": 74},
+    {"command": "uv run --locked ty check", "exit_code": 0},
+    {
+      "command": "uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:/tmp/askme-final-offline-metadata.nxOVxR/coverage.xml",
+      "exit_code": 0,
+      "passed": 1415,
+      "skipped": 30,
+      "elapsed_s": 43.16,
+      "branch_aware_coverage_percent": 96.46,
+      "coverage_gate_percent": 90,
+      "branches_covered": 993,
+      "branches_total": 1054
+    },
+    {"command": "git diff --check", "exit_code": 0, "scope": "Tracked source changes before adding outcome artifacts"},
+    {"command": "git diff --cached --check", "exit_code": 2, "scope": "Full evidence staging", "finding": "Retained model-generated candidate.patch and patch-apply.txt contain the original trailing whitespace; do not rewrite frozen evidence to silence this diagnostic."},
+    {"command": "git diff --cached --check -- . ':!tests/bench_records'", "exit_code": 0, "scope": "Source, tests, protocols and documentation; excludes immutable raw evidence"}
+  ],
+  "regressions_failed_before_fix": [
+    "A planner response cut off with finish_reason=length must not be repaired as a natural stop by the serving qualifier.",
+    "Published hosted summary runner_cost must not claim a free public macOS CI runner."
+  ],
+  "live_test_boundary": "No generic paid/live pytest suite was enabled. Separate preregistered physical serving probes, hosted preflights and the one Requests task have their own complete records; this offline gate does not establish backend capability.",
+  "visual_checks": "Pinned Marp 4.4.1 regenerated slides.pdf; all eight pages visually inspected. Details and hashes are in 2026-09-08-public-access.json."
+}

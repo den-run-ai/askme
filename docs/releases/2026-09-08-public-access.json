@@ -1,0 +1,1359 @@
+{
+  "schema_version": 1,
+  "audit_date_utc": "2026-09-08",
+  "audited_public_main": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+  "scope": "Direct Markdown hyperlink targets in the seven entry documents, plus repository, issue creation, author-profile, and raw-PDF checks. Main remained 6a212cf during public-page checks. Local candidate changes and the regenerated PDF were verified separately.",
+  "source_documents": [
+    "README.md",
+    "docs/SECURITY.md",
+    "docs/PERFORMANCE.md",
+    "talks/berkeley-agentic-ai-summit-2026/README.md",
+    "talks/berkeley-agentic-ai-summit-2026/evals/README.md",
+    "tests/featurebench/README.md",
+    "docs/releases/v0.1.0.md"
+  ],
+  "http": {
+    "started_at_utc": "2026-09-08T05:43:04.550654+00:00",
+    "completed_at_utc": "2026-09-08T05:43:17.534451+00:00",
+    "method": "Unauthenticated urllib GETs without cookies or Authorization; redirects followed. Relative targets resolved against their source document. HTTP availability does not by itself establish correct profile routing or rendered application content.",
+    "distinct_targets": 98,
+    "http_200": 98,
+    "http_errors": 0,
+    "relative_link_occurrences": 72,
+    "missing_relative_targets": 0,
+    "linked_fragment_targets": 5,
+    "fragment_matches": 5,
+    "target_set_note": "This initial set included the old X author URL and raw PDF. The browser set instead includes the corrected GitHub author URL and the README entry page without a fragment."
+  },
+  "browser": {
+    "browser": "Google Chrome 152.0.7977.77",
+    "started_at_utc": "2026-09-08T05:47:37.949943+00:00",
+    "completed_at_utc": "2026-09-08T06:17:22.502Z",
+    "isolation": "Fresh temporary Chrome profile for each target; no user profile, cookies, or authentication inherited. All 79 GitHub HTML pages exposed an empty user-login value and a Sign in affordance; SVG badges have no login metadata.",
+    "method": "Headless rendered DOM checks. The resumed sweep allowed five seconds of virtual time for client rendering; Codecov was rechecked after its initial application shell and rendered the public visitor coverage view. Databricks used DOMContentLoaded with visible body text after two full-load dump deadlines.",
+    "distinct_targets": 98,
+    "rendered_targets": 98,
+    "fragment_matches": 5,
+    "model_measurement_separation": "Browser work paused after 05:48:50 UTC and resumed at 06:11:54 UTC after the local serving measurements finished.",
+    "limits": "This verifies public access and rendered content, not signed-in permissions, video playback, every interactive feature, or pixel-level review of all third-party pages.",
+    "databricks_full_load_attempts": [
+      {
+        "elapsed_s": 20.62,
+        "dom_bytes": 0,
+        "result": "collection_deadline"
+      },
+      {
+        "elapsed_s": 45.67,
+        "dom_bytes": 0,
+        "result": "collection_deadline"
+      }
+    ],
+    "checks": [
+      {
+        "url": "https://ai.google.dev/gemma/docs/core",
+        "elapsed_s": 7.72,
+        "dom_bytes": 155900,
+        "complete": true,
+        "title": "Gemma 4 model overview &nbsp;|&nbsp; Google AI for Developers"
+      },
+      {
+        "url": "https://ai.google.dev/gemma/docs/run",
+        "elapsed_s": 7.33,
+        "dom_bytes": 132862,
+        "complete": true,
+        "title": "Run Gemma content generation and inferences &nbsp;|&nbsp; Google AI for Developers"
+      },
+      {
+        "url": "https://ai.google.dev/gemma/docs/tune",
+        "elapsed_s": 7.7,
+        "dom_bytes": 148383,
+        "complete": true,
+        "title": "Gemma model fine-tuning &nbsp;|&nbsp; Google AI for Developers"
+      },
+      {
+        "url": "https://app.codecov.io/gh/den-run-ai/askme",
+        "elapsed_s": 16.8,
+        "dom_bytes": 43954,
+        "complete": true,
+        "title": "Codecov",
+        "body_text_chars": 819,
+        "repository_name_in_body": true,
+        "coverage_in_body": true
+      },
+      {
+        "url": "https://arxiv.org/abs/2603.19461",
+        "elapsed_s": 5.71,
+        "dom_bytes": 43935,
+        "complete": true,
+        "title": "[2603.19461] Hyperagents"
+      },
+      {
+        "url": "https://codecov.io/gh/den-run-ai/askme/branch/main/graph/badge.svg?precision=2",
+        "elapsed_s": 3.99,
+        "dom_bytes": 2277,
+        "complete": true,
+        "title": null
+      },
+      {
+        "url": "https://docs.codecov.com/docs/frequently-asked-questions#how-is-coverage-calculated",
+        "elapsed_s": 5.56,
+        "dom_bytes": 126009,
+        "complete": true,
+        "title": "Frequently Asked Questions",
+        "fragment_found": true
+      },
+      {
+        "url": "https://docs.databricks.com/aws/en/omnigent/",
+        "elapsed_s": 8.35,
+        "dom_bytes": 252969,
+        "complete": true,
+        "title": "Omnigent on Databricks | Databricks on AWS"
+      },
+      {
+        "url": "https://docs.openhands.dev/sdk/arch/conversation",
+        "elapsed_s": 5.87,
+        "dom_bytes": 346650,
+        "complete": true,
+        "title": "Conversation - OpenHands Docs"
+      },
+      {
+        "url": "https://docs.openhands.dev/sdk/arch/tool-system",
+        "elapsed_s": 8.65,
+        "dom_bytes": 742888,
+        "complete": true,
+        "title": "Tool System &amp; MCP - OpenHands Docs"
+      },
+      {
+        "url": "https://github.com/can1357/oh-my-pi",
+        "elapsed_s": 8.37,
+        "dom_bytes": 720684,
+        "complete": true,
+        "title": "GitHub - can1357/oh-my-pi: ⌥ Coding agent with the IDE wired in · GitHub",
+        "body_text_chars": 38326,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai",
+        "elapsed_s": 9.15,
+        "dom_bytes": 216372,
+        "complete": true,
+        "title": "den-run-ai (Denis Akhiyarov) · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme",
+        "elapsed_s": 9.75,
+        "dom_bytes": 379812,
+        "complete": true,
+        "title": "GitHub - den-run-ai/askme: askme minimal ai agent for local coding task execution · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/30883171900",
+        "elapsed_s": 6.9,
+        "dom_bytes": 237928,
+        "complete": true,
+        "title": "LLM Tests · den-run-ai/askme@9eba802 · GitHub",
+        "body_text_chars": 3429,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34152793007",
+        "elapsed_s": 4.9,
+        "dom_bytes": 231689,
+        "complete": true,
+        "title": "LLM Tests · den-run-ai/askme@fcd5bc0 · GitHub",
+        "body_text_chars": 3285,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34173996654",
+        "elapsed_s": 4.81,
+        "dom_bytes": 236276,
+        "complete": true,
+        "title": "Merge pull request #98 from den-run-ai/dependabot/github_actions/astr… · den-run-ai/askme@2293d49 · GitHub",
+        "body_text_chars": 3700,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34173996684",
+        "elapsed_s": 6.14,
+        "dom_bytes": 230737,
+        "complete": true,
+        "title": "Merge pull request #98 from den-run-ai/dependabot/github_actions/astr… · den-run-ai/askme@2293d49 · GitHub",
+        "body_text_chars": 3508,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34174642414",
+        "elapsed_s": 5.98,
+        "dom_bytes": 228076,
+        "complete": true,
+        "title": "fix: repair macOS timeout cleanup and evaluator CI · den-run-ai/askme@7c2147c · GitHub",
+        "body_text_chars": 3402,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34175311656",
+        "elapsed_s": 6.65,
+        "dom_bytes": 219039,
+        "complete": true,
+        "title": "eval: preregister a real Requests repair on local Qwen3-4B · den-run-ai/askme@1f3eff0 · GitHub",
+        "body_text_chars": 3179,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34175780679",
+        "elapsed_s": 6.84,
+        "dom_bytes": 228119,
+        "complete": true,
+        "title": "eval: preregister a real Requests repair on local Qwen3-4B · den-run-ai/askme@ed17180 · GitHub",
+        "body_text_chars": 3429,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/runs/34175780682",
+        "elapsed_s": 5.61,
+        "dom_bytes": 227757,
+        "complete": true,
+        "title": "eval: preregister a real Requests repair on local Qwen3-4B · den-run-ai/askme@ed17180 · GitHub",
+        "body_text_chars": 3235,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/workflows/ci.yml?query=branch%3Amain",
+        "elapsed_s": 6.48,
+        "dom_bytes": 432860,
+        "complete": true,
+        "title": "CI · Workflow runs · den-run-ai/askme · GitHub",
+        "body_text_chars": 7410,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/workflows/ci.yml/badge.svg?branch=main&event=push",
+        "elapsed_s": 4.31,
+        "dom_bytes": 2204,
+        "complete": true,
+        "title": "CI - passing",
+        "body_text_chars": 0,
+        "user_login": [],
+        "sign_in_present": false,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/workflows/llm.yml?query=branch%3Amain",
+        "elapsed_s": 6.76,
+        "dom_bytes": 430434,
+        "complete": true,
+        "title": "LLM Tests · Workflow runs · den-run-ai/askme · GitHub",
+        "body_text_chars": 7054,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/actions/workflows/llm.yml/badge.svg?branch=main",
+        "elapsed_s": 4.3,
+        "dom_bytes": 2225,
+        "complete": true,
+        "title": "LLM Tests - failing",
+        "body_text_chars": 0,
+        "user_login": [],
+        "sign_in_present": false,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/.github/workflows/ci.yml",
+        "elapsed_s": 8.07,
+        "dom_bytes": 296415,
+        "complete": true,
+        "title": "askme/.github/workflows/ci.yml at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 8787,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/.github/workflows/llm.yml",
+        "elapsed_s": 8.38,
+        "dom_bytes": 380891,
+        "complete": true,
+        "title": "askme/.github/workflows/llm.yml at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 25428,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/.github/workflows/macos.yml",
+        "elapsed_s": 6.14,
+        "dom_bytes": 382210,
+        "complete": true,
+        "title": "askme/.github/workflows/macos.yml at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 25545,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/CLAUDE.md",
+        "elapsed_s": 6.7,
+        "dom_bytes": 345664,
+        "complete": true,
+        "title": "askme/CLAUDE.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 18082,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/ARCHITECTURE.md",
+        "elapsed_s": 7.36,
+        "dom_bytes": 531469,
+        "complete": true,
+        "title": "askme/docs/ARCHITECTURE.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 54467,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/caching_analysis.md",
+        "elapsed_s": 6.5,
+        "dom_bytes": 334541,
+        "complete": true,
+        "title": "askme/docs/caching_analysis.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 12702,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/configuration.md",
+        "elapsed_s": 5.59,
+        "dom_bytes": 301364,
+        "complete": true,
+        "title": "askme/docs/configuration.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 11548,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/EXPERIMENTS.md",
+        "elapsed_s": 6.07,
+        "dom_bytes": 624528,
+        "complete": true,
+        "title": "askme/docs/EXPERIMENTS.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 59642,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/EXPERIMENTS.md#e21--gpt-oss-20b-lowmediumhigh-effort-as-the-openrouter-ciprototyping-model",
+        "elapsed_s": 5.28,
+        "dom_bytes": 627109,
+        "complete": true,
+        "title": "askme/docs/EXPERIMENTS.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 59665,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true,
+        "fragment_found": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/gemma4-setup.md",
+        "elapsed_s": 9.54,
+        "dom_bytes": 810245,
+        "complete": true,
+        "title": "askme/docs/gemma4-setup.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 59826,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/PERFORMANCE.md",
+        "elapsed_s": 8.02,
+        "dom_bytes": 704258,
+        "complete": true,
+        "title": "askme/docs/PERFORMANCE.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/releases/2026-09-08-readiness.json",
+        "elapsed_s": 5.27,
+        "dom_bytes": 290265,
+        "complete": true,
+        "title": "askme/docs/releases/2026-09-08-readiness.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 10278,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/releases/v0.1.0.md",
+        "elapsed_s": 7.13,
+        "dom_bytes": 258747,
+        "complete": true,
+        "title": "askme/docs/releases/v0.1.0.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/SECURITY.md",
+        "elapsed_s": 7.53,
+        "dom_bytes": 253862,
+        "complete": true,
+        "title": "askme/docs/SECURITY.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/docs/showcase-tasks.md",
+        "elapsed_s": 5.06,
+        "dom_bytes": 310956,
+        "complete": true,
+        "title": "askme/docs/showcase-tasks.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 13598,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/README.md",
+        "elapsed_s": 9.47,
+        "dom_bytes": 368762,
+        "complete": true,
+        "title": "askme/README.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/README.md#quick-start",
+        "elapsed_s": 6.92,
+        "dom_bytes": 371339,
+        "complete": true,
+        "title": "askme/README.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 18922,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true,
+        "fragment_found": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/blog.md",
+        "elapsed_s": 6.72,
+        "dom_bytes": 322741,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/blog.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 17865,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md",
+        "elapsed_s": 5.48,
+        "dom_bytes": 360089,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 23032,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/evals/draft-results.json",
+        "elapsed_s": 7.67,
+        "dom_bytes": 416798,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/evals/draft-results.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 29734,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/evals/README.md",
+        "elapsed_s": 7.81,
+        "dom_bytes": 318657,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/evals/README.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/README.md",
+        "elapsed_s": 7.92,
+        "dom_bytes": 310129,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/README.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/README.md#published-talk-errata--2026-09-07",
+        "elapsed_s": 4.82,
+        "dom_bytes": 310369,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/README.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 12752,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true,
+        "fragment_found": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/slides.md",
+        "elapsed_s": 6.08,
+        "dom_bytes": 375264,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/slides.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 19758,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+        "elapsed_s": 5.46,
+        "dom_bytes": 237358,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/slides.pdf at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 3027,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md",
+        "elapsed_s": 5.54,
+        "dom_bytes": 289746,
+        "complete": true,
+        "title": "askme/talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 8491,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md",
+        "elapsed_s": 6.14,
+        "dom_bytes": 286342,
+        "complete": true,
+        "title": "askme/tests/bench_records/2026-09-08-requests-qwen4b-macos/README.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 8274,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/canary-protocol.json",
+        "elapsed_s": 6.76,
+        "dom_bytes": 371390,
+        "complete": true,
+        "title": "askme/tests/featurebench/canary-protocol.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 17950,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/gemma-31b-canary-protocol-v4.json",
+        "elapsed_s": 7.37,
+        "dom_bytes": 376834,
+        "complete": true,
+        "title": "askme/tests/featurebench/gemma-31b-canary-protocol-v4.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 19704,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/gemma-31b-canary-protocol-v5.json",
+        "elapsed_s": 6.77,
+        "dom_bytes": 378886,
+        "complete": true,
+        "title": "askme/tests/featurebench/gemma-31b-canary-protocol-v5.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 20977,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/gemma-31b-canary-protocol-v6.json",
+        "elapsed_s": 6.53,
+        "dom_bytes": 380924,
+        "complete": true,
+        "title": "askme/tests/featurebench/gemma-31b-canary-protocol-v6.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 22112,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/qwen-27b-canary-protocol-v4.json",
+        "elapsed_s": 7.19,
+        "dom_bytes": 377076,
+        "complete": true,
+        "title": "askme/tests/featurebench/qwen-27b-canary-protocol-v4.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 19680,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/qwen-27b-canary-protocol-v5.json",
+        "elapsed_s": 6.98,
+        "dom_bytes": 378822,
+        "complete": true,
+        "title": "askme/tests/featurebench/qwen-27b-canary-protocol-v5.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 20953,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/qwen-27b-canary-protocol-v6.json",
+        "elapsed_s": 7.48,
+        "dom_bytes": 380853,
+        "complete": true,
+        "title": "askme/tests/featurebench/qwen-27b-canary-protocol-v6.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 22080,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/README.md",
+        "elapsed_s": 7.84,
+        "dom_bytes": 523179,
+        "complete": true,
+        "title": "askme/tests/featurebench/README.md at main · den-run-ai/askme · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json",
+        "elapsed_s": 6.53,
+        "dom_bytes": 308535,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-07-13-gemma-4-31b-canary.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 11079,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v4.json",
+        "elapsed_s": 6.12,
+        "dom_bytes": 318730,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v4.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 12111,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v6.json",
+        "elapsed_s": 7.19,
+        "dom_bytes": 334277,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v6.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 16060,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-qwen36-27b-canary-v4.json",
+        "elapsed_s": 6.8,
+        "dom_bytes": 318913,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-qwen36-27b-canary-v4.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 12051,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-qwen36-27b-canary-v6.json",
+        "elapsed_s": 7.93,
+        "dom_bytes": 336661,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-qwen36-27b-canary-v6.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 16085,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-v4-control-requalification.json",
+        "elapsed_s": 7.49,
+        "dom_bytes": 309514,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-v4-control-requalification.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 11199,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-v5-control-requalification.json",
+        "elapsed_s": 6.47,
+        "dom_bytes": 336522,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-v5-control-requalification.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 17087,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/featurebench/results/2026-08-01-v6-provider-amendment.json",
+        "elapsed_s": 6.38,
+        "dom_bytes": 290135,
+        "complete": true,
+        "title": "askme/tests/featurebench/results/2026-08-01-v6-provider-amendment.json at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 9978,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/blob/main/tests/workflows/PROTOCOL.md",
+        "elapsed_s": 5.49,
+        "dom_bytes": 304641,
+        "complete": true,
+        "title": "askme/tests/workflows/PROTOCOL.md at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 14696,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/2293d49ab984b1575ef88c7b9b00b1d40e2d1fcc",
+        "elapsed_s": 6.54,
+        "dom_bytes": 324198,
+        "complete": true,
+        "title": "Merge pull request #98 from den-run-ai/dependabot/github_actions/astr… · den-run-ai/askme@2293d49 · GitHub",
+        "body_text_chars": 5208,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/commit/28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+        "elapsed_s": 8.64,
+        "dom_bytes": 1318047,
+        "complete": true,
+        "title": "Merge pull request #107 from den-run-ai/release/preview-september · den-run-ai/askme@28534c6 · GitHub",
+        "body_text_chars": 44882,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues",
+        "elapsed_s": 6.49,
+        "dom_bytes": 346264,
+        "complete": true,
+        "title": "Issues · den-run-ai/askme · GitHub",
+        "body_text_chars": 5540,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/105",
+        "elapsed_s": 6.72,
+        "dom_bytes": 272438,
+        "complete": true,
+        "title": "Fix macOS release regressions in timeout cleanup and evaluator execution · Issue #105 · den-run-ai/askme",
+        "body_text_chars": 5071,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/109",
+        "elapsed_s": 6.01,
+        "dom_bytes": 274383,
+        "complete": true,
+        "title": "Qualify real-model serving latency before a new macOS external-task protocol · Issue #109 · den-run-ai/askme",
+        "body_text_chars": 7162,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/2",
+        "elapsed_s": 6.66,
+        "dom_bytes": 374416,
+        "complete": true,
+        "title": "Evaluation extension: FeatureBench adapter qualified · Issue #2 · den-run-ai/askme",
+        "body_text_chars": 16071,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/7",
+        "elapsed_s": 7.02,
+        "dom_bytes": 324953,
+        "complete": true,
+        "title": "Make AskMe actions feature-scale before the next FeatureBench run · Issue #7 · den-run-ai/askme",
+        "body_text_chars": 10329,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/85",
+        "elapsed_s": 7.68,
+        "dom_bytes": 443329,
+        "complete": true,
+        "title": "Prepare a claim-safe AskMe v0.1.0 open-source announcement · Issue #85 · den-run-ai/askme",
+        "body_text_chars": 17260,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/issues/new",
+        "elapsed_s": 3.8,
+        "dom_bytes": 47279,
+        "complete": true,
+        "title": "Sign in to GitHub · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/pull/106",
+        "elapsed_s": 6.01,
+        "dom_bytes": 302482,
+        "complete": true,
+        "title": "fix: repair macOS timeout cleanup and evaluator CI by den-run-ai · Pull Request #106 · den-run-ai/askme · GitHub",
+        "body_text_chars": 8227,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/pull/14",
+        "elapsed_s": 8.5,
+        "dom_bytes": 403177,
+        "complete": true,
+        "title": "Archived draft: historical pi harness ablation (unqualified; not merged) by den-run-ai · Pull Request #14 · den-run-ai/askme · GitHub",
+        "body_text_chars": 17482,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/pull/21",
+        "elapsed_s": 7.13,
+        "dom_bytes": 624799,
+        "complete": true,
+        "title": "Revision 4: validate-after-write policy + PR #16 review fixes by den-run-ai · Pull Request #21 · den-run-ai/askme · GitHub",
+        "body_text_chars": 23829,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/pull/89#issuecomment-5187957872",
+        "elapsed_s": 7.73,
+        "dom_bytes": 489500,
+        "complete": true,
+        "title": "Showcase web-app tasks for small LLMs: proposal doc, opt-in web suite, CI model matrix by den-run-ai · Pull Request #89 …",
+        "body_text_chars": 30744,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false,
+        "fragment_found": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/tree/eval/e89-web-local/tests/bench_records/2026-08-04/e89-web-local",
+        "elapsed_s": 5.54,
+        "dom_bytes": 295592,
+        "complete": true,
+        "title": "askme/tests/bench_records/2026-08-04/e89-web-local at eval/e89-web-local · den-run-ai/askme · GitHub",
+        "body_text_chars": 11923,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/den-run-ai/askme/tree/main/tests/bench_records/2026-08-04",
+        "elapsed_s": 6.18,
+        "dom_bytes": 252004,
+        "complete": true,
+        "title": "askme/tests/bench_records/2026-08-04 at main · den-run-ai/askme · GitHub",
+        "body_text_chars": 5269,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md",
+        "elapsed_s": 6.53,
+        "dom_bytes": 596099,
+        "complete": true,
+        "title": "pi/packages/coding-agent/README.md at main · earendil-works/pi · GitHub",
+        "body_text_chars": 30572,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/facebookresearch/programbench",
+        "elapsed_s": 8.31,
+        "dom_bytes": 347695,
+        "complete": true,
+        "title": "GitHub - facebookresearch/ProgramBench: Can Language Models Rebuild Programs From Scratch? · GitHub",
+        "body_text_chars": 5869,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/issues/24768",
+        "elapsed_s": 7.89,
+        "dom_bytes": 317742,
+        "complete": true,
+        "title": "Feature Request: Gemma 4 MTP \"heuristic\" n-max · Issue #24768 · ggml-org/llama.cpp",
+        "body_text_chars": 6988,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/ggml-org/llama.cpp/issues/25250",
+        "elapsed_s": 7.44,
+        "dom_bytes": 313084,
+        "complete": true,
+        "title": "metal : small-batch mul_mat is compute-bound between the mv_ext and mm paths (bs 4..16), ~2x headroom; affects speculative decoding · …",
+        "body_text_chars": 6346,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": false
+      },
+      {
+        "url": "https://github.com/LiberCoders/FeatureBench",
+        "elapsed_s": 6.4,
+        "dom_bytes": 308491,
+        "complete": true,
+        "title": "GitHub - LiberCoders/FeatureBench: [ICLR 2026] Official Implementation of \"FeatureBench: Benchmarking Agentic Coding for Complex Feature Development\" · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/omnigent-ai/omnigent",
+        "elapsed_s": 8.03,
+        "dom_bytes": 729987,
+        "complete": true,
+        "title": "GitHub - omnigent-ai/omnigent: Omnigent is an open-source AI agent framework and meta-harness: orchestrate Claude Code, Codex, Cursor, Pi, and custom …",
+        "body_text_chars": 27990,
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://github.com/OpenHands/benchmarks",
+        "elapsed_s": 6.31,
+        "dom_bytes": 385271,
+        "complete": true,
+        "title": "GitHub - OpenHands/benchmarks: Evaluation harness for OpenHands V1. · GitHub",
+        "user_login": [
+          ""
+        ],
+        "sign_in_present": true,
+        "article_present": true
+      },
+      {
+        "url": "https://lilianweng.github.io/posts/2026-07-04-harness/",
+        "elapsed_s": 5.42,
+        "dom_bytes": 207490,
+        "complete": true,
+        "title": "Harness Engineering for Self-Improvement | Lil'Log",
+        "body_text_chars": 45467
+      },
+      {
+        "url": "https://qwen.ai/blog?id=qwen3.6-27b",
+        "elapsed_s": 8.06,
+        "dom_bytes": 388137,
+        "complete": true,
+        "title": "Qwen",
+        "body_text_chars": 12370,
+        "model_name_in_body": true
+      },
+      {
+        "url": "https://qwen.ai/blog?id=qwen3.6-35b-a3b",
+        "elapsed_s": 8.57,
+        "dom_bytes": 388801,
+        "complete": true,
+        "title": "Qwen",
+        "body_text_chars": 12434,
+        "model_name_in_body": true
+      },
+      {
+        "url": "https://rdi.berkeley.edu/events/agentic-ai-summit-2026",
+        "elapsed_s": 5.71,
+        "dom_bytes": 267966,
+        "complete": true,
+        "title": "Agentic AI Summit 2026 - Center for Responsible, Decentralized Intelligence at Berkeley",
+        "body_text_chars": 34913
+      },
+      {
+        "url": "https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase",
+        "title": "Benchmarking Coding Agents on Databricks’ Multi-Million Line Codebase | Databricks Blog",
+        "dom_content_loaded": true,
+        "body_text_chars": 12186,
+        "article_title_present": true,
+        "ready_state": "interactive",
+        "navigation_error": null,
+        "elapsed_s": 3.469,
+        "checked_at_utc": "2026-09-08T06:17:22.502Z",
+        "method": "Fresh temporary Chrome profile with Puppeteer 24.43.1; DOMContentLoaded and visible body text"
+      },
+      {
+        "url": "https://www.vals.ai/benchmarks/vibe-code",
+        "elapsed_s": 7.3,
+        "dom_bytes": 1142941,
+        "complete": true,
+        "title": "Vibe Code Bench v1.1",
+        "body_text_chars": 18511
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=N1XoiJGyNpM",
+        "elapsed_s": 8.41,
+        "dom_bytes": 1608818,
+        "complete": true,
+        "title": "Denis Akhiyarov - Are Small LLMs Ready for Coding Agents? - YouTube",
+        "body_text_chars": 3615
+      }
+    ]
+  },
+  "author_link_fix": {
+    "old_url": "https://x.com/den-run-ai",
+    "new_url": "https://github.com/den-run-ai",
+    "reason": "The old URL used a dashed handle, which X does not permit. The replacement anonymously rendered the named author's GitHub profile.",
+    "primary_source": "https://help.x.com/en/managing-your-account/x-username-rules",
+    "changed_surfaces": [
+      "talks/berkeley-agentic-ai-summit-2026/README.md",
+      "talks/berkeley-agentic-ai-summit-2026/DECK_SPEC.md",
+      "talks/berkeley-agentic-ai-summit-2026/slides.md",
+      "talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+      "tests/test_talk_deck_contract.py"
+    ],
+    "visible_handle_unchanged": true,
+    "canonical_spoken_script_unchanged": true
+  },
+  "pdf": {
+    "historical_public": {
+      "url": "https://raw.githubusercontent.com/den-run-ai/askme/main/talks/berkeley-agentic-ai-summit-2026/slides.pdf",
+      "checked_at_utc": "2026-09-08T05:43:17+00:00",
+      "bytes": 110226,
+      "sha256": "729fd867b51a8b40d3865301c3c60a139353498550a97125301219862f423e2f",
+      "prior_readiness_record_preserved": true
+    },
+    "regenerated_candidate": {
+      "bytes": 289330,
+      "sha256": "0966f3db376be47df9707698e4c8b24b243f3990c218d3ba0091a1136fb5e8c9",
+      "source_sha256": "a8bd0f9dbd87a730a8308ba4eaaa95180d2a6d849b62460da6ba7c9b2d646bfb",
+      "canonical_notes_sha256": "ee22d44562c24d3d97f1e10ae334cf5af3f772f57579aa8cc2c948152ec15ef7",
+      "command": "npx @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md --html --pdf --allow-local-files",
+      "node": "23.10.0",
+      "platform": "macOS",
+      "pages": 8,
+      "author_annotation": "https://github.com/den-run-ai",
+      "old_x_annotation_absent": true,
+      "visually_inspected_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "visual_result": "All pages readable without clipping or overlap. The macOS rerender changed raster bytes on all eight pages, so every page was inspected; source prose and layout were not edited.",
+      "validation": "uv run --locked pytest tests/test_talk_deck_contract.py tests/test_berkeley_evals_contract.py -q: 12 passed"
+    }
+  },
+  "github": {
+    "checked_at_utc": "2026-09-08T05:49:25Z",
+    "visibility": "public",
+    "has_issues": true,
+    "archived": false,
+    "disabled": false,
+    "anonymous_new_issue": "Rendered Sign in to GitHub, preserving /den-run-ai/askme/issues/new as return_to. This is not proof that a signed-in non-collaborator may create an issue.",
+    "signed_in_noncollaborator_verified": false,
+    "intentional_interaction_limit_verified": false,
+    "tags_at_initial_check": 0,
+    "releases_at_initial_check": 0,
+    "publication_performed": false,
+    "reviewed_merged_prs": {
+      "no_open_threads": [
+        47,
+        89,
+        96,
+        98,
+        100,
+        101,
+        102,
+        103,
+        104,
+        106,
+        107,
+        108
+      ]
+    },
+    "open_pr97": {
+      "head": "9d572c15f6ea92d9a8121eb4852b8c399cce876b",
+      "mergeable": false,
+      "unresolved_threads": 1,
+      "thread": "PRRT_kwDOR7cb-s6de6fk",
+      "remaining_work": "A separately versioned producer must validate single expected tool calls and full action schemas, retaining complete responses. Historical 62 parseable/schema-unverified rows and two truncations remain historical evidence.",
+      "release_blocker": false
+    }
+  },
+  "secret_scan": {
+    "scanner": "Gitleaks 8.30.1",
+    "release_url": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+    "platform": "darwin_arm64",
+    "archive_sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+    "checksums_sha256": "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae",
+    "verification": "Archive and checksum-list digests matched the official GitHub release API; archive digest also matched the official checksum file.",
+    "method": "Nonshallow repository, freshly fetched branch refs and all PR heads, gitleaks git --log-opts=--all. GITLEAKS_CONFIG/GITLEAKS_CONFIG_TOML unset, no repository configuration, empty ignore directory, --ignore-gitleaks-allow, --redact=100. Historical raw evidence was not modified.",
+    "initial": {
+      "candidate": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+      "reachable_commits": 338,
+      "scanner_commits": 258,
+      "scanned_bytes": 7244301,
+      "findings": 0,
+      "refs_sha256": "929d5db6ab796ccc8c43d63976d9bda668872dce5fe022a909a74f88402583d7"
+    },
+    "refreshed": {
+      "checked_at_utc": "2026-09-08T06:14:36Z",
+      "candidate": "9f6179020e647724f30558160a423875ae52e3a3",
+      "reachable_commits": 342,
+      "scanner_commits": 262,
+      "scanned_bytes": 7335382,
+      "findings": 0,
+      "refs_sha256": "fe4b56debe99ed64933531289f16279da43db6bb17fcf0978f5ff708d80ed902"
+    },
+    "initial_worktree_snapshot": {
+      "method": "Export tracked and nonignored untracked files from the isolated release worktree; scan directory with archive depth 3, without following the guidance symlink. The original developer worktree's untracked .env/.claude files were not copied.",
+      "scanned_bytes": 3777633,
+      "findings": 0
+    },
+    "interim_worktree_with_public_audit": {
+      "checked_at_utc": "2026-09-08T06:19:53Z",
+      "scanned_bytes": 7724895,
+      "findings": 0,
+      "method": "Fresh tracked/nonignored file export including the corrected PDF, this access audit, and the compressed local-serving record; archive depth 3. The hosted trial was still running, so this does not cover its eventual outcome or final documentation."
+    },
+    "final_candidate_note": "These are timestamped snapshots. Scan the final candidate history and completed evidence/export again after any additional commits or files; do not present this record as covering future changes."
+  },
+  "remaining_before_formal_publication": [
+    "Verify the New issue flow using a signed-in non-collaborator account and document any intentional interaction limit.",
+    "Complete review, CI and the exact-candidate secret scan for the final publication revision.",
+    "Tag the final reviewed commit as v0.1.0 and publish the prepared experimental research-preview notes; no tag or Release was created in this audit."
+  ]
+}

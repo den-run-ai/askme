@@ -34,7 +34,7 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "Are Small LLMs Ready for Coding Agents?" in title
     assert "Denis Akhiyarov" in title
     assert "Sr Staff Research Scientist at ServiceNow" in title
-    assert 'href="https://x.com/den-run-ai"' in title
+    assert 'href="https://github.com/den-run-ai"' in title
     assert "trace-table" not in title
 
     bridge = slides[1]
@@ -162,7 +162,7 @@ def test_deck_contract_guards_notes_and_review_spec():
     for requirement in (
         "Are Small LLMs Ready for Coding Agents?",
         "Sr Staff Research Scientist at ServiceNow",
-        "https://x.com/den-run-ai",
+        "https://github.com/den-run-ai",
         "Removing the Gemma/Qwen two-variant comparison was a regression",
         "Slide 2 contains no product/vendor taxonomy",
         "experimental coding-agent harness",

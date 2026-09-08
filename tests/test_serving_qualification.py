@@ -273,6 +273,46 @@ def test_malformed_plan_is_retained_as_failure():
     assert any("contract_error" in error for error in verdict["errors"])
 
 
+@pytest.mark.parametrize("finish_reason,qualified", [("length", False), ("stop", True)])
+def test_cutoff_plan_cannot_be_repaired_as_a_natural_stop(finish_reason, qualified):
+    result = exchange(
+        {
+            "choices": [
+                {
+                    "delta": {"content": '{"tasks":["Create hello.txt"]'},
+                    "finish_reason": finish_reason,
+                }
+            ]
+        }
+    )
+    verdict = gate.assess_case(gate.DEFAULT_CASES[-2], result, protocol())
+    assert verdict["finish_reason"] == finish_reason
+    assert verdict["qualified"] is qualified
+    if not qualified:
+        assert any("contract_error" in error for error in verdict["errors"])
+
+
+def test_oai_usage_only_chunk_supplies_prompt_tokens_without_changing_content():
+    parsed = gate.summarize_stream(
+        exchange(
+            {
+                "choices": [
+                    {
+                        "delta": {"content": '{"tasks":["Create hello.txt"]}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+            {"choices": [], "usage": {"prompt_tokens": 617, "completion_tokens": 12}},
+            {"choices": [], "usage": None},
+        )
+    )
+    assert parsed["prompt_tokens"] == 617
+    assert parsed["completion_tokens"] == 12
+    assert parsed["message"]["content"] == '{"tasks":["Create hello.txt"]}'
+    assert parsed["finish_reason"] == "stop"
+
+
 def test_busy_server_blocks_all_generation_after_registration(tmp_path):
     output = tmp_path / "qualification"
     calls = []

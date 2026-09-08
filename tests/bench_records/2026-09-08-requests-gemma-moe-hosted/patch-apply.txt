@@ -1,0 +1,11 @@
+<stdin>:34: trailing whitespace.
+        
+<stdin>:37: trailing whitespace.
+        
+<stdin>:40: trailing whitespace.
+        
+<stdin>:43: trailing whitespace.
+        
+<stdin>:46: trailing whitespace.
+        
+warning: 5 lines add whitespace errors.

@@ -2,7 +2,7 @@
 
 **Title:** Are Small LLMs Ready for Coding Agents?
 
-**Speaker:** Denis Akhiyarov, Sr Staff Research Scientist at ServiceNow · [@den-run-ai](https://x.com/den-run-ai)
+**Speaker:** Denis Akhiyarov, Sr Staff Research Scientist at ServiceNow · [@den-run-ai](https://github.com/den-run-ai)
 
 **Slot:** Compass (Saturday), Session 2: Frameworks & Dev Platforms, Aug 1, 2026, 1:00 PM PT
 **Format:** 5 minutes, 7 main slides + 1 backup

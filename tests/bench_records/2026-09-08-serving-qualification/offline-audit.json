@@ -1,0 +1,102 @@
+{
+  "audit": "offline-local-serving-decoder-parity-v1",
+  "audited_runner_sha256": "286eeb99e60580afd2e3c24aaf6c6b568ad638a464afa88342736221f3d7ea58",
+  "cells": [
+    {
+      "all_seven_case_verdicts_and_errors_unchanged": true,
+      "cell": "e4b",
+      "contracts": [
+        {
+          "actual_finish_reason": "stop",
+          "case": "planner",
+          "decoded": {
+            "tasks": [
+              "Create hello.txt with content 'hi'",
+              "Read and display the content of hello.txt"
+            ]
+          },
+          "decoded_with_actual_finish_reason": true,
+          "insertion_repair_used": false,
+          "observed_prompt_tokens": 633,
+          "original_errors": [],
+          "original_qualified": true,
+          "response_sha256": "572b6309bff577a23784fe80336cc0cf2f2862fd961515e3f35faa4fe6cdc47d"
+        },
+        {
+          "actual_finish_reason": "tool_calls",
+          "case": "native_action",
+          "decoded": {
+            "action": "write",
+            "arg": "hello.txt",
+            "content": "hi\n"
+          },
+          "decoded_with_actual_finish_reason": true,
+          "insertion_repair_used": false,
+          "observed_prompt_tokens": 2258,
+          "original_errors": [
+            "first_token_limit"
+          ],
+          "original_qualified": false,
+          "response_sha256": "acee3e9c7790dfb1418f51ddbde9c26bafb181c0f34a6b67ba89d3d6e6960630"
+        }
+      ],
+      "original_qualification_sha256": "4ea5d9db85fd95fbd73d4d0d9f397f23a2228b0d2085104b98b66636825ef091",
+      "original_qualified": false,
+      "protocol": "serving-m1-e4b-20260908-v1",
+      "registered_runner_matches_original": true,
+      "runtime_matches_original": true
+    },
+    {
+      "all_seven_case_verdicts_and_errors_unchanged": true,
+      "cell": "qwen4b",
+      "contracts": [
+        {
+          "actual_finish_reason": "stop",
+          "case": "planner",
+          "decoded": {
+            "tasks": [
+              "create hello.txt with content 'hi'",
+              "check content of hello.txt"
+            ]
+          },
+          "decoded_with_actual_finish_reason": true,
+          "insertion_repair_used": false,
+          "observed_prompt_tokens": 562,
+          "original_errors": [],
+          "original_qualified": true,
+          "response_sha256": "da6c4fc80f002f444c0bd114027aab7ad89c63e28c8fecfac7aeb671f61b4a21"
+        },
+        {
+          "actual_finish_reason": "tool_calls",
+          "case": "native_action",
+          "decoded": {
+            "action": "write",
+            "arg": "hello.txt",
+            "content": "hi\n"
+          },
+          "decoded_with_actual_finish_reason": true,
+          "insertion_repair_used": false,
+          "observed_prompt_tokens": 2240,
+          "original_errors": [
+            "first_token_limit"
+          ],
+          "original_qualified": false,
+          "response_sha256": "65caa546dfdc398f5d6f426b336aa30a2d6dca690f7b9c283b3c5c073da58c11"
+        }
+      ],
+      "original_qualification_sha256": "b077651bf4f7784c57d191ad06025bde636429fa66f4ab9db49362ea5febac4f",
+      "original_qualified": false,
+      "protocol": "serving-m1-qwen4b-20260908-v1",
+      "registered_runner_matches_original": true,
+      "runtime_matches_original": true
+    }
+  ],
+  "change": "Forward actual planner finish_reason to the existing decoder and expose OAI usage.prompt_tokens. Original outcome records are not modified.",
+  "frozen_file_count": 174,
+  "frozen_files_manifest_sha256": "8c6857f1e3341e9db0ac678a3d1b27cfa83c6df3c6c8335f70af41a38f6844cf",
+  "frozen_files_unchanged": true,
+  "model_calls": 0,
+  "original_runner_revision": "d29b68c7c6c13b4b0957003757ea523ee7edde3a",
+  "original_runner_sha256": "cdd7ada1fafed8b4c0f82e3c835f84cb16c6e40dcad7fc7a9082b2a35933f2aa",
+  "score_amendment": false
+}

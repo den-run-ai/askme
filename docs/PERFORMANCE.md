@@ -22,6 +22,47 @@ cause. Current runs record accepted controls separately as `step_control`.
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## Qualified hosted Gemma MoE Requests control — 2026-09-08
+
+One separately preregistered attempt with the unchanged `6a212cf` runtime and
+OpenRouter/DeepInfra Gemma 4 26B-A4B MoE **made applying edits but did not
+resolve**. It exhausted its bounded steps/replans after 73.707 seconds, adding
+two reproduction scripts without reading or modifying the target implementation.
+Fresh independent acceptance still raises the original pickle TypeError; the
+root-level reproduction script also violates the declared change scope.
+The process did not time out and the harness did not claim completion.
+
+All 27 HTTP attempts returned complete replies and usage: 27,605 prompt and
+3,130 completion tokens, $0.00299655 task cost. Both preceding preflights,
+including the retained response-ID registration error, bring the hosted study
+to $0.00321032. The original summary's conservative usage flag and incorrect
+legacy runner-cost description are clarified in an appended offline audit;
+original records and the negative decision remain unchanged.
+
+The hosted model, precision, provider and generic 4096/8192 step/write budgets
+differ from local Qwen v1 and E4B. This selected historical bug can overlap
+training data; no reliability rate, model-family result, local performance
+result or causal harness comparison follows. See the [full record](../tests/bench_records/2026-09-08-requests-gemma-moe-hosted/README.md).
+
+## Physical M1 serving qualification — 2026-09-08
+
+Both predeclared E4B and Qwen3-4B deployments failed the serving gate on the
+physical M1/16 GiB host; no local coding task followed. At 2000 input tokens,
+the native 512/1024-output probes exceeded 120 seconds. Both models produced
+valid plans and the requested native write call, but action first-output
+latency was 51.803 seconds (E4B) and 46.094 seconds (Qwen), above the frozen
+30-second bound. Cancellation recovery also exceeded its ten-second gate.
+
+Qwen's log confirms 37/37 GPU layers. Pinned llama.cpp source explains how
+queued cancellation can wait behind an inference update. A power observation
+during Qwen, after E4B finished, found battery Low Power Mode enabled; no
+earlier power sample exists. Pre-existing swap and resident workloads further
+limit attribution. E4B is dense PLE, not the hosted 26B-A4B MoE. These are
+singleton deployment checks, not reference-performance reproductions,
+reliability estimates or a causal hardware/model comparison. See the
+[complete local evidence and unchanged-outcome audit](../tests/bench_records/2026-09-08-serving-qualification/README.md)
+for exact timings, protocols, logs and limitations.
+
 ## Research-preview candidate snapshot — 2026-09-08
 
 The initial integration baseline was revision

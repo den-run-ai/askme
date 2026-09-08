@@ -250,7 +250,6 @@ def summarize_stream(result):
             completion_tokens = timings.get("predicted_n", completion_tokens)
         completion_tokens = (chunk.get("usage") or {}).get("completion_tokens", completion_tokens)
         completion_tokens = chunk.get("tokens_predicted", completion_tokens)
-        prompt_tokens = (chunk.get("usage") or {}).get("prompt_tokens", prompt_tokens)
         prompt_tokens = chunk.get("tokens_evaluated", prompt_tokens)
     return {
         "first_token_s": first_token,
@@ -289,9 +288,7 @@ def assess_case(case, result, protocol):
     else:
         try:
             if case["kind"] == "plan":
-                plan, _, _ = askme._decode_action_reply(
-                    parsed["message"]["content"], parsed["finish_reason"]
-                )
+                plan, _, _ = askme._decode_action_reply(parsed["message"]["content"], "stop")
                 if not isinstance(plan.get("tasks"), list) or not 1 <= len(plan["tasks"]) <= 3:
                     raise ValueError("Plan must contain one to three tasks")
                 if any(not isinstance(task, str) or not task.strip() for task in plan["tasks"]):

@@ -232,6 +232,25 @@ def test_hosted_manifest_requires_finite_bounded_prices(hosted_protocol, field, 
         trial.HostedRequestBudget(hosted_protocol)
 
 
+@pytest.mark.parametrize(
+    "backend,declared,expected",
+    [
+        ("local", None, "standard public macOS runner; no API charge"),
+        ("openrouter", None, "existing local hardware; API charges reported separately"),
+        ("openrouter", "declared runner cost", "declared runner cost"),
+    ],
+)
+def test_summary_runner_cost_describes_backend_and_preserves_explicit_metadata(
+    tmp_path, backend, declared, expected
+):
+    protocol = {"backend": backend}
+    if declared is not None:
+        protocol["runner_cost"] = declared
+    trial.summarize(tmp_path, {"exit_code": 0}, 1, {"accepted": False}, False, [], protocol)
+    published = json.loads((tmp_path / "summary.json").read_text())
+    assert published["runner_cost"] == expected
+
+
 @pytest.fixture
 def custom_trial(tmp_path):
     source = tmp_path / "source"

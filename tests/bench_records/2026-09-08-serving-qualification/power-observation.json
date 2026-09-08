@@ -1,0 +1,15 @@
+{
+  "observed_during": "Qwen qualification, after the Gemma qualification completed",
+  "method": ["pmset -g batt", "pmset -g custom", "pmset -g therm", "sysctl -n kern.hv_vmm_present"],
+  "power_source": "Battery Power",
+  "battery_percent": 88,
+  "battery_state": "discharging",
+  "low_power_mode_battery": 1,
+  "low_power_mode_ac": 0,
+  "thermal_warning": "No thermal warning level has been recorded",
+  "performance_warning": "No performance warning level has been recorded",
+  "cpu_power_status": "No CPU power status has been recorded",
+  "kern_hv_vmm_present": 0,
+  "settings_changed": false,
+  "interpretation": "Current Low Power Mode is an uncontrolled deployment variable, not proof of the cause of these latencies. No earlier power-state sample was captured. Keep the original cells unchanged; do not describe them as reference-performance reproductions."
+}

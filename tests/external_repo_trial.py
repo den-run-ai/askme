@@ -456,7 +456,12 @@ def summarize(output, process, elapsed, acceptance, applying, changes, protocol=
         "usage_note": "Observed totals are lower bounds; failed/interrupted HTTP attempts "
         "may not return usage. Raw request/response records are retained.",
         "api_cost_usd": protocol.get("api_cost_usd", 0),
-        "runner_cost": protocol.get("runner_cost", "standard public macOS runner; no API charge"),
+        "runner_cost": protocol.get(
+            "runner_cost",
+            "existing local hardware; API charges reported separately"
+            if protocol.get("backend") == "openrouter"
+            else "standard public macOS runner; no API charge",
+        ),
         "limitations": protocol.get(
             "limitations",
             "One historical, potentially training-contaminated bug; stdlib json only; "
