@@ -1,0 +1,412 @@
+name: macOS (Apple Silicon)
+
+# Apple Silicon parity for the local llama.cpp backend.
+#
+# Three lanes, deliberately separated because they buy different things:
+#
+#   macos-tests      The deterministic suite on arm64 macOS. No model, no
+#                    credential, no network model pull. This is what catches
+#                    real platform bugs — /tmp -> /private/tmp symlink
+#                    resolution, case-insensitive filesystems, BSD vs GNU
+#                    shell tools — in workspace-path and target-identity
+#                    normalization. Free and unlimited on public repos, so
+#                    it runs on every push and pull request, and it gates.
+#
+#   llama-contract   llama.cpp built for Metal on Apple Silicon, serving a
+#                    deliberately tiny tool-capable model, checked through
+#                    AskMe's real LLMClient. This catches upstream llama.cpp
+#                    drift breaking the local backend — the recurring risk
+#                    docs/gemma4-setup.md tracks by hand. The server
+#                    preflight gates; the model-behavior probe is advisory
+#                    because a 0.6B model on a 3-vCPU runner is not the
+#                    reference deployment.
+#
+#   llama-reference  The documented reference model (Gemma 4 E4B QAT Q4_0,
+#                    5.15 GB) on a runner with enough memory to hold it.
+#                    Manual and scheduled only: it needs a larger runner,
+#                    and larger runners are billed per-minute even on public
+#                    repositories.
+#
+# Runner sizing (why `runner` is an input). The reference deployment in
+# docs/gemma4-setup.md is an M1 with 16 GB. No GitHub-hosted Apple Silicon
+# runner reaches that:
+#
+#   macos-26          M1,      3 vCPU,  7 GB — free/unlimited on public repos
+#   macos-26-xlarge   M2 Pro,  5 vCPU, 14 GB — billed per-minute, always
+#   macos-26-large    Intel,  12 vCPU, 30 GB — not Apple Silicon, no Metal
+#
+# 14 GB is short of the 16 GB reference but still fits E4B QAT plus its
+# 16K q4_0 KV cache, so macos-26-xlarge is the default reference runner.
+# For true 16 GB+ parity, point `runner` at a third-party arm64 label
+# (Depot `depot-macos-26`, WarpBuild `warp-macos-26-arm64-6x`, Blaze, or
+# Bitrise) or a self-hosted Tart/Tartelet label — all are one-line swaps,
+# and `min_memory_gb` then verifies the machine really is that size.
+#
+# No lane here produces performance evidence. Runners are smaller and
+# slower than the reference machine, so timings from this workflow must
+# never be written into docs/PERFORMANCE.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - askme.py
+      - actions.py
+      - tests/**
+      - .github/workflows/macos.yml
+      - pyproject.toml
+      - uv.lock
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: >-
+          Runner label for the reference lane. macos-26-xlarge is the
+          largest GitHub-hosted Apple Silicon option (14 GB). Use a
+          third-party or self-hosted arm64 label for 16 GB+.
+        type: string
+        default: macos-26-xlarge
+      min_memory_gb:
+        description: >-
+          Fail the reference lane unless the runner has at least this much
+          RAM. 12 clears macos-26-xlarge; use 16 to demand parity with the
+          documented M1 reference machine.
+        type: string
+        default: "12"
+      model_repo:
+        description: Hugging Face repo for the reference GGUF
+        type: string
+        default: google/gemma-4-E4B-it-qat-q4_0-gguf
+      model_file:
+        description: GGUF filename within that repo
+        type: string
+        default: gemma-4-E4B_q4_0-it.gguf
+      model_revision:
+        description: >-
+          Hugging Face revision for the reference GGUF. 'main' is a moving
+          target — Gemma 4 checkpoints have been republished under identical
+          filenames (docs/gemma4-setup.md) — so pass an immutable commit for
+          any run whose pass/fail you intend to cite.
+        type: string
+        default: main
+      suite:
+        description: Integration suite for the reference lane
+        type: choice
+        options: [easy, medium, hard]
+        default: easy
+  schedule:
+    # Tuesdays 09:23 UTC — offset from llm.yml's Monday slot. Catches
+    # llama.cpp/Homebrew drift breaking the local backend between pushes.
+    - cron: "23 9 * * 2"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Routine push/PR runs coalesce per ref and cancel their predecessors. A
+  # manual dispatch gets its own group keyed by run id and is never
+  # cancelled: it shares a ref with push and schedule events, so without
+  # this a commit landing on main would kill an in-flight reference run
+  # after it had already spent time on a billed runner.
+  group: macos-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  macos-tests:
+    name: Tests on Apple Silicon (Python ${{ matrix.python-version }})
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and ceiling of the supported range. ci.yml already
+        # covers every intermediate version on Linux; this lane exists to
+        # prove the platform, not to re-run the whole compatibility matrix
+        # at the macOS minute rate.
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Record runner hardware
+        env:
+          ASKME_RUNNER_LABEL: macos-26
+        run: |
+          uv run --locked python tests/ci_local_gate.py hardware \
+            --require-apple-silicon \
+            --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Run deterministic suite
+        # This lane never sets the live-model opt-in, so conftest keeps the
+        # local and OpenRouter suites skipped. Hermetic by construction.
+        run: uv run --locked pytest tests/ -v -rs
+
+  llama-contract:
+    name: llama.cpp local-backend contract
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      # Tiny, ungated, and tool-call capable. Chosen so the lane tests the
+      # transport seam on a free runner, not the model's competence.
+      MODEL_REPO: ggml-org/Qwen3-0.6B-GGUF
+      MODEL_FILE: Qwen3-0.6B-Q8_0.gguf
+      MODEL_REVISION: main
+      LLM_BACKEND: local
+      LLM_MODEL: ci-local-model
+      LLM_API_URL: http://127.0.0.1:8080/v1/chat/completions
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Install llama.cpp
+        run: |
+          brew update --quiet
+          brew install llama.cpp
+          mkdir -p macos-logs
+          # Record the resolved build. Homebrew tracks upstream, so this is
+          # the drift signal when a scheduled run starts failing.
+          llama-server --version 2>&1 | tee macos-logs/llama-server-version.txt
+      - name: Download the CI model
+        run: |
+          mkdir -p models macos-logs
+          curl -fL --retry 3 --retry-delay 5 \
+            -D macos-logs/model-headers.txt \
+            -o "models/$MODEL_FILE" \
+            "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REVISION/$MODEL_FILE"
+          # Record which artifact actually ran. A revision is only a name:
+          # Hugging Face serves 'main' as a moving target, so the resolved
+          # commit and the file digest are what make a run attributable.
+          {
+            echo "repo: $MODEL_REPO"
+            echo "file: $MODEL_FILE"
+            echo "requested_revision: $MODEL_REVISION"
+            grep -i '^x-repo-commit:' macos-logs/model-headers.txt \
+              || echo "x-repo-commit: (not returned)"
+            shasum -a 256 "models/$MODEL_FILE"
+          } | tee macos-logs/model-identity.txt
+          {
+            echo "### Model artifact"
+            echo '```'
+            cat macos-logs/model-identity.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Start llama-server
+        run: |
+          mkdir -p macos-logs
+          # --jinja is required for tool-call parsing on Qwen-family
+          # templates; without it the server hands the delimiters back as
+          # plain text and no tool call is ever decoded. --reasoning off is
+          # the same suppression flag the reference deployment uses, and
+          # Qwen3 templates enable thinking by default.
+          nohup llama-server \
+            -m "models/$MODEL_FILE" \
+            --alias "$LLM_MODEL" \
+            --jinja \
+            --reasoning off \
+            -ngl 99 \
+            --ctx-size 4096 \
+            -np 1 \
+            --host 127.0.0.1 \
+            --port 8080 \
+            > macos-logs/llama-server.log 2>&1 &
+          echo "Waiting for llama-server to become healthy..."
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
+              echo "healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "llama-server did not become healthy in 90s" >&2
+          tail -n 100 macos-logs/llama-server.log >&2
+          exit 1
+      - name: Preflight the local backend
+        # Gates. conftest.py would silently skip local tests when :8080 is
+        # absent, which would turn a broken backend into a green run.
+        run: |
+          uv run --locked python tests/ci_local_gate.py preflight \
+            --api "$LLM_API_URL" \
+            --json-out macos-logs/preflight.json \
+            --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Probe the native tool-call transport
+        # Advisory. A 0.6B model on a 3-vCPU runner is not the reference
+        # deployment; a miss here is weak evidence about the model and no
+        # evidence at all about AskMe. The preflight above is the gate.
+        run: |
+          uv run --locked python tests/ci_local_gate.py probe \
+            --api "$LLM_API_URL" \
+            --model "$LLM_MODEL" \
+            --json-out macos-logs/probe.json \
+            --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Upload llama.cpp logs and gate records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-llama-contract-logs
+          path: macos-logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  llama-reference:
+    name: Reference model on a sized runner
+    # Manual only, deliberately not scheduled. Larger runners never draw
+    # from included minutes — they are billed per-minute even on public
+    # repositories — and they require an organization-owned repository, so
+    # a recurring schedule here would bill every week or, on a user-owned
+    # repo, queue forever for a runner that will never be allocated. Run it
+    # when you want the evidence, on a runner you have chosen.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ inputs.runner || 'macos-26-xlarge' }}
+    timeout-minutes: 90
+    env:
+      MODEL_REPO: ${{ inputs.model_repo || 'google/gemma-4-E4B-it-qat-q4_0-gguf' }}
+      MODEL_FILE: ${{ inputs.model_file || 'gemma-4-E4B_q4_0-it.gguf' }}
+      MODEL_REVISION: ${{ inputs.model_revision || 'main' }}
+      # docs/gemma4-setup.md pins both identities for the reference contract.
+      LLM_BACKEND: local
+      LLM_MODEL: gemma-4-e4b
+      LLM_CAPABILITY_PROFILE: legacy-e4b-m1-16k-v1
+      LLM_API_URL: http://127.0.0.1:8080/v1/chat/completions
+      SUITE: ${{ inputs.suite || 'easy' }}
+      MIN_MEMORY_GB: ${{ inputs.min_memory_gb || '12' }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Gate on runner size
+        # Fails before the 5.15 GB download when the runner cannot hold the
+        # model plus its KV cache. An undersized runner would either thrash
+        # or be OOM-killed mid-run, producing a failure that looks like an
+        # agent-loop bug and is not one.
+        env:
+          ASKME_RUNNER_LABEL: ${{ inputs.runner || 'macos-26-xlarge' }}
+        run: |
+          mkdir -p macos-logs
+          uv run --locked python tests/ci_local_gate.py hardware \
+            --require-apple-silicon \
+            --min-memory-gb "$MIN_MEMORY_GB" \
+            --json-out macos-logs/hardware.json \
+            --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Install llama.cpp
+        run: |
+          brew update --quiet
+          brew install llama.cpp
+          llama-server --version 2>&1 | tee macos-logs/llama-server-version.txt
+      - name: Download the reference model
+        run: |
+          mkdir -p models macos-logs
+          # Gemma 4 checkpoints have been republished under identical
+          # filenames (docs/gemma4-setup.md), so 'main' cannot identify the
+          # weights a result came from. Unpinned runs stay allowed, but they
+          # say so, and every run records what it actually loaded.
+          if [ "$MODEL_REVISION" = "main" ]; then
+            echo "::warning::model_revision=main is a moving target; pass an immutable commit for any run whose pass/fail you intend to cite"
+          fi
+          curl -fL --retry 3 --retry-delay 5 \
+            -D macos-logs/model-headers.txt \
+            -o "models/$MODEL_FILE" \
+            "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REVISION/$MODEL_FILE"
+          {
+            echo "repo: $MODEL_REPO"
+            echo "file: $MODEL_FILE"
+            echo "requested_revision: $MODEL_REVISION"
+            grep -i '^x-repo-commit:' macos-logs/model-headers.txt \
+              || echo "x-repo-commit: (not returned)"
+            shasum -a 256 "models/$MODEL_FILE"
+          } | tee macos-logs/model-identity.txt
+          {
+            echo "### Model artifact"
+            echo '```'
+            cat macos-logs/model-identity.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Start llama-server with the reference flags
+        run: |
+          # The stable flag set from docs/gemma4-setup.md. Gemma 4 has a
+          # dedicated tool-call parser in llama.cpp, so --jinja is not used
+          # here; --reasoning off is permanently required for this family.
+          nohup llama-server \
+            -m "models/$MODEL_FILE" \
+            --alias "$LLM_MODEL" \
+            -ngl 99 \
+            --ctx-size 16384 \
+            --flash-attn on \
+            --cache-type-k q4_0 --cache-type-v q4_0 \
+            --swa-full --cache-reuse 256 \
+            --reasoning off \
+            -np 1 \
+            --host 127.0.0.1 \
+            --port 8080 \
+            > macos-logs/llama-server.log 2>&1 &
+          echo "Waiting for llama-server to become healthy..."
+          for i in $(seq 1 300); do
+            if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
+              echo "healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "llama-server did not become healthy in 300s" >&2
+          tail -n 100 macos-logs/llama-server.log >&2
+          exit 1
+      - name: Preflight the local backend
+        run: |
+          uv run --locked python tests/ci_local_gate.py preflight \
+            --api "$LLM_API_URL" \
+            --json-out macos-logs/preflight.json \
+            --markdown-out "$GITHUB_STEP_SUMMARY"
+      - name: Run the local integration suite
+        env:
+          ASKME_RUN_LIVE_LLM_TESTS: "1"
+          AGENT_RUN_LOG: ${{ github.workspace }}/macos-logs/reference.jsonl
+        run: |
+          case "$SUITE" in
+            easy)   K="TestIntegration and not Medium and not Hard" ;;
+            medium) K="TestIntegrationMedium" ;;
+            hard)   K="TestIntegrationHard" ;;
+            *) echo "unknown suite: $SUITE" >&2; exit 1 ;;
+          esac
+          uv run --locked pytest tests/test_agent_integration.py -s -v -rs \
+            -m live_llm -k "$K"
+      - name: Assert the suite really ran (no silent skips)
+        run: test -s macos-logs/reference.jsonl
+      - name: Upload reference logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-llama-reference-logs
+          path: macos-logs/
+          if-no-files-found: warn
+          retention-days: 14
