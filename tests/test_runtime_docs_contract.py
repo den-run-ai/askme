@@ -42,6 +42,8 @@ def test_setup_preserves_dated_upstream_status_without_deferring_native_adoption
 
 def test_architecture_does_not_present_historical_salvage_as_live_behavior():
     document = (ROOT / "docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+    assert "curated planner state; raw write payloads are excluded" in document
+    assert "Gets full user prompt + full state" not in document
     history = document.split("### Historical interface revisions\n", 1)[1]
     assert "`<<<CONTENT`" in history  # Retain the old interface's attribution.
     assert "Interface revision 6 removed that wire path" in history

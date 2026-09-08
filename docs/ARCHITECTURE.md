@@ -155,7 +155,7 @@ State design:
 - The initial planner receives the full request. Executor and task-local replan receive the same frozen `goal_context_chars` prefix in both policy arms; other executor fields remain capped independently
 
 **Primary system prompts:**
-- `SYSTEM_PLAN` — planner, outputs `{"tasks": [...]}`. Gets full user prompt + full state.
+- `SYSTEM_PLAN` — planner, outputs `{"tasks": [...]}`. Gets the full user prompt plus curated planner state; raw write payloads are excluded.
 - `SYSTEM_STEP` — executor, selects one native tool call with schema-validated arguments (for example, `write` with `arg` and `content`). Gets original goal + current task + slim state. A JSON action object in ordinary message text is not an executor fallback.
 
 ## Explicit-Reasoning Policy
