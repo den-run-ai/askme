@@ -647,9 +647,11 @@ def _build_llm_request(messages, budget, effective_think_level, strict, settings
         body["tool_choice"] = "auto"
     sent_effort = effective_think_level
     if cfg.backend == "openrouter":
-        if cfg.provider:
+        # Constraints also apply to automatic routing. Keep its default
+        # request unchanged, but do not discard explicitly stricter flags.
+        if cfg.provider or not cfg.allow_fallbacks or cfg.require_parameters:
             body["provider"] = {
-                "order": [cfg.provider],
+                **({"order": [cfg.provider]} if cfg.provider else {}),
                 "allow_fallbacks": cfg.allow_fallbacks,
                 "require_parameters": cfg.require_parameters,
             }
