@@ -26,6 +26,12 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 
 This keeps b9618 launchable throughout, so the A/B can interleave rounds instead of measuring one build then the other.
 
+This is build-only preparation. E27 remains an incomplete draft: its
+[response-level evidence gate](EXPERIMENTS.md#e27--master-rebuild-ab-against-b9618)
+must be satisfied and a new matched-control protocol registered before any
+outcome-bearing calls. The unchanged E01 harness cannot measure recovered
+malformed calls, and `peg_probe_v2.py` is not a live driver or E01 integration.
+
 **Verified compatible (2026-08-29):** every flag in the recommended launch command still exists on master — `--swa-full`, `-fa/--flash-attn [on|off|auto]`, `-ctk/-ctv/--cache-type-{k,v}`, `--cache-reuse`, `-rea/--reasoning [on|off|auto]`, `--spec-type`, `--spec-draft-n-max`. No command edits are needed to rebuild.
 **Phase 1 (build update): COMPLETE** — all tests pass. See [verification results](#phase-1-verification-results-2026-04-07) below.
 **Phase 3 (quantized KV cache): COMPLETE** — q4_0 KV is the current recommended default (-4% vs f16 in single-trial test, ~4x less KV memory). See [Phase 3 results](#phase-3-quantized-kv-cache--complete-2026-04-08).
@@ -237,6 +243,8 @@ a rebuild are unknown until measured.
 **Dated experiment proposal (2026-08-29):** the tuner can emit candidate rows for
 the tested device. Validate their numerics and measured performance before any
 adoption or upstream contribution; no benefit is established here.
+The E26 sweep remains gated on E27 qualification and its separate registration;
+the commands below are not authorization or a completed measurement protocol.
 
 ```bash
 # from the master worktree created above
@@ -729,7 +737,7 @@ Then launch the server with the current q4_0 flags **plus** `--swa-full --cache-
 
 | PR/Issue | Status / what to do |
 |----------|----------------------|
-| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma decode regression) | **Rebuild gate — substantially weakened (2026-08-29).** Two independent reproductions failed; see the header. Still A/B against b9618, but in a separate build dir with interleaved rounds, not as a blocker |
+| [#26470](https://github.com/ggml-org/llama.cpp/issues/26470) (Metal Gemma decode regression) | **Rebuild gate — substantially weakened (2026-08-29).** Two independent reproductions failed; see the header. The proposed matched b9618 A/B still requires E27's response-level evidence gate and a new registration; use separate build dirs and interleaved rounds |
 | [#25250](https://github.com/ggml-org/llama.cpp/issues/25250) (Metal small-batch mul_mat) / [#24768](https://github.com/ggml-org/llama.cpp/issues/24768) (adaptive n-max) | **Both stale-bot-closed `not_planned` (2026-08-17 / 2026-08-30), neither fixed — this gate can no longer trigger as written.** Re-gate E24 on [PR #25726](https://github.com/ggml-org/llama.cpp/pull/25726) merging, or on base-M1 fa-vec tuning landing |
 | **NEW: [#26570](https://github.com/ggml-org/llama.cpp/pull/26570) Metal fa-vec per-device tuning** | **Dated tuning proposal, not a measured benefit or current recommendation.** Base M1 has zero table rows while M1 Pro/Max have 210/187; the table already covers q4_0 KV and both Gemma 4 head sizes. Offline tuner ships in `tools/tuning` — see [the section above](#metal-fa-vec-per-device-tuning--base-m1-is-untuned-2026-08-29) |
 | [#25986](https://github.com/ggml-org/llama.cpp/issues/25986) / [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) (PEG tool-call parsing) | **Historical August 29 parser-risk audit, not a deferred adoption gate.** Native action support is implemented; qualify the actual model/server route. The audit recorded #25986 open and #25072 stale-closed with its fix unmerged. Those upstream dispositions are not a fresh September status check |

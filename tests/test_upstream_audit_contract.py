@@ -49,6 +49,33 @@ def test_e25_docs_separate_run_contract_from_unmeasured_malformed_call_incidence
     assert "retry attempts do not identify their causes" in text
 
 
+def test_e27_draft_requires_response_level_evidence_before_outcome_calls():
+    experiments = (ROOT / "docs/EXPERIMENTS.md").read_text()
+    section = experiments.split("### E27 —", 1)[1].split("\n##", 1)[0]
+    text = " ".join(section.split())
+    assert "incomplete draft, blocked before outcome-bearing calls" in text
+    assert "every response attempt, including recovered retries" in text
+    assert "define the denominator" in text
+    assert "typed decoder failures separately from HTTP errors and budget telemetry" in text
+    assert "matched runtime, model, settings and request shape" in text
+    assert "E23 is historical context, not the matched control" in text
+    assert "not a live driver or automatic E01 instrumentation" in text
+    assert section.index("**Execution gate") < section.index("**Change")
+
+
+def test_setup_and_adjacent_drafts_preserve_e27_evidence_gate():
+    setup = " ".join((ROOT / "docs/gemma4-setup.md").read_text().split())
+    experiments = " ".join((ROOT / "docs/EXPERIMENTS.md").read_text().split())
+    assert "E27 remains an incomplete draft" in setup
+    assert "before any outcome-bearing calls" in setup
+    assert "The E26 sweep remains gated on E27 qualification" in setup
+    assert "untyped retry-attempt count" in experiments
+    assert (
+        "E27's response-level evidence gate applies to any claimed parse-failure metric"
+        in experiments
+    )
+
+
 def test_architecture_never_equates_e25_with_synthetic_tool_history():
     text = (ROOT / "docs/ARCHITECTURE.md").read_text()
     assert "precisely the shape E25 already ran" not in text

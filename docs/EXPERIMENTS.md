@@ -42,7 +42,7 @@ Ordered by execution sequence (Wave, then within-wave order). For a topic-based 
 |-----|-----|---------------------------------------------------------|------|----------|--------|----------|
 | 1   | E01 | 3-trial test harness on top of existing `AGENT_RUN_LOG` | 1    | P0       | S      | done     |
 | —   | E23 | Local revision-3 baseline: QAT Q4_0, `--reasoning off`  | 1    | P0       | S      | done     |
-| —   | E27 | Master rebuild A/B against b9618 (1071 commits behind)  | 1    | P1       | S+M    | planned  |
+| —   | E27 | Master rebuild A/B against b9618 (1071 commits behind)  | 1    | P1       | S+M    | draft; evidence gate |
 | —   | E26 | Base-M1 Metal fa-vec tuning table (gated on E27)         | 1    | P1       | M      | planned  |
 | —   | E21 | gpt-oss-20b low/med/high effort as CI/prototyping model | 1    | P1       | S      | running  |
 | —   | E08 | `--checkpoint-every-n-tokens` trial on E4B              | 1    | P1       | S      | archived |
@@ -551,8 +551,8 @@ Moved to [Archived / rejected](#archived--rejected).
   2. E26 lands base-M1 fa-vec tunings — the fa-vec tuning grid is explicitly built on a "GQA spec-decode shape … Q>1 K/V-reuse" basis, i.e. it tunes the same batch widths MTP verification runs at, which motivates testing a possible bottleneck; shape overlap does not establish an MTP handicap or a removable cause of the measured loss.
 
   Re-run on a build that also carries the landed MTP fixes (#27400 embeddings, #27005/#26814 auto-detection, #26605 layer memory), and take acceptance rate from the new spec-decode `/metrics` counters ([#26389](https://github.com/ggml-org/llama.cpp/pull/26389)) rather than inferring it from wall time.
-- **Change.** After the gate lands: A/B `--spec-type draft-mtp --spec-draft-n-max {1,3}` vs no-MTP on easy + medium under the E01 harness, against the E23 reference. Measure end-to-end task success and wall time, not just decode tok/s. Verify JSON quality — [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) reports format corruption specifically under MTP.
-- **Metric.** Wall time, agent_complete rate, parse-retry count, decode tok/s.
+- **Change.** After the gate lands and a new protocol is registered: A/B `--spec-type draft-mtp --spec-draft-n-max {1,3}` vs a matched no-MTP control on easy + medium under the E01 harness; E23 remains historical context. Measure end-to-end task success and wall time, not just decode tok/s. Format quality requires the response-level evidence gate below; the dated [#25072](https://github.com/ggml-org/llama.cpp/issues/25072) report motivates that check.
+- **Metric.** Wall time, agent_complete rate, untyped retry-attempt count, decode tok/s. E27's response-level evidence gate applies to any claimed parse-failure metric; E01 retries alone do not identify decoder failures.
 - **Upside.** Potentially the largest local decode lever if the Metal small-batch gap closes (~2x headroom documented upstream).
 - **Risk.** Low — server-flag A/B, trivially revertible. Format-corruption risk (#25072) is why agent-level metrics gate adoption, not raw tok/s.
 - **Code.** `gemma4-setup.md` (server flags), no `askme.py` change.
@@ -567,7 +567,7 @@ Moved to [Archived / rejected](#archived--rejected).
 - **Metric.** Decode and prompt-eval tok/s at the deployment's real shape, then agent-level wall time under the E01 harness. Post the sweep log alongside the rows — it records every config the no-harm rule refused.
 - **Upside.** A hardware-specific candidate from the August 29 audit, with possible upstream contribution value; no local throughput or MTP benefit has been measured.
 - **Risk.** Low, but **calibrate expectations down**: the tuner's no-harm rule only replaces a baseline bucket when a candidate is no slower at *every* covered point, but this sampled-point criterion does not guarantee non-regression or an end-to-end benefit. Thermal drift is the main threat to validity on a 16 GB M1 — the tuner re-anchors every four candidates and retries, and any A/B must use separate build dirs with interleaved rounds (see the #26470 thread, where back-to-back measurement fabricated a 13% delta).
-- **Gates.** Requires a master build (E27). Blocks the re-gated E24.
+- **Gates.** Requires a separately built master and E27's registered qualification, not merely a newer binary. E27's incomplete evidence gate is not satisfied here. Blocks the re-gated E24.
 - **Code.** `ggml/src/ggml-metal/ggml-metal-tuning.cpp` (generated rows) in the llama.cpp tree; no `askme.py` change.
 - **Effort.** M (sweep is hours of wall time, mostly unattended).
 - **Status.** Planned.
@@ -576,12 +576,13 @@ Moved to [Archived / rejected](#archived--rejected).
 
 - **Context.** Added 2026-08-29. Local is b9618 `c34b92235` (2026-06-12), now **1071 commits** behind master `57291f264`. The prior rebuild blocker ([#26470](https://github.com/ggml-org/llama.cpp/issues/26470)) has substantially weakened — two independent reproductions failed, one measuring the newer build *faster*. All flags in the documented launch command were verified present on master, so no command changes are required.
 - **Hypothesis.** A rebuild could improve decode or tool-call robustness, but can also regress; test the effects of post-b9618 PEG hardening (#24329, #24869, #26780, #24624) and the reasoning-leak template fix (#24674).
-- **Change.** Build master in a **separate git worktree** (`git worktree add ../llama.cpp-master origin/master`), not a second build dir in the same tree — a second build dir would still compile the b9618 source, and checking master out in place would disturb the stable tree and replace the binary the managed server runs from. Then A/B decode/prompt-eval, then the easy+medium suites under the E01 harness against the E23 reference. Pin the exact master SHA in the registration; `origin/master` moves.
-- **Metric.** Decode and prompt-eval tok/s, then pytest pass + agent-complete rate, wall time, and malformed-tool-call incidence (the last is the point — see E25 and the #25986 risk).
+- **Execution gate (clarified 2026-09-08).** This is an incomplete draft, blocked before outcome-bearing calls, not an executable registration. First implement and offline-qualify a response-retaining driver, then separately register its exact revision, both build controls and matched runtime, model, settings and request shape, plus budgets, trial count and decision rule. It must retain complete request/response bodies for every response attempt, including recovered retries, and typed decoder failures separately from HTTP errors and budget telemetry; define the denominator and distinguish native actions from non-action JSON. The current E01 harness does not provide this evidence. [`tests/peg_probe_v2.py`](../tests/peg_probe_v2.py) is an offline-tested collector core, not a live driver or automatic E01 instrumentation. Neither the required integration nor a new protocol is provided here.
+- **Change.** Build master in a **separate git worktree** (`git worktree add ../llama.cpp-master origin/master`), not a second build dir in the same tree — a second build dir would still compile the b9618 source, and checking master out in place would disturb the stable tree and replace the binary the managed server runs from. Only after the execution gate is satisfied, A/B decode/prompt-eval and easy+medium suites with newly measured b9618 and candidate-build controls. Pin both build SHAs in the registration; `origin/master` moves. E23 is historical context, not the matched control.
+- **Metric (conditional on that gate).** Decode and prompt-eval tok/s, pytest pass + agent-complete rate and wall time. Malformed-tool-call incidence requires the registered response-level evidence and denominator, not run-contract validity or retry counts. An isolated diagnostic probe measures only its registered request scope; it cannot supply an agent-trajectory incidence estimate unless every relevant trajectory attempt is retained and classified.
 - **Risk.** Low and fully revertible while both build dirs exist. The measurement is the risk, not the build: use separate build dirs and interleaved rounds.
 - **Blocks.** E26 (the tuner only exists on master) and the re-gated E24.
 - **Effort.** S (build) + M (paired bench).
-- **Status.** Planned.
+- **Status.** Incomplete draft; execution and malformed-call measurement remain blocked on the evidence gate above.
 
 ## Planning
 
