@@ -13,10 +13,12 @@ import sys
 import tempfile
 import time
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 TASK = Path(__file__).parent / "external_repo/requests_pickle_v1"
 DEFAULT_API_URL = "http://127.0.0.1:8080/v1/chat/completions"
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 def digest(path):
@@ -191,9 +193,124 @@ def prepare(source, harness, output, task_dir=TASK):
     return protocol
 
 
-def record_post(path, seed):
+class HostedRequestBudget:
+    """Pin the paid route and reserve conservative token charges before every attempt."""
+
+    def __init__(self, protocol):
+        if protocol["api_url"] != OPENROUTER_API_URL:
+            raise ValueError("Hosted trials require the exact official OpenRouter API URL")
+        self.protocol = protocol
+        self.route = protocol["openrouter"]
+        for field in ("provider", "expected_response_provider", "expected_response_model"):
+            if not isinstance(self.route.get(field), str) or not self.route[field]:
+                raise ValueError(f"Missing hosted route field: {field}")
+        control = protocol["cost_control"]
+        self.cap = self.amount(control["cap_usd"])
+        if not 0 < self.cap <= Decimal("0.50"):
+            raise ValueError("Hosted trial budget must be positive and at most USD 0.50")
+        self.prompt_price = self.amount(control["prompt_usd_per_token"])
+        self.completion_price = self.amount(control["completion_usd_per_token"])
+        if not self.prompt_price or not self.completion_price:
+            raise ValueError("Hosted catalog token prices must be positive")
+        self.overhead = control["prompt_overhead_tokens"]
+        if type(self.overhead) is not int or self.overhead < 16384:
+            raise ValueError("Hosted prompt overhead must reserve at least 16384 tokens")
+        self.committed = Decimal(0)
+        self.halted = False
+
+    @staticmethod
+    def amount(value):
+        try:
+            amount = Decimal(str(value))
+        except InvalidOperation as error:
+            raise ValueError("Missing or invalid API cost") from error
+        if not amount.is_finite() or amount < 0:
+            raise ValueError("API cost must be finite and nonnegative")
+        return amount
+
+    def reserve(self, api, body):
+        if self.halted:
+            raise RuntimeError("Hosted cost/route guard halted further requests")
+        if api != OPENROUTER_API_URL or body.get("model") != self.protocol["model_alias"]:
+            raise ValueError("Hosted endpoint or requested model differs from protocol")
+        expected = {
+            "order": [self.route["provider"]],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+        if "quantizations" in self.route:
+            expected["quantizations"] = self.route["quantizations"]
+        route = body.get("provider") or {}
+        if any(route.get(field) != value for field, value in expected.items()):
+            raise ValueError("Hosted provider route differs from protocol")
+        output_tokens = body.get("max_tokens")
+        if type(output_tokens) is not int or output_tokens <= 0 or body.get("stream"):
+            raise ValueError("Hosted requests require bounded non-streaming output")
+        # UTF-8 bytes overestimate textual token counts. Reserve extra template/tool
+        # tokens as well; catalog prices and this overhead are frozen in the protocol.
+        prompt_bound = len(json.dumps(body, ensure_ascii=False).encode("utf-8")) + self.overhead
+        estimate = prompt_bound * self.prompt_price + output_tokens * self.completion_price
+        if self.committed + estimate > self.cap:
+            raise RuntimeError("Hosted request would exceed the remaining dollar budget")
+        self.committed += estimate
+        return estimate
+
+    def settle(self, payload, reserved):
+        # Unknown cost, unexpected routing or changed prices block further calls.
+        # Transport failures retain their full reservation across client retries.
+        self.halted = True
+        if not isinstance(payload, dict) or not isinstance(payload.get("usage"), dict):
+            raise ValueError("Hosted response has no priced usage record")
+        cost = self.amount(payload["usage"].get("cost"))
+        self.committed += cost - reserved
+        if cost > reserved:
+            raise RuntimeError("Actual hosted charge exceeded the registered cost estimate")
+        if payload.get("provider") != self.route["expected_response_provider"]:
+            raise ValueError("Actual hosted provider differs from protocol")
+        if payload.get("model") != self.route["expected_response_model"]:
+            raise ValueError("Actual hosted model differs from protocol")
+        self.halted = False
+
+    @classmethod
+    def summary(cls, path):
+        total, upper = Decimal(0), Decimal(0)
+        requests_count = priced = 0
+        lines = path.read_text().splitlines() if path.exists() else []
+        for line in lines:
+            try:
+                event = json.loads(line)
+                if "budget_committed_usd" in event:
+                    upper = cls.amount(event["budget_committed_usd"])
+                if event.get("event") == "request":
+                    requests_count += 1
+                if event.get("event") == "response":
+                    payload = json.loads(event["body"])
+                    usage = payload.get("usage") if isinstance(payload, dict) else None
+                    if isinstance(usage, dict):
+                        total += cls.amount(usage.get("cost"))
+                        priced += 1
+            except (ValueError, TypeError):
+                continue
+        return {
+            "api_cost_usd": float(total),
+            "api_cost_complete": priced == requests_count,
+            "api_cost_unpriced_requests": max(0, requests_count - priced),
+            "api_cost_upper_bound_usd": float(max(total, upper)),
+            "api_cost_note": "Sum of response usage.cost; unknown attempts retain the registered "
+            "token-price estimate. The upper bound depends on unchanged catalog pricing.",
+        }
+
+
+def record_post(path, seed, protocol=None):
     """Record complete requests/replies at the supported HTTP injection seam."""
     import requests
+
+    budget = (
+        HostedRequestBudget(protocol)
+        if protocol and protocol.get("backend") == "openrouter"
+        else None
+    )
+    decode_response = json.loads
 
     def emit(value):
         with path.open("a") as log:
@@ -202,9 +319,31 @@ def record_post(path, seed):
     def post(api, *, json, headers, timeout):
         body = dict(json, seed=seed)
         started = time.monotonic()
-        emit({"event": "request", "api": api, "body": body, "timeout": timeout})
+        accounting = {}
+        if budget:
+            if "quantizations" in budget.route:
+                body["provider"] = dict(
+                    body.get("provider") or {}, quantizations=budget.route["quantizations"]
+                )
+            try:
+                reserved = budget.reserve(api, body)
+            except (ValueError, RuntimeError) as error:
+                emit({"event": "request_refused", "reason": str(error)})
+                raise
+            accounting = {
+                "estimated_max_cost_usd": str(reserved),
+                "budget_committed_usd": str(budget.committed),
+            }
+        emit({"event": "request", "api": api, "body": body, "timeout": timeout, **accounting})
         try:
-            response = requests.post(api, json=body, headers=headers, timeout=timeout)
+            if budget:
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.post(
+                        api, json=body, headers=headers, timeout=timeout, allow_redirects=False
+                    )
+            else:
+                response = requests.post(api, json=body, headers=headers, timeout=timeout)
         except Exception as error:
             emit(
                 {
@@ -223,23 +362,62 @@ def record_post(path, seed):
                 "wall_s": time.monotonic() - started,
             }
         )
+        if budget:
+            guard_error = None
+            try:
+                if response.status_code != 200:
+                    budget.halted = True
+                    raise ValueError("Hosted HTTP response was not successful")
+                budget.settle(decode_response(response.text), reserved)
+            except (ValueError, RuntimeError) as error:
+                budget.halted = True
+                guard_error = str(error)
+                raise
+            finally:
+                emit(
+                    {
+                        "event": "cost_ledger",
+                        "budget_committed_usd": str(budget.committed),
+                        "guard_error": guard_error,
+                    }
+                )
         return response
 
     return post
 
 
 def worker(harness, workspace, output, task_dir=TASK):
+    protocol = json.loads((output / "protocol.json").read_text())
+    hosted = protocol.get("backend") == "openrouter"
+    api_key = os.environ.pop("OPENROUTER_API_KEY", "") if hosted else ""
+    if hosted and not api_key:
+        raise ValueError("Hosted worker requires an explicitly inherited API credential")
     sys.path.insert(0, str(harness))
     import askme
 
-    protocol = json.loads((output / "protocol.json").read_text())
+    if hosted:
+        os.environ.pop("OPENROUTER_API_KEY", None)
     if protocol != json.loads((task_dir / "protocol.json").read_text()):
         raise ValueError("Worker task protocol differs from registration")
     settings = replace(
         askme.LLMSettings.from_env(),
         capability_profile=askme.CapabilityProfile(**protocol["capability_profile"]),
     )
-    client = askme.LLMClient(settings, post=record_post(output / "http.jsonl", protocol["seed"]))
+    if hosted:
+        settings = replace(
+            settings,
+            backend="openrouter",
+            api=protocol["api_url"],
+            model=protocol["model_alias"],
+            api_key=api_key,
+            provider=protocol["openrouter"]["provider"],
+            allow_fallbacks=False,
+            require_parameters=True,
+            reasoning_effort="",
+        )
+    client = askme.LLMClient(
+        settings, post=record_post(output / "http.jsonl", protocol["seed"], protocol)
+    )
     result = askme.run_result(
         (output / "prompt.md").read_text(),
         str(workspace),
@@ -287,6 +465,8 @@ def summarize(output, process, elapsed, acceptance, applying, changes, protocol=
     }
     if "runner" in protocol:
         summary["runner"] = protocol["runner"]
+    if protocol.get("backend") == "openrouter":
+        summary.update(HostedRequestBudget.summary(output / "http.jsonl"))
     save(output / "summary.json", summary)
     print(json.dumps(summary, indent=2))
     return summary
@@ -318,6 +498,13 @@ def run_trial(source, harness, output, task_dir=TASK):
         != protocol["serving_qualification"]["sha256"]
     ):
         raise ValueError("Registered serving qualification changed")
+    backend = protocol.get("backend", "local")
+    if backend not in {"local", "openrouter"}:
+        raise ValueError("Unknown trial backend")
+    if backend == "openrouter":
+        HostedRequestBudget(protocol)
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            raise ValueError("Hosted trial requires an explicitly inherited API credential")
     # Exclusive marker prevents accidentally overwriting or retrying an outcome.
     with (output / "trial-started.json").open("x") as marker:
         json.dump({"trial": 1, "started_at_unix": time.time()}, marker)
@@ -339,13 +526,15 @@ def run_trial(source, harness, output, task_dir=TASK):
             key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG") if key in os.environ
         }
         env.update(
-            LLM_BACKEND="local",
+            LLM_BACKEND=backend,
             LLM_MODEL=protocol["model_alias"],
             LLM_API_URL=protocol.get("api_url", DEFAULT_API_URL),
             AGENT_RUN_LOG=str(output / "agent.jsonl"),
             PYTHONPATH=str(workspace / "src"),
             PYTHONDONTWRITEBYTECODE="1",
         )
+        if backend == "openrouter":
+            env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
         env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
         started = time.monotonic()
         process = {"timed_out": False}

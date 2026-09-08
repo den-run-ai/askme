@@ -47,3 +47,27 @@ alone are 14.4 GB; this host had about 12 GiB free disk and already used
 8.7 GiB swap before setup. The available E4B model is 5.15 GB. OpenRouter
 remains an optional future route within the user's $10 allowance; this
 registered local study spends no hosted credits.
+
+## Separately registered hosted control
+
+The physical cells later exposed latency limits; a power-state observation
+during Qwen's cell found the host on battery with Low Power Mode enabled.
+That observation does not identify its causal contribution and does not
+change the frozen local matrix or authorize a local task after a failed gate.
+
+The [hosted manifest](2026-09-08-gemma-moe-hosted.json) therefore declares a
+separate Gemma 26B-A4B MoE route: DeepInfra fp8 on OpenRouter, exact served
+model pin, no fallbacks, required parameter support and reasoning off.
+Two task-independent planner/native-tool probes precede any task inference.
+The user authorized up to $10; this hosted study caps qualification at $0.05
+and its single subsequent Requests task at $0.45, at most $0.50 combined.
+Every attempted request reserves a conservative cost bound before dispatch;
+unknown charges keep their reservation. Credentials are supplied in memory
+and never enter protocols, request records or task files. AskMe still is not
+a host isolation boundary.
+
+This control uses a different model, provider, precision and budget profile.
+It cannot establish a local performance result or a causal model/harness
+comparison. Preserve a failed qualification and do not selectively rerun it.
+Register the exact task protocol, runtime, runner and serving-record hashes
+before its one task attempt, and requalify all three task controls.

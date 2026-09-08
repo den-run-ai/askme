@@ -13,6 +13,226 @@ from tests.external_trial_claim import validate_claim
 
 
 @pytest.fixture
+def hosted_protocol():
+    return {
+        "backend": "openrouter",
+        "api_url": "https://openrouter.ai/api/v1/chat/completions",
+        "model_alias": "google/gemma-4-26b-a4b-it",
+        "openrouter": {
+            "provider": "DeepInfra",
+            "expected_response_provider": "DeepInfra",
+            "expected_response_model": "google/gemma-4-26b-a4b-it-20260403",
+            "quantizations": ["fp8"],
+        },
+        "cost_control": {
+            "cap_usd": "0.50",
+            "prompt_usd_per_token": "0.00000007",
+            "completion_usd_per_token": "0.00000034",
+            "prompt_overhead_tokens": 16384,
+        },
+    }
+
+
+@pytest.fixture
+def hosted_http(monkeypatch, hosted_protocol):
+    import requests
+
+    case = SimpleNamespace(
+        calls=[],
+        response={
+            "provider": "DeepInfra",
+            "model": "google/gemma-4-26b-a4b-it-20260403",
+            "usage": {"cost": 0.000123, "prompt_tokens": 12, "completion_tokens": 8},
+        },
+        error=None,
+        body={
+            "model": hosted_protocol["model_alias"],
+            "messages": [{"role": "user", "content": "雪" * 25}],
+            "max_tokens": 512,
+            "provider": {
+                "order": ["DeepInfra"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+            },
+        },
+    )
+
+    class Session:
+        trust_env = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def post(self, api, **kwargs):
+            assert self.trust_env is False
+            assert kwargs["allow_redirects"] is False
+            case.calls.append((api, kwargs))
+            if case.error:
+                raise case.error
+            return SimpleNamespace(status_code=200, text=json.dumps(case.response))
+
+    monkeypatch.setattr(requests, "Session", Session)
+    return case
+
+
+def test_hosted_requests_pin_route_record_actual_cost_and_keep_credentials_out(
+    tmp_path, hosted_protocol, hosted_http
+):
+    path = tmp_path / "http.jsonl"
+    post = trial.record_post(path, 123, hosted_protocol)
+    for _ in range(2):
+        post(
+            hosted_protocol["api_url"],
+            json=hosted_http.body,
+            headers={"Authorization": "Bearer fake-secret-for-regression"},
+            timeout=120,
+        )
+    body = hosted_http.calls[0][1]["json"]
+    assert body["seed"] == 123
+    assert body["provider"]["quantizations"] == ["fp8"]
+    assert "quantizations" not in hosted_http.body["provider"]
+    assert "fake-secret-for-regression" not in path.read_text()
+    cost = trial.HostedRequestBudget.summary(path)
+    assert cost["api_cost_usd"] == pytest.approx(0.000246)
+    assert cost["api_cost_complete"]
+    assert cost["api_cost_upper_bound_usd"] == pytest.approx(cost["api_cost_usd"])
+    summary = trial.summarize(
+        tmp_path, {"exit_code": 0}, 1, {"accepted": False}, False, [], hosted_protocol
+    )
+    assert summary["api_cost_usd"] == pytest.approx(0.000246)
+
+
+@pytest.mark.parametrize("failure", ["price", "provider", "model", "missing_cost", "negative_cost"])
+def test_hosted_unexpected_or_unpriced_response_stops_further_calls(
+    tmp_path, hosted_protocol, hosted_http, failure
+):
+    if failure == "price":
+        hosted_http.response["usage"]["cost"] = 0.02
+    elif failure in {"provider", "model"}:
+        hosted_http.response[failure] = "unexpected"
+    elif failure == "missing_cost":
+        del hosted_http.response["usage"]["cost"]
+    else:
+        hosted_http.response["usage"]["cost"] = -0.1
+    path = tmp_path / "http.jsonl"
+    post = trial.record_post(path, 123, hosted_protocol)
+    for _ in range(2):
+        with pytest.raises((RuntimeError, ValueError)):
+            post(hosted_protocol["api_url"], json=hosted_http.body, headers={}, timeout=120)
+    assert len(hosted_http.calls) == 1
+    assert any(e["event"] == "response" for e in map(json.loads, path.read_text().splitlines()))
+
+
+def test_hosted_unknown_attempt_reserves_its_cost_before_retry(
+    tmp_path, hosted_protocol, hosted_http
+):
+    import requests
+
+    hosted_protocol["cost_control"]["cap_usd"] = "0.002"
+    hosted_http.error = requests.Timeout("Synthetic timeout")
+    path = tmp_path / "http.jsonl"
+    post = trial.record_post(path, 123, hosted_protocol)
+    with pytest.raises(requests.Timeout):
+        post(hosted_protocol["api_url"], json=hosted_http.body, headers={}, timeout=120)
+    with pytest.raises(RuntimeError, match="budget"):
+        post(hosted_protocol["api_url"], json=hosted_http.body, headers={}, timeout=120)
+    assert len(hosted_http.calls) == 1
+    cost = trial.HostedRequestBudget.summary(path)
+    assert cost["api_cost_usd"] == 0
+    assert not cost["api_cost_complete"]
+    assert cost["api_cost_unpriced_requests"] == 1
+    assert 0 < cost["api_cost_upper_bound_usd"] <= 0.002
+
+
+@pytest.mark.parametrize("failure", ["api", "model", "route", "output", "oversize_prompt"])
+def test_hosted_guard_refuses_before_http(tmp_path, hosted_protocol, hosted_http, failure):
+    api = hosted_protocol["api_url"]
+    if failure == "api":
+        api += "/redirect"
+    elif failure == "model":
+        hosted_http.body["model"] = "other-model"
+    elif failure == "route":
+        hosted_http.body["provider"]["allow_fallbacks"] = True
+    elif failure == "output":
+        hosted_http.body["max_tokens"] = -1
+    else:
+        hosted_protocol["cost_control"]["cap_usd"] = "0.0015"
+        hosted_http.body["messages"][0]["content"] = "雪" * 3000
+    post = trial.record_post(tmp_path / "http.jsonl", 123, hosted_protocol)
+    with pytest.raises((RuntimeError, ValueError)):
+        post(api, json=hosted_http.body, headers={}, timeout=120)
+    assert not hosted_http.calls
+
+
+def test_hosted_partial_response_retains_unknown_cost_bound(tmp_path, hosted_protocol, hosted_http):
+    import requests
+
+    hosted_http.error = requests.Timeout("Synthetic timeout")
+    path = tmp_path / "http.jsonl"
+    post = trial.record_post(path, 123, hosted_protocol)
+    with pytest.raises(requests.Timeout):
+        post(hosted_protocol["api_url"], json=hosted_http.body, headers={}, timeout=120)
+    with path.open("a") as stream:
+        stream.write('{"event":"response","body":"incomplete')
+    summary = trial.HostedRequestBudget.summary(path)
+    assert not summary["api_cost_complete"]
+    assert summary["api_cost_unpriced_requests"] == 1
+    assert summary["api_cost_upper_bound_usd"] > 0
+
+
+def test_hosted_worker_freezes_route_and_removes_credential_from_action_environment(
+    tmp_path, monkeypatch, hosted_protocol
+):
+    import askme
+
+    protocol = json.loads((trial.TASK / "protocol.json").read_text()) | hosted_protocol
+    output = tmp_path / "output"
+    output.mkdir()
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    for directory in (output, task_dir):
+        trial.save(directory / "protocol.json", protocol)
+    (output / "prompt.md").write_text("Synthetic task")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-inherited-credential")
+    monkeypatch.setenv("OPENROUTER_MODEL", "unexpected-environment-model")
+    monkeypatch.setenv("OPENROUTER_PROVIDER", "unexpected-environment-provider")
+
+    def run_result(prompt, workspace, *, config, dependencies):
+        assert "OPENROUTER_API_KEY" not in trial.os.environ
+        assert config.llm.api_key == "fake-inherited-credential"
+        assert config.llm.backend == "openrouter"
+        assert config.llm.api == hosted_protocol["api_url"]
+        assert config.llm.model == hosted_protocol["model_alias"]
+        assert config.llm.provider == "DeepInfra"
+        assert config.llm.allow_fallbacks is False
+        assert config.llm.require_parameters is True
+        return {"status": "synthetic_no_model_calls"}
+
+    monkeypatch.setattr(askme, "run_result", run_result)
+    trial.worker(Path(__file__).parent.parent, tmp_path, output, task_dir)
+    assert "fake-inherited-credential" not in (output / "agent-result.json").read_text()
+
+
+def test_hosted_worker_requires_credential_already_in_environment(
+    tmp_path, monkeypatch, hosted_protocol
+):
+    trial.save(tmp_path / "protocol.json", hosted_protocol)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="explicitly inherited"):
+        trial.worker(Path(__file__).parent.parent, tmp_path, tmp_path, tmp_path)
+
+
+@pytest.mark.parametrize("field,value", [("cap_usd", "0.51"), ("prompt_usd_per_token", "NaN")])
+def test_hosted_manifest_requires_finite_bounded_prices(hosted_protocol, field, value):
+    hosted_protocol["cost_control"][field] = value
+    with pytest.raises(ValueError):
+        trial.HostedRequestBudget(hosted_protocol)
+
+
+@pytest.fixture
 def custom_trial(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
