@@ -118,3 +118,12 @@ native calls exactly requested `hello.txt` containing `hi\n`. Their observed
 prompt counts were 633/2258 (E4B planner/action) and 562/2240 (Qwen).
 Original qualification files are unchanged; no score was amended and this
 audit made no model calls.
+
+The later [stream-identity audit](offline-model-identity-audit.json) addresses
+PR #110's missing-model-identity review finding. The current qualifier requires
+an observed matching model alias and rejects conflicting or malformed identity
+fields across chunks. All ten completed responses identify the expected alias.
+Four already-failed interrupted native streams lack terminal identity and gain
+an additional diagnostic error; all fourteen case verdicts and both failed
+deployment gates remain unchanged. All 174 archived files were verified,
+original records were preserved, and no model calls were made.

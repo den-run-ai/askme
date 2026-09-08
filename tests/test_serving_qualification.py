@@ -17,7 +17,9 @@ def protocol():
     )
 
 
-def exchange(*chunks, wall_s=5, timed_out=False):
+def exchange(*chunks, wall_s=5, timed_out=False, model="synthetic-model"):
+    if chunks and model is not None:
+        chunks = ({"model": model, **chunks[0]}, *chunks[1:])
     return {
         "name": "probe",
         "wall_s": wall_s,
@@ -138,6 +140,33 @@ def test_full_forced_decode_passes_but_early_eos_fails():
     assert gate.assess_case(case, result, protocol())["qualified"]
     result["events"][-1]["body"]["tokens_predicted"] = 3
     assert not gate.assess_case(case, result, protocol())["qualified"]
+
+
+@pytest.mark.parametrize(
+    "models,qualified",
+    [
+        ([], False),
+        (["wrong-model"], False),
+        (["synthetic-model"], True),
+        (["wrong-model", "synthetic-model"], False),
+        (["synthetic-model", "wrong-model"], False),
+        (["synthetic-model", "synthetic-model"], True),
+        ([None, "synthetic-model", None], True),
+        ([[], "synthetic-model"], False),
+        ([{}, "synthetic-model"], False),
+        ([0, "synthetic-model"], False),
+        (["", "synthetic-model"], False),
+    ],
+)
+def test_every_observed_model_identity_must_match_declared_model(models, qualified):
+    chunks = [
+        {"content": "hi"},
+        {"stop": True, "tokens_predicted": 128, "tokens_evaluated": 600, "timings": {"cache_n": 0}},
+    ]
+    chunks.extend({"model": model} for model in models)
+    verdict = gate.assess_case(gate.DEFAULT_CASES[0], exchange(*chunks, model=None), protocol())
+    assert verdict["qualified"] is qualified
+    assert ("served_model_mismatch" in verdict["errors"]) is (not qualified)
 
 
 @pytest.mark.parametrize("cache_n,prompt_tokens", [(1, 600), (0, 599)])

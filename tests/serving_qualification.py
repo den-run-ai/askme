@@ -214,6 +214,7 @@ def summarize_stream(result):
     terminal = False
     finish_reason = None
     model = None
+    model_consistent = True
     prompt_tokens = None
     for event in result["events"]:
         if event["event"] == "done":
@@ -221,8 +222,14 @@ def summarize_stream(result):
         if event["event"] != "chunk":
             continue
         chunk = event["body"]
-        if chunk.get("model"):
-            model = chunk["model"]
+        chunk_model = chunk.get("model")
+        if chunk_model is not None:
+            if not isinstance(chunk_model, str) or not chunk_model:
+                model_consistent = False
+            else:
+                if model is not None and model != chunk_model:
+                    model_consistent = False
+                model = chunk_model
         choices = chunk.get("choices") or []
         delta = choices[0].get("delta", {}) if choices else {}
         content = chunk.get("content") or delta.get("content") or ""
@@ -259,6 +266,7 @@ def summarize_stream(result):
         "completion_tokens": completion_tokens,
         "timings": timings,
         "model": model,
+        "model_consistent": model_consistent,
         "prompt_tokens": prompt_tokens,
         "message": {"role": "assistant", "content": text, "tool_calls": list(tools.values())},
     }
@@ -277,7 +285,7 @@ def assess_case(case, result, protocol):
         errors.append("first_token_limit")
     if result["wall_s"] > protocol["total_limit_s"]:
         errors.append("total_limit")
-    if parsed["model"] and parsed["model"] != protocol["model"]:
+    if parsed["model"] != protocol["model"] or not parsed["model_consistent"]:
         errors.append("served_model_mismatch")
     if case["kind"] == "completion":
         if parsed["completion_tokens"] != case["max_tokens"]:
