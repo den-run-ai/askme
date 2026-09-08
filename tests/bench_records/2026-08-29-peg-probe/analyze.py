@@ -2,9 +2,9 @@
 """Classify only what the archived diagnostic probe actually retained.
 
 The frozen producer's `ok` accepts the first call without checking cardinality,
-the expected tool, or the argument schema. Check the retained shape metadata
-instead. Successful argument values were not retained in full, so even a
-parseable single call is schema-unverified, never proven AskMe acceptance.
+the expected tool, or the argument schema. Check the retained shape and key
+metadata instead. Successful argument values were not retained in full, so
+even a key-valid single call is schema-unverified, never proven AskMe acceptance.
 
 An uncapped parse failure would warrant investigation; it would not, by itself,
 identify an upstream grammar defect. A parse failure at the output cap is
@@ -24,6 +24,20 @@ EXPECTED_TOOLS = {
     "B_long_write_512": "write",
     "B_long_write_2048": "write",
     "C_delimiter_payload": "write",
+}
+
+# Key-only projection of ACTION_SPECS and the native decoder at b45bc873f0173c331e86b1cf3a0b26b19ebf6314.
+# Keep archival interpretation independent of later runtime schema changes.
+# Native arguments exclude `action`, which the decoder supplies from the name.
+ARGUMENT_KEYS = {
+    "read": (
+        frozenset({"arg"}),
+        frozenset({"arg", "offset", "limit", "cursor", "sha256", "reasoning"}),
+    ),
+    "write": (
+        frozenset({"arg", "content"}),
+        frozenset({"arg", "content", "append", "reasoning"}),
+    ),
 }
 
 
@@ -49,8 +63,26 @@ def classify(r):
     # The producer stores None here for a successfully parsed non-object.
     if "arg_keys" not in r:
         return "insufficient_evidence"
-    if not isinstance(r["arg_keys"], list):
+    keys = r["arg_keys"]
+    if keys is None:
         return "action_contract_failure"
+    # The producer emits sorted, unique string keys, or the None sentinel.
+    # Other metadata cannot prove either a valid object or a schema violation.
+    if not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
+        return "insufficient_evidence"
+    fields = set(keys)
+    if len(fields) != len(keys) or keys != sorted(keys):
+        return "insufficient_evidence"
+    tool = EXPECTED_TOOLS[r["arm"]]
+    required, allowed = ARGUMENT_KEYS[tool]
+    if not required <= fields or not fields <= allowed:
+        return "action_contract_failure"
+    # Historical parse_action_envelope also enforces these key-only read rules.
+    if tool == "read":
+        if "cursor" in fields and not {"limit", "sha256"} <= fields:
+            return "action_contract_failure"
+        if "sha256" in fields and "cursor" not in fields:
+            return "action_contract_failure"
     return "parse_ok_schema_unverified"
 
 

@@ -30,8 +30,10 @@ The following corrections supersede their inline prose and the earlier
 - **The producer's `ok` is insufficient.** It parses only the first returned
   call, without requiring exactly one call, the arm's expected tool, or an
   object matching AskMe's action schema. The analyzer now checks retained call
-  count, expected tool name, parse status, and object-shape metadata. It reports
-  detectable mismatches as `action_contract_failure`, even when raw `ok` is true.
+  count, expected tool name, parse status, object shape, and argument-key
+  constraints frozen from the historical action contract. It reports provable
+  mismatches as `action_contract_failure`, even when raw `ok` is true; missing
+  or impossible key metadata remains `insufficient_evidence`.
 - **Full schema validation cannot be reconstructed.** Successful argument values
   were not retained in full: keys and content excerpts cannot establish path,
   field-type, or other action-contract validity. Successful rows are therefore
