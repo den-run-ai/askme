@@ -36,15 +36,15 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 ## Core Files
 
 `askme.py` keeps the CLI, environment/configuration wiring and public
-compatibility surface; `loop.py` owns planning, run state, recording and
-controller sequencing;
+compatibility surface; `loop.py` owns planning, run configuration and
+controller sequencing; `state.py` owns shared run state and the single recorder;
 `llm.py` owns immutable provider settings, codecs and the injectable client;
 `policies.py` owns step strategies, write obligations and completion decisions;
 `actions.py` owns the canonical action registry, handlers and typed receipts.
 There is no framework or new runtime dependency. `askme.py` re-exports shared
 types and adapts its patchable defaults to explicit client settings and sinks.
 `ask_llm()` and `execute()` stay compatible, as do the script entry point and
-structured run API. Importing `llm`, `policies` or `loop` does not load `.env`
+structured run API. Importing `llm`, `policies`, `loop` or `state` does not load `.env`
 or import `askme`. Policies depend only on the action contracts and the standard library;
 validation and legacy call-time timeout defaults enter through explicit
 callbacks. The name `policies` includes selectable strategies as well as shared
@@ -58,8 +58,13 @@ algorithms are not copied into the adapters. `RunState`, its dictionary and
 history, and its single recorder remain shared by identity throughout the run.
 Stable records live with their owning module instead of in a separate catch-all
 records file. The dependency direction is facade → loop/client/policies/actions,
-loop → client/policies/actions, and client/policies → actions; no runtime module
-imports the facade.
+loop → client/policies/state/actions, client/policies → actions, and
+state → actions; no runtime module imports the facade. `state.py` is a leaf
+over action records and the standard library, not a home for policy decisions.
+`loop.RunState` and `loop.StepRecorder` remain re-exports of those same classes;
+the facade adapters and the single shared state/history/recorder identity stay
+intact. This extraction changes ownership, not serialized state or receipt
+semantics.
 
 Within `loop.py`, `_RunController.__init__` sequences four private setup
 stages in place: `_configure_request` resolves the selected request and model

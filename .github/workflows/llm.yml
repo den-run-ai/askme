@@ -71,6 +71,7 @@ on:
       - llm.py
       - policies.py
       - loop.py
+      - state.py
       - tests/**
       - .github/workflows/llm.yml
       - pyproject.toml

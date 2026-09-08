@@ -20,10 +20,11 @@ import askme
 import llm
 import loop
 import policies
+import state
 
 
 def test_loop_import_does_not_load_facade_dotenv_or_infer(tmp_path):
-    for module in (loop, policies, llm, actions):
+    for module in (loop, policies, llm, actions, state):
         shutil.copy(Path(module.__file__), tmp_path)
     (tmp_path / ".env").write_text("ASKME_IMPORT_SENTINEL=loaded\n")
     env = {
@@ -91,6 +92,11 @@ def test_facade_adapters_inherit_every_algorithm_without_copying(name):
     for method_name, method in vars(canonical).items():
         if inspect.isfunction(method) and method_name != "__init__":
             assert getattr(facade, method_name) is method
+
+
+@pytest.mark.parametrize("name", ["StepRecorder", "RunState"])
+def test_loop_keeps_canonical_state_reexports(name):
+    assert getattr(loop, name) is getattr(state, name)
 
 
 def test_run_config_adapter_is_frozen_and_keeps_selected_settings_factory(monkeypatch):

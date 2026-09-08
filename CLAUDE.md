@@ -15,7 +15,8 @@ AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
 entry point remains `python3 askme.py`; the runtime is split between `askme.py`
 (CLI, environment/configuration wiring, compatibility facade), `loop.py`
-(planning, run state, controller sequencing, recording), `llm.py` (provider
+(planning, run configuration and controller sequencing), `state.py` (shared
+run state and the single step recorder), `llm.py` (provider
 settings, client, response codecs), `policies.py` (step, write-obligation and
 completion decisions), and `actions.py` (action registry,
 handlers, typed results/receipts), and its longest functions should keep shrinking.
@@ -45,10 +46,14 @@ Start with:
   and re-exports, the public structured `run_result(...)` API, and the
   compatibility `run(...) -> bool`, `ask_llm(...)` and `execute(...)` APIs
 - `loop.py` — planner/executor sequencing, controller-owned `done`/`fail`,
-  one step recorder and shared run state, prompt builders, recovery proposals,
+  prompt builders, recovery proposals,
   immutable `RunConfig`/injectable `RunDependencies`, and workspace ownership.
   Explicit defaults and collaborators enter from the facade; no back-imports
   or module-global rebinding may replace that boundary.
+- `state.py` — `RunState` and the single `StepRecorder`, sharing the live
+  compatibility dictionary and history. This leaf imports only action records
+  and the standard library; it does not own policy decisions. `loop` re-exports
+  both classes so existing imports and facade adapters remain compatible.
 - `llm.py` — immutable provider settings, request/response codecs, transport,
   retry policy, and the injectable client; never imports the CLI facade or
   loads `.env`. `askme` adapts legacy call-time configuration and re-exports

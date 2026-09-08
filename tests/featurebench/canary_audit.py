@@ -25,7 +25,7 @@ REQUIRED_CODE_FILES = {
     "tests/featurebench/askme_adapter.py",
     "tests/featurebench/canary_audit.py",
 }
-RUNTIME_MODULES = ("askme", "actions", "llm", "policies", "loop")
+RUNTIME_MODULES = ("askme", "actions", "llm", "policies", "loop", "state")
 
 
 def runtime_source_paths(askme_source: Path) -> dict[str, Path]:

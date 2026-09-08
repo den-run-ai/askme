@@ -63,6 +63,7 @@ def test_every_runtime_module_is_type_checked_covered_and_triggers_ci():
 
     from featurebench.canary_audit import RUNTIME_MODULES
 
+    assert "state" in RUNTIME_MODULES
     project = PYPROJECT.read_text(encoding="utf-8")
     ty_source = project.split("[tool.ty.src]", 1)[1].split("[tool.coverage.run]", 1)[0]
     assert '"*.py"' in ty_source
