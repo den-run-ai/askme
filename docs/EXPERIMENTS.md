@@ -242,9 +242,9 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   profile, isolated worktree at `d0c2826b`; hard deferred by owner decision):
   json 14/18 pytest / 15/18 agent-complete, tools 12/18 / 12/18 — the gap is
   two trials on n=18 against a baseline whose same-weights swing spans 22/27
-  (E23) to 14/18 (this run). All 36 trials contract-valid; the tools arm
-  produced zero malformed tool calls, and every tools failure is one of the
-  two documented QAT classes (content drift; duplicate-action loops after
+  (E23) to 14/18 (this run). All 36 trials passed the recorded run contract.
+  Observed tools failure trajectories included the documented QAT classes
+  (content drift; duplicate-action loops after
   completed work — both failed `fix_missing_include` trials had the fix
   landed and the binary running before duplicate-action loops exhausted the run). Tools took
   the loop-prone `create_missing_file_then_use` 3/3 (json 1/3 with an 800s
@@ -264,11 +264,14 @@ Updated 2026-05-03 based on experience.md qualitative runs (7 live sessions agai
   complete call voids the whole parse; no escape for the `<|"|>` string
   delimiter) and [#25072](https://github.com/ggml-org/llama.cpp/issues/25072)
   (stale-closed, fix PR #25100 unmerged). The implicated grammar rules were
-  verified unchanged on master `57291f264`. This does **not** retroactively weaken
-  the E25 verdict, and the existing evidence is stronger than the issue text might
-  suggest: counting the hard-suite addendum, the tools arm ran 27 real agent
-  trials across easy+medium+hard, **every one contract-valid with zero malformed
-  tool calls**. These were real agent trajectories, but `get_step()` sends only
+  verified unchanged on master `57291f264`. The historical owner adoption
+  decision above is not a response-level parser qualification: counting the
+  hard-suite addendum, the tools arm ran 27 real agent trials across
+  easy+medium+hard, all passing the recorded metadata, usage, model/provider
+  route, capability-profile and config-hash checks. **Run-contract validity does
+  not measure malformed-call incidence**: raw replies and typed decoder failures
+  were not retained, and retry attempts do not identify their causes. These were
+  real agent trajectories, but `get_step()` sends only
   system and current user/state messages; it does not replay prior assistant
   tool calls or tool results. The separate PEG probe used synthetic tool history,
   so neither record qualifies the other request shape. The residual exposure

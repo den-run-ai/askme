@@ -280,21 +280,26 @@ deferred (owner decision) — this comparison covers easy+medium only.
 
 **Findings.**
 
-1. **No transport-level failures.** All 36 trials were contract-valid; the
-   tools arm produced zero malformed, corrupted, or unparseable tool calls.
-   Every tools failure is one of the two documented QAT behavior classes
+1. **Run-contract validity is not response-level parser evidence.** All 36
+   trials passed the recorded metadata, usage, model/provider route,
+   capability-profile and config-hash checks. Run-contract validity does not
+   measure malformed-call incidence: raw replies and typed decoder failures
+   were not retained, and retry attempts do not identify their causes.
+   Observed tools failure trajectories included documented QAT behavior classes
    (E20/E07 dispositions): content drift on rewrites
    (`fix_python_syntax_error`, bad on both arms — json 1/3, tools 0/3) and
    duplicate-action loops. Both failed tools `fix_missing_include` trials
    completed the work — compile fixed, binary built and ran — then exhausted
    while repeating the same previously successful shell; the stuck guard
    and terminal exhaustion reported them correctly.
-2. **The classes redistributed, not multiplied.** Tools lost trials on
+2. **Observed terminal failure patterns.** Tools lost trials on
    `fix_missing_include`/`multi_step_build` to duplicate-action loops; json lost
    `create_missing_file_then_use` to the same class (one 800.3s exhaustion
    spiral). Net −2 pytest for tools on n=18 against a baseline whose own
    day-to-day swing on identical weights spans 22/27 (E23) to 14/18 (this
-   run) — inside run-to-run variance, and no new failure class.
+   run). The original comparison interpreted that gap as within run-to-run
+   variance; these records do not establish an exhaustive response-level
+   failure taxonomy.
 3. **Tools runs are tighter.** Worst tools wall 547s vs json 800s; tools took
    the loop-prone `create_and_read_file` with zero retries/replans at a 61–78s
    range where json spread 44–281s. Easy-suite decode overhead from grammar
@@ -305,7 +310,8 @@ deferred (owner decision) — this comparison covers easy+medium only.
    industry-aligned — the JSON executor transport was removed (interface
    revision 6, workflow protocol revision 7). The duplicate-action loop class
    was observed under both transports and remains the sanctioned #31 lifecycle-arm
-   target.
+   target. This preserves the dated owner adoption decision, not a formal
+   statistical non-inferiority or reliability estimate.
 
 Raw records: [tests/bench_records/2026-08-04/](../tests/bench_records/2026-08-04/)
 — per-arm summaries, per-trial JSONL, pytest diagnostics, and the provenance
@@ -332,13 +338,14 @@ hung and blocked the harness's 1200s subprocess kill via inherited pipes —
 process-group cleanup before the next long bench. (3) All three tools build
 failures are one semantic loop — repeated `cc -o main main.c msg.h` (clang
 rejects the header as a second output) that E05 thinking escalation never
-broke; a recovery-policy gap, not a transport failure (every trial remained
-contract-valid with zero malformed tool calls, hard included). (4) One
+broke; a recovery-policy target, with any contribution from intermediate
+decoder failures unmeasured. All 27 tools trials, hard included, passed the
+recorded run contract; this is not a malformed-call incidence measurement. (4) One
 `multi_step_recovery` tools trial passed pytest while ending `exhausted` —
 the duplicate-action exhaustion class again. The all-suite gap (18/27 vs 21/27)
-stays
-within the same two-plus-one known behavior classes; the shipped
-non-inferiority verdict stands on pass-rate shape, but hard is tools'
+has observed terminal outcomes fitting the known behavior patterns; the historical
+shipped non-inferiority verdict was based on pass-rate shape, not measured parser
+reliability. Hard is tools'
 weakest suite and the `cc` recovery loop is a concrete new data point for
 the #31 lifecycle / recovery-policy arms.
 

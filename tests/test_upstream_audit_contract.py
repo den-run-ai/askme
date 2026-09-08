@@ -1,8 +1,52 @@
 """Keep a dated upstream diagnostic separate from current runtime claims."""
 
+import json
+from collections import Counter
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_e25_run_contract_and_retry_evidence_do_not_supply_response_bodies():
+    records = ROOT / "tests/bench_records/2026-08-04/tools"
+    validity = []
+    for path in sorted(records.glob("*/summary.json")):
+        summary = json.loads(path.read_text())
+        validity.extend(
+            valid for test in summary["tests"].values() for valid in test["contract_valid"]
+        )
+    assert validity == [True] * 27
+
+    logs = sorted(records.glob("*/*.jsonl"))
+    assert len(logs) == 27
+    rows = [json.loads(line) for path in logs for line in path.read_text().splitlines()]
+    attempts = Counter(row["attempt"] for row in rows if row["event"] == "tokens")
+    assert attempts == {0: 530, 1: 20, 2: 9}
+    assert all(
+        not {"raw_response", "response_body", "tool_calls"}.intersection(row) for row in rows
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "heading"),
+    [("EXPERIMENTS.md", "### E25 —"), ("PERFORMANCE.md", "## E25 Transport A/B")],
+)
+def test_e25_docs_separate_run_contract_from_unmeasured_malformed_call_incidence(document, heading):
+    section = (ROOT / "docs" / document).read_text().split(heading, 1)[1]
+    text = " ".join(section.split("\n##", 1)[0].split())
+    for unsupported in (
+        "zero malformed",
+        "No transport-level failures.",
+        "not a transport failure",
+        "Every tools failure is one of",
+        "every tools failure is one of",
+    ):
+        assert unsupported not in text
+    assert "Run-contract validity does not measure malformed-call incidence" in text
+    assert "raw replies and typed decoder failures were not retained" in text
+    assert "retry attempts do not identify their causes" in text
 
 
 def test_architecture_never_equates_e25_with_synthetic_tool_history():
