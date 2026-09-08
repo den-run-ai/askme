@@ -2,7 +2,7 @@
 
 **Status:** reviewer-facing source of truth for seven main slides plus one backup
 
-**Last updated:** 2026-08-01
+**Last updated:** 2026-09-08 (corrected publication edition)
 
 **Purpose:** prevent narrative and evidence drift between slide revisions
 
@@ -37,7 +37,9 @@ completed work, and checking the delivered workflow independently.
 
 Define AskMe on slide 2 before using its name as shorthand: it is an
 experimental coding-agent harness that keeps an explicit plan, asks the model
-for one structured action per turn, executes it, and returns focused evidence.
+for one native tool call per turn, executes it, and returns focused evidence.
+The current interface has six executable actions plus controller-owned `done`
+and `fail`; it is distinct from the historical experiment interfaces.
 AskMe's specific design seam is:
 
 > keep the contract → choose one small action → execute/test → interpret fresh
@@ -51,18 +53,19 @@ visible monologues are not themselves the goal.
 
 Keep one explicit evidence chain visible across the last three slides:
 
-1. **Current experiment:** four hosted models × two deliberately simple harness
+1. **Historical July 10 experiment:** four hosted models × two deliberately simple harness
    checks × one unseeded, sequential run per cell.
 2. **Observed result:** all eight agents reported completion; seven artifacts
    passed independent acceptance; the retained Qwen3.6-35B-A3B action record
    shows a combined compile-and-run command at the wrong path exiting zero.
-3. **External boundary probe:** on one qualified FeatureBench-fast task, the
-   Gemma 4 31B trajectory made four reads but no write, produced an empty patch,
-   and remained unresolved because proposed structured writes exceeded the
-   action budget or were malformed.
-4. **Supported conclusion:** the harness exposed two distinct boundaries: one
-   wrong delivered artifact and one feature-scale action that never reached
-   execution.
+3. **Historical external boundary probe:** on one qualified FeatureBench-fast
+   task, revision 2 left both cells with empty patches for different reasons.
+   After bundled revision-3 changes and a changed serving stack, both August 1
+   attempts left applying but unresolved patches: 11/13 target tests for Gemma
+   and 7/13 for Qwen under post-run held-out scoring. Neither ran the target
+   tests; both agents exhausted their planning attempts.
+4. **Supported conclusion:** action success, agent completion, and accepted
+   artifacts are distinct. The changed outcomes do not isolate a harness effect.
 5. **Unresolved:** readiness, reasoning-policy benefit, model speed or
    reliability, Qwen versus Gemma, dense versus MoE, and larger versus smaller.
 
@@ -96,7 +99,7 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   complexity from repeated evidence.
 - Provider names, pytest mechanics, routing flags, and similar audit details
   belong in the appendix/eval documentation, not the five-minute narrative.
-- The current acceptance check scored the artifact after the run; its failure was
+- The historical acceptance check scored the artifact after the run; its failure was
   not returned to AskMe for another correction. Feeding a focused acceptance
   failure back into the loop while retaining a held-out scorer is future harness
   work, not a feature of the published smoke.
@@ -127,12 +130,13 @@ Do not collapse these four levels into a single "the smoke validates" claim.
   are identical; the issue-15 local-neutrality bar was waived, so no
   local-neutrality claim is licensed for revision 3; and three frozen Codex P2
   findings caveat Qwen mechanism-level write-forcing counts. Both agents
-  exhausted without `done`, but their failure modes differed: Gemma rewrote one
-  file 18 times without testing, while Qwen wrote once and returned to
+  exhausted their planning attempts, but their failure modes differed: Gemma rewrote one
+  file 18 times without running target tests, while Qwen wrote once and returned to
   observation. The
   revision-4 counterpart (validate-after-write pressure, rewrite damping, an
-  unvalidated-write replan flag) is future work in progress and is never
-  presented as done.
+  unvalidated-write replan flag) has since landed. Its implementation does not
+  establish an outcome improvement. The current native-tool interface is
+  revision 6; these historical canaries do not validate it.
 
 ## Seven main slides plus one backup
 
@@ -189,24 +193,23 @@ the full boundary language lives in the eval receipts.
 
 ### 6. FeatureBench progression and next bottleneck
 
-Give the slide one job: state the plain result — both models build partially
-working app features but fail on testing.
+Give the slide one job: describe applied but unresolved patches on one feature
+task without converting two historical attempts into general capability claims.
 
-1. **Before — July:** the frozen FeatureBench-fast canary produced zero writes,
-   an empty patch, and an unresolved task.
+1. **Before — July:** revision 2 left both cells with zero writes and empty
+   patches, for different reasons. Do not say the interface blocked every edit.
 2. **After — Aug 1:** under the revision-3 bundle and a changed serving stack,
-   both attempts produced patches that applied. Gemma reached 11/13 target
-   tests; Qwen reached 7/13.
-3. **Next bottleneck:** neither attempt validated and finished cleanly. Gemma
-   rewrote 18 times without testing; Qwen wrote once and returned to reading;
-   neither emitted `done`.
+   both attempts produced patches that applied. Held-out scoring found 11/13
+   target tests passing for Gemma and 7/13 for Qwen.
+3. **Remaining gaps:** neither ran the target tests; both agents exhausted their
+   planning attempts. Gemma
+   rewrote one file 18 times; Qwen wrote once and returned to reading.
 
-State the supported observation directly: AskMe now reaches applied, partially
-working FeatureBench code on this canary. The stage caveat is one short line —
-one task, one attempt per model, not a benchmark score — so the progression
-does not read as a FeatureBench score; the serving-stack and mechanism caveats
-stay in companion documents. The retained wrong-path smoke example belongs on
-slide 3 and should not compete with this story.
+State the observation in the past tense. The publication correction supersedes
+"AskMe now reaches applied, partially working FeatureBench code": the results
+belong to revision 3, not the current interface. Keep one task, one attempt per
+model, and no causal attribution visible. The retained wrong-path smoke example
+belongs on slide 3 and should not compete with this story.
 
 Keep research sequencing off the stage. The presentation is not blocked on the
 unfinished native reasoning-policy A/B. The detailed evaluation roadmap remains
@@ -217,9 +220,10 @@ in issue #2 and the companion material.
 Return to the title question. The bounded answer is that small LLMs are
 promising for bounded coding loops, while realistic feature readiness is not
 demonstrated. Treat readiness as a property of the model, harness, task, and
-evaluator together. The current evidence shows meaningful progress from empty
-to applied patches and exposes validation and termination as the next harness
-problems; it does not validate a transport-only causal benefit or settle
+evaluator together. The historical evidence records a change from empty
+to applied patches and exposes target-test execution and termination gaps in
+those attempts. Bundled changes and a changed serving stack prevent causal
+attribution; it does not validate a transport-only causal benefit or settle
 general model readiness.
 
 ### 8. Backup: AskMe, pi, and OpenHands
@@ -227,13 +231,18 @@ general model readiness.
 Compare only three technical dimensions: model-facing action surface,
 state/control, and completion/acceptance boundary. The purpose is to show how a
 harness changes the work left to the model. State that this is a trade-off, not
-a ranking. Use current primary project documentation and keep company, cloud,
-and enterprise positioning off the slide.
+a ranking. Use primary project documentation checked on the publication date and keep
+company, cloud, and enterprise positioning off the slide. AskMe has eight native
+tools (six executable actions plus `done` and `fail`). A requested but unavailable
+final validator produces `complete_unverified`, not a passing validation.
+External acceptance stays separate.
 
 ## Visual and editorial constraints
 
-- Exactly eight rendered slides: seven main slides with exactly 511 speaker-note
-  words in total, followed by one backup slide without a main-talk note block.
+- Exactly eight rendered slides: seven main slides with 450–650 spoken words
+  in total, followed by one backup slide without a main-talk note block.
+  `SPEAKER_NOTES.md` is canonical; inline prose and source blocks must match it.
+  Sources are not counted as spoken words.
 - Stage slides carry no PR or issue numbers; receipts and protocol pointers
   live in the talk README and evals documents.
 - Main slides carry at most one short caveat line and no source footers; the
@@ -248,6 +257,14 @@ and enterprise positioning off the slide.
 - Keep audit mechanics in sources or the companion documents.
 
 ## Feedback ledger and precedence
+
+- The 2026-09-08 publication pass supersedes stale claims in the August deck:
+  show one native tool call and eight tools, name the historical experiment
+  dates, restrict feature claims to the two observed attempts, and remove
+  causal attribution to harness design. Update source and PDF together.
+  Synchronize inline notes with the corrected canonical delivery script rather
+  than preserving a second historical script or an arbitrary exact word count.
+  Keep the recording linked as the historical delivery with errata.
 
 - The latest instruction makes slide 1 an author/title introduction. This
   supersedes the earlier request to place a structured steps/plan/actions table
@@ -316,8 +333,8 @@ and enterprise positioning off the slide.
       the repository receipts rather than the stage slide.
 - [ ] The supported harness conclusion is distinct from unsupported size,
       family, architecture, reasoning, reliability, and local-speed claims.
-- [ ] Slide 6 leads with the plain result: both models build partially working
-      app features (Gemma 11/13, Qwen 7/13 target tests) but fail on testing.
+- [ ] Slide 6 reports historical applied but unresolved patches on one task
+      (Gemma 11/13, Qwen 7/13 target tests), with no general capability claim.
 - [ ] Slide 6 separates that progress from the remaining validation and clean
       termination failures.
 - [ ] Slide 6 labels the canary one task, one attempt/model, and not a score.
@@ -333,9 +350,9 @@ and enterprise positioning off the slide.
 - [ ] Any v6 comparison to v4 or the pi ablation carries the serving-stack
       confound, the waived local-neutrality bar, and the Codex P2 caveats in
       companion documents.
-- [ ] No PR or issue numbers appear on any slide; revision-4 status stays in
-      companion documents and is never presented as done.
+- [ ] No PR or issue numbers appear on any slide; later implementation status
+      stays distinct from historical outcome evidence.
 - [ ] Main slides have no source footers and at most one short caveat line.
 - [ ] Backup slide 8 compares AskMe, pi, and OpenHands without a product ranking.
-- [ ] Eight slides render without clipping; the seven main speaker-note blocks
-      total 511 words.
+- [ ] Eight slides render without clipping; the seven inline spoken-note
+      blocks match the canonical script and total 450–650 words, excluding sources.

@@ -15,6 +15,49 @@ exact base SHAs and other provenance limits.
 
 For architecture decisions and current constraints see [ARCHITECTURE.md](ARCHITECTURE.md). For model/server config see [gemma4-setup.md](gemma4-setup.md). For the active experiment backlog that feeds future Phase entries here, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
+## Research-preview candidate snapshot — 2026-09-08
+
+This status entry describes candidate revision
+[`2293d49`](https://github.com/den-run-ai/askme/commit/2293d49ab984b1575ef88c7b9b00b1d40e2d1fcc),
+after PRs #100–#103, #96, #89, #47, and #98 merged. It introduces no new model
+measurement. Historical tables below retain their original revisions and
+protocol limits.
+
+The candidate fixes cross-attempt verification suppression, records accepted
+`done`/`fail` control claims, bundles both pinned FeatureBench runtime modules,
+and bounds cleanup of owned POSIX subprocess groups. It also records actual
+benchmark trial time, watches `actions.py` in the LLM workflow, and adds macOS
+offline tests and a local-server contract lane. Deterministic regressions cover
+fresh verification, same-attempt loops, control receipts, clean-container
+imports, dependency tampering, and timeout cleanup. These fixes do not establish
+an improvement in live-model completion rates.
+
+<!-- RELEASE_GATE: Refresh integrated checks and append the frozen macOS canary outcome before tagging. -->
+
+[Integrated Linux CI](https://github.com/den-run-ai/askme/actions/runs/34173996684)
+passed. The [OpenRouter health check](https://github.com/den-run-ai/askme/actions/runs/34173996654)
+passed its protocol job, while the Gemma smoke suite passed 1/3 cases and
+exhausted on the other two. These outcomes are retained without selective reruns.
+The initial integrated macOS run found platform regressions tracked in
+[#105](https://github.com/den-run-ai/askme/issues/105); native confirmation of
+the fixes is pending in [#106](https://github.com/den-run-ai/askme/pull/106). The predeclared external real-repository macOS canary has
+not yet produced a retained result. Record its exact runner hardware,
+AskMe/task/model/server revisions, configuration, controls, and every trial
+before using it as current-revision evidence. A macOS runner alone does not
+reproduce the 16 GB M1 reference deployment; a hosted health check does not
+measure local performance or reliability.
+
+The September 7 [scheduled LLM run](https://github.com/den-run-ai/askme/actions/runs/34152793007)
+used earlier `fcd5bc0`. Credential preflights passed; the smoke gate and the
+Gemma protocol cell failed, while the Qwen protocol cell passed. Those failures
+remain historical evidence and cannot be called resolved by the offline fixes.
+
+The release claim remains narrow: useful bounded coding examples exist;
+reliable feature work and causal harness benefits remain unestablished. A
+single predeclared external task will be published regardless of outcome,
+without turning it into a reliability, model-family, or model-size result.
+See the [draft preview notes](releases/v0.1.0.md) and [#85](https://github.com/den-run-ai/askme/issues/85).
+
 ## Web Showcase 3-Trial Matrix — 2026-08-04, OpenRouter (three small-active-class models)
 
 First multi-trial measurement of the showcase web suite
@@ -223,7 +266,7 @@ First local benchmark on the current stack (E23): build 9618 `c34b92235`, offici
 
 | Test | Pass | Wall (median) | Apr baseline | Replans | Notes |
 |---|---|---|---|---|---|
-| `create_and_read_file` | **1/3** | 95.5s (15.0–137.4) | 33.7s, 3/3 | 2 full in each failed trial | Both failures: all steps succeeded, deliverable correct, model never emitted `done` — duplicate-action loops (5–6 skips) until exhaustion |
+| `create_and_read_file` | **1/3** | 95.5s (15.0–137.4) | 33.7s, 3/3 | 2 full in each failed trial | Both failures: recorded executed steps succeeded and the deliverable was reported correct, but duplicate-action loops (5–6 skips) exhausted the run. Old JSONL omitted accepted control receipts, so absent `done` records do not establish absent emissions. |
 | `shell_and_write` | 3/3 | 15.8s (15.4–17.9) | 20.1s | 0 | −21%, clean |
 | `multi_step_build` | 3/3 | 43.8s (35.6–53.7) | 118.7s | **0** (baseline: 1 every trial) | −63%, zero replans, zero thinking retries |
 

@@ -8,9 +8,11 @@ release preparation) — offline fixture qualification in
 proposals. Historical hosted outcomes are in [PERFORMANCE.md](PERFORMANCE.md).
 The [later local evaluation](https://github.com/den-run-ai/askme/pull/89#issuecomment-5187957872)
 reported 11 runs and 2 strict passes; shipped-profile repair runs could land
-correct artifacts yet exhaust without `done`. Treat this as a negative local
-demo until a new registered evaluation demonstrates otherwise. A single CI
-run is a health check, not a reliability estimate.
+correct artifacts yet exhaust without reaching agent completion. Those older
+JSONL records omitted accepted `done`/`fail` control receipts, so their absence
+does not establish that the model never emitted `done`. Treat this as a
+negative local demo until a new registered evaluation demonstrates otherwise.
+A single CI run is a health check, not a reliability estimate.
 
 ## Why a new task family
 
@@ -65,11 +67,12 @@ These are current-code constraints, not preferences:
   2/5/8 (`max_replans`/`max_tasks`/`max_steps`, `tests/_test_support.py`);
   runtime defaults are 3/10/10.
 - **Known small-model failure modes to watch** (E23 evidence in
-  `EXPERIMENTS.md`): done-emission loops (work correct, `done` never
-  emitted) and content drift on whole-file rewrites. Mitigations below:
-  every test prints a unique sentinel so "finish when it prints X" gives
-  crisp completion evidence, and acceptance pins exact sentinel strings so
-  drift fails deterministically.
+  `EXPERIMENTS.md`): repeated-action loops and exhaustion despite correct
+  artifacts, plus content drift on whole-file rewrites. The historical label
+  "done-emission loop" does not prove that no `done` was emitted: those logs
+  omitted accepted control receipts. The sentinel below is a completion cue
+  to evaluate, not a demonstrated cure. Acceptance pins exact sentinel strings
+  so drift fails deterministically.
 
 ## T1 — flagship: loopback micro-service, built and proven end-to-end
 
