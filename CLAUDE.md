@@ -15,7 +15,8 @@ AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
 entry point remains `python3 askme.py`; the runtime is split between `askme.py`
 (CLI, compatibility facade, controller loop, recording), `llm.py` (provider
-settings, client, response codecs), and `actions.py` (action registry,
+settings, client, response codecs), `policies.py` (step, write-obligation and
+completion decisions), and `actions.py` (action registry,
 handlers, typed results/receipts), and its longest functions should keep shrinking.
 Preserve the simple CLI and compatibility surfaces while following the cohesive,
 behavior-preserving extraction work tracked in the issue roadmap below.
@@ -51,6 +52,10 @@ Start with:
 - `actions.py` — action registry (`ACTION_SPECS`), the six handlers behind
   `ActionExecutor`, workspace-path/output policies, error classification, and the
   typed `ActionResult`/`StepReceipt` structures
+- `policies.py` — selectable step strategies, run-wide incomplete-write
+  obligations, validation state and terminal decisions. Model validation and
+  legacy call-time timeout defaults enter through explicit callbacks; this
+  module imports neither the CLI facade nor the provider client.
 - `tests/test_agent_*.py` — deterministic unit and action/controller regression tests
 - `tests/test_agent_integration.py` — local and OpenRouter integration suites
 - `tests/workflow_eval.py`, `tests/test_workflow_*.py`, `tests/workflows/` — native

@@ -37,11 +37,16 @@ A deterministic `preflight_probe()` runs once before the first plan: platform, a
 
 `askme.py` keeps the CLI, controller and public compatibility surface;
 `llm.py` owns immutable provider settings, codecs and the injectable client;
+`policies.py` owns step strategies, write obligations and completion decisions;
 `actions.py` owns the canonical action registry, handlers and typed receipts.
 There is no framework or new runtime dependency. `askme.py` re-exports shared
 types and adapts its patchable defaults to explicit client settings and sinks.
 `ask_llm()` and `execute()` stay compatible, as do the script entry point and
-structured run API. Importing `llm` does not load `.env` or import `askme`.
+structured run API. Importing `llm` or `policies` does not load `.env` or import
+`askme`. Policies depend only on the action contracts and the standard library;
+validation and legacy call-time timeout defaults enter through explicit
+callbacks. The name `policies` includes selectable strategies as well as shared
+invariants; it does not imply host-level security enforcement.
 
 The extraction is checked against frozen pre-move public names, signatures,
 CLI help and nine offline whole-run transcripts: model-visible calls,
