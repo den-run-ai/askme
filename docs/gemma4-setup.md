@@ -1,6 +1,7 @@
 # Gemma 4 E4B — Legacy Capability-Profile Reference
 
-Mac M1 16GB. Last updated 2026-08-04. This guide describes the explicit
+Mac M1 16GB. Reference status recorded 2026-08-04; headline evidence caveat
+corrected 2026-09-07. This guide describes the explicit
 `legacy-e4b-m1-16k-v1` AskMe profile; it is not the generic runtime default.
 
 **Current local build:** `c34b92235` (build 9618, master as of 2026-06-13; pulled + rebuilt 2026-06-12). Includes all Phase 6 fixes plus, from the `a702f395 → c34b92235` delta: **Gemma 4 MTP speculative decoding** ([#23398](https://github.com/ggml-org/llama.cpp/pull/23398) for 31B/26B-A4B, [#24282](https://github.com/ggml-org/llama.cpp/pull/24282) for E2B/E4B assistants), the **state-save fix [#23468](https://github.com/ggml-org/llama.cpp/pull/23468) that makes Gemma 4 cache reuse fully reliable** (build ~9484), SWA checkpoint improvements (#23981, #24110, #24411), structured-output parser fix (#22302), fast Walsh-Hadamard KV rotation (#22631), Gemma4ForCausalLM conversion (#23682), and the 12B Unified conversion fix (#24118). PERFORMANCE.md local baselines predate this binary — see the build caveat there.
@@ -18,7 +19,7 @@ Mac M1 16GB. Last updated 2026-08-04. This guide describes the explicit
 | Model | File | Size | Architecture | GPU | Status |
 |-------|------|------|-------------|-----|--------|
 | **Gemma 4 E4B** Q4_K_M | `models/gemma4-e4b/gemma-4-e4b-it-Q4_K_M.gguf` | ~5.0 GB | Dense PLE, 4.5B effective / 8B incl. embeddings, iSWA | Full Metal | Pre-refresh (2026-04-06) — legacy |
-| **Gemma 4 E4B QAT Q4_0** | `models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf` | 5.15 GB | Same, quantization-aware-trained, post-refresh weights | Full Metal | **Primary** (promoted 2026-08-03) — E23 full bench: hard 9/9 at −38–66% wall, `fix_missing_include` 39× faster, thinking retries near-zero. Two known quirks (done-emission loops; content drift on rewrites) recorded in ARCHITECTURE.md Current Constraints. See [PERFORMANCE.md E23 entry](PERFORMANCE.md#e23-qat-baseline--2026-08-03-local-build-9618-official-e4b-qat-q4_0) |
+| **Gemma 4 E4B QAT Q4_0** | `models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf` | 5.15 GB | Same, quantization-aware-trained, post-refresh weights | Full Metal | **Primary reference** (promoted 2026-08-03). E23's hard 9/9 and speedups are historical, not current capability claims: the 2026-08-04 E25 addendum did not reproduce 9/9 (JSON 7/9; tools 6/9). The `fix_missing_include` speedup includes the enabled deterministic C-header repair (#41), not model-only improvement. See [PERFORMANCE.md](PERFORMANCE.md) for the retraction, infrastructure caveats, and retained results; done-emission loops and rewrite drift remain known constraints. |
 
 - **iSWA** (Interleaved Sliding Window Attention) — 3 sliding-window layers + 1 global attention layer, repeating
 - Per-Layer Embeddings (PLE) make the file ~8B-sized despite 4.5B effective params

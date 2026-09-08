@@ -160,7 +160,7 @@ def test_llm_workflow_is_opt_in_for_pull_requests():
 def test_llm_workflow_tracks_locked_dependencies_and_uses_uv_cache():
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     push_block = text.split("  push:", 1)[1].split("  pull_request:", 1)[0]
-    for path in ("pyproject.toml", "uv.lock"):
+    for path in ("askme.py", "actions.py", "tests/**", "pyproject.toml", "uv.lock"):
         assert f"- {path}" in push_block
     assert "requirements" not in text
     assert text.count("uv sync --locked") == 2

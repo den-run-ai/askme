@@ -45,6 +45,7 @@ on:
     branches: [main]
     paths:
       - askme.py
+      - actions.py
       - tests/**
       - .github/workflows/llm.yml
       - pyproject.toml
