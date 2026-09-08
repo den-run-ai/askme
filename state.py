@@ -4,14 +4,106 @@ This leaf module depends only on action records and the standard library.
 It never loads environment configuration or imports policy, transport or CLI code.
 """
 
+from __future__ import annotations
+
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, TypeVar, overload
 
 from actions import SkippedStep
 
 REWRITE_PRESSURE_WRITES = 2
 REWRITE_SKIP_WRITES = 3
+
+
+_Value = TypeVar("_Value")
+
+
+class _StateField(Generic[_Value]):
+    """One strict field access over the existing compatibility mapping.
+
+    No defaults, coercion, copying or mirrored storage: sparse legacy mappings
+    still raise KeyError at the same access that used to index the dictionary.
+    """
+
+    def __init__(self, key: str):
+        self.key = key
+
+    @overload
+    def __get__(self, instance: None, owner: type) -> _StateField[_Value]: ...
+
+    @overload
+    def __get__(self, instance: RunProgress, owner: type | None = None) -> _Value: ...
+
+    def __get__(self, instance, owner=None):
+        return self if instance is None else instance.data[self.key]
+
+    def __set__(self, instance: RunProgress, value: _Value) -> None:
+        instance.data[self.key] = value
+
+
+@dataclass(frozen=True)
+class PendingWrite:
+    """A newly recorded zero-byte write obligation; legacy records stay intact."""
+
+    name: str
+    append_allowed: bool
+    append_targets: tuple[str, ...]
+    recovery_arg: str
+
+    def describe(self) -> dict[str, Any]:
+        """Historical result/model projection, detached from the typed record."""
+        return {
+            "name": self.name,
+            "append_allowed": self.append_allowed,
+            "append_targets": list(self.append_targets),
+            "recovery_arg": self.recovery_arg,
+        }
+
+
+class RunProgress:
+    """Typed access and mutation ownership over one live compatibility dict.
+
+    This is not a second state store. Fields resolve at use time, so replacing
+    errors/last_steps remains visible; constructing a view never populates a
+    sparse mapping. Owners recreate the view when their mapping is replaced.
+    Receipt and environment dictionaries are documented projection boundaries.
+    """
+
+    errors = _StateField[list[str]]("errors")
+    completed_tasks = _StateField[list[str]]("completed_tasks")
+    completed_step_groups = _StateField[list[list[dict[str, Any]]]]("completed_step_groups")
+    all_steps = _StateField[list[dict[str, Any]]]("all_steps")
+    last_steps = _StateField[list[dict[str, Any]]]("last_steps")
+    selected_steps = _StateField[int]("selected_steps")
+    executed_steps = _StateField[int]("executed_steps")
+    skipped_steps = _StateField[int]("skipped_steps")
+    task_start_step_count = _StateField[int]("task_start_step_count")
+    planning_attempt = _StateField[int]("planning_attempt")
+    current_task = _StateField[str]("current_task")
+    task_index = _StateField[str]("task_index")
+    environment = _StateField[dict[str, Any]]("environment")
+    policy = _StateField[dict[str, bool]]("policy")
+    pending_empty_writes = _StateField[dict[str, Any]]("pending_empty_writes")
+
+    def __init__(self, data: dict[str, Any]):
+        self.data = data
+
+    @property
+    def optional_last_steps(self) -> list[dict[str, Any]]:
+        return self.data.get("last_steps", [])
+
+    @property
+    def optional_all_steps(self) -> list[dict[str, Any]]:
+        return self.data.get("all_steps", [])
+
+    @property
+    def optional_pending_empty_writes(self) -> dict[str, Any]:
+        return self.data.get("pending_empty_writes", {})
+
+    def set_pending_write(self, target: str, record: PendingWrite) -> None:
+        self.pending_empty_writes[target] = record.describe()
 
 
 def _ignore(*_args, **_kwargs):
@@ -39,11 +131,15 @@ class StepRecorder:
     def _event(self, event):
         self._event_sink(event)
 
+    @property
+    def progress(self) -> RunProgress:
+        return RunProgress(self.state)
+
     def selected(self):
-        self.state["selected_steps"] += 1
+        self.progress.selected_steps += 1
 
     def executed(self):
-        self.state["executed_steps"] += 1
+        self.progress.executed_steps += 1
 
     def control(self, task_index, step, act):
         """Record an accepted model control action, never execution evidence.
@@ -58,7 +154,7 @@ class StepRecorder:
 
     def skip(self, task_index, step, act, action, reason):
         """Record a selected-but-not-dispatched action in run metrics + log."""
-        self.state["skipped_steps"] += 1
+        self.progress.skipped_steps += 1
         record = SkippedStep(
             task_index=task_index,
             step=step,
@@ -71,20 +167,20 @@ class StepRecorder:
     def note(self, entry):
         """Model-visible corrective observation: enters the sliding window
         only, never the run-wide structured record or the JSONL log."""
-        self.state["last_steps"].append(entry)
+        self.progress.last_steps.append(entry)
 
     def record(self, receipt, task_index, step, wall_s=None):
         """Append a receipt to every projection; returns the live entry."""
         entry = receipt.entry
-        self.state["last_steps"].append(entry)
-        self.state["all_steps"].append(dict(entry))
+        self.progress.last_steps.append(entry)
+        self.progress.all_steps.append(dict(entry))
         self.history.append(receipt.history_event(task_index, step))
         self._event(receipt.jsonl_event(task_index, step, wall_s))
         return entry
 
     def append_recovery_hint(self, hint):
         """Suffix the newest recorded step's output with a recovery hint."""
-        for steps in (self.state["last_steps"], self.state["all_steps"]):
+        for steps in (self.progress.last_steps, self.progress.all_steps):
             steps[-1]["output"] = steps[-1]["output"][:100] + f" → {hint}"
 
 
@@ -147,6 +243,10 @@ class RunState:
         self.started = self.clock()
         self.last_write_target = None
         self.consecutive_target_writes = 0
+
+    @property
+    def progress(self) -> RunProgress:
+        return RunProgress(self.data)
 
     def elapsed(self):
         """Wall seconds since the run started."""

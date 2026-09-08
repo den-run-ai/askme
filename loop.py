@@ -53,6 +53,7 @@ from state import (
 from state import (
     REWRITE_SKIP_WRITES as REWRITE_SKIP_WRITES,
 )
+from state import RunProgress
 from state import (
     RunState as RunState,
 )
@@ -1539,6 +1540,11 @@ class _RunController:
         # construction (issue #69).
         self._budgets = self._config_payload["budgets"]
 
+    @property
+    def progress(self) -> RunProgress:
+        """Live typed access; preserve legacy replacement of controller.state."""
+        return RunProgress(self.state)
+
     def _emit(self, msg):
         """Console line through the injected sink, defaulting to log()."""
         (self._hooks.log if self._log_sink is None else self._log_sink)(msg)
@@ -1635,21 +1641,21 @@ class _RunController:
     def _preflight(self):
         # Preflight: probe environment and set the run's resolved policy
         env = self._hooks.preflight(self.working_dir)
-        self.state["environment"] = env
-        self.state["policy"] = dict(self._policy)
+        self.progress.environment = env
+        self.progress.policy = dict(self._policy)
         self._emit(f"Environment: platform={env['platform']} arch={env['arch']}")
         self._emit(f"Available tools: {env['available_tools']}")
         if env["missing_tools"]:
             self._emit(f"Missing tools: {env['missing_tools']}")
         self._emit(f"Package managers: {env['package_managers']}")
-        self._emit(f"Policy: allow_system_installs={self.state['policy']['allow_system_installs']}")
+        self._emit(f"Policy: allow_system_installs={self.progress.policy['allow_system_installs']}")
 
     def _plan(self, replan):
         """One planning attempt; returns the task list or None on failure."""
         self._emit("=" * 40)
         t_plan = self._clock()
         self._emit(f"Planning (attempt {replan + 1}/{self.max_replans})...")
-        self.state["planning_attempt"] = replan
+        self.progress.planning_attempt = replan
         try:
             plan = self._hooks.get_plan(
                 self.user_prompt,
@@ -1663,7 +1669,7 @@ class _RunController:
             )
         except (LLMTransportError, KeyError) as e:
             self._emit(f"  Planner transport error: {e}")
-            self.state["errors"].append(f"[unknown] Planner transport error: {str(e)[:100]}")
+            self.progress.errors.append(f"[unknown] Planner transport error: {str(e)[:100]}")
             self.history.append({"event": "plan_error", "replan": replan, "error": str(e)[:200]})
             self._event(
                 {
@@ -1682,7 +1688,7 @@ class _RunController:
             parsed = PlanResponse.parse(plan, self.max_tasks)
         if parsed is None:
             error = "[malformed_plan] planner returned no valid tasks"
-            self.state["errors"].append(error)
+            self.progress.errors.append(error)
             self._emit(f"  Planner contract error: {error}")
             self.history.append({"event": "plan_error", "replan": replan, "error": error})
             self._event(
@@ -1695,7 +1701,7 @@ class _RunController:
             )
             return None
         tasks = list(parsed.tasks)
-        self.state["errors"] = []  # reset errors each replan; planner already saw them
+        self.progress.errors = []  # reset errors each replan; planner already saw them
         plan_wall = self._clock() - t_plan
         self._emit(f"Plan ({plan_wall:.1f}s, planner_wall_time={plan_wall:.1f}s): {tasks}")
         self.history.append({"event": "plan", "replan": replan, "tasks": tasks})
@@ -1709,25 +1715,25 @@ class _RunController:
         all_done = True
         for i, task in enumerate(tasks):
             # Carry over last step from previous task so executor has cross-task context
-            prev_last = self.state["last_steps"][-1:] if self.state.get("last_steps") else []
+            prev_last = self.progress.last_steps[-1:] if self.progress.optional_last_steps else []
             t_task = self._clock()
             # Scope for no_write_executed: an earlier task's write must not
             # mask a stall in this one.
-            self.state["task_start_step_count"] = len(self.state["all_steps"])
+            self.progress.task_start_step_count = len(self.progress.all_steps)
             task, task_done, task_steps = self._run_task(i, task, tasks, prev_last)
             if task_done:
                 blocker = self.obligations.completion_blocker()
                 if blocker is not None:
                     incomplete_name, recovery_arg, _append_allowed = blocker
-                    self.state["errors"].append(
+                    self.progress.errors.append(
                         f"[incomplete_write] {incomplete_name} at "
                         f"{recovery_arg}: completion refused"
                     )
                     self._emit(f"  Task completion refused: {incomplete_name} is incomplete")
                     task_done = False
             if task_done:
-                self.state["completed_tasks"].append(task)
-                self.state["completed_step_groups"].append(task_steps)
+                self.progress.completed_tasks.append(task)
+                self.progress.completed_step_groups.append(task_steps)
                 self._emit(f"  Task complete. ({self._clock() - t_task:.1f}s)")
                 self._event(
                     {
@@ -1769,9 +1775,9 @@ class _RunController:
         attempt = self._new_attempt(task)
         saved_errors = []
         for task_attempt in range(1 + self.guards.max_task_local_replans):
-            self.state["current_task"] = task
-            self.state["task_index"] = f"{i + 1}/{len(tasks)}"
-            self.state["last_steps"] = list(prev_last)
+            self.progress.current_task = task
+            self.progress.task_index = f"{i + 1}/{len(tasks)}"
+            self.progress.last_steps = list(prev_last)
             self._emit(f"--- Task {i + 1}/{len(tasks)}: {task} ---")
 
             # Reset per-attempt execution state (the task may be a replacement)
@@ -1796,12 +1802,12 @@ class _RunController:
 
             # E11: try task-local replan before falling through to full replan
             if task_attempt < self.guards.max_task_local_replans:
-                saved_errors = list(self.state["errors"])
+                saved_errors = list(self.progress.errors)
                 t_lr = self._clock()
                 replan = self._hooks.replan_task(
                     task,
-                    self.state["errors"],
-                    self.state["completed_tasks"],
+                    self.progress.errors,
+                    self.progress.completed_tasks,
                     self.state,
                     self.goal_context,
                     goal_context_chars=self.goal_context_chars,
@@ -1826,7 +1832,7 @@ class _RunController:
                     )
                     task = replacement
                     tasks[i] = replacement
-                    self.state["errors"] = []
+                    self.progress.errors = []
                     continue  # retry with replacement
                 else:
                     reject_reason = replan.reject_reason or "unknown"
@@ -1842,11 +1848,11 @@ class _RunController:
                             "reject_reason": reject_reason,
                         }
                     )
-                    self.state["errors"] = saved_errors
+                    self.progress.errors = saved_errors
             else:
                 # Replacement attempt also failed — merge original errors back
                 # so full replan sees both failure contexts
-                self.state["errors"] = saved_errors + self.state["errors"]
+                self.progress.errors = saved_errors + self.progress.errors
             # Fall through — task failed, no more local attempts
             break
         return task, attempt.done, attempt.steps
@@ -1886,7 +1892,7 @@ class _RunController:
             )
         except LLMTransportError as e:
             self._emit(f"  [{step + 1}] LLM transport error ({self._clock() - t_step:.1f}s): {e}")
-            self.state["errors"].append(
+            self.progress.errors.append(
                 f"[unknown] LLM transport error on task '{attempt.task}': {str(e)[:100]}"
             )
             return None
@@ -1904,7 +1910,7 @@ class _RunController:
             else:
                 etype = "unknown"
             self._emit(f"  [{step + 1}] LLM parse error ({self._clock() - t_step:.1f}s) [{etype}]")
-            self.state["errors"].append(
+            self.progress.errors.append(
                 f"[{etype}] LLM parse error on task '{attempt.task}': {str(e)[:100]}"
             )
             self._event(
@@ -1944,7 +1950,7 @@ class _RunController:
             label = raw_name if _valid_nonempty_str(raw_name) else "(no action)"
             envelope = parsed_action.error_type
             self._emit(f"  [{step + 1}] rejected [{envelope}]: {label}")
-            self.state["errors"].append(f"[{envelope}] {label}: {parsed_action.message}")
+            self.progress.errors.append(f"[{envelope}] {label}: {parsed_action.message}")
             self._event(
                 {
                     "event": "step_error",
@@ -1979,7 +1985,7 @@ class _RunController:
         if ctx.act == "fail":
             reason = ctx.action.get("reasoning", "no reason")
             self._emit(f"  FAIL ({self._clock() - ctx.started:.1f}s): {reason}")
-            self.state["errors"].append(f"Task '{attempt.task}': {reason}")
+            self.progress.errors.append(f"Task '{attempt.task}': {reason}")
             self.recorder.control(ctx.task_index, ctx.step, ctx.act)
             return _StepFlow.END_ATTEMPT
         flow = self.obligations.prepare(ctx)
@@ -2116,7 +2122,7 @@ class _RunController:
         if hint:
             err_output = f"{err_output} → {hint}"
             self.recorder.append_recovery_hint(hint)
-        self.state["errors"].append(f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}")
+        self.progress.errors.append(f"[{etype}] {act} {action.get('arg', '')[:60]}: {err_output}")
         attempt.use_think = etype not in _NO_THINK_ERRORS
         attempt.reasoning_trigger = f"execution_error:{etype}"
         return None
