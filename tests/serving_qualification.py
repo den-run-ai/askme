@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+from featurebench.canary_audit import runtime_source_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -326,7 +327,10 @@ def run(protocol, output, *, call=isolated_http, idle=wait_idle):
             "protocol": protocol,
             "registered_at_unix": time.time(),
             "runner_sha256": digest(Path(__file__)),
-            "runtime_sha256": {name: digest(ROOT / name) for name in ("askme.py", "actions.py")},
+            "runtime_discovery_sha256": digest(Path(runtime_source_paths.__code__.co_filename)),
+            "runtime_sha256": {
+                name: digest(path) for name, path in runtime_source_paths(ROOT / "askme.py").items()
+            },
             "python": sys.version,
         },
     )

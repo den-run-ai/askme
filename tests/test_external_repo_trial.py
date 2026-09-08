@@ -288,7 +288,7 @@ def custom_trial(tmp_path):
         protocol="requests-physical-local-v2",
         target_revision=trial.git(source, "rev-parse", "HEAD").strip(),
         harness_revision=trial.git(harness, "rev-parse", "HEAD").strip(),
-        runtime_sha256={name: trial.digest(harness / name) for name in ("askme.py", "actions.py")},
+        runtime_sha256={path.name: trial.digest(path) for path in harness.glob("*.py")},
         api_url="http://127.0.0.1:18090/v1/chat/completions",
         wall_timeout_seconds=93,
         runner="physical-test-machine",
@@ -349,6 +349,31 @@ def test_custom_task_uses_qualified_endpoint_budget_and_retains_one_attempt(
         assert result[field] == case.protocol[field]
     with pytest.raises(FileExistsError):
         trial.run_trial(case.source, case.harness, case.output, case.task_dir)
+
+
+@pytest.mark.parametrize("changed", ["omit", "extra", "traversal"])
+def test_task_protocol_requires_exact_runtime_inventory_before_attempt(custom_trial, changed):
+    case = custom_trial
+    runtime = case.protocol["runtime_sha256"]
+    if changed == "omit":
+        del runtime["actions.py"]
+    else:
+        runtime["../outside.py" if changed == "traversal" else "unregistered.py"] = "0" * 64
+    trial.save(case.task_dir / "protocol.json", case.protocol)
+    with pytest.raises(ValueError, match="pin every runtime module"):
+        trial.prepare(case.source, case.harness, case.output, case.task_dir)
+    assert not (case.output / "trial-started.json").exists()
+
+
+def test_changed_runtime_discovery_blocks_registered_task(custom_trial):
+    case = custom_trial
+    trial.prepare(case.source, case.harness, case.output, case.task_dir)
+    registration = json.loads((case.output / "registration.json").read_text())
+    registration["runtime_discovery_sha256"] = "0" * 64
+    trial.save(case.output / "registration.json", registration)
+    with pytest.raises(ValueError, match="runtime discovery changed"):
+        trial.run_trial(case.source, case.harness, case.output, case.task_dir)
+    assert not (case.output / "trial-started.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["prepare", "run", "worker"])
@@ -443,6 +468,7 @@ def test_committed_repair_is_replayed_against_original_workspace(tmp_path, monke
     protocol = json.loads((trial.TASK / "protocol.json").read_text())
     protocol["target_revision"] = trial.git(source, "rev-parse", "HEAD").strip()
     protocol["harness_revision"] = trial.git(harness, "rev-parse", "HEAD").strip()
+    protocol["runtime_sha256"] = {path.name: trial.digest(path) for path in harness.glob("*.py")}
     output = tmp_path / "records"
     output.mkdir()
     trial.save(output / "protocol.json", protocol)
@@ -452,6 +478,9 @@ def test_committed_repair_is_replayed_against_original_workspace(tmp_path, monke
         {
             "protocol": protocol,
             "runner_sha256": trial.digest(trial.__file__),
+            "runtime_discovery_sha256": trial.digest(
+                trial.runtime_source_paths.__code__.co_filename
+            ),
             "source_sha256": {p.name: trial.digest(p) for p in trial.TASK.iterdir() if p.is_file()},
         },
     )

@@ -16,6 +16,8 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+from featurebench.canary_audit import runtime_source_paths
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 API = "https://openrouter.ai/api/v1/chat/completions"
@@ -187,12 +189,13 @@ def run(protocol, output, *, process_runner=None):
     protocol = resolve_protocol(protocol)
     output.mkdir(parents=True, exist_ok=False)
     save(output / "protocol.json", protocol)
-    hashes = {name: digest(ROOT / name) for name in ("askme.py", "actions.py")}
+    hashes = {name: digest(path) for name, path in runtime_source_paths(ROOT / "askme.py").items()}
     registration = {
         "protocol_sha256": digest(output / "protocol.json"),
         "protocol": protocol,
         "runner_sha256": digest(Path(__file__)),
         "request_guard_sha256": digest(ROOT / "tests" / "external_repo_trial.py"),
+        "runtime_discovery_sha256": digest(Path(runtime_source_paths.__code__.co_filename)),
         "runtime_sha256": hashes,
         "registered_at_unix": time.time(),
         "python": sys.version,
@@ -254,10 +257,15 @@ def worker(output):
         output / "protocol.json": registration["protocol_sha256"],
         Path(__file__): registration["runner_sha256"],
         ROOT / "tests" / "external_repo_trial.py": registration["request_guard_sha256"],
-        **{ROOT / name: value for name, value in registration["runtime_sha256"].items()},
+        Path(runtime_source_paths.__code__.co_filename): registration.get(
+            "runtime_discovery_sha256"
+        ),
     }
     if any(digest(path) != expected for path, expected in checks.items()):
         raise ValueError("Registered code or protocol changed before hosted probes")
+    runtime = {name: digest(path) for name, path in runtime_source_paths(ROOT / "askme.py").items()}
+    if runtime != registration["runtime_sha256"]:
+        raise ValueError("Registered runtime changed before hosted probes")
     run_probes(registration["protocol"], output)
 
 

@@ -406,9 +406,7 @@ def test_copied_current_runtime_launches_without_repository_on_python_path(tmp_p
 
     assert result.returncode == 0, result.stderr
     assert "--working-dir" in result.stdout
-    runtime_hashes = {
-        name: adapter.sha256_file(source.with_name(name)) for name in ("askme.py", "actions.py")
-    }
+    runtime_hashes = {path.name: adapter.sha256_file(path) for path in source.parent.glob("*.py")}
     manifest = json.loads(cm.files[adapter.ADAPTER_MANIFEST_PATH])
     launch = json.loads((tmp_path / adapter.POLICY_LOG_PATH.lstrip("/")).read_text())
     assert manifest["runtime_files"] == runtime_hashes
@@ -417,9 +415,10 @@ def test_copied_current_runtime_launches_without_repository_on_python_path(tmp_p
 
 
 @pytest.mark.parametrize("change", ["modify", "delete", "add"])
-def test_adapter_rejects_dependency_changed_after_pinning_before_copy(tmp_path, change):
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_adapter_rejects_dependency_changed_after_pinning_before_copy(tmp_path, change, module):
     source = _source(tmp_path)
-    dependency = source.with_name("actions.py")
+    dependency = source.with_name(module + ".py")
     if change != "add":
         dependency.write_text("PINNED = True\n", encoding="utf-8")
     agent_class = adapter.build_askme_agent_class(
@@ -436,12 +435,27 @@ def test_adapter_rejects_dependency_changed_after_pinning_before_copy(tmp_path, 
     assert cm.files == {}
 
 
-def test_modular_source_requires_its_own_sibling_dependency(tmp_path):
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_modular_source_requires_its_own_sibling_dependency(tmp_path, module):
     source = _source(tmp_path)
-    source.write_text("from actions import ActionExecutor\n", encoding="utf-8")
+    source.write_text(f"from {module} import Something\n", encoding="utf-8")
 
-    with pytest.raises(FileNotFoundError, match="actions.py"):
+    with pytest.raises(FileNotFoundError, match=module + ".py"):
         adapter.build_askme_agent_class(FakeBaseAgent, source, "secret", inner_timeout=60)
+
+
+def test_adapter_does_not_resolve_away_source_symlink_before_inspection(tmp_path):
+    source = _source(tmp_path)
+    linked = tmp_path / "linked.py"
+    linked.symlink_to(source)
+    with pytest.raises(FileNotFoundError, match="symlink"):
+        adapter.build_askme_agent_class(FakeBaseAgent, linked, "secret", inner_timeout=60)
+
+
+@pytest.mark.parametrize("name", ["../llm.py", "/tmp/llm.py", "llm.txt"])
+def test_launcher_rejects_non_sibling_runtime_names(name):
+    with pytest.raises(ValueError, match="sibling"):
+        adapter.launcher_source(("askme.py", name))
 
 
 @pytest.mark.parametrize(

@@ -361,6 +361,13 @@ def test_busy_server_blocks_all_generation_after_registration(tmp_path):
     assert not any("completion" in url for url in calls)
     saved = json.loads((output / "qualification.json").read_text())
     assert saved == result
+    registration = json.loads((output / "registration.json").read_text())
+    assert registration["runtime_sha256"] == {
+        path.name: gate.digest(path) for path in gate.ROOT.glob("*.py")
+    }
+    assert registration["runtime_discovery_sha256"] == gate.digest(
+        Path(gate.runtime_source_paths.__code__.co_filename)
+    )
     with pytest.raises(FileExistsError):
         gate.run(protocol(), output, call=call)
 

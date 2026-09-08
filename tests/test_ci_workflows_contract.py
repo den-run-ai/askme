@@ -33,13 +33,13 @@ def test_unit_workflow_stays_hermetic():
 
 def test_unit_workflow_gates_quality_compatibility_and_coverage():
     text = UNIT_WORKFLOW.read_text(encoding="utf-8")
-    assert "uv run --locked ruff check askme.py actions.py tests" in text
-    assert "uv run --locked ruff format --check askme.py actions.py tests" in text
+    assert "uv run --locked ruff check *.py tests" in text
+    assert "uv run --locked ruff format --check *.py tests" in text
     assert "uv run --locked ty check" in text
     assert "mypy" not in text
     assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in text
-    assert "--cov=askme" in text
-    assert "--cov=actions" in text
+    assert "--cov \\" in text
+    assert "--cov=" not in text  # Do not override the complete central runtime inventory.
     assert "--cov-report=xml:coverage.xml" in text
     assert text.count("uv sync --locked") == 2
     assert text.count("astral-sh/setup-uv@") == 2
@@ -56,6 +56,26 @@ def test_unit_workflow_gates_quality_compatibility_and_coverage():
     assert "[tool.ty.environment]" in project
     assert 'required-version = "==0.12.1"' in project
     assert UV_LOCK.is_file()
+
+
+def test_every_runtime_module_is_type_checked_covered_and_triggers_ci():
+    import ast
+
+    from featurebench.canary_audit import RUNTIME_MODULES
+
+    project = PYPROJECT.read_text(encoding="utf-8")
+    ty_source = project.split("[tool.ty.src]", 1)[1].split("[tool.coverage.run]", 1)[0]
+    assert '"*.py"' in ty_source
+    coverage = project.split("[tool.coverage.run]", 1)[1].split("[tool.coverage.report]", 1)[0]
+    match = re.search(r"^source = (\[.*?\])", coverage, re.MULTILINE | re.DOTALL)
+    assert match
+    # Explicit source modules must match existing runtime files: future modules
+    # cannot escape coverage, and absent modules cannot generate no-data warnings.
+    assert set(ast.literal_eval(match[1])) == {path.stem for path in ROOT.glob("*.py")}
+    for workflow in (LLM_WORKFLOW, MACOS_WORKFLOW):
+        push = workflow.read_text().split("  push:", 1)[1].split("  pull_request:", 1)[0]
+        for module in RUNTIME_MODULES:
+            assert f"- {module}.py" in push
 
 
 def test_unit_workflow_publishes_coverage_reports():

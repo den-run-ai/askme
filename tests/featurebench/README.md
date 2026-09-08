@@ -463,13 +463,17 @@ PY
 ## 6. Run the single AskMe adapter attempt
 
 For new protocols on the split runtime, `sources.askme.runtime_files` must pin
-both `askme.py` and its sibling `actions.py` by SHA-256. The adapter copies only
-that selected snapshot, checks every module again before container setup, and
+`askme.py` and every discovered sibling runtime module by SHA-256, including
+`actions.py` and `llm.py` in the current layout. The shared static discovery
+walks only the selected snapshot's supported runtime imports and rejects
+missing or symlink dependencies. The adapter copies only that snapshot,
+checks every module again before container setup, and
 records the complete map in the adapter manifest, run provenance, and launcher
 policy log. A missing, changed, or unpinned dependency fails qualification. The
 legacy `base_source_sha256` / `askme_sha256` fields still identify `askme.py`.
 Historical monolith snapshots without `actions.py` retain their original
-single-file protocol and audit contract; do not rewrite the frozen canary
+single-file protocol and audit contract; historical two-file snapshots retain
+their two-file map. Do not rewrite the frozen canary
 protocols or results to use current runtime hashes. Register a new protocol and
 adapter/audit code hashes before attempting a current-runtime canary.
 

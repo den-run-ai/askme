@@ -52,8 +52,12 @@ INNER_TIMEOUT_MARGIN_SECONDS = 60
 INNER_TIMEOUT_KILL_GRACE_SECONDS = 15
 
 
-def launcher_source() -> str:
+def launcher_source(runtime_files: tuple[str, ...] = ("askme.py",)) -> str:
     """Return a credential-scrubbing, action-guarded launcher for pinned AskMe."""
+    if "askme.py" not in runtime_files or any(
+        name != Path(name).name or not name.endswith(".py") for name in runtime_files
+    ):
+        raise ValueError("Launcher runtime files must be plain sibling Python filenames")
     return textwrap.dedent(
         f"""\
         #!/usr/bin/env python3
@@ -72,6 +76,7 @@ def launcher_source() -> str:
         CREDENTIAL_PATH = {CREDENTIAL_PATH!r}
         RESULT_PATH = {RESULT_PATH!r}
         POLICY_LOG_PATH = {POLICY_LOG_PATH!r}
+        RUNTIME_FILES = {runtime_files!r}
         WORKSPACE = Path("/testbed").resolve()
 
         _NETWORK_PATTERNS = (
@@ -245,8 +250,7 @@ def launcher_source() -> str:
                     "askme_sha256": _sha256_path(ASKME_PATH),
                     "runtime_files": {{
                         name: _sha256_path(Path(ASKME_PATH).with_name(name))
-                        for name in ("askme.py", "actions.py")
-                        if Path(ASKME_PATH).with_name(name).is_file()
+                        for name in RUNTIME_FILES
                     }},
                     "prompt_sha256": _sha256_path(PROMPT_PATH),
                 }})
@@ -525,7 +529,9 @@ def build_askme_agent_class(
     inner_timeout: int,
 ) -> type:
     """Create a FeatureBench BaseAgent subclass bound to one AskMe snapshot."""
-    source = askme_source.resolve()
+    if askme_source.is_symlink():
+        raise FileNotFoundError(f"AskMe source must not be a symlink: {askme_source}")
+    source = askme_source.absolute()
     if not source.is_file():
         raise FileNotFoundError(f"AskMe source not found: {source}")
     runtime_paths = _load_canary_audit_api().runtime_source_paths(source)
@@ -540,7 +546,7 @@ def build_askme_agent_class(
         raise ValueError("OPENROUTER_API_KEY is required")
     if inner_timeout < 1:
         raise ValueError("inner timeout must be positive")
-    launcher = launcher_source().encode("utf-8")
+    launcher = launcher_source(tuple(runtime_paths)).encode("utf-8")
 
     class AskMeFeatureBenchAgent(base_agent):
         _source = source
