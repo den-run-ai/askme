@@ -1,0 +1,425 @@
+{
+  "source_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+  "description": "Frozen offline pre-extraction controller transcripts. No model calls or host shell commands. Runtime bytes are identical to release-prep c879334. Normalization replaces lexical and resolved workspace prefixes and type-defining runtime module names only; clock and environment probe are injected. The workspace-alias correction was recaptured from the unchanged named source and matched full Linux/macOS transcripts. Regenerate only by an explicit reviewed baseline change using runtime_characterization.py against the named source.",
+  "capture": {
+    "cases": {
+      "accepted_fail": {
+        "outcome": {
+          "completed_tasks": 0,
+          "replans": 1,
+          "status": "exhausted",
+          "steps": {
+            "executed": 0,
+            "selected": 1,
+            "skipped": 0
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "exhausted",
+        "transcript_sha256": {
+          "calls": "7625277201e2d59991b9ba5bc7db5ffbc144e5383849c7dd03e9775dc07e24ec",
+          "dispatched": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "events": "3e3511f66783e8db7fb1983e47a0ad13a72cdd87d8c3c28682552e735f1a1dd5",
+          "lines": "7c9c65d8eaa1dba48bb92037193d05f8b0658f73531bb25a660149063f30491c",
+          "result": "8305fafd0f6ef6c889fd4c87293c5a9d0b7e3be6842e7e14ffd8b07b89b6f902"
+        },
+        "workspace": {
+          "seed.txt": "736565640a"
+        }
+      },
+      "duplicate_write": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete",
+          "steps": {
+            "executed": 2,
+            "selected": 5,
+            "skipped": 2
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "1871bbb24ad35078401f3225ff4fa66aa1e2ac8d12f03a94a998b6b9c2307653",
+          "dispatched": "b6b6eb04612fdee8085055301bb1342d136b971dac7b0c9f39f81cd24170bff9",
+          "events": "7fa403b341c6b6dfa5136597671ff9d070383dfb6add8bc74ee5147936974336",
+          "lines": "9a6161e187c176efa26e2aa3f035b27c408d5649649983def25cb57c30c01363",
+          "result": "efd2e0f3e61207e22574e251ebf18f283442a380dba41867e6b197bf3779f96b"
+        },
+        "workspace": {
+          "result.txt": "66697273740a",
+          "seed.txt": "736565640a"
+        }
+      },
+      "empty_write": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete",
+          "steps": {
+            "executed": 1,
+            "selected": 2,
+            "skipped": 0
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "09797c253fe93d5ff8c4d9f637b0037841fd20666b780e0df5cd74fc90077c27",
+          "dispatched": "6bd48c5490047ec05848741ec6a6abbc5c7ace371d4e38ce1455758c4252070d",
+          "events": "25a645ae78bd63553af49f4230c3594f317cf0a94e650c5b6e8120e753091b78",
+          "lines": "c9f88b59f3bdefae2323efc1d9dff3e09895852d4ce847975018a9d9ca54ed94",
+          "result": "0cdebfd4a24a6bf1be305ee6cdf08df0524b39c8e9bda96f6e7afad04b027181"
+        },
+        "workspace": {
+          "result.txt": "",
+          "seed.txt": "736565640a"
+        }
+      },
+      "lifecycle_rewrite": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete",
+          "steps": {
+            "executed": 4,
+            "selected": 6,
+            "skipped": 1
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "3303dd7be243c50b63e9d90106217310410c4c43ffef568fa7ff3d7bbd66f7cc",
+          "dispatched": "a7a4cb9de513a5d9d2b787d35961cd675b57f7351ae8d7363069cbc9bb47a66e",
+          "events": "cda90eed81e4cccfaf0dceadf9df0f1c0f69632ae433036f4876b7b7b29cb482",
+          "lines": "3b438b256c9f836e895e7fd7afd31b513da8231ede3c5fb7597815e130107de7",
+          "result": "91ac9d17d039ca6b44a2dd05381c26f9f399e983b8ba37e6ea7aec29b4c39102"
+        },
+        "workspace": {
+          "result.txt": "66696e616c0a",
+          "seed.txt": "736565640a"
+        }
+      },
+      "observation_stall": {
+        "outcome": {
+          "completed_tasks": 0,
+          "replans": 1,
+          "status": "exhausted",
+          "steps": {
+            "executed": 1,
+            "selected": 3,
+            "skipped": 2
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 1,
+          "validation": 0
+        },
+        "status": "exhausted",
+        "transcript_sha256": {
+          "calls": "8ddd00bfbc582ab862eaf586af307f6b95fe50752577d26fe1396b07a3aa0075",
+          "dispatched": "0ef321ff2214391d6dd57da3884e0aec57fb5c3c81a1c03795eae4379afafcd5",
+          "events": "222b5bd7904472ec612658f2b4409ce5732ca5cc14cac9334fd6663183656812",
+          "lines": "4ba7ca376829ce1cbb9ba5db47891953a1bb8ade5c200fbf768b227bf6e214e5",
+          "result": "01745a6a28ab99993692f9f16a1c95311bdfc6e00e5abb3889b16c624f6b45f8"
+        },
+        "workspace": {
+          "seed.txt": "736565640a"
+        }
+      },
+      "partial_write": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete",
+          "steps": {
+            "executed": 3,
+            "selected": 5,
+            "skipped": 1
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "3b14e6dba1a993706e8a530b4ca235ef52d11a483ffeac382d43ba65765c5abd",
+          "dispatched": "3fda9b75264ed0391923e10bbd87c9a733b986e4c3b1285c9ae6debc8a1ce8fb",
+          "events": "e947c9d2b50d7774376030956dfe82faf0b653f5f4f8a3fd05131b627c807123",
+          "lines": "988973cb640c6259d14dc933d12ef0add7bd320d495d19ba46fa6e413114faf9",
+          "result": "ba713909c87c9e571d3a54ae3bbadc11f82662fb518f61269b4c4f9eb06ba528"
+        },
+        "workspace": {
+          "result.txt": "66697273740a6c6173740a",
+          "seed.txt": "736565640a"
+        }
+      },
+      "validation_recheck": {
+        "outcome": {
+          "completed_tasks": 2,
+          "replans": 1,
+          "status": "complete",
+          "steps": {
+            "executed": 3,
+            "selected": 5,
+            "skipped": 0
+          },
+          "validation": "passed",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "0082050aa2f382af4693501cda289da6360c96760880e003ebc6696cd5052e27",
+          "dispatched": "6605e34d4e53e125d6cd879ce9efef2b139f3dafcb1ba58c68bc39c7e663abc0",
+          "events": "887a51f8efedb877eeef2bbb97726e50525b9bff3ea2055631110b950af25f0e",
+          "lines": "ad6aa4a9e13e4d07989a56da2a09653480f4864878eb822251e7a2ef41bdb236",
+          "result": "9f05e8914230be4f99e7e8aa5c5efa31d9736a27b6130ec61880588fb8969293"
+        },
+        "workspace": {
+          "result.txt": "66696e616c0a",
+          "seed.txt": "736565640a"
+        }
+      },
+      "validator_unavailable": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete_unverified",
+          "steps": {
+            "executed": 1,
+            "selected": 2,
+            "skipped": 0
+          },
+          "validation": "unavailable",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete_unverified",
+        "transcript_sha256": {
+          "calls": "5e17dd4316fb5c94b0b14d2d9a9b946a836dfda9c4d020dc70b55d54d0ddd677",
+          "dispatched": "e309d623ff3e9e96e59637480e834cacf47022cecb70cd99321994496e6c4dac",
+          "events": "82c5715af24af0aaf06d7c01f6902c171ff9cf7b42cae0ba3f4e01861b35a524",
+          "lines": "9ae9b9d7ca3a75d13ada3258c115f84a20c23149972902abe4c8bc306e1b951c",
+          "result": "a438b27f1f5230404bf8a8e403961a0ddc188b195577db05e900586cf48c786e"
+        },
+        "workspace": {
+          "result.txt": "66697273740a",
+          "seed.txt": "736565640a"
+        }
+      },
+      "write_edit_verify": {
+        "outcome": {
+          "completed_tasks": 1,
+          "replans": 0,
+          "status": "complete",
+          "steps": {
+            "executed": 4,
+            "selected": 5,
+            "skipped": 0
+          },
+          "validation": "skipped",
+          "wall_s": 0
+        },
+        "remaining_scripted_replies": {
+          "action": 0,
+          "validation": 0
+        },
+        "status": "complete",
+        "transcript_sha256": {
+          "calls": "547bafaf04b38d83fb900cb8b1365a69e2665218cc5a6abae9b3409cf14712e4",
+          "dispatched": "c701bf56a64846b4399b96e62e824e50df2673ff8c8b2891774f69e1985cf898",
+          "events": "33dc74d59fb19234aeeb4897807bbfec5189226eba4144b856f740947e8594dd",
+          "lines": "ee6a85279d6f8ca91e265545910b1afd507bc2089a8b38faaee70c5ce0595009",
+          "result": "9188e02450dba1d2dda43b6059f84841184dcca74d50b64ca4292afbefc73729"
+        },
+        "workspace": {
+          "result.txt": "66696e616c0a",
+          "seed.txt": "736565640a"
+        }
+      }
+    },
+    "contract": {
+      "cli_help": "usage: askme.py [-h] [--prompt-file PROMPT_FILE]\n                                   [--working-dir WORKING_DIR]\n                                   [--result-json RESULT_JSON]\n                                   [--reasoning-policy {gated,off}]\n                                   [--capability-profile {generic-feature-scale-v1,legacy-e4b-m1-16k-v1}]\n                                   [--max-replans MAX_REPLANS]\n                                   [--max-tasks MAX_TASKS]\n                                   [--max-steps MAX_STEPS]\n                                   [--goal-context-chars GOAL_CONTEXT_CHARS]\n                                   [prompt]\n\nRun AskMe against an isolated or existing working directory.\n\npositional arguments:\n  prompt                Task request\n\noptions:\n  -h, --help            show this help message and exit\n  --prompt-file PROMPT_FILE\n                        Read the task request from this file\n  --working-dir WORKING_DIR\n                        Existing workspace for the agent\n  --result-json RESULT_JSON\n                        Write the structured run result here\n  --reasoning-policy {gated,off}\n                        Explicit-reasoning policy (default: gated)\n  --capability-profile {generic-feature-scale-v1,legacy-e4b-m1-16k-v1}\n                        Model-facing budget/context profile (default:\n                        LLM_CAPABILITY_PROFILE or generic-feature-scale-v1)\n  --max-replans MAX_REPLANS\n                        Maximum planning attempts, including the initial plan\n  --max-tasks MAX_TASKS\n                        Maximum tasks accepted from each plan\n  --max-steps MAX_STEPS\n                        Maximum executor steps per task attempt\n  --goal-context-chars GOAL_CONTEXT_CHARS\n                        Goal characters available to executor and task\n                        replanner (default: AGENT_GOAL_CONTEXT_CHARS or 300)\n",
+      "public_names": [
+        "ACTION_SPECS",
+        "ACTION_TRANSPORT",
+        "ALLOW_NETWORK",
+        "ALLOW_SYSTEM_INSTALLS",
+        "API",
+        "ActionEnvelope",
+        "ActionExecutor",
+        "ActionProtocolError",
+        "ActionResult",
+        "ActionTransport",
+        "Any",
+        "CAPABILITY_PROFILE",
+        "CAPABILITY_PROFILE_NAMES",
+        "COMPILE_REPAIR_ENABLED",
+        "COMPLETE_STATUSES",
+        "CapabilityProfile",
+        "CompletionPolicy",
+        "ContextVar",
+        "DEFAULT_REASONING_POLICY",
+        "DEFAULT_STEP_POLICY",
+        "DecodedAction",
+        "Enum",
+        "FINAL_VALIDATE",
+        "GOAL_CONTEXT_CHARS",
+        "GuardThresholds",
+        "HeuristicStepPolicy",
+        "LLMClient",
+        "LLMSettings",
+        "LLMTransportError",
+        "LLM_BACKEND",
+        "LLM_TIMEOUT",
+        "LLM_TIMEOUT_REPLAN",
+        "LifecycleStepPolicy",
+        "MAX_INPUT",
+        "MAX_LLM_RETRIES",
+        "MAX_REPLANS",
+        "MAX_RESULT",
+        "MAX_STEPS",
+        "MAX_STEP_HISTORY",
+        "MAX_TASKS",
+        "MAX_TASK_LOCAL_REPLANS",
+        "MODEL",
+        "NamedTuple",
+        "OBSERVE_ACTIONS",
+        "OBSERVE_STATE_CHARS",
+        "OBSERVE_TAIL_RESERVE",
+        "OPENROUTER_ALLOW_FALLBACKS",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_CHAT_API",
+        "OPENROUTER_MODEL",
+        "OPENROUTER_PROVIDER",
+        "OPENROUTER_REASONING_EFFORT",
+        "OPENROUTER_REQUIRE_PARAMETERS",
+        "PLANNER_MAX_TOKENS",
+        "PROBE_PKG_MANAGERS",
+        "PROBE_TOOLS",
+        "Path",
+        "PlanResponse",
+        "READ_CHARS",
+        "READ_LIMIT_MAX",
+        "READ_LINES",
+        "REASONING_POLICIES",
+        "REASONING_TOKEN_FLOORS",
+        "RESPONSE_SCHEMAS",
+        "REWRITE_PRESSURE_WRITES",
+        "REWRITE_SKIP_WRITES",
+        "RUN_LOG_PATH",
+        "RunConfig",
+        "RunDependencies",
+        "RunOutcome",
+        "RunState",
+        "RunWorkspace",
+        "SEARCH_MAX_CHARS",
+        "SEARCH_MAX_FILES",
+        "SEARCH_MAX_MATCHES",
+        "SHELL_TIMEOUT",
+        "SHELL_TIMEOUT_LONG",
+        "SHELL_TIMEOUT_MAX",
+        "STEP_POLICIES",
+        "STEP_TOKENS",
+        "STEP_WRITE_TOKENS",
+        "SYSTEM_PLAN",
+        "SYSTEM_STEP",
+        "SYSTEM_TASK_REPLAN",
+        "SYSTEM_VALIDATE",
+        "SkippedStep",
+        "StepPolicy",
+        "StepReceipt",
+        "StepRecorder",
+        "TASK_REPLAN_MAX_TOKENS",
+        "TREE_MAX_CHARS",
+        "TREE_MAX_DEPTH",
+        "TREE_MAX_ENTRIES",
+        "TaskAttemptState",
+        "TaskReplanResponse",
+        "TaskReplanResult",
+        "VALIDATION_MAX_TOKENS",
+        "ValidationResponse",
+        "ValidationState",
+        "WRITE_PRESSURE_OBSERVATIONS",
+        "WriteObligations",
+        "argparse",
+        "ask_llm",
+        "classify_error",
+        "dataclass",
+        "execute",
+        "field",
+        "get_capability_profile",
+        "get_plan",
+        "get_policy",
+        "get_step",
+        "hashlib",
+        "json",
+        "log",
+        "os",
+        "parse_action_envelope",
+        "preflight_probe",
+        "re",
+        "replan_task",
+        "requests",
+        "run",
+        "run_result",
+        "shlex",
+        "shutil",
+        "summarize_errors",
+        "sys",
+        "tempfile",
+        "time"
+      ],
+      "signatures": {
+        "LLMClient": "(settings=None, post=None, sleep=None, log_sink=None, event_sink=None)",
+        "LLMSettings": "(backend: str, api: str, model: str, api_key: str, provider: str, allow_fallbacks: bool, require_parameters: bool, reasoning_effort: str, timeout: int, step_write_tokens: int | None = None, step_token_budget: int | None = None, replan_timeout: int | None = None, max_retries: int | None = None, reasoning_token_floors: tuple[int, int, int] | None = None, capability_profile: CapabilityProfile | None = None) -> None",
+        "RunConfig": "(llm: LLMSettings | None = None, allow_system_installs: bool | None = None, allow_network: bool | None = None, reasoning_policy: str | None = None, max_replans: int | None = None, max_tasks: int | None = None, max_steps: int | None = None, goal_context_chars: int | None = None, final_validate: str | None = None, compile_repair: bool | None = None, step_policy: str | None = None, write_pressure_observations: int | None = None, observe_tail_reserve: int | None = None, rewrite_pressure_writes: int | None = None, rewrite_skip_writes: int | None = None, max_task_local_replans: int | None = None) -> None",
+        "RunDependencies": "(llm_client: Any = None, action_executor: Any = None, clock: Any = None, log_sink: Any = None, event_sink: Any = None) -> None",
+        "RunState": "(reasoning_policy, goal_context_chars, clock=None, event_sink=None, rewrite_pressure_writes=None, rewrite_skip_writes=None)",
+        "StepRecorder": "(state, history, event_sink=None)",
+        "TaskAttemptState": "(task: str, wants_write: bool, done: bool = False, steps: list[dict[str, typing.Any]] = <factory>, use_think: bool = False, reasoning_trigger: str = 'executor', dup_skip_count: int = 0, observe_executed: int = 0, commit_executed: int = 0, observe_blocked: int = 0, write_pressure_observations: int = 3) -> None",
+        "ask_llm": "(messages, max_tokens=256, think=False, think_level=None, max_retries=2, raw=False, timeout=None, reasoning_policy='gated', reasoning_trigger='unspecified', expect=None, expect_context=None)",
+        "execute": "(action, working_dir='.')",
+        "get_plan": "(user_prompt, state, client=None, max_tokens=None, max_tasks=None, timeout=None, replan_timeout=None, max_retries=None)",
+        "get_step": "(task, state, goal='', step_num=0, max_steps=10, think=False, reasoning_policy='gated', reasoning_trigger='executor', goal_context_chars=300, write_pressure=False, validate_pressure=None, client=None, step_tokens=None, timeout=None, max_retries=None)",
+        "replan_task": "(failed_task, errors, completed_tasks, state, user_prompt, goal_context_chars=300, client=None, max_tokens=None, timeout=None, max_retries=0)",
+        "run": "(user_prompt, working_dir=None)",
+        "run_result": "(user_prompt, working_dir=None, config=None, dependencies=None)"
+      }
+    }
+  }
+}

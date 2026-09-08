@@ -1,0 +1,33 @@
+{
+  "protocol": "serving-m1-e4b-20260908-v1",
+  "api": "http://127.0.0.1:8080/v1/chat/completions",
+  "model": "gemma-4-e4b",
+  "expected_model_path": "models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf",
+  "first_token_limit_s": 30,
+  "total_limit_s": 120,
+  "cancel_after_s": 1,
+  "idle_limit_s": 10,
+  "cases": [
+    {"name": "prefill600_decode128", "kind": "completion", "prompt_tokens": 600, "max_tokens": 128},
+    {"name": "prefill2000_decode128", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 128},
+    {"name": "prefill600_decode512", "kind": "completion", "prompt_tokens": 600, "max_tokens": 512},
+    {"name": "prefill2000_decode512", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 512},
+    {"name": "prefill2000_decode1024", "kind": "completion", "prompt_tokens": 2000, "max_tokens": 1024},
+    {"name": "planner", "kind": "plan", "prompt_tokens": 600, "max_tokens": 384},
+    {"name": "native_action", "kind": "action", "prompt_tokens": 2000, "max_tokens": 512}
+  ],
+  "provenance": {
+    "purpose": "Task-independent existing Gemma E4B serving qualification for issue 109; E4B is dense PLE, not the 26B-A4B MoE",
+    "harness_base": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "machine": "MacBookAir10,1; physical Apple M1; 8 CPU; 17179869184 bytes; macOS 26.5 25F71",
+    "environment": "Existing idle server, warm process and possibly cached state, interactive host with pre-existing swap. Run before starting Qwen. No isolated benchmark claim.",
+    "llama_revision": "c34b92235b2d6a07963f896085f9ca077ff400b4",
+    "llama_version": "b9618",
+    "llama_launcher_sha256": "4dcc084538ea65e1bd2b07cd81c61d61b6664348b40729503165eed4ed162566",
+    "model_sha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee",
+    "server_flags": ["-ngl", "99", "--ctx-size", "16384", "--flash-attn", "on", "--cache-type-k", "q4_0", "--cache-type-v", "q4_0", "--swa-full", "--cache-reuse", "256", "--reasoning", "off", "-np", "1", "--alias", "gemma-4-e4b", "--port", "8080"],
+    "api_cost_usd": 0,
+    "trials": "One complete qualification matrix, no selective reruns",
+    "decision": "Only a configuration passing every declared serving/format/cancellation check may enter a separately registered Requests task. Preserve failures and do not change thresholds after inference."
+  }
+}

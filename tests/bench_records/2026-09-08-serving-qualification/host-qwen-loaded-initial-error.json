@@ -1,0 +1,6 @@
+{
+  "stage": "Host metadata capture after Qwen startup, before qualification",
+  "error": "llama-server --version exceeded the metadata helper's 10-second subprocess limit",
+  "model_requests_started": false,
+  "effect": "Helper exited before writing its record and the chained serving qualifier did not start. Helper was changed to retain metadata timeouts, then host capture was repeated. No serving probe or task was rerun."
+}

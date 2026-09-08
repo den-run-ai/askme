@@ -35,21 +35,30 @@ One attempt per cell, as before.
 
 Both cells ran their single attempt on CoreWeave and produced **nonempty,
 cleanly applying patches** — the categorical change from v4's two empty-patch
-failures. Both agents still exhausted their planning attempts without emitting
-`done`, so agent completion is false in both cells; acceptance was evaluated
-on the delivered patches per the outcome contract.
+failures. Both agents still exhausted their planning attempts, so agent
+completion is false in both cells; acceptance was evaluated on the delivered
+patches per the outcome contract. The retained result JSON preserves historical
+claims about absent `done` emissions, but the checked-in raw-artifact hashes do
+not independently establish those claims. Exhaustion is the recorded outcome.
 
-- **Gemma 4 31B** — patch applied, **11/13 F2P (84.62%) — exactly the pi
-  ceiling, with the identical two failing tests**. 56/56 responses finished
+- **Gemma 4 31B** — patch applied, **11/13 F2P (84.62%)**, the same pass count
+  and two failing tests as the exploratory one-attempt pi reference.
+  56/56 responses finished
   `stop` (v4: 16/33 `length`); 18 sentinel-transport writes, zero truncation
   or parse failures. Failure mode inverted: a commit-without-validate rewrite
   loop exhausted the step budgets. 21.5 min, $0.032.
   Record: [`results/2026-08-01-gemma-4-31b-canary-v6.json`](results/2026-08-01-gemma-4-31b-canary-v6.json).
-- **Qwen3.6 27B** — patch applied, 7/13 F2P (53.85%) vs the 76.92% pi
-  ceiling. The v4 observation stall broke: one successful write was selected
+- **Qwen3.6 27B** — patch applied, 7/13 F2P (53.85%) versus 10/13 (76.92%)
+  in the exploratory one-attempt pi reference. The v4 observation stall broke:
+  one successful write was selected
   and executed (v4: zero across 27 steps), though the trajectory stayed
   observation-dominant (23/33 reads). 103 s, $0.090.
   Record: [`results/2026-08-01-qwen36-27b-canary-v6.json`](results/2026-08-01-qwen36-27b-canary-v6.json).
+
+The pi records are archival evidence from unmerged
+[PR #14](https://github.com/den-run-ai/askme/pull/14), on a different serving
+stack. They establish neither a performance ceiling nor a controlled comparison
+of harnesses.
 
 Both runs' original deterministic audits returned a false
 `invalid_infrastructure`: `canary_audit.py` hardcoded SiliconFlow instead of
@@ -81,14 +90,16 @@ interface (issue #17), one per model cell:
 
 Both pin AskMe base `491dbc0` (`askme.py` sha256 `a9037d47…`), the unchanged
 hardened adapter/audit hashes, and the same task, dataset revision, image
-digest, budgets, and timeouts as v2/v3/v4. The pi harness ablation
-([PR #14](https://github.com/den-run-ai/askme/pull/14)) is the preregistered
-comparison ceiling on the identical masked task and pinned endpoints (Gemma
-84.6% F2P, Qwen 76.9% F2P, both applied): if v5 moves a cell from empty patch
-to applied with ~its ceiling F2P, the transport/policy fixes were the binding
-constraint; any residual gap belongs to the plan/execute loop (interpretation
-rule preregistered in issue #17). The
-gold and harmless controls were requalified under this interface before any
+digest, budgets, and timeouts as v2/v3/v4. The v5 registration proposed comparing
+the exploratory pi records
+([PR #14](https://github.com/den-run-ai/askme/pull/14)) on the same masked task
+(Gemma 84.6% F2P, Qwen 76.9% F2P, both applied). Its original interpretation
+rule in issue #17 called those results a ceiling and assigned a matching result
+to transport/policy changes, with residual gaps attributed to the plan/execute
+loop. That causal interpretation remains unestablished: one attempt per cell
+cannot establish a ceiling, and the subsequent v6 provider/precision changes
+prevent a matched harness comparison. These records remain historical context.
+The gold and harmless controls were requalified under this interface before any
 model call; see
 [`results/2026-08-01-v5-control-requalification.json`](results/2026-08-01-v5-control-requalification.json).
 The clean commit containing the v5 protocols is the execution revision to pass
@@ -450,6 +461,21 @@ PY
 ```
 
 ## 6. Run the single AskMe adapter attempt
+
+For new protocols on the split runtime, `sources.askme.runtime_files` must pin
+`askme.py` and every discovered sibling runtime module by SHA-256, including
+`actions.py` and `llm.py` in the current layout. The shared static discovery
+walks only the selected snapshot's supported runtime imports and rejects
+missing or symlink dependencies. The adapter copies only that snapshot,
+checks every module again before container setup, and
+records the complete map in the adapter manifest, run provenance, and launcher
+policy log. A missing, changed, or unpinned dependency fails qualification. The
+legacy `base_source_sha256` / `askme_sha256` fields still identify `askme.py`.
+Historical monolith snapshots without `actions.py` retain their original
+single-file protocol and audit contract; historical two-file snapshots retain
+their two-file map. Do not rewrite the frozen canary
+protocols or results to use current runtime hashes. Register a new protocol and
+adapter/audit code hashes before attempting a current-runtime canary.
 
 The adapter passes the full pinned problem statement by file, runs AskMe in
 `/testbed`, requests `gated` reasoning, and sets strict SiliconFlow routing with

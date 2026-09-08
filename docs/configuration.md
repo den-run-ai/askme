@@ -80,6 +80,32 @@ OPENROUTER_REASONING_EFFORT=low python3 askme.py "your request here"
 
 ## Automation and evaluation CLI
 
+Before a new local evaluation, qualify the intended serving workload, not
+only `/health` or a tiny response. The [physical-Mac serving
+protocols](../tests/serving_protocols/README.md) exercise cold prompt sizes,
+bounded decode, actual planner/native-tool replies, and cancellation recovery.
+They preserve complete requests, replies, failures, server identity and
+registration hashes. A failed gate prevents a coding attempt under that
+configuration; it does not establish model incapability. Record actual device
+offload with llama.cpp `-lv 4` on b9618: its default verbosity suppresses
+loader information. CI's small local-server contract remains a portability
+check, not a real-model latency qualification.
+
+`tests/external_repo_trial.py --task-dir /path/to/frozen-task` selects a new
+Requests task protocol while keeping the original v1 default and records
+unchanged. New protocols can pin `api_url`, `wall_timeout_seconds`, runner
+metadata and a hashed `serving_qualification` record. Preparation requalifies
+baseline/no-op/gold controls; running rechecks hashes and creates an exclusive
+attempt marker. Do not reuse the retired v1 protocol for another model call.
+
+Hosted task protocols also pin OpenRouter's official endpoint, provider,
+returned model identity and no-fallback routing. Each HTTP attempt reserves
+the registered conservative token-price estimate before dispatch; unknown
+usage keeps its reservation. The cap assumes unchanged provider prices and
+is not a provider-side spending limit. The worker removes the API key from
+its environment before actions, but AskMe remains unsandboxed. See the
+[one-attempt hosted runbook](../tests/external_repo/requests_pickle_hosted_gemma_v2/README.md).
+
 `askme.py` accepts flags for a fixed workspace, a prompt file, a structured JSON
 result, and frozen policy/budget overrides — the interface used by the
 evaluation runners:

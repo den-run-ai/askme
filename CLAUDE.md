@@ -14,7 +14,10 @@ rules in addition to this file.
 AskMe is an experimental, dependency-light Python 3.10+ coding-agent harness for
 constrained local LLMs, with an OpenRouter backend for hosted models. The public
 entry point remains `python3 askme.py`; the runtime is split between `askme.py`
-(CLI, LLM client, controller loop, recording) and `actions.py` (action registry,
+(CLI, environment/configuration wiring, compatibility facade), `loop.py`
+(planning, run state, controller sequencing, recording), `llm.py` (provider
+settings, client, response codecs), `policies.py` (step, write-obligation and
+completion decisions), and `actions.py` (action registry,
 handlers, typed results/receipts), and its longest functions should keep shrinking.
 Preserve the simple CLI and compatibility surfaces while following the cohesive,
 behavior-preserving extraction work tracked in the issue roadmap below.
@@ -38,14 +41,25 @@ Start with:
 
 ## Repository map
 
-- `askme.py` — CLI, provider calls, planner/executor loop, controller-owned
-  `done`/`fail`, step recording, recovery, validation, the public structured
-  `run_result(...)` API with immutable `RunConfig`/injectable `RunDependencies`
-  and workspace ownership, and the compatibility `run(...) -> bool` and
-  `execute(...)` APIs
+- `askme.py` — CLI, environment/configuration wiring, compatibility adapters
+  and re-exports, the public structured `run_result(...)` API, and the
+  compatibility `run(...) -> bool`, `ask_llm(...)` and `execute(...)` APIs
+- `loop.py` — planner/executor sequencing, controller-owned `done`/`fail`,
+  one step recorder and shared run state, prompt builders, recovery proposals,
+  immutable `RunConfig`/injectable `RunDependencies`, and workspace ownership.
+  Explicit defaults and collaborators enter from the facade; no back-imports
+  or module-global rebinding may replace that boundary.
+- `llm.py` — immutable provider settings, request/response codecs, transport,
+  retry policy, and the injectable client; never imports the CLI facade or
+  loads `.env`. `askme` adapts legacy call-time configuration and re-exports
+  the shared response and exception types.
 - `actions.py` — action registry (`ACTION_SPECS`), the six handlers behind
   `ActionExecutor`, workspace-path/output policies, error classification, and the
   typed `ActionResult`/`StepReceipt` structures
+- `policies.py` — selectable step strategies, run-wide incomplete-write
+  obligations, validation state and terminal decisions. Model validation and
+  legacy call-time timeout defaults enter through explicit callbacks; this
+  module imports neither the CLI facade nor the provider client.
 - `tests/test_agent_*.py` — deterministic unit and action/controller regression tests
 - `tests/test_agent_integration.py` — local and OpenRouter integration suites
 - `tests/workflow_eval.py`, `tests/test_workflow_*.py`, `tests/workflows/` — native
@@ -56,6 +70,9 @@ Start with:
 - `.github/workflows/ci.yml` — locked uv environments, Ruff lint/format, ty,
   hermetic Python 3.10–3.14 tests, and a 90% branch-aware coverage gate
 - `.github/workflows/llm.yml` — credentialed, paid OpenRouter smoke/protocol jobs
+- `.github/workflows/macos.yml`, `tests/ci_local_gate.py` — credential-free Apple
+  Silicon lanes: the deterministic suite on arm64, a llama.cpp local-backend
+  contract smoke, and a manual reference-model lane with a runner-size gate
 
 ## Commands
 
@@ -72,13 +89,13 @@ uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failin
 uv sync --locked
 
 # Static checks and deterministic handoff gate; live-model tests skip by default
-uv run --locked ruff check askme.py actions.py tests
-uv run --locked ruff format --check askme.py actions.py tests
+uv run --locked ruff check *.py tests
+uv run --locked ruff format --check *.py tests
 uv run --locked ty check
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
+uv run --locked pytest tests/ --cov --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Common focused deterministic suites
 uv run --locked pytest tests/test_agent_actions.py -q
@@ -106,6 +123,12 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 ## CI and credentials
 
 - Keep `ci.yml` hermetic. It must never receive an OpenRouter key.
+- Keep `macos.yml` credential-free. Its lanes run no model at all or a local
+  `llama-server`, so an OpenRouter key would only un-skip paid suites. Its
+  reference lane stays manual: GitHub's larger runners are billed per-minute
+  even on public repositories and require an organization-owned repository.
+  CI runners are smaller than the M1/16 GB reference machine, so no macOS
+  lane produces `docs/PERFORMANCE.md` evidence.
 - `llm.yml` spends credits and may expose its key only to its intended jobs.
   Pull-request jobs must remain opt-in via `llm-tests` **and** restricted to
   same-repository branches before the credential enters scope.
@@ -150,11 +173,18 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/ -v -m live_llm
 
 ### Truncation and observation integrity
 
-- A partial/truncated mutation is `incomplete_write`, never a complete or merely
-  unvalidated artifact. Preserve an actionable resume boundary and target; do
-  not append to stale content or allow `done` while an obligation remains.
-- Preserve every complete byte/line at a token cutoff and test content that can
-  resemble transport sentinels. Framing syntax must not silently eat file content.
+- The live native-tool decoder rejects malformed argument payloads, including
+  JSON cut off mid-content, before mutation; it does not salvage partial file
+  content or create a resume boundary. The write-budget retry may still fail
+  with `response_truncated`. A valid argument payload is not marked partial
+  merely because `finish_reason=length` was reported.
+  Restoring live salvage or retiring the retained recovery machinery is an open
+  decision in [#94](https://github.com/den-run-ai/askme/issues/94).
+- For trusted injected clients that supply partial-write metadata, a partial
+  mutation is `incomplete_write`, never a complete or merely unvalidated artifact.
+  Preserve every complete byte/line and an actionable resume boundary and target;
+  do not append to stale content or allow `done` while an obligation remains.
+  These recovery tests do not establish live native-tool truncation salvage.
 - A bounded `read`, `search`, or `tree` result must not look complete when any
   line, character, file, match, entry, or depth cap was hit. Carry compact
   truncation reasons through the action result, model history, and JSONL record.

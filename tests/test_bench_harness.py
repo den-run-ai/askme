@@ -19,7 +19,7 @@ def test_local_trial_pins_model_and_capability_profile(tmp_path, monkeypatch):
         captured.update(kwargs)
         return Completed()
 
-    monkeypatch.setattr(bench_harness.subprocess, "run", run)
+    monkeypatch.setattr(bench_harness.CapturedProcess, "run", run)
 
     passed, _wall, _stdout, _stderr = bench_harness.run_single_test(
         "test_multi_step_build",
@@ -97,6 +97,8 @@ def test_timeout_retains_partial_pytest_output_in_summary(tmp_path, monkeypatch)
     diagnostic_name = "test_timeout_trial1_pytest.txt"
     assert summary["tests"]["test_timeout"]["pytest_diagnostics"] == [diagnostic_name]
     assert summary["tests"]["test_timeout"]["timed_out"] == [True]
+    assert summary["trial_timeout_s"] == 1200
+    assert 0 <= summary["tests"]["test_timeout"]["trial_wall_s"][0] < 1
     assert "line 1 column 10" in summary["tests"]["test_timeout"]["log_parse_errors"][0]
     diagnostic = (tmp_path / diagnostic_name).read_text(encoding="utf-8")
     assert diagnostic.startswith("Pytest timeout diagnostics")

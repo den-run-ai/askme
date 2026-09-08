@@ -52,8 +52,12 @@ INNER_TIMEOUT_MARGIN_SECONDS = 60
 INNER_TIMEOUT_KILL_GRACE_SECONDS = 15
 
 
-def launcher_source() -> str:
+def launcher_source(runtime_files: tuple[str, ...] = ("askme.py",)) -> str:
     """Return a credential-scrubbing, action-guarded launcher for pinned AskMe."""
+    if "askme.py" not in runtime_files or any(
+        name != Path(name).name or not name.endswith(".py") for name in runtime_files
+    ):
+        raise ValueError("Launcher runtime files must be plain sibling Python filenames")
     return textwrap.dedent(
         f"""\
         #!/usr/bin/env python3
@@ -72,6 +76,7 @@ def launcher_source() -> str:
         CREDENTIAL_PATH = {CREDENTIAL_PATH!r}
         RESULT_PATH = {RESULT_PATH!r}
         POLICY_LOG_PATH = {POLICY_LOG_PATH!r}
+        RUNTIME_FILES = {runtime_files!r}
         WORKSPACE = Path("/testbed").resolve()
 
         _NETWORK_PATTERNS = (
@@ -243,6 +248,10 @@ def launcher_source() -> str:
                     "guard": "best_effort_command_and_workspace_paths",
                     "container_egress_isolated": False,
                     "askme_sha256": _sha256_path(ASKME_PATH),
+                    "runtime_files": {{
+                        name: _sha256_path(Path(ASKME_PATH).with_name(name))
+                        for name in RUNTIME_FILES
+                    }},
                     "prompt_sha256": _sha256_path(PROMPT_PATH),
                 }})
                 askme_exit_code = module._main()
@@ -520,17 +529,24 @@ def build_askme_agent_class(
     inner_timeout: int,
 ) -> type:
     """Create a FeatureBench BaseAgent subclass bound to one AskMe snapshot."""
-    source = askme_source.resolve()
+    if askme_source.is_symlink():
+        raise FileNotFoundError(f"AskMe source must not be a symlink: {askme_source}")
+    source = askme_source.absolute()
     if not source.is_file():
         raise FileNotFoundError(f"AskMe source not found: {source}")
-    pinned_sha256 = sha256_file(source)
-    pinned_size = source.stat().st_size
+    runtime_paths = _load_canary_audit_api().runtime_source_paths(source)
+    runtime_bytes = {name: path.read_bytes() for name, path in runtime_paths.items()}
+    runtime_hashes = {
+        name: hashlib.sha256(data).hexdigest() for name, data in runtime_bytes.items()
+    }
+    pinned_sha256 = runtime_hashes["askme.py"]
+    pinned_size = len(runtime_bytes["askme.py"])
     credential = api_key.strip()
     if not credential:
         raise ValueError("OPENROUTER_API_KEY is required")
     if inner_timeout < 1:
         raise ValueError("inner timeout must be positive")
-    launcher = launcher_source().encode("utf-8")
+    launcher = launcher_source(tuple(runtime_paths)).encode("utf-8")
 
     class AskMeFeatureBenchAgent(base_agent):
         _source = source
@@ -579,11 +595,15 @@ test -z "${OPENROUTER_API_KEY:-}"
 
         def pre_run_setup(self, container: Any, instance: Any, log_file: Path) -> bool:
             del instance
-            if sha256_file(self._source) != self._source_sha256:
-                self.logger.error("Pinned askme.py changed after adapter initialization")
-                return False
             try:
-                self.cm.copy_to_container(container, self._source, ASKME_PATH)
+                current_paths = _load_canary_audit_api().runtime_source_paths(self._source)
+                if current_paths != runtime_paths or any(
+                    path.read_bytes() != runtime_bytes[name] for name, path in current_paths.items()
+                ):
+                    self.logger.error("Pinned runtime changed after adapter initialization")
+                    return False
+                for name, data in runtime_bytes.items():
+                    _copy_bytes(self.cm, container, data, str(Path(ASKME_PATH).with_name(name)))
                 _copy_bytes(self.cm, container, launcher, LAUNCHER_PATH)
                 _copy_bytes(
                     self.cm,
@@ -593,12 +613,14 @@ test -z "${OPENROUTER_API_KEY:-}"
                 )
                 exit_code, _ = self.cm.exec_command(
                     container,
-                    f"chmod 0555 {ASKME_PATH} {LAUNCHER_PATH} && chmod 0400 {CREDENTIAL_PATH}",
+                    "chmod 0555 "
+                    + " ".join(str(Path(ASKME_PATH).with_name(name)) for name in runtime_bytes)
+                    + f" {LAUNCHER_PATH} && chmod 0400 {CREDENTIAL_PATH}",
                     log_file=log_file,
                 )
                 return exit_code == 0
             except Exception as error:
-                self.logger.error(f"Failed to copy pinned askme.py: {error}")
+                self.logger.error(f"Failed to copy pinned AskMe runtime: {error}")
                 return False
 
         def prepare_run(self, container: Any, instruction: str, log_file: Path) -> bool:
@@ -612,6 +634,7 @@ test -z "${OPENROUTER_API_KEY:-}"
                 "agent": AGENT_NAME,
                 "askme_sha256": self._source_sha256,
                 "askme_size_bytes": self._source_size,
+                "runtime_files": runtime_hashes,
                 "prompt_chars": self._prompt_chars,
                 "prompt_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
                 "goal_context_chars": self._prompt_chars,
@@ -871,6 +894,15 @@ def _validate_protocol_settings(settings: CanarySettings) -> Mapping[str, Any]:
         raise ValueError("protocol must pin sources.askme.base_source_sha256")
     if sha256_file(settings.askme_path) != base_source_sha256:
         raise ValueError("AskMe source hash differs from the protocol")
+    runtime_hashes = {
+        name: sha256_file(path)
+        for name, path in _load_canary_audit_api().runtime_source_paths(settings.askme_path).items()
+    }
+    pinned_runtime = askme_source.get("runtime_files")
+    if pinned_runtime is None and set(runtime_hashes) == {"askme.py"}:
+        pinned_runtime = {"askme.py": base_source_sha256}
+    if pinned_runtime != runtime_hashes:
+        raise ValueError("protocol must pin exact sources.askme.runtime_files hashes")
 
     code_revision = askme_source.get("adapter_code_revision")
     if not isinstance(code_revision, str) or len(code_revision) != 40:
@@ -964,6 +996,12 @@ def _write_run_provenance(
             "kill_grace_seconds": INNER_TIMEOUT_KILL_GRACE_SECONDS,
         },
         "askme_sha256": askme_sha256,
+        "runtime_files": {
+            name: sha256_file(path)
+            for name, path in _load_canary_audit_api()
+            .runtime_source_paths(settings.askme_path)
+            .items()
+        },
         "askme_repository_revision": _git_revision(settings.askme_path.parent),
         "expected_askme_repository_revision": settings.askme_revision,
         "adapter_code_revision": askme_protocol["adapter_code_revision"],

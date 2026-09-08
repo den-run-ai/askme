@@ -1,0 +1,57 @@
+{
+  "api_url": "https://openrouter.ai/api/v1/chat/completions",
+  "backend": "openrouter",
+  "cases": [
+    {
+      "approximate_prompt_tokens": 600,
+      "kind": "plan",
+      "max_tokens": 768,
+      "name": "planner"
+    },
+    {
+      "approximate_prompt_tokens": 2000,
+      "kind": "action",
+      "max_tokens": 512,
+      "name": "native_action"
+    }
+  ],
+  "cost_control": {
+    "cap_usd": "0.05",
+    "completion_usd_per_token": "0.00000034",
+    "prompt_overhead_tokens": 16384,
+    "prompt_usd_per_token": "0.00000007"
+  },
+  "model_alias": "google/gemma-4-26b-a4b-it",
+  "openrouter": {
+    "expected_response_model": "google/gemma-4-26b-a4b-it-20260403",
+    "expected_response_provider": "DeepInfra",
+    "provider": "DeepInfra",
+    "quantizations": [
+      "fp8"
+    ]
+  },
+  "protocol": "serving-openrouter-gemma-moe-20260908-v1",
+  "provenance": {
+    "catalog": "https://openrouter.ai/api/v1/models/google/gemma-4-26b-a4b-it/endpoints",
+    "catalog_checked_utc": "2026-09-08",
+    "fallbacks": false,
+    "harness_runtime_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "planned_outcomes": "One planner reply and one native write reply on synthetic public inputs; one HTTP attempt each. No coding action executes. Both replies must pass route, cost, latency and exact contract checks before a new Requests task can run.",
+    "reasoning_policy": "off",
+    "require_parameters": true,
+    "route_supports": [
+      "tools",
+      "tool_choice",
+      "seed",
+      "reasoning",
+      "max_tokens"
+    ],
+    "selection": "Separate hosted control after physical serving cells exposed latency limits; it is not a rerun of any local task or an isolated model/harness comparison.",
+    "task_cap_reserved_usd": "0.45",
+    "total_hosted_study_cap_usd": "0.50"
+  },
+  "read_timeout_s": 60,
+  "seed": 20260908,
+  "trials_per_case": 1,
+  "wall_timeout_s": 150
+}

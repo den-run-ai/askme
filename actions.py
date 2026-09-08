@@ -18,10 +18,13 @@ import bisect
 import copy
 import hashlib
 import json
+import locale
 import os
 import re
 import shlex
+import signal
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +59,7 @@ _LONG_TIMEOUT_PATTERNS = [
 SHELL_TIMEOUT = 30  # default
 SHELL_TIMEOUT_LONG = 120  # for install/build commands
 SHELL_TIMEOUT_MAX = 300  # hard cap for model-specified timeout
+PROCESS_TERMINATION_GRACE = 0.2  # bounded grace and output-drain periods
 
 # Model-controlled read positions are bounded even though Python integers are
 # unbounded.  The cap is intentionally much larger than an executor-visible
@@ -73,6 +77,131 @@ def _get_shell_timeout(cmd, hint=None):
         if pattern in cmd_lower:
             return SHELL_TIMEOUT_LONG
     return SHELL_TIMEOUT
+
+
+class CapturedProcess:
+    """Captured commands with bounded timeout cleanup, shared by shell and trials.
+
+    POSIX commands own a session so timeout cleanup reaches their process group.
+    Descendants that create their own sessions/groups can escape this lifecycle
+    boundary; this is not containment or whole-run cancellation (#77).
+    """
+
+    @staticmethod
+    def _signal_group(process, signum):
+        try:
+            os.killpg(process.pid, signum)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # Darwin returns EPERM for a group containing only a zombie. Reap
+            # our exited child without waiting, then retry: ESRCH confirms the
+            # group disappeared; a real permission failure still propagates.
+            if process.poll() is None:
+                raise
+            try:
+                os.killpg(process.pid, signum)
+            except ProcessLookupError:
+                pass
+
+    @classmethod
+    def run(cls, command, *, timeout, cwd, shell=False, env=None):
+        if os.name != "posix":
+            return cls._run_windows(command, timeout=timeout, cwd=cwd, shell=shell, env=env)
+        encoding = locale.getpreferredencoding(False)
+        process = subprocess.Popen(
+            command,
+            shell=shell,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            cls._signal_group(process, signal.SIGTERM)
+            try:
+                # Preserve partial diagnostics; never wait indefinitely for EOF
+                # from a descendant that inherited a pipe and escaped the group.
+                exc.output, exc.stderr = process.communicate(timeout=PROCESS_TERMINATION_GRACE)
+            except subprocess.TimeoutExpired as partial:
+                exc.output, exc.stderr = partial.output, partial.stderr
+            finally:
+                # The group leader may already be gone while an output-closing
+                # descendant still ignores TERM. Always signal the entire group.
+                cls._signal_group(process, signal.SIGKILL)
+            try:
+                exc.output, exc.stderr = process.communicate(timeout=PROCESS_TERMINATION_GRACE)
+            except subprocess.TimeoutExpired as partial:
+                exc.output, exc.stderr = partial.output, partial.stderr
+            raise
+        except BaseException:
+            cls._signal_group(process, signal.SIGKILL)
+            raise
+        finally:
+            # Avoid Popen.__exit__'s unbounded wait. On POSIX communicate has no
+            # reader threads, so closing pipes also cannot block on a reader lock.
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+            try:
+                process.wait(timeout=PROCESS_TERMINATION_GRACE)
+            except subprocess.TimeoutExpired:
+                pass
+        return subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            stdout.decode(encoding).replace("\r\n", "\n").replace("\r", "\n"),
+            stderr.decode(encoding).replace("\r\n", "\n").replace("\r", "\n"),
+        )
+
+    @staticmethod
+    def _run_windows(command, *, timeout, cwd, shell, env):
+        # File capture avoids Windows communicate() reader threads, whose EOF
+        # can otherwise wait on inherited descendant handles after a timeout.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(
+                command, shell=shell, stdout=stdout, stderr=stderr, cwd=cwd, env=env
+            )
+            try:
+                process.wait(timeout=timeout)
+            except BaseException as exc:
+                # taskkill /T handles the normal descendant tree. A missing or
+                # stuck taskkill must not prevent bounded direct-child cleanup.
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=PROCESS_TERMINATION_GRACE,
+                        check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                process.kill()
+                try:
+                    process.wait(timeout=PROCESS_TERMINATION_GRACE)
+                except subprocess.TimeoutExpired:
+                    pass
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    stdout.seek(0)
+                    stderr.seek(0)
+                    exc.output = stdout.read(os.fstat(stdout.fileno()).st_size)
+                    exc.stderr = stderr.read(os.fstat(stderr.fileno()).st_size)
+                raise
+            stdout.seek(0)
+            stderr.seek(0)
+            output = stdout.read(os.fstat(stdout.fileno()).st_size)
+            errors = stderr.read(os.fstat(stderr.fileno()).st_size)
+            encoding = locale.getpreferredencoding(False)
+            return subprocess.CompletedProcess(
+                command,
+                process.returncode,
+                output.decode(encoding).replace("\r\n", "\n").replace("\r", "\n"),
+                errors.decode(encoding).replace("\r\n", "\n").replace("\r", "\n"),
+            )
 
 
 # VCS / dependency / build directories excluded from search and tree walks.
@@ -488,11 +617,9 @@ class ActionExecutor:
     def _shell(self, action):
         try:
             timeout = _get_shell_timeout(action["arg"], action.get("timeout"))
-            r = subprocess.run(
+            r = CapturedProcess.run(
                 action["arg"],
                 shell=True,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=self.working_dir,
             )

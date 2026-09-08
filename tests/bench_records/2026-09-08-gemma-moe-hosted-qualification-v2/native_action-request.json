@@ -1,0 +1,223 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": "Executor. Call exactly ONE tool per turn. No text outside the tool call.\nRules:\n- done only when the FULL task description is satisfied\n- fail if same error appears 2+ times\n- Never redo completed_tasks\n- Relative paths, except use an exact incomplete_write_target supplied in state.\n  Recover it before done; append only when incomplete_write_append_allowed=true.\n  Reasoning max 10 words\n- If missing_tools required and allow_system_installs=false: fail; do NOT install\n- Prefer edit over write for existing files\n- Prefer search/tree over shell grep/find/ls\n- read: initial pages take offset/limit (1-based lines); continuation pages must\n  echo the output's cursor, limit, and sha256. Cursors count Unicode code points.\n- write: whole file in content; set append=true to append the next chunk",
+      "role": "system"
+    },
+    {
+      "content": "Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthetic observation: only alpha.txt and beta.txt exist in the example directory. Synthet\nCall write with arg hello.txt and content exactly hi followed by newline.",
+      "role": "user"
+    }
+  ],
+  "model": "google/gemma-4-26b-a4b-it",
+  "provider": {
+    "allow_fallbacks": false,
+    "order": [
+      "DeepInfra"
+    ],
+    "quantizations": [
+      "fp8"
+    ],
+    "require_parameters": true
+  },
+  "reasoning": {
+    "enabled": false
+  },
+  "temperature": 0.1,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Run a shell command in the working directory.",
+        "name": "shell",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "timeout": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Create or overwrite a file; set append=true to append the next chunk.",
+        "name": "write",
+        "parameters": {
+          "properties": {
+            "append": {
+              "type": "boolean"
+            },
+            "arg": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "arg",
+            "content"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Replace exact text in a file.",
+        "name": "edit",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "find": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "arg",
+            "find",
+            "replace"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Read a file window; continuation pages echo the output's cursor/limit/sha256.",
+        "name": "read",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "integer"
+            },
+            "limit": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Bounded literal search; pattern in arg, optional path (default '.').",
+        "name": "search",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Bounded directory listing; directory in arg (default '.').",
+        "name": "tree",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Declare the FULL task complete.",
+        "name": "done",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Give up on the task; one-line reason in arg.",
+        "name": "fail",
+        "parameters": {
+          "properties": {
+            "arg": {
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

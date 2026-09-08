@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,6 +340,7 @@ def test_agent_copies_pinned_source_and_passes_full_prompt_by_file(tmp_path):
     assert manifest["prompt_chars"] == len(prompt)
     assert manifest["goal_context_chars"] == len(prompt)
     assert manifest["askme_sha256"] == adapter.sha256_file(source)
+    assert manifest["runtime_files"] == {"askme.py": adapter.sha256_file(source)}
     assert manifest["allow_provider_fallbacks"] is False
     assert manifest["network_policy_requested"] == "deny"
     assert manifest["container_egress_isolated"] is False
@@ -370,6 +372,162 @@ def test_agent_rejects_source_changed_after_snapshot_was_pinned(tmp_path):
 
     assert agent.pre_run_setup(object(), object(), tmp_path / "infer.log") is False
     assert "changed after adapter initialization" in agent.logger.errors[-1]
+
+
+def test_copied_current_runtime_launches_without_repository_on_python_path(tmp_path):
+    source = MODULE_PATH.parents[2] / "askme.py"
+    agent_class = adapter.build_askme_agent_class(
+        FakeBaseAgent, source, "secret-key", inner_timeout=3540
+    )
+    cm = FakeContainerManager()
+    agent = agent_class(cm, adapter.strict_openrouter_env("model/id", "siliconflow"))
+    assert agent.pre_run_setup(object(), object(), tmp_path / "infer.log")
+    assert agent.prepare_run(object(), "Smoke the copied runtime", tmp_path / "infer.log")
+
+    # Exercise the actual copied launcher in a fresh process, with only the
+    # runtime dependency (requests) supplied by this interpreter's environment.
+    for destination, content in cm.files.items():
+        path = tmp_path / destination.lstrip("/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if destination == adapter.LAUNCHER_PATH:
+            content = content.replace(b"/installed-agent/", f"{tmp_path}/installed-agent/".encode())
+            content = content.replace(b"/agent-logs/", f"{tmp_path}/agent-logs/".encode())
+        path.write_bytes(content)
+    workspace = tmp_path / "empty-workspace"
+    workspace.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-E", str(tmp_path / adapter.LAUNCHER_PATH.lstrip("/")), "--help"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--working-dir" in result.stdout
+    runtime_hashes = {path.name: adapter.sha256_file(path) for path in source.parent.glob("*.py")}
+    manifest = json.loads(cm.files[adapter.ADAPTER_MANIFEST_PATH])
+    launch = json.loads((tmp_path / adapter.POLICY_LOG_PATH.lstrip("/")).read_text())
+    assert manifest["runtime_files"] == runtime_hashes
+    assert launch["runtime_files"] == runtime_hashes
+    assert not (tmp_path / adapter.CREDENTIAL_PATH.lstrip("/")).exists()
+
+
+@pytest.mark.parametrize("change", ["modify", "delete", "add"])
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_adapter_rejects_dependency_changed_after_pinning_before_copy(tmp_path, change, module):
+    source = _source(tmp_path)
+    dependency = source.with_name(module + ".py")
+    if change != "add":
+        dependency.write_text("PINNED = True\n", encoding="utf-8")
+    agent_class = adapter.build_askme_agent_class(
+        FakeBaseAgent, source, "secret-key", inner_timeout=3540
+    )
+    cm = FakeContainerManager()
+    agent = agent_class(cm, adapter.strict_openrouter_env("model/id", "siliconflow"))
+    if change in {"modify", "add"}:
+        dependency.write_text("PINNED = False\n", encoding="utf-8")
+    else:
+        dependency.unlink()
+
+    assert agent.pre_run_setup(object(), object(), tmp_path / "infer.log") is False
+    assert cm.files == {}
+
+
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_modular_source_requires_its_own_sibling_dependency(tmp_path, module):
+    source = _source(tmp_path)
+    source.write_text(f"from {module} import Something\n", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match=module + ".py"):
+        adapter.build_askme_agent_class(FakeBaseAgent, source, "secret", inner_timeout=60)
+
+
+def test_adapter_does_not_resolve_away_source_symlink_before_inspection(tmp_path):
+    source = _source(tmp_path)
+    linked = tmp_path / "linked.py"
+    linked.symlink_to(source)
+    with pytest.raises(FileNotFoundError, match="symlink"):
+        adapter.build_askme_agent_class(FakeBaseAgent, linked, "secret", inner_timeout=60)
+
+
+@pytest.mark.parametrize("name", ["../llm.py", "/tmp/llm.py", "llm.txt"])
+def test_launcher_rejects_non_sibling_runtime_names(name):
+    with pytest.raises(ValueError, match="sibling"):
+        adapter.launcher_source(("askme.py", name))
+
+
+@pytest.mark.parametrize(
+    ("modular", "pins", "accepted"),
+    [
+        (False, "legacy", True),
+        (True, "legacy", False),
+        (True, "partial", False),
+        (True, "exact", True),
+        (True, "wrong_hash", False),
+    ],
+)
+def test_protocol_pins_complete_runtime_before_dataset_or_inference(
+    tmp_path, monkeypatch, modular, pins, accepted
+):
+    source = _source(tmp_path)
+    if modular:
+        source.with_name("actions.py").write_text("PINNED = True\n", encoding="utf-8")
+    protocol = json.loads(MODULE_PATH.with_name("canary-protocol.json").read_text())
+    frozen_source = protocol["sources"]["askme"]
+    frozen_source["base_source_sha256"] = adapter.sha256_file(source)
+    frozen_source["code_files"] = {
+        name: adapter.sha256_file(MODULE_PATH.parents[2] / name)
+        for name in frozen_source["code_files"]
+    }
+    if pins != "legacy":
+        runtime = {"askme.py": adapter.sha256_file(source)}
+        if pins != "partial":
+            runtime["actions.py"] = adapter.sha256_file(source.with_name("actions.py"))
+        if pins == "wrong_hash":
+            runtime["actions.py"] = "0" * 64
+        frozen_source["runtime_files"] = runtime
+    dataset = protocol["sources"]["dataset"]
+    prompt = "Pinned task prompt"
+    dataset["problem_statement_chars"] = len(prompt)
+    dataset["problem_statement_sha256"] = adapter.hashlib.sha256(prompt.encode()).hexdigest()
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(protocol), encoding="utf-8")
+    cell = protocol["agent_cell"]
+    settings = adapter.CanarySettings(
+        featurebench_root=tmp_path,
+        featurebench_revision=protocol["sources"]["featurebench"]["commit"],
+        askme_path=source,
+        dataset_path=tmp_path,
+        dataset_revision=dataset["revision"],
+        output_dir=tmp_path,
+        task_id=dataset["instance_id"],
+        model=cell["model"],
+        askme_revision="a" * 40,
+        protocol_path=protocol_path,
+        expected_served_models=tuple(cell["expected_served_models"]),
+    )
+    loads = []
+
+    def load_dataset(*args, **kwargs):
+        loads.append((args, kwargs))
+        return [
+            {
+                "instance_id": dataset["instance_id"],
+                "problem_statement": prompt,
+                "image_name": protocol["sources"]["container"]["image"].removeprefix("docker.io/"),
+            }
+        ]
+
+    monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load_dataset))
+    if accepted:
+        assert adapter._validate_protocol_settings(settings) == protocol
+        assert len(loads) == 1
+    else:
+        with pytest.raises(ValueError, match="runtime_files"):
+            adapter._validate_protocol_settings(settings)
+        assert loads == []
 
 
 def test_post_run_preserves_logs_and_requires_complete_structured_result(tmp_path):
@@ -428,6 +586,7 @@ def test_registration_is_temporary_and_delegates_other_agents(tmp_path):
 
 def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, monkeypatch):
     source = _source(tmp_path)
+    source.with_name("actions.py").write_text("PINNED = True\n", encoding="utf-8")
     featurebench_root = tmp_path / "FeatureBench"
     featurebench_root.mkdir()
     dataset_path = tmp_path / "FeatureBench-dataset"
@@ -547,6 +706,9 @@ def test_run_canary_uses_official_runner_shape_without_persisting_key(tmp_path, 
     provenance_text = (run_dir / "askme-canary.json").read_text()
     assert "secret-key" not in provenance_text
     provenance = json.loads(provenance_text)
+    assert provenance["runtime_files"] == {
+        name: adapter.sha256_file(source.with_name(name)) for name in ("askme.py", "actions.py")
+    }
     assert provenance["featurebench_revision"] == "featurebench-sha"
     assert provenance["featurebench_git_dirty"] is False
     assert provenance["dataset_revision"] == "dataset-sha"

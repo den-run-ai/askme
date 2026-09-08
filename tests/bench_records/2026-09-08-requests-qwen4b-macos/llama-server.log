@@ -1,0 +1,75 @@
+0.00.100.904 I log_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.100.922 I device_info:
+0.00.100.939 I   - MTL0    : Apple Paravirtual device (4778 MiB, 4778 MiB free)
+0.00.100.940 I   - BLAS    : Accelerate (0 MiB, 0 MiB free)
+0.00.100.955 I   - CPU     : Apple M1 (Virtual) (7168 MiB, 7168 MiB free)
+0.00.101.026 I system_info: n_threads = 3 (n_threads_batch = 3) / 3 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | DOTPROD = 1 | LLAMAFILE = 1 | ACCELERATE = 1 | REPACK = 1 | 
+0.00.102.090 I srv          init: running without SSL
+0.00.105.751 I srv          init: using 5 threads for HTTP server
+0.00.107.879 I srv         start: binding port with default address family
+0.00.118.409 I srv  llama_server: loading model
+0.00.118.798 I srv    load_model: loading model '/Users/runner/work/_temp/Qwen3-4B-Q4_K_M.gguf'
+0.00.120.471 I common_init_result: fitting params to device memory ...
+0.00.120.481 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.631.864 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.21.678.882 W llama_context: n_ctx_seq (8192) < n_ctx_train (40960) -- the full capacity of the model will not be utilized
+0.22.054.920 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.38.675.307 I srv    load_model: initializing slots, n_slots = 1
+0.54.246.783 W common_speculative_init: no implementations specified for speculative decoding
+0.54.246.999 I slot   load_model: id  0 | task -1 | new slot, n_ctx = 8192
+0.54.247.928 I srv    load_model: prompt cache is enabled, size limit: 8192 MiB
+0.54.248.182 I srv    load_model: use `--cache-ram 0` to disable the prompt cache
+0.54.248.188 I srv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391
+0.54.248.188 I srv    load_model: context checkpoints enabled, max = 32, min spacing = 256
+0.54.250.998 I srv          init: idle slots will be saved to prompt cache upon starting a new task
+0.54.303.579 I init: chat template, example_format: '<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+'
+0.54.310.453 I srv          init: init: chat template, thinking = 0
+0.54.312.531 I srv  llama_server: model loaded
+0.54.312.541 I srv  llama_server: server is listening on http://127.0.0.1:8080
+0.54.313.384 I srv  update_slots: all slots are idle
+0.56.454.018 I srv  params_from_: Chat format: peg-native
+0.56.454.856 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.56.454.861 I srv  get_availabl: updating prompt cache
+0.56.454.866 I srv          load:  - looking for better prompt, base f_keep = -1.000, sim = 0.000
+0.56.454.867 I srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)
+0.56.454.868 I srv  get_availabl: prompt cache update took 0.01 ms
+0.56.455.883 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+1.12.693.756 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =    147, progress = 0.25, t =  16.24 s / 9.05 tokens per second
+2.56.814.818 W srv          stop: cancel task, id_task = 0
+2.58.148.044 I srv  params_from_: Chat format: peg-native
+3.03.059.686 I slot      release: id  0 | task 0 | stop processing: n_tokens = 584, truncated = 0
+3.03.060.190 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.991
+3.03.063.446 I slot launch_slot_: id  0 | task 9 | processing task, is_child = 0
+3.03.063.511 W slot update_slots: id  0 | task 9 | need to evaluate at least 1 token for each active slot (n_past = 579, task.n_tokens() = 579)
+3.03.063.516 W slot update_slots: id  0 | task 9 | n_past was set to 578
+4.59.051.226 W srv          stop: cancel task, id_task = 9
+5.01.976.343 I srv  params_from_: Chat format: peg-native
+5.39.531.129 I slot      release: id  0 | task 9 | stop processing: n_tokens = 588, truncated = 0
+5.39.533.337 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, sim_best = 0.952 (> 0.100 thold), f_keep = 0.974
+5.39.541.538 I slot launch_slot_: id  0 | task 21 | processing task, is_child = 0
+7.01.850.445 W srv          stop: cancel task, id_task = 21
+7.03.261.356 I srv  params_from_: Chat format: peg-native
+7.33.222.919 I slot      release: id  0 | task 21 | stop processing: n_tokens = 604, truncated = 0
+7.33.225.263 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, sim_best = 0.553 (> 0.100 thold), f_keep = 0.566
+7.33.235.682 I slot launch_slot_: id  0 | task 26 | processing task, is_child = 0
+10.02.317.990 W srv          stop: cancel task, id_task = 26
+10.03.835.690 I srv  params_from_: Chat format: peg-native
+10.16.972.181 I slot      release: id  0 | task 26 | stop processing: n_tokens = 622, truncated = 0
+10.16.973.103 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.995
+10.16.976.690 I slot launch_slot_: id  0 | task 32 | processing task, is_child = 0
+10.16.976.772 W slot update_slots: id  0 | task 32 | need to evaluate at least 1 token for each active slot (n_past = 619, task.n_tokens() = 619)
+10.16.976.772 W slot update_slots: id  0 | task 32 | n_past was set to 618
+12.56.673.984 W srv          stop: cancel task, id_task = 32

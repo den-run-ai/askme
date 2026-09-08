@@ -1,0 +1,57 @@
+{
+  "date_utc": "2026-09-08",
+  "tested_base": "c8793348bed8ae267f8130fad8b4a730839bcb6c",
+  "scope": "Uncommitted corrected conclusion, canonical notes, companion/release documentation, frozen local-evidence receipt and deck contracts. Runtime and historical model records were unchanged. No model calls or paid inference were requested.",
+  "conclusion": "Local repairs are possible. Reliable autonomy is unproven.",
+  "evidence_receipt": "talks/berkeley-agentic-ai-summit-2026/evals/local-repair-evidence.json",
+  "historical_source_commit": "8d4e1eab8034d2b5e0b6418b6701a351201187ad",
+  "claim_boundary": "Four shipped-profile heuristic runs repaired one seeded health-check bug and all exhausted. Independent acceptance is reported in the pinned historical README; retained JSONL confirms edit receipts and exhaustion but does not contain full edit payloads or a held-out replay transcript. The original pilot's two strict passes used a non-shipping diagnostic budget. Later lifecycle trials are a separate addendum. No reliability, net time-savings, current-runtime, or causal harness claim is added.",
+  "public_source_check": {
+    "checked_at_utc": "2026-09-08T07:07:19Z",
+    "raw_files": 9,
+    "http_200": 9,
+    "sha256_matches_receipt": 9,
+    "method": "Unauthenticated raw-file GETs for the pinned report, protocol, four JSONL records and three summaries. Fresh headless Chrome profile also rendered the pinned report with an empty user-login value.",
+    "new_candidate_link_limit": "The newly added local receipt and regenerated candidate PDF require a final public-byte check after commit/push. This record does not assert uncommitted bytes were already public."
+  },
+  "render": {
+    "command": "npx --yes @marp-team/marp-cli@4.4.1 talks/berkeley-agentic-ai-summit-2026/slides.md --html --pdf --allow-local-files",
+    "node_version": "23.10.0",
+    "pages": 8,
+    "spoken_words_excluding_source_blocks": 568,
+    "source_sha256": "ef9cc5d5390f2167e33d965978f4526a4a43962ff562ce26a689f9c01f2d7bea",
+    "canonical_notes_sha256": "344a8f1b1f3239ef1db4e67aef6af9b0f145c826de89a084cb326ce6128a14d7",
+    "previous_pdf_sha256": "0966f3db376be47df9707698e4c8b24b243f3990c218d3ba0091a1136fb5e8c9",
+    "pdf_sha256": "557f094e478624b9dccd634702250f66b65ddbd15bc506165c71b94318985e4d",
+    "visual_method": "Native PDFKit rasterization at 1600x900; compare all eight before/after PNG hashes and visually inspect every changed page.",
+    "changed_pages": [7],
+    "visually_inspected_changed_pages": [7],
+    "unchanged_raster_pages": [1, 2, 3, 4, 5, 6, 8],
+    "changed_page_png_sha256": "ae416cdf8468aedf0c247e3996796b23023073e72a9cd8f874831d80f070f101",
+    "finding": "No clipping, overlap or unreadable density on the changed conclusion page; title and backup link annotations are unchanged. Earlier PDF hashes and visual audits remain historical."
+  },
+  "checks": [
+    {"command": "uv run --locked pytest tests/test_talk_deck_contract.py tests/test_berkeley_evals_contract.py -q", "passed": 13, "exit_code": 0},
+    {"command": "uv run --locked ruff check askme.py actions.py tests", "exit_code": 0},
+    {"command": "uv run --locked ruff format --check askme.py actions.py tests", "exit_code": 0, "files": 80},
+    {"command": "uv run --locked ty check", "exit_code": 0},
+    {"command": "ASKME_RUN_LIVE_LLM_TESTS=0 uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:<temporary-path>", "exit_code": 0, "passed": 1433, "skipped": 30, "elapsed_s": 29.69, "branch_aware_coverage_percent": 96.46},
+    {"command": "git diff --check", "exit_code": 0}
+  ],
+  "failure_before_edit": "The revised narrative contract rejected the old slide-7 heading, and the local-receipt contract failed before that receipt existed. Both pass after the scoped publication changes.",
+  "github_checkpoint": {
+    "pr": 110,
+    "reviewed_source_head": "c8793348bed8ae267f8130fad8b4a730839bcb6c",
+    "linux_ci": {"run_id": 34196761505, "conclusion": "success"},
+    "macos_ci": {"run_id": 34196761497, "conclusion": "success"},
+    "paid_llm_workflow": {"run_id": 34196761507, "conclusion": "skipped"},
+    "inline_review_threads": 1,
+    "unresolved_inline_review_threads": 0,
+    "limit": "The resolved streamed-identity P1 and green CI apply to c879334. They are not substituted for review/CI on this later slide-publication candidate."
+  },
+  "remaining": [
+    "Review, commit/push and check the actual final candidate, including fresh public-byte and secrets scans.",
+    "Verify New issue flow from an independent signed-in non-collaborator account; no such account was available.",
+    "Select and publish the reviewed v0.1.0 tag/Release deliberately. No commit, push, merge, tag or Release was performed by this slide-edit pass."
+  ]
+}

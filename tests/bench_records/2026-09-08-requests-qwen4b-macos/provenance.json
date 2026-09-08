@@ -1,0 +1,20 @@
+{
+  "run_id": 34175311656,
+  "job_id": 101903426407,
+  "run_attempt": 1,
+  "workflow_revision": "1f3eff01287af0a7707ae8e007c293efcbfddc2f",
+  "claim_revision": "1cd6a9a0384202791f611f3f3c0fb040863591e8",
+  "harness_revision": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+  "artifact": {
+    "id": 10037361797,
+    "bytes": 7668180,
+    "sha256": "45b5f46f396bd485a85b5d54f177820e365adbd9854ec9c86912055f198b284d",
+    "expires_at": "2026-12-07T01:02:37Z",
+    "download_limitation": "GitHub artifact metadata retained; connector signed download returned HTTP403. Full workspace remains in the GitHub artifact. Portable job-log archive is retained here and contains every recorded file except workspace.tar.gz. No model action was reached; pinned upstream and empty candidate patch reproduce the unmodified checkout."
+  },
+  "portable_archive_sha256": "db68958d8bc1d2f85819fd384e4825234d3534ce5559a68f9f7245a5905a19d6",
+  "job_log_sha256": "62473dfaf3edcb677cc642e7b9e075d81105006c732a9e8b6230daef52018fc0",
+  "offline_scoring_amendment": false,
+  "checkout_revision": "5de73dd0acdeb229cb07401321144651441fe10d",
+  "workflow_revision_kind": "PR head; checkout_revision identifies GitHub generated PR merge checkout; frozen files match the PR head"
+}

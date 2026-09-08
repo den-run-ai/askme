@@ -12,6 +12,7 @@ AskMe evaluation, benchmark, or reliability estimate.
 | `analyze.py` | Authoritative bounded classifier: `uv run --locked --no-dev python tests/bench_records/2026-08-29-peg-probe/analyze.py` |
 | `peg_probe_results_run1.jsonl` / `peg_probe_results_run2.jsonl` | 32 records each, including call count, first tool name, parse status, argument keys, usage, and finish reason |
 | `peg_probe_run1.txt` / `peg_probe_run2.txt` | Frozen console transcripts; `.txt` because `*.log` is gitignored |
+| [`../../peg_probe_v2.py`](../../peg_probe_v2.py) | Separately versioned, offline-tested replacement collector core; no historical results were produced with it |
 
 ## Correction — 2026-09-07
 
@@ -87,6 +88,38 @@ trials, the other two remained JSON-parseable. No HTTP 5xx is recorded; the
 original report also states no `unparsed peg-gemma4` server-log messages.
 These observations do not establish a zero AskMe decoder-rejection rate or
 clear upstream #25986.
+
+## Replacement collector — offline-tested 2026-09-08
+
+The versioned `peg_probe_v2.py` core addresses the old first-call acceptance and
+incomplete-retention defects without editing `peg_probe.py` or reconstructing
+missing historical bytes. It has **no live CLI or default HTTP transport**,
+server URL, credential lookup, or action dispatcher. A caller must supply an
+explicit exchange callback over complete request/response-body bytes.
+
+Each attempt creates a new directory and refuses an existing destination
+before transport. It records exact request bytes and the full returned body,
+including non-JSON/HTTP failures, with SHA-256 hashes. It never records HTTP
+headers or transport exception text. The canonical native decoder and action
+schema validate exactly one expected tool and all retained argument values;
+multiple calls, wrong tools, non-object arguments and invalid fields cannot
+pass `action_contract_valid`. Full accepted content and delimiter counts remain
+available, including Unicode and content beyond the old prefix/suffix excerpts.
+
+That flag is schema validity, not action execution or artifact acceptance.
+Schema-valid arguments with `finish_reason=length` remain valid under the
+current runtime contract; malformed arguments fail without partial salvage.
+A delimiter count of zero does not exercise the delimiter condition. The
+collector cannot establish either artifact completeness or upstream defect
+clearance by itself. Captured bodies still need sensitivity review and a secret
+scan before publication; absence of credential handling is not a privacy proof.
+
+A new live campaign still requires a separately registered protocol: exact
+runtime/model/server hashes, actual two-message and synthetic-history arms,
+budgets, controls, trial count and a decision rule. The injected transport must
+enforce the registered endpoint and request/response/time bounds. This PR adds
+only the collector and synthetic regression tests, not that campaign or a
+qualified live runner. The original 62 schema-unverified rows remain unchanged.
 
 ## Limitations and next qualification
 

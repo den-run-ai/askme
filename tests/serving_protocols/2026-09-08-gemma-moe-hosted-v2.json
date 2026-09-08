@@ -1,0 +1,44 @@
+{
+  "protocol": "serving-openrouter-gemma-moe-20260908-v2",
+  "backend": "openrouter",
+  "api_url": "https://openrouter.ai/api/v1/chat/completions",
+  "model_alias": "google/gemma-4-26b-a4b-it",
+  "seed": 20260908,
+  "openrouter": {
+    "provider": "DeepInfra",
+    "expected_response_provider": "DeepInfra",
+    "expected_response_model": "google/gemma-4-26b-a4b-it",
+    "quantizations": [
+      "fp8"
+    ]
+  },
+  "cost_control": {
+    "cap_usd": "0.04995",
+    "prompt_usd_per_token": "0.00000007",
+    "completion_usd_per_token": "0.00000034",
+    "prompt_overhead_tokens": 16384
+  },
+  "provenance": {
+    "catalog": "https://openrouter.ai/api/v1/models/google/gemma-4-26b-a4b-it/endpoints",
+    "catalog_checked_utc": "2026-09-08",
+    "harness_runtime_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+    "route_supports": [
+      "tools",
+      "tool_choice",
+      "seed",
+      "reasoning",
+      "max_tokens"
+    ],
+    "reasoning_policy": "off",
+    "fallbacks": false,
+    "require_parameters": true,
+    "selection": "Separate hosted control after physical serving cells exposed latency limits; it is not a rerun of any local task or an isolated model/harness comparison.",
+    "planned_outcomes": "One planner reply and one native write reply on synthetic public inputs; one HTTP attempt each. No coding action executes. Both replies must pass route, cost, latency and exact contract checks before a new Requests task can run.",
+    "total_hosted_study_cap_usd": "0.50",
+    "task_cap_reserved_usd": "0.45",
+    "previous_protocol": "serving-openrouter-gemma-moe-20260908-v1",
+    "previous_attempt_cost_usd": "0.00004135",
+    "amendment": "The v1 preflight stopped after its planner response because the frozen expected response.model incorrectly used the endpoint's dated display name. The API returned the requested canonical alias from the correct DeepInfra route. V2 pins that observed API identifier; it does not prove hosted weight bytes or a dated checkpoint. Preserve v1 unchanged. No task attempt has occurred.",
+    "catalog_endpoint_name": "DeepInfra | google/gemma-4-26b-a4b-it-20260403"
+  }
+}

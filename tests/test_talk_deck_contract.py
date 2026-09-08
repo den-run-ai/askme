@@ -1,5 +1,6 @@
 """Regression guard for the Berkeley talk's reviewer-approved narrative."""
 
+import json
 import re
 from pathlib import Path
 
@@ -7,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TALK = ROOT / "talks" / "berkeley-agentic-ai-summit-2026"
 SLIDES = TALK / "slides.md"
 SPEC = TALK / "DECK_SPEC.md"
+NOTES = TALK / "SPEAKER_NOTES.md"
 BLOG = TALK / "blog.md"
 README = TALK / "README.md"
 ROOT_README = ROOT / "README.md"
@@ -33,7 +35,7 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "Are Small LLMs Ready for Coding Agents?" in title
     assert "Denis Akhiyarov" in title
     assert "Sr Staff Research Scientist at ServiceNow" in title
-    assert 'href="https://x.com/den-run-ai"' in title
+    assert 'href="https://github.com/den-run-ai"' in title
     assert "trace-table" not in title
 
     bridge = slides[1]
@@ -42,8 +44,9 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "ASKME LOOP" in bridge_upper
     assert "EXTERNAL ACCEPTANCE LAYER" in bridge_upper
     assert "AskMe is an experimental coding-agent harness" in bridge
-    assert "one JSON action" in bridge
-    assert "fixed action vocabulary" in bridge
+    assert "one native tool call" in bridge
+    assert "eight native tools" in bridge
+    assert "one JSON action" not in bridge
     assert "external workflow acceptance" in bridge
     for stale_label in ("Pi", "Oh My Pi", "OpenHands", "Omnigent", "Databricks"):
         assert stale_label not in bridge
@@ -73,28 +76,42 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
 
     boundary = slides[5]
     assert "FeatureBench canary" in boundary
-    assert "Both models build app features — but fail on testing" in boundary
+    assert "Applied patches, unresolved feature task" in boundary
     assert "0 writes" in boundary
     assert "Empty patch" in boundary
-    assert "App features built" in boundary
+    assert "Patches applied" in boundary
     assert "11 / 13" in boundary
     assert "7 / 13" in boundary
-    assert "They never test their work" in boundary
-    assert "Neither finished cleanly" in boundary
-    assert "testing and finishing the work is the next gap" in boundary
-    assert "One task, one attempt per model — progress, not a benchmark score" in boundary
+    assert "No target-test run" in boundary
+    assert "Both agents exhausted their planning attempts" in boundary
+    assert "Neither emitted" not in boundary
+    assert "One task, one attempt per model" in boundary
+    assert "historical results" in boundary
+    assert "no causal attribution" in boundary
+    assert "changed serving stack" in boundary
+    assert "The action interface blocked every edit" not in boundary
+    assert "They never test their work" not in boundary
     assert "Qwen wrong-path result" not in boundary
     for roadmap_detail in ("reasoning-policy", "24-run", "Vals"):
         assert roadmap_detail not in boundary
 
     conclusion = slides[6]
     assert "Conclusion + limits" in conclusion
-    assert "Promising for bounded loops. Feature readiness is still open." in conclusion
+    assert "Local repairs are possible. Reliable autonomy is unproven." in conclusion
     for label in ("Observed", "Supported", "Still open"):
         assert label in conclusion
     assert "Evaluate the model, harness, and task as one system" in conclusion
     assert "not a general readiness verdict" in conclusion
     assert "validates this interface" not in conclusion
+    assert "do not isolate a harness effect" in conclusion
+    assert "Harness design changed the outcome" not in conclusion
+    assert "Gemma 4 E4B (dense PLE), Aug 4" in conclusion
+    assert "four repairs of one seeded health-check bug" in conclusion
+    assert "passed independent acceptance" in conclusion
+    assert "All four agents exhausted" in conclusion
+    assert "Narrow, independently accepted small repairs exist" in conclusion
+    assert "net time savings" in conclusion
+    assert "larger, diagnostic budget" in conclusion
 
     backup = slides[7]
     assert "Backup · harness boundaries" in backup
@@ -104,7 +121,9 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     for dimension in ("Action surface", "State + control", "Completion boundary"):
         assert dimension in backup
     assert "Trade-off, not ranking" in backup
-    assert "conditional fail-open validation" in backup
+    assert "8 native tools: 6 executable actions" in backup
+    assert "complete_unverified" in backup
+    assert "conditional fail-open validation" not in backup
     assert "optional persistence" in backup
     assert "finish</code> signals completion" in backup
     assert "Databricks" not in backup
@@ -126,7 +145,14 @@ def test_deck_contract_guards_notes_and_review_spec():
         flags=re.DOTALL,
     )
     assert len(note_blocks) == 7
-    assert sum(len(block.split()) for block in note_blocks) == 511
+    canonical = re.findall(
+        r"(?ms)^## Slide [1-7][^\n]*\n\n(.*?)(?=^## Slide |\Z)",
+        NOTES.read_text(encoding="utf-8"),
+    )
+    assert [block.strip() for block in note_blocks] == [block.strip() for block in canonical]
+    assert all("[Sources]" in block for block in note_blocks)
+    spoken_word_count = sum(len(block.split("[Sources]", 1)[0].split()) for block in note_blocks)
+    assert 450 <= spoken_word_count <= 650
     assert "FeatureBench canary" in text
     for benchmark in ("Vals", "ProgramBench"):
         assert benchmark not in text
@@ -144,7 +170,7 @@ def test_deck_contract_guards_notes_and_review_spec():
     for requirement in (
         "Are Small LLMs Ready for Coding Agents?",
         "Sr Staff Research Scientist at ServiceNow",
-        "https://x.com/den-run-ai",
+        "https://github.com/den-run-ai",
         "Removing the Gemma/Qwen two-variant comparison was a regression",
         "Slide 2 contains no product/vendor taxonomy",
         "experimental coding-agent harness",
@@ -239,3 +265,27 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "AskMe is experimental automation, **not a sandbox**" in root_readme
     assert "not an operating-system sandbox" in security
     assert "ALLOW_NETWORK" in security and "does not block network access" in security
+
+
+def test_local_repair_conclusion_keeps_historical_acceptance_and_completion_distinct():
+    evidence = json.loads((TALK / "evals" / "local-repair-evidence.json").read_text())
+    assert evidence["source_commit"] == "8d4e1eab8034d2b5e0b6418b6701a351201187ad"
+    assert len(evidence["shipped_trials"]) == 4
+    for trial in evidence["shipped_trials"]:
+        assert trial["backend"] == "local"
+        assert trial["model"] == "gemma-4-e4b"
+        assert trial["capability_profile"] == "legacy-e4b-m1-16k-v1"
+        assert trial["step_policy"] == "heuristic"
+        assert trial["agent_status"] == "exhausted"
+        assert trial["successful_app_edits"] == 1
+        assert len(trial["record"]["sha256"]) == 64
+    assert evidence["acceptance"]["accepted_repairs_in_historical_report"] == 4
+    assert evidence["acceptance"]["replayed_in_this_publication_pass"] is False
+    assert evidence["diagnostic_raised_budget"]["strict_passes"] == 2
+    assert evidence["diagnostic_raised_budget"]["shipped_profile"] is False
+    assert evidence["model_calls_in_this_publication_pass"] == 0
+
+    notes = _single_line(NOTES.read_text(encoding="utf-8"))
+    assert "The two clean finishes used a larger, diagnostic budget" in notes
+    assert "not dependable autonomy or measured net time savings" in notes
+    assert "local-repair-evidence.json" in notes

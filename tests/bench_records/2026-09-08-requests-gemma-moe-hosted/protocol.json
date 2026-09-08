@@ -1,0 +1,64 @@
+{
+  "protocol": "requests-pickle-openrouter-gemma-moe-v2",
+  "registered_date": "2026-09-08",
+  "trials": 1,
+  "harness_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+  "runtime_sha256": {
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949",
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930"
+  },
+  "target_repository": "https://github.com/psf/requests.git",
+  "target_revision": "7a13c041dbef42f9f3feb14110f02626f6892e9a",
+  "upstream_issue": "https://github.com/psf/requests/issues/6628",
+  "gold_reference": "https://github.com/psf/requests/pull/6629",
+  "runner": "physical MacBookAir10,1 / Apple M1 / 16 GiB / macOS 26.5; remote inference",
+  "backend": "openrouter",
+  "api_url": "https://openrouter.ai/api/v1/chat/completions",
+  "model_alias": "google/gemma-4-26b-a4b-it",
+  "openrouter": {
+    "provider": "DeepInfra",
+    "expected_response_provider": "DeepInfra",
+    "expected_response_model": "google/gemma-4-26b-a4b-it",
+    "quantizations": ["fp8"]
+  },
+  "cost_control": {
+    "cap_usd": "0.45",
+    "prompt_usd_per_token": "0.00000007",
+    "completion_usd_per_token": "0.00000034",
+    "prompt_overhead_tokens": 16384
+  },
+  "serving_qualification": {
+    "path": "../../bench_records/2026-09-08-gemma-moe-hosted-qualification-v2/qualification.json",
+    "sha256": "7074770165c5e378a9c09b0919af270040f4afd5c7c9ebe42b6fa692e00ada6b",
+    "protocol": "serving-openrouter-gemma-moe-20260908-v2"
+  },
+  "seed": 20260908,
+  "temperature": 0.1,
+  "wall_timeout_seconds": 720,
+  "capability_profile": {
+    "name": "generic-feature-scale-v1",
+    "step_tokens": 4096,
+    "step_write_tokens": 8192,
+    "planner_tokens": 768,
+    "task_replan_tokens": 96,
+    "validation_tokens": 768,
+    "context_window": null,
+    "server_slots": null
+  },
+  "run_config": {
+    "allow_system_installs": false,
+    "allow_network": false,
+    "reasoning_policy": "off",
+    "max_replans": 2,
+    "max_tasks": 3,
+    "max_steps": 8,
+    "max_task_local_replans": 1,
+    "goal_context_chars": 300,
+    "final_validate": "auto",
+    "compile_repair": false,
+    "step_policy": "heuristic"
+  },
+  "provider": "OpenRouter / DeepInfra only / fp8 requested / no fallbacks / required parameters",
+  "limitations": "One deliberately selected historical Requests bug, possibly in training data; stdlib json only. Hosted MoE, route, quantization and output budgets differ from local Qwen v1 and E4B serving cells. No matched causal comparison, reliability estimate, model-size claim, or local performance claim. Hosted response identity is an API alias, not verified weight bytes.",
+  "decision_rule": "Resolved only if a nonempty patch applies to a fresh pinned checkout, changes no unrelated production files, and passes every independent acceptance check. Agent completion is reported separately. Publish the sole attempt even if exhausted, timed out, regressed, over-budget, or invalid. Do not selectively rerun."
+}

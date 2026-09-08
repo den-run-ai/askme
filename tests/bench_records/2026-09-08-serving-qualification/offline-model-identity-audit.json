@@ -1,0 +1,182 @@
+{
+  "all_completed_responses_have_matching_identity": true,
+  "all_fourteen_case_qualification_booleans_unchanged": true,
+  "archive_members_verified": 174,
+  "audit": "offline-local-stream-model-identity-v1",
+  "cells": [
+    {
+      "cases": [
+        {
+          "case": "prefill600_decode128",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "gemma-4-e4b"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "prefill2000_decode128",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "gemma-4-e4b"
+          ],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "prefill600_decode512",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "gemma-4-e4b"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "prefill2000_decode512",
+          "diagnostic_errors_added": [
+            "served_model_mismatch"
+          ],
+          "observed_model_ids": [],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "prefill2000_decode1024",
+          "diagnostic_errors_added": [
+            "served_model_mismatch"
+          ],
+          "observed_model_ids": [],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "planner",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "gemma-4-e4b"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "native_action",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "gemma-4-e4b"
+          ],
+          "original_qualified": false,
+          "updated_qualified": false
+        }
+      ],
+      "cell": "e4b",
+      "expected_model": "gemma-4-e4b",
+      "original_gate_qualified": false,
+      "updated_gate_qualified": false
+    },
+    {
+      "cases": [
+        {
+          "case": "prefill600_decode128",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "qwen3-4b-q4-k-m-qualification-v1"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "prefill2000_decode128",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "qwen3-4b-q4-k-m-qualification-v1"
+          ],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "prefill600_decode512",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "qwen3-4b-q4-k-m-qualification-v1"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "prefill2000_decode512",
+          "diagnostic_errors_added": [
+            "served_model_mismatch"
+          ],
+          "observed_model_ids": [],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "prefill2000_decode1024",
+          "diagnostic_errors_added": [
+            "served_model_mismatch"
+          ],
+          "observed_model_ids": [],
+          "original_qualified": false,
+          "updated_qualified": false
+        },
+        {
+          "case": "planner",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "qwen3-4b-q4-k-m-qualification-v1"
+          ],
+          "original_qualified": true,
+          "updated_qualified": true
+        },
+        {
+          "case": "native_action",
+          "diagnostic_errors_added": [],
+          "observed_model_ids": [
+            "qwen3-4b-q4-k-m-qualification-v1"
+          ],
+          "original_qualified": false,
+          "updated_qualified": false
+        }
+      ],
+      "cell": "qwen4b",
+      "expected_model": "qwen3-4b-q4-k-m-qualification-v1",
+      "original_gate_qualified": false,
+      "updated_gate_qualified": false
+    }
+  ],
+  "diagnostic_error_additions": 4,
+  "guard_change": "Require observed model identity to equal the declared alias and reject conflicting identities or malformed non-null identity fields across chunks. Missing identity is now a failure. Ordinary omitted/null chunk identity remains allowed when a valid matching identity exists.",
+  "missing_identity_explanation": "Both 2000-input / 512-output and 2000-input / 1024-output streams timed out in each deployment before the native final response supplied model identity. They already failed on timing/incomplete output; the stricter guard adds an identity error without changing their failed verdict.",
+  "model_calls": 0,
+  "original_files_sha256": {
+    "e4b-qualification.json": "4ea5d9db85fd95fbd73d4d0d9f397f23a2228b0d2085104b98b66636825ef091",
+    "frozen-serving-qualification.py": "cdd7ada1fafed8b4c0f82e3c835f84cb16c6e40dcad7fc7a9082b2a35933f2aa",
+    "offline-audit.json": "fb2caba3b191eb1705965a2cb790044fb997f5b3c59dc335231f86340b3b6163",
+    "qwen4b-qualification.json": "b077651bf4f7784c57d191ad06025bde636429fa66f4ab9db49362ea5febac4f",
+    "raw-evidence-manifest.json": "e77d7443a329104f69da5ab6223bfecd6c41df4533033d2ed8405517e984f87a",
+    "raw-evidence.tar.gz": "98350855475e2dddc87fc1c4f61741b93b3061be574640bda673612fe159e3c1"
+  },
+  "original_files_unchanged": true,
+  "original_runner_sha256": "cdd7ada1fafed8b4c0f82e3c835f84cb16c6e40dcad7fc7a9082b2a35933f2aa",
+  "review_thread": "PRRT_kwDOR7cb-s6gH9da",
+  "score_amendment": false,
+  "updated_runner_sha256": "be6b88d25a30bd47dca6deb0a852739312baeef83de357c03aa8242d0144071d",
+  "verification": {
+    "failing_before_fix": [
+      "missing model identity incorrectly passed",
+      "earlier wrong model identity followed by correct identity incorrectly passed"
+    ],
+    "focused_tests_passed": 37,
+    "guarded_full_suite_passed": 1432,
+    "guarded_full_suite_skipped": 30,
+    "branch_aware_coverage_percent": 96.46,
+    "live_llm_tests_enabled": false,
+    "local_server_log_sha256_before_and_after": "1e599be410c355947176225952cbcca12e43754aff0eb50415d15f6adb4f5676",
+    "ty_check": "passed",
+    "ruff_check": "passed",
+    "ruff_format": "passed"
+  }
+}

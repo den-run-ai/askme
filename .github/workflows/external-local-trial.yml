@@ -1,0 +1,191 @@
+name: Predeclared external local trial
+
+# No schedule, push trigger, hosted API key, or automatic outcome-based retry.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-local-trial-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  requests-pickle:
+    if: >-
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.label.name == 'external-local-trial' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      TASK: tests/external_repo/requests_pickle_v1
+    steps:
+      - name: Set evidence directory
+        run: echo "RECORDS=$RUNNER_TEMP/external-local-trial-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the immutable protocol-wide claim
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: den-run-ai/askme
+          ref: 1cd6a9a0384202791f611f3f3c0fb040863591e8
+          path: trial-claim
+          persist-credentials: false
+      - name: Reject every unclaimed run before model setup
+        env:
+          TRIAL_WORKFLOW_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tests/external_trial_claim.py trial-claim/claim.json \
+            tests/external_repo/requests_pickle_v1/protocol.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 28534c62a498ae3dcda1899a9ec2f989a5745f9e
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: psf/requests
+          ref: 7a13c041dbef42f9f3feb14110f02626f6892e9a
+          path: external-source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: harness/uv.lock
+      - name: Install locked harness environment
+        working-directory: harness
+        run: uv sync --locked
+      - name: Register exact inputs and qualify controls before any inference
+        run: |
+          harness/.venv/bin/python tests/external_repo_trial.py prepare \
+            --source external-source --harness harness --output "$RECORDS"
+          git rev-parse HEAD > "$RECORDS/protocol-commit.txt"
+          sysctl hw.memsize hw.model hw.ncpu > "$RECORDS/hardware.txt"
+          sw_vers >> "$RECORDS/hardware.txt"
+          harness/.venv/bin/python - <<'PY'
+          import json, platform, subprocess
+          from pathlib import Path
+          p = json.loads(Path('tests/external_repo/requests_pickle_v1/protocol.json').read_text())
+          memory = int(subprocess.check_output(['sysctl', '-n', 'hw.memsize']))
+          assert platform.machine() == 'arm64', 'This protocol requires Apple Silicon'
+          assert memory >= p['minimum_memory_bytes'], 'Insufficient memory for registered model'
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ggml-org/llama.cpp
+          ref: c34b92235b2d6a07963f896085f9ca077ff400b4
+          path: llama.cpp
+          persist-credentials: false
+      - name: Build pinned llama.cpp for Metal
+        run: |
+          cmake -S llama.cpp -B llama.cpp/build -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_METAL=ON -DLLAMA_CURL=OFF
+          cmake --build llama.cpp/build --config Release -j 3 --target llama-server
+          llama.cpp/build/bin/llama-server --version > "$RECORDS/llama-version.txt" 2>&1
+          shasum -a 256 llama.cpp/build/bin/llama-server > "$RECORDS/llama-binary-sha256.txt"
+          clang --version > "$RECORDS/compiler.txt"
+      - name: Download and verify immutable official Qwen weights
+        run: |
+          harness/.venv/bin/python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          p = json.loads(Path(os.environ['TASK'], 'protocol.json').read_text())
+          target = Path(os.environ['RUNNER_TEMP'], p['model_file'])
+          url = f"https://huggingface.co/{p['model_repository']}/resolve/{p['model_revision']}/{p['model_file']}"
+          subprocess.run(['curl', '-fL', '--retry', '3', '--max-time', '600', '-o', str(target), url], check=True)
+          h = hashlib.sha256()
+          with target.open('rb') as f:
+              for block in iter(lambda: f.read(1024 * 1024), b''):
+                  h.update(block)
+          assert target.stat().st_size == p['model_bytes'], 'Model size mismatch'
+          assert h.hexdigest() == p['model_sha256'], 'Model digest mismatch'
+          Path(os.environ['RECORDS'], 'model-identity.json').write_text(json.dumps({
+              'url': url, 'sha256': h.hexdigest(), 'bytes': target.stat().st_size}, indent=2))
+          PY
+      - name: Start the pinned local server and check health without generation
+        run: |
+          harness/.venv/bin/python - <<'PY'
+          import json, os, subprocess, time, urllib.request
+          from pathlib import Path
+          p = json.loads(Path(os.environ['TASK'], 'protocol.json').read_text())
+          records = Path(os.environ['RECORDS'])
+          command = ['llama.cpp/build/bin/llama-server', '-m',
+                     str(Path(os.environ['RUNNER_TEMP'], p['model_file'])),
+                     '--alias', p['model_alias'], *p['server_flags']]
+          (records / 'server-command.json').write_text(json.dumps(command))
+          with (records / 'llama-server.log').open('wb') as log:
+              process = subprocess.Popen(command, stdout=log, stderr=log, start_new_session=True)
+          (records / 'server.pid').write_text(str(process.pid))
+          for _ in range(180):
+              if process.poll() is not None:
+                  raise RuntimeError(f'Server exited: {process.returncode}')
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except OSError:
+                  pass
+              time.sleep(1)
+          else:
+              raise RuntimeError('Server startup timeout; no outcome-bearing calls were made')
+          PY
+      - name: Run the one registered primary attempt and retain every outcome
+        run: |
+          harness/.venv/bin/python tests/external_repo_trial.py run \
+            --source external-source --harness harness --output "$RECORDS"
+      - name: Stop server
+        if: always()
+        run: |
+          if test -f "$RECORDS/server.pid"; then
+            kill "$(cat "$RECORDS/server.pid")" || true
+          fi
+      - name: Publish outcome to job summary
+        if: always()
+        run: |
+          if test -f "$RECORDS/summary.json"; then
+            echo '### One predeclared Requests repair on local Qwen3-4B' >> "$GITHUB_STEP_SUMMARY"
+            echo 'A research canary on 7 GB CI hardware; no reliability or reference-Mac performance claim.' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$RECORDS/summary.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Infrastructure or qualification failure; inspect retained records. No success claim.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain portable evidence in the job log as well as the artifact
+        if: always()
+        run: |
+          harness/.venv/bin/python - <<'PY'
+          import base64, hashlib, io, os, tarfile
+          from pathlib import Path
+          root = Path(os.environ['RECORDS'])
+          if not root.exists():
+              raise SystemExit('No records directory; setup failed before registration')
+          buffer = io.BytesIO()
+          with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+              for path in sorted(root.iterdir()):
+                  # The full workspace archive stays in the artifact. The pinned
+                  # upstream revision + binary Git patch reproduce its edited files.
+                  if path.is_file() and path.name != 'workspace.tar.gz':
+                      archive.add(path, arcname=path.name)
+          content = buffer.getvalue()
+          print('ASKME_EVIDENCE_BEGIN sha256=' + hashlib.sha256(content).hexdigest())
+          encoded = base64.b64encode(content).decode()
+          for offset in range(0, len(encoded), 120):
+              print(encoded[offset:offset + 120])
+          print('ASKME_EVIDENCE_END')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: requests-pickle-qwen4b-${{ github.run_id }}
+          path: ${{ env.RECORDS }}/
+          if-no-files-found: error
+          retention-days: 90

@@ -16,6 +16,25 @@ def work_dir(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def block_unmocked_http(request, monkeypatch):
+    """Unit tests must mock Requests; only explicitly enabled live tests may send."""
+    if live_llm_enabled and request.node.get_closest_marker("live_llm"):
+        return
+
+    import requests
+
+    def blocked_send(*args, **kwargs):
+        # pytest.fail escapes the client's ordinary Exception fallback. Do not
+        # include URLs, bodies or headers, which can contain credentials.
+        pytest.fail(
+            "Unmocked HTTP blocked in deterministic test; mock the provider/HTTP boundary.",
+            pytrace=False,
+        )
+
+    monkeypatch.setattr(requests.sessions.Session, "send", blocked_send)
+
+
+@pytest.fixture(autouse=True)
 def disable_validation():
     """Disable final validation in all unit tests by default.
     TestFinalValidation tests explicitly re-enable it."""

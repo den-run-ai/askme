@@ -1,0 +1,253 @@
+{
+  "api_url": "http://127.0.0.1:8080/v1/chat/completions",
+  "cancellation": {
+    "acceptance_evidence_required": "Successful server headers or streamed event before kill",
+    "idle": false,
+    "polls": 1,
+    "request_interrupted": true,
+    "wall_s": 10.01252970797941
+  },
+  "model_alias": "gemma-4-e4b",
+  "protocol": "serving-m1-e4b-20260908-v1",
+  "qualified": false,
+  "reason": "serving_checks_failed",
+  "registration_sha256": "958fc8652af492364549f2a76cae60a28f312b449169a3be8f064a5679a31dbb",
+  "results": [
+    {
+      "completion_tokens": 128,
+      "errors": [],
+      "finish_reason": "limit",
+      "first_token_s": 15.04369058390148,
+      "idle_after": {
+        "idle": true,
+        "polls": 1,
+        "wall_s": 0.18434812489431351
+      },
+      "message": {
+        "content": ". Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": "gemma-4-e4b",
+      "name": "prefill600_decode128",
+      "prompt_tokens": 600,
+      "qualified": true,
+      "terminal": true,
+      "timings": {
+        "cache_n": 0,
+        "predicted_ms": 27707.386,
+        "predicted_n": 128,
+        "predicted_per_second": 4.619706817525118,
+        "predicted_per_token_ms": 216.463953125,
+        "prompt_ms": 15028.035,
+        "prompt_n": 600,
+        "prompt_per_second": 39.925379465778455,
+        "prompt_per_token_ms": 25.046725
+      },
+      "wall_s": 42.907677999930456
+    },
+    {
+      "completion_tokens": 128,
+      "errors": [
+        "first_token_limit"
+      ],
+      "finish_reason": "limit",
+      "first_token_s": 45.73392654105555,
+      "idle_after": {
+        "idle": true,
+        "polls": 1,
+        "wall_s": 0.18970070802606642
+      },
+      "message": {
+        "content": " sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": "gemma-4-e4b",
+      "name": "prefill2000_decode128",
+      "prompt_tokens": 2000,
+      "qualified": false,
+      "terminal": true,
+      "timings": {
+        "cache_n": 0,
+        "predicted_ms": 28733.238,
+        "predicted_n": 128,
+        "predicted_per_second": 4.454771160841671,
+        "predicted_per_token_ms": 224.478421875,
+        "prompt_ms": 45723.821,
+        "prompt_n": 2000,
+        "prompt_per_second": 43.74087633664737,
+        "prompt_per_token_ms": 22.8619105
+      },
+      "wall_s": 74.69238445907831
+    },
+    {
+      "completion_tokens": 512,
+      "errors": [],
+      "finish_reason": "limit",
+      "first_token_s": 13.475096166017465,
+      "idle_after": {
+        "idle": true,
+        "polls": 1,
+        "wall_s": 0.18343545799143612
+      },
+      "message": {
+        "content": ". Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": "gemma-4-e4b",
+      "name": "prefill600_decode512",
+      "prompt_tokens": 600,
+      "qualified": true,
+      "terminal": true,
+      "timings": {
+        "cache_n": 0,
+        "predicted_ms": 90451.343,
+        "predicted_n": 512,
+        "predicted_per_second": 5.660501912061163,
+        "predicted_per_token_ms": 176.662779296875,
+        "prompt_ms": 13460.732,
+        "prompt_n": 600,
+        "prompt_per_second": 44.5740989420189,
+        "prompt_per_token_ms": 22.434553333333334
+      },
+      "wall_s": 104.10737608303316
+    },
+    {
+      "completion_tokens": 390,
+      "errors": [
+        "incomplete_response",
+        "first_token_limit",
+        "total_limit",
+        "forced_decode_incomplete",
+        "cold_prefill_not_confirmed"
+      ],
+      "finish_reason": null,
+      "first_token_s": 43.31575208308641,
+      "idle_after": {
+        "idle": true,
+        "polls": 2,
+        "wall_s": 0.613463957910426
+      },
+      "message": {
+        "content": " sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": null,
+      "name": "prefill2000_decode512",
+      "prompt_tokens": 2000,
+      "qualified": false,
+      "terminal": false,
+      "timings": null,
+      "wall_s": 120.01440633297898
+    },
+    {
+      "completion_tokens": 366,
+      "errors": [
+        "incomplete_response",
+        "first_token_limit",
+        "total_limit",
+        "forced_decode_incomplete",
+        "cold_prefill_not_confirmed"
+      ],
+      "finish_reason": null,
+      "first_token_s": 44.52212795801461,
+      "idle_after": {
+        "idle": true,
+        "polls": 2,
+        "wall_s": 0.8632048750296235
+      },
+      "message": {
+        "content": " sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt and beta.txt. Synthetic observation: the sample directory contains alpha.txt",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": null,
+      "name": "prefill2000_decode1024",
+      "prompt_tokens": 2000,
+      "qualified": false,
+      "terminal": false,
+      "timings": null,
+      "wall_s": 120.01394099998288
+    },
+    {
+      "completion_tokens": 25,
+      "errors": [],
+      "finish_reason": "stop",
+      "first_token_s": 14.377319499966688,
+      "idle_after": {
+        "idle": true,
+        "polls": 1,
+        "wall_s": 0.17204866593237966
+      },
+      "message": {
+        "content": "{\"tasks\": [\"Create hello.txt with content 'hi'\",\"Read and display the content of hello.txt\"]}",
+        "role": "assistant",
+        "tool_calls": []
+      },
+      "model": "gemma-4-e4b",
+      "name": "planner",
+      "prompt_tokens": null,
+      "qualified": true,
+      "terminal": true,
+      "timings": {
+        "cache_n": 0,
+        "predicted_ms": 4106.31,
+        "predicted_n": 25,
+        "predicted_per_second": 6.088191101012831,
+        "predicted_per_token_ms": 164.25240000000002,
+        "prompt_ms": 14263.564,
+        "prompt_n": 633,
+        "prompt_per_second": 44.37881023284223,
+        "prompt_per_token_ms": 22.53327646129542
+      },
+      "wall_s": 18.62543575000018
+    },
+    {
+      "completion_tokens": 40,
+      "errors": [
+        "first_token_limit"
+      ],
+      "finish_reason": "tool_calls",
+      "first_token_s": 51.803285958012566,
+      "idle_after": {
+        "idle": true,
+        "polls": 1,
+        "wall_s": 0.18748120893724263
+      },
+      "message": {
+        "content": "",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"arg\":\"hello.txt\",\"content\":\"hi\\n\",\"reasoning\":\"Write \\\"hi\\\" followed by a newline to hello.txt\"}",
+              "name": "write"
+            },
+            "id": "Iu7RyKoVJm1JHsyi1n7FJXCQ0ZErzC71",
+            "type": "function"
+          }
+        ]
+      },
+      "model": "gemma-4-e4b",
+      "name": "native_action",
+      "prompt_tokens": null,
+      "qualified": false,
+      "terminal": true,
+      "timings": {
+        "cache_n": 0,
+        "predicted_ms": 7550.113,
+        "predicted_n": 40,
+        "predicted_per_second": 5.2979339514521175,
+        "predicted_per_token_ms": 188.752825,
+        "prompt_ms": 50684.217,
+        "prompt_n": 2258,
+        "prompt_per_second": 44.550357757327106,
+        "prompt_per_token_ms": 22.446508857395923
+      },
+      "wall_s": 58.72322062496096
+    }
+  ]
+}

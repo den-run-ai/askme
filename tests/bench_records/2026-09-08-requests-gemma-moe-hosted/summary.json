@@ -1,0 +1,36 @@
+{
+  "acceptance": {
+    "accepted": false,
+    "error": "acceptance_failed_or_invalid_evaluator_output",
+    "exit_code": 1,
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/macmone/code/llama.cpp/agent-worktrees/qwen-serving-release/tests/external_repo/requests_pickle_hosted_gemma_v2/acceptance.py\", line 51, in <module>\n    print(json.dumps(check(sys.argv[1])))\n                     ^^^^^^^^^^^^^^^^^^\n  File \"/Users/macmone/code/llama.cpp/agent-worktrees/qwen-serving-release/tests/external_repo/requests_pickle_hosted_gemma_v2/acceptance.py\", line 24, in check\n    restored = pickle.loads(pickle.dumps(error, protocol=protocol))\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/k9/b2q3fw8x7s523q319qjwj8fm0000gn/T/askme-external-ar45caf_/evaluation/src/requests/exceptions.py\", line 41, in __init__\n    CompatJSONDecodeError.__init__(self, *args)\nTypeError: JSONDecodeError.__init__() missing 2 required positional arguments: 'doc' and 'pos'\n",
+    "stdout": ""
+  },
+  "agent_status": "exhausted",
+  "api_cost_complete": true,
+  "api_cost_note": "Sum of response usage.cost; unknown attempts retain the registered token-price estimate. The upper bound depends on unchanged catalog pricing.",
+  "api_cost_unpriced_requests": 0,
+  "api_cost_upper_bound_usd": 0.00299655,
+  "api_cost_usd": 0.00299655,
+  "changed_files": [
+    "repro_json_error_pickle.py",
+    "tests/repro_json_error_pickle.py"
+  ],
+  "configured_timeout_s": 720,
+  "decision": "did_not_resolve",
+  "limitations": "One deliberately selected historical Requests bug, possibly in training data; stdlib json only. Hosted MoE, route, quantization and output budgets differ from local Qwen v1 and E4B serving cells. No matched causal comparison, reliability estimate, model-size claim, or local performance claim. Hosted response identity is an API alias, not verified weight bytes.",
+  "observed_completion_tokens": 3130,
+  "observed_prompt_tokens": 27605,
+  "patch_applies": true,
+  "process": {
+    "exit_code": 0,
+    "timed_out": false
+  },
+  "runner": "physical MacBookAir10,1 / Apple M1 / 16 GiB / macOS 26.5; remote inference",
+  "runner_cost": "standard public macOS runner; no API charge",
+  "scope_valid": false,
+  "trial_wall_s": 73.70671875006519,
+  "usage_complete": false,
+  "usage_note": "Observed totals are lower bounds; failed/interrupted HTTP attempts may not return usage. Raw request/response records are retained.",
+  "usage_records": 27
+}

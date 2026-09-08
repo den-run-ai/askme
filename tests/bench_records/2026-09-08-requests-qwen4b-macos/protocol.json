@@ -1,0 +1,31 @@
+{
+  "protocol": "requests-pickle-macos-qwen4b-v1",
+  "registered_date": "2026-09-08",
+  "trials": 1,
+  "harness_revision": "28534c62a498ae3dcda1899a9ec2f989a5745f9e",
+  "runtime_sha256": {
+    "askme.py": "9eb3e57cf3d2d91618a1bfaa0825fc9ffa2765f7f0270ee93fd6d04f61861949",
+    "actions.py": "8f261219933025868118e1ba4c9ebfc7576989c50b21f08c00404be5f7310930"
+  },
+  "target_repository": "https://github.com/psf/requests.git",
+  "target_revision": "7a13c041dbef42f9f3feb14110f02626f6892e9a",
+  "upstream_issue": "https://github.com/psf/requests/issues/6628",
+  "gold_reference": "https://github.com/psf/requests/pull/6629",
+  "runner": "macos-26",
+  "minimum_memory_bytes": 6500000000,
+  "llama_revision": "c34b92235b2d6a07963f896085f9ca077ff400b4",
+  "model_repository": "Qwen/Qwen3-4B-GGUF",
+  "model_revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+  "model_file": "Qwen3-4B-Q4_K_M.gguf",
+  "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+  "model_bytes": 2497280256,
+  "model_alias": "qwen3-4b-q4-k-m-external-v1",
+  "server_flags": ["--jinja", "--reasoning", "off", "--ctx-size", "8192", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--flash-attn", "on", "-ngl", "99", "-np", "1", "--seed", "20260908", "--host", "127.0.0.1", "--port", "8080"],
+  "seed": 20260908,
+  "temperature": 0.1,
+  "wall_timeout_seconds": 720,
+  "capability_profile": {"name": "external-qwen4b-8k-v1", "step_tokens": 512, "step_write_tokens": 1024, "planner_tokens": 384, "task_replan_tokens": 96, "validation_tokens": 512, "context_window": 8192, "server_slots": 1},
+  "run_config": {"allow_system_installs": false, "allow_network": false, "reasoning_policy": "off", "max_replans": 2, "max_tasks": 3, "max_steps": 8, "max_task_local_replans": 1, "final_validate": "auto", "compile_repair": false, "step_policy": "heuristic"},
+  "provider": "local llama.cpp; no hosted provider and no API charge",
+  "decision_rule": "Resolved only if a nonempty patch applies to a fresh pinned checkout, changes no unrelated production files, and passes every independent acceptance check. Agent completion is reported separately. Publish the single attempt even if exhausted, timed out, regressed, or invalid. Do not selectively rerun."
+}

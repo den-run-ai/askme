@@ -280,6 +280,77 @@ def _codes(result):
     return {violation["code"] for violation in result["violations"]}
 
 
+def _pin_split_runtime(paths, module="actions"):
+    dependency = paths["source"].with_name(module + ".py")
+    dependency.write_text("PINNED_RUNTIME = True\n", encoding="utf-8")
+    runtime = {
+        name: hashlib.sha256(paths["source"].with_name(name).read_bytes()).hexdigest()
+        for name in ("askme.py", module + ".py")
+    }
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["sources"]["askme"]["runtime_files"] = runtime
+    _json(paths["protocol"], protocol)
+    for path in (
+        paths["root"] / "askme-canary.json",
+        paths["attempt"] / "askme-adapter.json",
+    ):
+        record = json.loads(path.read_text())
+        record["runtime_files"] = runtime
+        _json(path, record)
+    policy_path = paths["attempt"] / "askme-policy.jsonl"
+    events = [json.loads(line) for line in policy_path.read_text().splitlines()]
+    events[0]["runtime_files"] = runtime
+    _jsonl(policy_path, events)
+    return runtime
+
+
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_audit_requires_every_runtime_module_hash_across_retained_records(tmp_path, module):
+    paths = _fixture(tmp_path)
+    runtime = _pin_split_runtime(paths, module)
+
+    valid = _audit(paths)
+    assert valid["infrastructure_valid"] is True, valid["violations"]
+    paths["source"].with_name(module + ".py").write_text("PINNED_RUNTIME = False\n")
+    changed = _audit(paths)
+    assert changed["infrastructure_valid"] is False
+    assert {
+        "protocol_runtime_files",
+        "manifest_runtime_files",
+        "provenance_runtime_files",
+        "policy_launcher_runtime_files",
+    } <= _codes(changed)
+    assert len(runtime) == 2
+
+
+@pytest.mark.parametrize("record", ["protocol", "manifest", "provenance", "launcher"])
+@pytest.mark.parametrize("module", ["actions", "llm", "policies", "loop"])
+def test_audit_rejects_missing_modular_runtime_pins(tmp_path, record, module):
+    paths = _fixture(tmp_path)
+    _pin_split_runtime(paths, module)
+    if record == "launcher":
+        path = paths["attempt"] / "askme-policy.jsonl"
+        events = [json.loads(line) for line in path.read_text().splitlines()]
+        del events[0]["runtime_files"]
+        _jsonl(path, events)
+        expected_code = "policy_launcher_runtime_files"
+    else:
+        path = {
+            "protocol": paths["protocol"],
+            "manifest": paths["attempt"] / "askme-adapter.json",
+            "provenance": paths["root"] / "askme-canary.json",
+        }[record]
+        value = json.loads(path.read_text())
+        fields = value["sources"]["askme"] if record == "protocol" else value
+        del fields["runtime_files"]
+        _json(path, value)
+        expected_code = f"{record}_runtime_files"
+
+    result = _audit(paths)
+    assert result["infrastructure_valid"] is False
+    assert expected_code in _codes(result)
+
+
 def _require_endpoint_catalog_preflight(paths, *, write_record=True):
     provenance_path = paths["root"] / "askme-canary.json"
     provenance = json.loads(provenance_path.read_text())

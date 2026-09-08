@@ -446,7 +446,7 @@ style: |
 
 <!-- _class: title -->
 
-<div class="title-kicker">Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026</div>
+<div class="title-kicker">Agentic AI Summit 2026 · UC Berkeley · Aug 1, 2026 · Corrected Sep 8</div>
 
 <div class="title-question">
 
@@ -458,17 +458,23 @@ style: |
 
 <div class="title-speaker">
   <div><span class="name"><strong>Denis Akhiyarov</strong></span><span class="role">Sr Staff Research Scientist at ServiceNow</span></div>
-  <div class="title-links"><a href="https://x.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
+  <div class="title-links"><a href="https://github.com/den-run-ai">@den-run-ai</a><span>·</span><a href="https://github.com/den-run-ai/askme">github.com/den-run-ai/askme</a></div>
 </div>
 
 <!--
-Speaker notes (~40s):
-The title is a question, not a verdict. Here, small is a deployment class, not one
-parameter cutoff. The hosted receipts span roughly three-to-four-billion-active mixtures
-and twenty-seven-to-thirty-one-billion dense models; they do not measure local
-performance. Teams want control over speed, hardware, deployment, and post-training on
-their chosen hardware and stack. The question is whether tight execution feedback can
-turn structured actions into accepted workflows.
+Speaker notes:
+This started on a plane. No wifi, no coding agent, and the experiments I
+wanted would take weeks alone. So, the dream: small open models on my own
+MacBook, through llama.cpp, doing real coding work anywhere. This talk is a
+progress report on that dream. Small means a deployment class, not a parameter
+count. One caveat up front: AskMe began with Gemma 4 E4B, a dense PLE model
+on a sixteen-gigabyte Mac. The smoke and feature evaluations use hosted Gemma
+and Qwen across different revisions and serving configurations. A separate
+local repair pilot closes the talk. None isolates model size.
+
+[Sources]
+- [Local deployment and scope](../../README.md)
+- [Hosted experiment provenance](evals/draft-results.json)
 -->
 
 ---
@@ -477,7 +483,7 @@ turn structured actions into accepted workflows.
 
 # AskMe gives a small model one structured move at a time
 
-<p class="subtitle"><strong>AskMe</strong> is an experimental coding-agent harness: explicit plan → one JSON action → execution evidence ↺</p>
+<p class="subtitle"><strong>AskMe</strong> is an experimental coding-agent harness: explicit plan → one native tool call → execution evidence ↺</p>
 
 <div class="bridge-grid">
   <div class="bridge-stage model-stage"><div class="num">01</div><div class="label">Controllable small LLMs</div><h2>Choose the model boundary</h2><ul><li>Execution speed</li><li>Hardware and deployment</li><li>Post-training access</li></ul></div>
@@ -485,16 +491,22 @@ turn structured actions into accepted workflows.
   <div class="bridge-stage workflow-stage"><div class="num">03</div><div class="label">External acceptance layer</div><h2>Check the delivered workflow</h2><ul><li>Preserve the full contract</li><li>Check required behavior</li><li>Accept the real artifact independently</li></ul></div>
 </div>
 
-<div class="bridge-caption"><strong>The bridge:</strong> fixed action vocabulary + fresh execution feedback + external workflow acceptance.<span>Assumes scoped actions, informative feedback, and independently testable success.</span></div>
+<div class="bridge-caption"><strong>The bridge:</strong> eight native tools + fresh execution feedback + external workflow acceptance.<span>Assumes scoped actions, informative feedback, and independently testable success.</span></div>
 
 <!--
-Speaker notes (~45s):
-AskMe is an experimental coding-agent harness. It keeps an explicit plan, asks the model
-for one structured action, executes it, and returns fresh test or runtime evidence. AskMe
-keeps the current task and recent completed work in view; it can continue, repair, or
-replan. External acceptance retains the full contract. This approach assumes work decomposes into
-scoped actions, feedback is informative, and success is independently testable.
-Acceptance checks the required behavior and artifact.
+Speaker notes:
+AskMe is an experimental coding-agent harness, small enough to read in one
+sitting. Three bets for small models. One: pass as little context as possible
+— the planner gets a curated summary, the executor a smaller sliding view.
+Two: small granular actions, an edit instead of a rewrite. Today's interface
+accepts one native tool call per turn: six executable actions plus `done` and
+`fail`. Three: reasoning tokens only where they pay, mostly in recovery.
+Tool feedback guides AskMe; held-out acceptance scores the artifact after the
+run and is not returned to the agent for recovery.
+
+[Sources]
+- [Runtime protocol and control boundaries](../../docs/ARCHITECTURE.md)
+- [Current native tool schemas](../../actions.py)
 -->
 
 ---
@@ -517,13 +529,16 @@ Acceptance checks the required behavior and artifact.
 </div>
 
 <!--
-Speaker notes (~45s):
-This Qwen build run shows the agent problem: a successful command can still miss the
-workflow contract. The retained evidence shows a combined compile-and-run command
-targeting slash tmp slash test returning zero, followed by reported completion. It does
-not preserve stdout or prove the source contents. Acceptance expected dot slash main and
-found none. AskMe did not receive that failure for recovery. The workflow contract
-remained unmet afterward.
+Speaker notes:
+First lesson: success signals can mislead. This Qwen run issued a combined
+compile-and-run command at slash tmp slash test, saw exit zero, and reported
+complete. The record does not preserve stdout or prove source contents. The
+contract asked for dot slash main; the post-run check found none. AskMe did
+not receive that failure for recovery. Judge the delivered artifact, not
+the agent's self-report.
+
+[Sources]
+- [Frozen July 10 per-cell outcomes and retained command](evals/draft-results.json)
 -->
 
 ---
@@ -549,13 +564,16 @@ remained unmet afterward.
 <div class="callout"><strong>Design goal:</strong> fewer repeated failures, fewer stuck steps, and less unnecessary plan churn.</div>
 
 <!--
-Speaker notes (~45s):
-This is a design hypothesis, not a result from the smoke. Reasoning should keep the
-contract in view, interpret execution feedback, and decide how much of the plan changed.
-A local mismatch should produce a local correction while completed work stays completed.
-Broad replanning belongs to broken assumptions, not every red command. The target is
-trajectory quality across these fast execution-feedback loops: fewer repeated failures,
-stuck steps, and unnecessary plan churn—not longer monologues.
+Speaker notes:
+The third bet is still a hypothesis. The control flow is boring on purpose.
+Evidence matches the plan: continue. One step misses: repair that step, rerun
+its check. Replan broadly only when an assumption broke. The target is
+trajectory quality — fewer repeated failures, fewer stuck steps, less plan
+churn — not longer monologues. Not measured yet; it's the bet I most want to
+be right about.
+
+[Sources]
+- [Harness hypotheses and evaluation limits](../../docs/EXPERIMENTS.md)
 -->
 
 ---
@@ -584,86 +602,105 @@ stuck steps, and unnecessary plan churn—not longer monologues.
 <div class="smoke-limit"><strong>Compatibility smoke, not a ranking:</strong> single runs on simple tasks — no model comparisons.</div>
 
 <!--
-Speaker notes (~45s):
-Four hosted variants each ran two simple checks once. Every agent reported completion;
-independent checks accepted seven artifacts. The shortest build trajectory was the rejected
-one, which is why completion and speed alone are insufficient. The rows preserve Gemma and
-Qwen acceptance status; steps, tokens, and replans remain in the records. No pair
-isolates size, architecture, active compute, family, run order, reasoning, or reliability.
-These are one-shot receipts, not rankings.
+Speaker notes:
+Does the loop hold? Four hosted variants — two Gemma 4s, two Qwen3.6s — two
+simple tasks each, one run each. All eight reported complete; the independent
+check accepted seven. The one rejection was the fastest build trajectory —
+that wrong-path build; an accepted repair was faster overall. This is a frozen
+July record, one run per cell, with no rankings or current reliability claim.
+Acceptance caught what the completion signal missed.
+
+[Sources]
+- [Frozen July 10 hosted matrix](evals/draft-results.json)
+- [Protocol and acceptance boundary](evals/README.md)
 -->
 
 ---
 
-<div class="eyebrow">FeatureBench canary · one feature task</div>
+<div class="eyebrow">Historical FeatureBench canary · one feature task</div>
 
-# Both models build app features — but fail on testing
+# Applied patches, unresolved feature task
 
-<p class="subtitle">The same frozen task went from zero code changes to working partial features.</p>
+<p class="subtitle">After bundled harness changes and a changed serving stack.</p>
 
 <div class="feature-progress">
   <div class="feature-stage before">
     <div class="feature-label">Before · July</div>
     <div class="big-result">0 writes</div>
     <h2>Empty patch</h2>
-    <p>The action interface blocked every edit. No code changed.</p>
+    <p>Revision 2 left both cells empty. Their failure modes differed.</p>
   </div>
   <div class="feature-stage after">
     <div class="feature-label">After · Aug 1</div>
-    <h2>App features built</h2>
+    <h2>Patches applied</h2>
     <div class="feature-results">
       <div><strong>11 / 13</strong><span>Gemma target tests</span></div>
       <div><strong>7 / 13</strong><span>Qwen target tests</span></div>
     </div>
-    <p>Both patches applied — working partial features from both models.</p>
+    <p>Held-out target tests passed in part; both patches remained unresolved.</p>
   </div>
   <div class="feature-stage next">
-    <div class="feature-label">Why they still fail</div>
-    <h2>They never test their work</h2>
-    <p>Gemma rewrote code without running tests. Qwen stopped editing and went back to reading. Neither finished cleanly.</p>
+    <div class="feature-label">Gaps in both attempts</div>
+    <h2>No target-test run</h2>
+    <p>Gemma rewrote one file 18 times. Qwen returned to reading. Both agents exhausted their planning attempts.</p>
   </div>
 </div>
 
-<div class="feature-takeaway"><strong>Bottom line:</strong> small models can build app features; testing and finishing the work is the next gap.</div>
+<div class="feature-takeaway"><strong>Observed:</strong> partial target-test acceptance, without agent completion.</div>
 
-<div class="feature-caveat">One task, one attempt per model — progress, not a benchmark score.</div>
+<div class="feature-caveat">One task, one attempt per model · historical results · no causal attribution or benchmark score.</div>
 
 <!--
-Speaker notes (~45s):
-FeatureBench asks the agent to build a real app feature. In July, the same task produced
-no code edits at all: the agents read files and returned an empty patch. On August first,
-both models produced patches that applied and passed most target tests: Gemma eleven of
-thirteen, Qwen seven of thirteen. Both models can now build partially working app features.
-Neither validated its work: Gemma rewrote the same file without running tests; Qwen stopped
-editing and went back to reading. This is one task and one attempt per model — progress,
-not a benchmark score.
+Speaker notes:
+Next: FeatureBench, one frozen feature task. Revision 2 left both cells with
+empty patches, for different reasons. After bundled revision-3 changes and a
+changed serving stack, both left applying but unresolved patches. Held-out
+scoring found eleven of thirteen target tests passing for Gemma, seven for
+Qwen. Neither ran the target tests; both agents exhausted their planning attempts.
+Gemma rewrote one file
+eighteen times, Qwen returned to reading. One task, one attempt each, no causal
+attribution. These historical results do not validate today's native-tool
+transport.
+
+[Sources]
+- [FeatureBench protocols and historical outcomes](../../tests/featurebench/README.md)
+- [Gemma August 1 result](../../tests/featurebench/results/2026-08-01-gemma-4-31b-canary-v6.json)
+- [Qwen August 1 result](../../tests/featurebench/results/2026-08-01-qwen36-27b-canary-v6.json)
 -->
 
 ---
 
 <div class="eyebrow">Conclusion + limits</div>
 
-# Promising for bounded loops. Feature readiness is still open.
+# Local repairs are possible. Reliable autonomy is unproven.
 
 <div class="conclusion-grid">
-  <div class="conclusion-card observed"><strong>Observed</strong><p>Simple tasks: 7 / 8 artifacts accepted. Feature task: both models built working partial features — Gemma 11/13, Qwen 7/13 target tests — but neither tested or finished its work.</p></div>
-  <div class="conclusion-card supported"><strong>Supported</strong><p>Harness design changed the outcome: the same task moved from empty patches to applied, partially working code.</p></div>
-  <div class="conclusion-card open"><strong>Still open</strong><p>Testing and clean completion. Reliability beyond one task. Model-to-model comparisons and local performance.</p></div>
+  <div class="conclusion-card observed"><strong>Observed locally</strong><p>Gemma 4 E4B (dense PLE), Aug 4: four repairs of one seeded health-check bug passed independent acceptance. All four agents exhausted.</p></div>
+  <div class="conclusion-card supported"><strong>Supported</strong><p>Narrow, independently accepted small repairs exist. A correct artifact is not a clean agent finish.</p></div>
+  <div class="conclusion-card open"><strong>Still open</strong><p>Dependable autonomous coding, net time savings, and causal harness benefit. The historical pilots do not isolate a harness effect.</p></div>
 </div>
 
 <p class="tagline">Evaluate the model, harness, and task as one system.</p>
 
-<p class="closing">Current evidence supports boundary diagnosis—not a general readiness verdict.</p>
+<p class="closing">One seeded task—not a general readiness verdict or time-savings claim.</p>
 
 <p class="tiny" style="text-align:center; margin-top:20px;">github.com/den-run-ai/askme · slides, blog, protocol, and raw summary data</p>
 
 <!--
-Speaker notes (~35s):
-The bounded checks are promising, but feature readiness remains unproven. Both models moved
-from empty patches to working partial features, yet neither tested its work or finished
-cleanly. Gemma rewrote without testing; Qwen wrote once and returned to reading. Testing
-and clean completion are the next harness problems, and one task cannot settle general
-readiness. Judge delivered behavior; evaluate the model, harness, and task as one system.
+Speaker notes:
+So: can small local models do useful coding work? A narrow yes. In an August
+pilot, local Gemma E4B repaired one seeded health-check bug in four
+shipped-profile runs. Independent acceptance passed; all four agents exhausted.
+The two clean finishes used a larger, diagnostic budget.
+That is evidence of small accepted repairs, not dependable autonomy or measured
+net time savings. The feature canary remains unresolved. Judge delivered
+behavior, and evaluate the model, harness, task, and evaluator together.
+A causal harness benefit and the reliable plane version remain goals.
+
+[Sources]
+- [Frozen August 4 local repair receipt and evidence limits](evals/local-repair-evidence.json)
+- [Evidence and unresolved claims](README.md#evidence-boundary)
+- [Dated measurements and limits](../../docs/PERFORMANCE.md)
 -->
 
 ---
@@ -672,13 +709,13 @@ readiness. Judge delivered behavior; evaluate the model, harness, and task as on
 
 # A small model's workload depends on the harness
 
-<p class="subtitle">Three technical boundaries—not a leaderboard.</p>
+<p class="subtitle">Three technical boundaries · documentation checked Sep 8, 2026.</p>
 
 <div class="harness-grid">
   <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
-  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">6 fixed JSON actions; exactly one action per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
+  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">8 native tools: 6 executable actions + <code>done</code>/<code>fail</code>; one call per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
   <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Conversation state + append-only event log; optional persistence and configurable condenser.</div>
-  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> → conditional fail-open validation; held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> signals completion; benchmark evaluation remains a separate harness.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>. Held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> signals completion; benchmark evaluation remains a separate harness.</div>
 </div>
 
 <div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>

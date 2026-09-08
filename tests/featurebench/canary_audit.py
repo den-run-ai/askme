@@ -9,6 +9,7 @@ validity separate from whether AskMe reported completion.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -24,6 +25,58 @@ REQUIRED_CODE_FILES = {
     "tests/featurebench/askme_adapter.py",
     "tests/featurebench/canary_audit.py",
 }
+RUNTIME_MODULES = ("askme", "actions", "llm", "policies", "loop")
+
+
+def runtime_source_paths(askme_source: Path) -> dict[str, Path]:
+    """Identify the runtime in the selected snapshot, including legacy monoliths.
+
+    Never import the inspected code or borrow files from the adapter checkout.
+    All supported sibling modules present in the selected snapshot are pinned,
+    including actions-era snapshots whose entry point does not import actions.
+    Walk their static imports too: a missing transitive dependency must fail
+    before execution instead of being supplied by the launching Python path.
+    """
+    if askme_source.is_symlink() or not askme_source.is_file():
+        raise FileNotFoundError(f"AskMe source is missing or a symlink: {askme_source}")
+    paths = {"askme.py": askme_source}
+    pending = ["askme"]
+    for module in RUNTIME_MODULES[1:]:
+        path = askme_source.with_name(module + ".py")
+        if path.exists() or path.is_symlink():
+            pending.append(module)
+    inspected = set()
+    while pending:
+        module = pending.pop()
+        if module in inspected:
+            continue
+        inspected.add(module)
+        path = askme_source if module == "askme" else askme_source.with_name(module + ".py")
+        if path.is_symlink() or not path.is_file():
+            raise FileNotFoundError(f"Pinned runtime dependency missing or symlink: {path}")
+        paths[module + ".py"] = path
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    raise ValueError("Pinned runtime imports must name plain sibling modules")
+                imports = [node.module] if node.module else []
+            else:
+                continue
+            for imported in imports:
+                top = imported.split(".", 1)[0]
+                if top in RUNTIME_MODULES:
+                    if imported != top:
+                        raise ValueError("Pinned runtime imports must name plain sibling modules")
+                    pending.append(top)
+                elif any(
+                    candidate.exists() or candidate.is_symlink()
+                    for candidate in (path.with_name(top + ".py"), path.with_name(top))
+                ):
+                    raise ValueError(f"Unsupported runtime dependency: {top}")
+    return {name: paths[name] for name in sorted(paths)}
 
 
 class CanaryAuditError(RuntimeError):
@@ -310,6 +363,7 @@ def _protocol_expectations(audit: _Audit, protocol: Mapping[str, Any]) -> Option
                 "adapter_code_revision", sources["askme"].get("adapter_revision")
             ),
             "base_source_sha256": sources["askme"]["base_source_sha256"],
+            "runtime_files": sources["askme"].get("runtime_files"),
             "code_files": dict(sources["askme"]["code_files"]),
             "cli_limits": cli_limits,
             "manifest_limits": manifest_limits,
@@ -456,6 +510,44 @@ def _audit_integrity(
             source_hash,
             expected["base_source_sha256"],
         )
+
+    try:
+        runtime_hashes = {
+            name: _sha256_file(path) for name, path in runtime_source_paths(askme_source).items()
+        }
+    except (OSError, SyntaxError, ValueError) as error:
+        audit.fail("runtime_source_invalid", f"cannot inspect pinned runtime: {error}")
+        runtime_hashes = {}
+    # Old monolith records did not carry a runtime map. Preserve their audit
+    # contract; split runtimes require independent pins for every module.
+    if (
+        len(runtime_hashes) > 1
+        or expected["runtime_files"] is not None
+        or manifest is not None
+        and "runtime_files" in manifest
+        or provenance is not None
+        and "runtime_files" in provenance
+    ):
+        hashes["runtime_files"] = runtime_hashes
+        expected_runtime = expected["runtime_files"]
+        if expected_runtime is None and set(runtime_hashes) == {"askme.py"}:
+            expected_runtime = {"askme.py": expected["base_source_sha256"]}
+        _expect_equal(
+            audit,
+            "protocol_runtime_files",
+            "protocol pinned runtime hashes",
+            runtime_hashes,
+            expected_runtime,
+        )
+        for label, record in (("manifest", manifest), ("provenance", provenance)):
+            if record is not None:
+                _expect_equal(
+                    audit,
+                    f"{label}_runtime_files",
+                    f"{label} runtime hashes",
+                    record.get("runtime_files"),
+                    runtime_hashes,
+                )
 
     code_hashes: dict[str, str] = {}
     root_resolved = code_root.resolve()
@@ -823,7 +915,7 @@ def _audit_policy_log(
             launch.get("container_egress_isolated"),
             False,
         )
-        for field in ("askme_sha256", "prompt_sha256"):
+        for field in ("askme_sha256", "prompt_sha256", "runtime_files"):
             if field in hashes:
                 _expect_equal(
                     audit,

@@ -2,6 +2,12 @@
 
 *Small actions, fresh execution feedback, and full-workflow acceptance.*
 
+Companion to the [published talk](https://www.youtube.com/watch?v=N1XoiJGyNpM).
+Text corrections dated 2026-09-07 are summarized in the
+[published-talk errata](README.md#published-talk-errata--2026-09-07); the deck
+and recording retain their original wording. Measurements below are dated
+historical records, not a current-main capability claim.
+
 Two trends are converging.
 
 First, smaller open models are becoming strategically useful. They give a team more control over execution speed, cost, hardware, data location, deployment, and post-training. Google's current Gemma guidance explicitly spans local, edge, and enterprise deployment, recommends starting with the smallest model that can meet the need, and supports modifying open weights through full or parameter-efficient tuning ([run and deployment guide](https://ai.google.dev/gemma/docs/run), [tuning guide](https://ai.google.dev/gemma/docs/tune)).
@@ -25,9 +31,9 @@ deliberately narrower than two prominent alternatives:
 
 | Boundary | AskMe | [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) | [OpenHands](https://docs.openhands.dev/sdk/arch/tool-system) |
 |---|---|---|---|
-| Action surface | Six fixed JSON actions; one action per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
+| Action surface | Six executable handlers plus `done`/`fail`; one native tool call per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
 | State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode | Conversation state and append-only event log; optional persistence and configurable condenser |
-| Completion boundary | `done`; conditional fail-open validation; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` signals completion; benchmark evaluation remains a separate harness |
+| Completion boundary | `done`; conditional validation with `complete_unverified` for an unavailable first verdict; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` signals completion; benchmark evaluation remains a separate harness |
 
 This is a trade-off, not a ranking. AskMe spends more harness structure to reduce
 each turn's decision burden. Pi keeps a minimal, extensible, model-led core.
@@ -154,12 +160,13 @@ requalified under preregistered v6 protocols. Under the bundled interface
 changes and a changed serving stack, both cells moved from empty patches to
 applied but unresolved patches: Gemma 4 31B reached 11/13 F2P (84.62%), with
 the same two failures as the exploratory one-attempt pi reference, and
-Qwen3.6-27B reached 7/13 (53.85%) versus the pi reference's 10/13. This shows
-that harness design was consequential on this task; it does not isolate
-sentinel transport or write forcing from the simultaneous serving changes.
-Both agents exhausted their planning attempts without emitting `done`, but
-their downstream failures differed: Gemma rewrote one file 18 times and ran
-zero tests, while Qwen wrote once and returned to observation. These remain one-task adapter
+Qwen3.6-27B reached 7/13 (53.85%) versus the pi reference's 10/13. These are
+observed outcomes under bundled changes; they do not isolate a causal effect
+of the harness, sentinel transport, or write forcing from the serving changes.
+Both agents exhausted their planning attempts, but
+their downstream failures differed: Gemma rewrote one file 18 times, while
+Qwen wrote once and returned to observation. Neither ran the target tests.
+These remain one-task adapter
 canaries, not FeatureBench scores, reliability estimates, or model
 comparisons, and three caveats travel with any v4/pi comparison: the v6 runs
 were served by CoreWeave (Gemma bf16, Qwen fp8) while the v4 and pi-ablation
@@ -169,8 +176,16 @@ waived by the maintainer, so no local-neutrality claim is licensed for
 revision 3; and three frozen Codex P2 findings on write-forcing mechanics
 caveat the Qwen cell's mechanism-level counts. A validate-after-write
 counterpart—acceptance pressure after writes, rewrite damping, an
-unvalidated-write replan flag—is implemented in open PR #21; v7
-requalification is pending.
+unvalidated-write replan flag—merged in
+[PR #21](https://github.com/den-run-ai/askme/pull/21) on Aug 2.
+
+*Current-interface caveat (Sep 7, 2026).* Revision 6 removed the sentinel
+transport on Aug 4; the executor now accepts native tool calls. No v7
+requalification record is checked in. The v6 numbers above therefore describe
+the historical revision-3 interface, not current-main performance. The pi
+figures remain exploratory, one-attempt archival comparisons whose runner is
+in unmerged [PR #14](https://github.com/den-run-ai/askme/pull/14); they are not
+a performance ceiling or a controlled harness comparison.
 
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.
@@ -185,6 +200,14 @@ a prerequisite for this talk, an external-readiness test, or a Qwen-versus-Gemma
 or model-size experiment.
 
 ## The Claim That Survives
+
+There is a narrow local positive. The [August 4 E4B repair pilot](evals/local-repair-evidence.json)
+records four accepted repairs of one seeded health-check bug under the shipped
+profile, but all four agents exhausted instead of finishing. The original
+pilot's two clean completions used a larger diagnostic budget. This demonstrates
+small accepted repairs, not dependable autonomous coding or net time savings.
+It is separate from the hosted smoke and feature canaries, and is not a
+measurement of today's runtime.
 
 Smaller models make more of the model stack controllable. General-purpose and lifecycle-spanning agents make more of the workflow executable. A tight harness makes the combination operational.
 

@@ -47,11 +47,11 @@ python-version = "3.10"
 
 [tool.ty.src]
 include = [
-    "askme.py",
-    "actions.py",
+    "*.py",
     "tests/_test_support.py",
     "tests/bench_harness.py",
     "tests/ci_llm_gate.py",
+    "tests/ci_local_gate.py",
     "tests/workflow_eval.py",
     "tests/featurebench/askme_adapter.py",
     "tests/featurebench/canary_audit.py",
@@ -59,7 +59,7 @@ include = [
 
 [tool.coverage.run]
 branch = true
-source = ["askme", "actions"]
+source = ["askme", "actions", "llm", "policies", "loop"]
 
 [tool.coverage.report]
 fail_under = 90

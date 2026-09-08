@@ -1,6 +1,7 @@
 """Core unit tests: execute(), ask_llm(), thinking retry, null-arg normalization, transport hardening."""
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,9 +37,15 @@ class TestExecuteShell:
         assert result["ok"] is False
 
     def test_timeout(self, work_dir):
-        result = execute({"action": "shell", "arg": "sleep 60"}, work_dir)
+        with patch(
+            "actions.CapturedProcess.run",
+            side_effect=subprocess.TimeoutExpired("sleep 60", 30),
+        ) as runner:
+            result = execute({"action": "shell", "arg": "sleep 60"}, work_dir)
         assert result["ok"] is False
         assert result["output"] == "TIMEOUT"
+        assert result["error_type"] == "timeout"
+        assert runner.call_args.kwargs["timeout"] == 30
 
     def test_stderr_captured(self, work_dir):
         result = execute({"action": "shell", "arg": "echo err >&2"}, work_dir)
@@ -657,9 +664,11 @@ class TestLLMTransport:
         with (
             patch("askme.get_plan", return_value={"tasks": ["do something"]}),
             patch("askme.get_step", side_effect=mock_get_step),
+            patch("askme.requests.post", return_value=mock_response({"task": ""})) as mock_post,
         ):
             result = _run_loop("test", str(tmp_path), max_replans=2)
         assert result["status"] == "complete"
+        assert mock_post.call_count == 1  # Task-local replanning stays scripted too.
 
     @patch("askme.requests.post")
     def test_json_error_key_still_retried(self, mock_post):

@@ -1,0 +1,12 @@
+{
+  "checked_at_utc": "2026-09-08T06:20:51.552306+00:00",
+  "account": {
+    "limit": 10,
+    "limit_remaining": 9.49820556,
+    "usage": 0.50179444,
+    "usage_daily": 0.00260115
+  },
+  "prior_account_remaining_usd": "9.50080671",
+  "study_response_cost_usd": "0.00321032",
+  "note": "Prior unrelated account spending is excluded. No credential, key label or identifier is retained."
+}

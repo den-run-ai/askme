@@ -21,14 +21,18 @@ gaps in [*Are Small LLMs Ready for Coding
 Agents?*](talks/berkeley-agentic-ai-summit-2026/README.md), a five-minute
 lightning talk at the 2026 Agentic AI Summit at UC Berkeley
 ([slides](talks/berkeley-agentic-ai-summit-2026/slides.pdf),
-[speaker script](talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md)).
+[recording](https://www.youtube.com/watch?v=N1XoiJGyNpM),
+[corrected speaker script](talks/berkeley-agentic-ai-summit-2026/SPEAKER_NOTES.md),
+[published-deck errata](talks/berkeley-agentic-ai-summit-2026/README.md#published-talk-errata--2026-09-07)).
 The current answer is deliberately cautious: bounded loops look promising,
 but realistic feature readiness remains open.
 
-Today, AskMe is a minimal two-module Python agent with no frameworks and no
-dependencies beyond `requests`: `askme.py` owns the CLI, LLM calls, and the
-plan/execute/replan controller, and `actions.py` owns the action registry and
-handlers. It takes a prompt, plans tasks, executes them via
+Today, AskMe is a small Python agent with no frameworks and no dependencies
+beyond `requests`: `askme.py` keeps the CLI and compatibility API, `loop.py`
+owns planning, run state and controller sequencing, `llm.py` owns provider
+calls and response decoding, `policies.py` owns step,
+write-obligation and completion decisions, and `actions.py` owns the
+action registry and handlers. It takes a prompt, plans tasks, executes them via
 shell/write/edit/read/search/tree actions, and replans on failure. Its
 capability-budget selection is provider/backend-independent by default; a
 named legacy profile preserves the original Gemma 4 E4B/M1 setup, and the
@@ -36,15 +40,24 @@ runtime remains configurable for local servers and OpenRouter.
 
 ## Quick Start
 
-With [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.10+,
-and a [local model](docs/gemma4-setup.md) ready, run AskMe on a project you can
-safely edit. uv creates the environment from the committed lockfile:
+AskMe is **source-only: clone and run**, not an installable pip CLI package.
+With Python 3.10+ (including pip) and a [local model](docs/gemma4-setup.md)
+ready, install the exact uv version required by `pyproject.toml`; uv creates
+the environment from the committed lockfile:
 
 ```bash
+python3 -m pip install uv==0.12.1
+git clone https://github.com/den-run-ai/askme.git
+cd askme
+uv run --locked --no-dev askme.py --help
 uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
 ```
 
-For OpenRouter or other options, see [configuration](docs/configuration.md).
+Replace `/path/to/project` with a project you can safely edit: `--help` prints
+the CLI options without calling a model, and a completed run prints
+`All tasks complete.` with its output directory (completion is not independent
+test acceptance). For OpenRouter or other options, see
+[configuration](docs/configuration.md).
 
 ### Local llama.cpp setup
 
@@ -98,7 +111,7 @@ Full model/build/flag rationale and benchmark history:
 flowchart TD
     U([user prompt]) --> PF[preflight probe]
     PF --> PL[plan — LLM proposes task list]
-    PL --> EX["execute — one JSON action per step<br/>shell · write · edit · read · search · tree"]
+    PL --> EX["execute: one native tool call (six actions + done/fail)"]
     EX -- task failed --> RE[replan]
     RE --> PL
     EX -- "all done · validation skipped" --> DONE([done])
@@ -155,15 +168,15 @@ run logging, context budgets, and the automation/evaluation CLI — lives in
 uv sync --locked
 
 # Fast local quality checks
-uv run --locked ruff check askme.py actions.py tests
-uv run --locked ruff format --check askme.py actions.py tests
+uv run --locked ruff check *.py tests
+uv run --locked ruff format --check *.py tests
 uv run --locked ty check
 
 # Deterministic suite (live LLM tests are opt-in and skip by default)
 uv run --locked pytest tests/ -q
 
 # CI-equivalent, branch-aware coverage gate
-uv run --locked pytest tests/ --cov=askme --cov=actions --cov-report=term-missing --cov-report=xml:coverage.xml
+uv run --locked pytest tests/ --cov --cov-report=term-missing --cov-report=xml:coverage.xml
 
 # Integration — local (requires llama-server on :8080)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestIntegration and not Medium and not Hard"
@@ -172,6 +185,10 @@ ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.p
 
 # Integration — OpenRouter (requires OPENROUTER_API_KEY in .env)
 ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterEasy or TestOpenRouterMedium or TestOpenRouterHard"
+
+# Integration — showcase web-app tasks (docs/showcase-tasks.md)
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestWebLocal"
+ASKME_RUN_LIVE_LLM_TESTS=1 uv run --locked pytest tests/test_agent_integration.py -s -v -m live_llm -k "TestOpenRouterWeb"
 
 # Multi-trial benchmark harness (reports median + range across N trials)
 uv run --locked python tests/bench_harness.py --list
@@ -214,14 +231,21 @@ Two GitHub Actions workflows split hermetic from live-model testing:
   repository's `Openrouter` deployment environment for `OPENROUTER_API_KEY`
   as an environment secret. The key is scoped only to preflight and live-model
   execution steps. Runs on push to `main` touching agent/test/dependency code,
-  weekly on schedule, on manual dispatch (choose suite, models, provider,
-  trials), and on pull requests only when labeled `llm-tests` — the job guard
+  weekly on schedule, on manual dispatch (choose suite, smoke-model matrix,
+  Berkeley models, provider, trials), and on pull requests only when labeled
+  `llm-tests` — the job guard
   also requires the PR head branch to live in this repository, so labeled fork
   PRs are rejected before any credential is in scope.
 
-`llm.yml` has two jobs. The smoke job runs an OpenRouter pytest suite (easy
-by default) with automatic provider routing. The legacy-named Berkeley job
-runs the same hard-build and medium-repair selectors used by
+`llm.yml` has three jobs. The smoke job runs an OpenRouter pytest suite (easy
+by default) with automatic provider routing, once per model in the
+`smoke_models` matrix. The dispatch-only `web-bench-trials` job (opt-in via a
+nonzero `web_trials` input) benches every `web_models` × web-task cell that
+many times through `tests/bench_harness.py` for median+range evidence. Web
+cells use `requested=expected-served@effort` syntax and the immutable
+`generic-feature-scale-v1` capability profile; an empty `web_models` input
+inherits the `models` matrix. The legacy-named Berkeley job runs the same
+hard-build and medium-repair selectors used by
 [the talk's frozen eval protocol](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
 on current code and current model cells; it is not a replay of that historical
 four-model, strict-SiliconFlow matrix. `tests/ci_llm_gate.py report` then
@@ -240,11 +264,73 @@ preflight step fails loudly when the key is missing or rejected, so a bad
 credential can never produce a silently green (all-skipped) run. The full
 default matrix measured about $0.01 in OpenRouter credits per run.
 
+### macOS Apple Silicon CI
+
+[`macos.yml`](.github/workflows/macos.yml) covers the platform the local
+llama.cpp backend actually targets. It needs no credential — every lane talks
+either to nothing at all or to a `llama-server` on localhost — and has three
+lanes because they buy different things:
+
+| Lane | Runner | Trigger | Gates? |
+|---|---|---|---|
+| `macos-tests` | `macos-26` (free) | push, PR | yes |
+| `llama-contract` | `macos-26` (free) | push, PR, weekly | server preflight gates; model probe advisory |
+| `llama-reference` | `${{ inputs.runner }}` | manual only | yes, including a runner-size floor |
+
+`macos-tests` runs the deterministic suite on arm64 for Python 3.10 and 3.14 —
+the ends of the supported range, since `ci.yml` already covers the middle on
+Linux. This is the lane that catches genuine platform bugs: macOS resolves
+`/tmp` and `/var` through symlinks into `/private`, and its default filesystem
+is case-insensitive, both of which bear directly on workspace-path and
+target-identity normalization.
+
+`llama-contract` installs llama.cpp from Homebrew, serves a deliberately tiny
+tool-capable model (Qwen3-0.6B), and checks the seam through the real
+`LLMClient`. It exists to catch upstream llama.cpp drift breaking the local
+backend. `tests/ci_local_gate.py preflight` gates: `tests/conftest.py` *skips*
+local suites when `:8080` is absent, so without it a broken backend would read
+as a green run. The `probe` step — one `expect="action"` round trip asserting
+the tools payload is accepted and the envelope decodes — stays advisory,
+because a 0.6B model on a 3-vCPU runner missing a tool call is evidence about
+the model, not about AskMe.
+
+`llama-reference` runs the documented reference model (Gemma 4 E4B QAT Q4_0,
+5.15 GB) with the exact stable flags from [docs/gemma4-setup.md](docs/gemma4-setup.md).
+It is manual-only and takes a runner label, because **no GitHub-hosted runner
+matches the 16 GB reference machine**:
+
+| Label | Chip | vCPU | RAM | Cost |
+|---|---|---|---|---|
+| `macos-26` | M1 | 3 | 7 GB | free/unlimited on public repos |
+| `macos-26-xlarge` | M2 Pro | 5 | 14 GB | billed per-minute, org-owned repos only |
+| `macos-26-large` | Intel | 12 | 30 GB | not Apple Silicon — no Metal |
+
+14 GB is short of the reference 16 GB but still holds the model plus its 16K
+q4_0 KV cache, so `macos-26-xlarge` is the default. For true 16 GB+ parity,
+point `runner` at a third-party arm64 label (Depot, WarpBuild, Blaze, Bitrise)
+or a self-hosted Tart/Tartelet runner — all are one-line swaps — and set
+`min_memory_gb` to `16`. `tests/ci_local_gate.py hardware` then verifies the
+machine really is that size *before* the multi-gigabyte download, so an
+undersized runner fails fast instead of being OOM-killed mid-suite in a way
+that looks like an agent-loop bug.
+
+**These lanes are not performance evidence.** CI runners are smaller and slower
+than the documented M1/16 GB reference deployment, and a run that clears a
+lane's floor while sitting below 16 GB says so explicitly in its job summary.
+Timings from this workflow must never be written into
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md) or cited as a local baseline; use the
+reference machine for that.
+
 ## Files
 
-- `askme.py` — the agent
+- `askme.py` — CLI, environment/configuration wiring and backwards-compatible public API
+- `loop.py` — planning, run configuration/state, recording and controller sequencing
+- `llm.py` — immutable provider settings, response codecs and injectable client
+- `policies.py` — step strategies, incomplete-write obligations and completion/validation decisions
+- `actions.py` — canonical action registry, handlers and execution receipts
 - `tests/` — unit and integration tests, split by concern
 - `tests/bench_harness.py` — multi-trial benchmark harness
+- `tests/ci_local_gate.py` — macOS/llama.cpp hardware, server, and transport gate
 - `tests/workflow_eval.py` — manifest-driven native workflow evaluator
 - `tests/workflows/` — versioned semantic fixtures and [evaluation protocol](tests/workflows/PROTOCOL.md)
 - `tests/featurebench/` — FeatureBench adapter and [qualified canary runbook](tests/featurebench/README.md)
