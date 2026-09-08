@@ -2536,6 +2536,17 @@ class StepRecorder:
     def executed(self):
         self.state["executed_steps"] += 1
 
+    def control(self, task_index, step, act):
+        """Record an accepted model control action, never execution evidence.
+
+        Refused ``done`` claims use ``skip`` instead. Keeping this out of
+        last_steps/all_steps preserves duplicate context and validation
+        evidence while making accepted done/fail selections observable.
+        """
+        event = {"event": "step_control", "task_index": task_index, "step": step, "action": act}
+        self.history.append(dict(event))
+        self._event(event)
+
     def skip(self, task_index, step, act, action, reason):
         """Record a selected-but-not-dispatched action in run metrics + log."""
         self.state["skipped_steps"] += 1
@@ -3111,6 +3122,16 @@ class StepPolicy:
                     attempt.reasoning_trigger = "duplicate_action"
                 return _StepFlow.NEXT_STEP
         elif act == "shell" and prev.get("arg", "") == action.get("arg", ""):
+            # The sliding window carries prior-task context, not proof
+            # that this attempt executed its check (issue #95). Give
+            # each new task/attempt a fresh execution after either success
+            # or failure; retain same-attempt guards and timeout bumps,
+            # including deterministic retries.
+            if not any(
+                step.get("action") == "shell" and step.get("arg", "") == action.get("arg", "")
+                for step in attempt.steps
+            ):
+                return None
             if prev.get("ok"):
                 # Repetition is never completion evidence (issue #68): the
                 # duplicate is suppressed as a no-op once, and repeating it
@@ -4549,6 +4570,7 @@ class _RunController:
             reason = ctx.action.get("reasoning", "no reason")
             self._emit(f"  FAIL ({self._clock() - ctx.started:.1f}s): {reason}")
             self.state["errors"].append(f"Task '{attempt.task}': {reason}")
+            self.recorder.control(ctx.task_index, ctx.step, ctx.act)
             return _StepFlow.END_ATTEMPT
         flow = self.obligations.prepare(ctx)
         if flow is None:
@@ -4565,6 +4587,7 @@ class _RunController:
         if flow is not None:
             return flow
         attempt.done = True
+        self.recorder.control(ctx.task_index, ctx.step, ctx.act)
         return _StepFlow.END_ATTEMPT
 
     def _execute_step(self, ctx, attempt):

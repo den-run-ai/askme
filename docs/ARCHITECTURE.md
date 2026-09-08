@@ -207,6 +207,27 @@ evidence and the paired json-vs-tools bench are recorded in
 
 The run loop also accounts for selected vs executed actions: every action the executor emits increments `selected_steps`, only dispatched ones increment `executed_steps`, and each guard-suppressed one increments `skipped_steps` and logs a `step_skipped` JSONL event with a typed reason (`duplicate_read`, `stuck_read`, `stuck_append`, …). The 2026-07-31 Qwen canary selected 14 reads of which only 2 executed — that gap is now first-class in `run_end` metrics instead of being reconstructed from logs.
 
+Accepted model `done` and `fail` selections emit `step_control` events into
+JSONL and returned history, with `task_index`, `step`, and `action`. These
+control receipts are not dispatched actions or verification evidence and do
+not enter `all_steps` or the model's sliding window. A refused `done` still
+emits `step_skipped`; deterministic-repair auto-completion is not a model
+`done` selection. Thus `selected = executed + skipped + accepted controls`.
+Historical logs without control receipts cannot establish that a model never
+emitted `done` merely because no `step` event names it.
+
+Shell duplicate/stuck suppression requires an executed receipt for that
+command in the current task attempt. The previous task's last step remains
+visible context, but cannot suppress a new task's first execution, including
+after task-local or full replans and whether the previous result succeeded or
+failed. Within an attempt, an adjacent successful repeat is still skipped once
+and a second repeat ends the attempt as stuck; failed repeats still end the
+attempt unless they timed out, in which case the bounded timeout bump applies.
+Fresh executions retain their actual results; neither previous success nor
+suppression completes a task, and explicit `done`, incomplete-write gates,
+and final-validation rules still apply. This fixes a deterministic failure
+path from #95; its effect on live completion rates remains unmeasured.
+
 ## Failure and Replanning
 
 On task failure:
