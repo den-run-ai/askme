@@ -249,6 +249,7 @@ def test_web_bench_dispatch_passes_qualifying_cell_contract(tmp_path):
     assert len(calls) == 6
     assert github_env.read_text().strip() == "EXPECTED_WEB_CELLS=6"
     for index, args in enumerate(calls):
+        assert all(args), "optional effort must not introduce empty arguments"
         expected_model = "example/one" if index < 3 else "example/two"
         assert args[args.index("--model") + 1] == expected_model
         assert args[args.index("--expected-served-model") + 1] == expected_model + "-20260907"
@@ -354,6 +355,10 @@ def test_macos_deterministic_lane_stays_hermetic():
     assert "llama-server" not in tests
     assert "uv run --locked pytest tests/ -v -rs" in tests
     assert 'python-version: ["3.10", "3.14"]' in tests
+    workflow = MACOS_WORKFLOW.read_text(encoding="utf-8")
+    assert 'UV_MANAGED_PYTHON: "1"' in workflow
+    assert "actions/setup-python@" not in workflow
+    assert tests.index("Check bounded loopback resolution") < tests.index("Run deterministic suite")
 
 
 def test_macos_reference_lane_is_opt_in():
