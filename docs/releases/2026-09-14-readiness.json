@@ -1,0 +1,90 @@
+{
+  "date": "2026-09-14",
+  "revision": "3ec477fc06cfd48bf6920c58974a60788847f5bb",
+  "scope": "Baseline main release audit before subsequent README, slide and comparison updates; not an audit of future commits.",
+  "environment": {
+    "os": "Linux x86_64",
+    "python": "3.12.14",
+    "uv": "0.12.1",
+    "fresh_source_help": "passed",
+    "locked_sync": "passed"
+  },
+  "deterministic_validation": {
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "formatted_files": 106,
+    "ty_check": "passed",
+    "pytest_passed": 1813,
+    "pytest_skipped_live": 30,
+    "coverage_percent": 96.88919164396003,
+    "coverage_statements": 3346,
+    "coverage_branches": 1058,
+    "coverage_floor_percent": 90,
+    "live_opt_in": false
+  },
+  "main_ci": {
+    "linux": "https://github.com/den-run-ai/askme/actions/runs/34808716539",
+    "macos": "https://github.com/den-run-ai/askme/actions/runs/34808716525",
+    "llm": "https://github.com/den-run-ai/askme/actions/runs/34808716557",
+    "all_conclusions": "success",
+    "linux_python_versions": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+    "python_3_14_coverage_percent": 96.77,
+    "hosted_easy_passed": 3,
+    "hosted_build_repair_valid_passed_cells": 2,
+    "hosted_current_model": "qwen/qwen3.6-27b",
+    "hosted_expected_served_model": "qwen/qwen3.6-27b-20260422",
+    "hosted_build_repair_observed_provider": "Chutes",
+    "hosted_trials_per_cell": 1,
+    "interpretation": "Integration observations, not the historical Berkeley matrix or a reliability estimate. No new paid inference was performed for this audit."
+  },
+  "secrets_scan": {
+    "scanner": "gitleaks 8.30.1",
+    "official_release": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+    "archive_sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+    "archive_checksum_verification": "Matched the official release checksums file before execution.",
+    "common_options": "GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML unset; no repository configuration; empty ignore directory; --redact=100 --ignore-gitleaks-allow --no-banner --no-color --timeout=120 --report-format=json",
+    "history": {
+      "method": "gitleaks git REPOSITORY --log-opts=--all",
+      "shallow_repository": false,
+      "git_reachable_commits_all_fetched_refs": 378,
+      "scanner_commits": 288,
+      "scanner_bytes": 8718210,
+      "findings": 0,
+      "exit_code": 0
+    },
+    "tracked_export": {
+      "method": "git archive at the audited revision, then gitleaks dir EXPORT --max-archive-depth=3",
+      "exported_files_including_relative_symlink": 408,
+      "scanner_bytes": 12829926,
+      "findings": 0,
+      "exit_code": 0
+    }
+  },
+  "runtime_dependency_advisories": {
+    "checked_date": "2026-09-14",
+    "method": "Exact locked PyPI package/version queries against OSV and PyPI release advisory data; maintained project advisories inspected. No dependency changes.",
+    "sources": ["https://api.osv.dev/v1/query", "https://pypi.org/pypi/"],
+    "checked_pins": {
+      "requests": "2.34.2",
+      "urllib3": "2.7.0",
+      "certifi": "2026.7.22",
+      "charset-normalizer": "3.4.9",
+      "idna": "3.18"
+    },
+    "known_vulnerabilities_returned": 0,
+    "scope": "Known advisory data for the five locked runtime packages at the check date; not proof of absence of vulnerabilities."
+  },
+  "repository_metadata": {
+    "public": true,
+    "archived": false,
+    "disabled": false,
+    "has_issues": true,
+    "license": "MIT"
+  },
+  "remaining_formal_release_items": [
+    "Review and validate the final candidate, including new evaluation artifacts.",
+    "Independently verify the signed-in non-collaborator New issue flow recorded in issue 85.",
+    "Deliberately create a tag and GitHub Release with notes for the selected reviewed commit."
+  ],
+  "release_published": false
+}

@@ -1,0 +1,144 @@
+{
+  "askme_config": {
+    "capability_profile": "generic-feature-scale-v1",
+    "goal_context_chars": 11144,
+    "max_replans": 3,
+    "max_steps": 10,
+    "max_tasks": 10,
+    "max_transport_retries": 0,
+    "reasoning_policy": "off"
+  },
+  "askme_revision": "3ec477fc06cfd48bf6920c58974a60788847f5bb",
+  "attempts_per_cell": 1,
+  "authorization_budget": {
+    "original_user_budget_usd": "10",
+    "prior_reserved_exposure_usd": "0.05043320",
+    "remaining_unallocated_usd": "1.94956680",
+    "this_protocol_maximum_usd": "8"
+  },
+  "cells": [
+    {
+      "harness": "askme",
+      "id": "gemma-askme",
+      "input_price_per_million": 0.1,
+      "model": "google/gemma-4-31b-it",
+      "output_price_per_million": 0.34,
+      "provider": "coreweave/fp4",
+      "quantization": "fp4",
+      "served_model": "google/gemma-4-31b-it-20260402",
+      "served_provider": "CoreWeave"
+    },
+    {
+      "harness": "pi",
+      "id": "gemma-pi",
+      "input_price_per_million": 0.1,
+      "model": "google/gemma-4-31b-it",
+      "output_price_per_million": 0.34,
+      "provider": "coreweave/fp4",
+      "quantization": "fp4",
+      "served_model": "google/gemma-4-31b-it-20260402",
+      "served_provider": "CoreWeave"
+    },
+    {
+      "harness": "pi",
+      "id": "qwen-pi",
+      "input_price_per_million": 0.3,
+      "model": "qwen/qwen3.6-27b",
+      "output_price_per_million": 3.2,
+      "provider": "siliconflow/fp8",
+      "quantization": "fp8",
+      "served_model": "qwen/qwen3.6-27b-20260422",
+      "served_provider": "SiliconFlow"
+    },
+    {
+      "harness": "askme",
+      "id": "qwen-askme",
+      "input_price_per_million": 0.3,
+      "model": "qwen/qwen3.6-27b",
+      "output_price_per_million": 3.2,
+      "provider": "siliconflow/fp8",
+      "quantization": "fp8",
+      "served_model": "qwen/qwen3.6-27b-20260422",
+      "served_provider": "SiliconFlow"
+    }
+  ],
+  "controls": "Fresh official gold must resolve; harmless nonempty add-file patch must apply and remain unresolved. Both must finish without evaluator errors before the proxy can start.",
+  "dataset_repository": "LiberCoders/FeatureBench",
+  "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+  "decision_rule": "Separately registered all-four-cell follow-up after v1 infrastructure failure; preserve v1 receipts. Retain and report all four cells including budget exhaustion, timeouts, malformed sessions and evaluator failures. Do not retry after any model call. Stop after this instrumentation check; expansion requires a new protocol. No benchmark score, reliability, readiness, model-family/size, ceiling or component-effect claim.",
+  "dependency_freeze": "Pinned AskMe and FeatureBench uv.lock; exact pi package and generated transitive npm lock, Node checksum and derived image ID retained before inference. All cells share that derived image.",
+  "differences": [
+    "Pi is an external whole-scaffold reference: prompts, planner, tools, requested per-call output allowance and completion semantics differ. This is not a causal component ablation.",
+    "Total external call/generated-token/wall/spend ceilings and within-model routes are equal; AskMe retains its native smaller planner/step token requests and internal step limits.",
+    "Gemma uses currently available CoreWeave fp4; Qwen uses SiliconFlow fp8. These differ from historical v6 routes/precision; historical results are not contemporary controls.",
+    "The known Seaborn task was already used in development and is excluded from future confirmation panels. It is episode-hidden, not contamination-free."
+  ],
+  "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+  "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+  "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+  "infrastructure_repair": {
+    "availability_diagnostic_result": "All four pre-existing records returned HTTP200 with metadata objects at06:06UTC; no returned metadata retained; original failure status remains unknown.",
+    "availability_diagnostic_run_id": 34812086810,
+    "completions_retried": false,
+    "explicit_user_agent": true,
+    "identity_compatibility_diagnostic_run_id": 34812394954,
+    "identity_compatibility_result": "At 06:11 UTC, all four pre-existing records matched the frozen dated model and expected provider; requested alias did not match. Only comparison booleans were retained. Strict dated identity validation is unchanged.",
+    "metadata_poll_deadline_seconds": 60,
+    "safe_metadata_fetch_diagnostics": "attempt, stage, HTTP status, elapsed milliseconds; never response/error text"
+  },
+  "label": "one-task, four-cell whole-scaffold qualification",
+  "network": "Inference containers use one internal Docker network with host-proxy access only; package setup finishes before inference. No hidden tests or reference patch remain inside containers.",
+  "node_version": "v22.23.2",
+  "outcomes": [
+    "infrastructure_validity",
+    "agent_completion",
+    "terminal_status",
+    "patch_bytes",
+    "patch_applied",
+    "resolved",
+    "f2p",
+    "p2p",
+    "visible_test_commands",
+    "calls",
+    "prompt_tokens",
+    "completion_tokens",
+    "reasoning_tokens",
+    "cost",
+    "reserved_cost",
+    "wall_seconds",
+    "finish_reasons",
+    "route_audit"
+  ],
+  "pi_package": "@earendil-works/pi-coding-agent",
+  "pi_version": "0.83.0",
+  "prior_study": {
+    "classification": "all four cells infrastructure-invalid after first completion; no usable task score",
+    "conservative_exposure_usd": "0.05043320",
+    "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
+    "receipt": "tests/bench_records/2026-09-14-pi-comparison-v1/README.md",
+    "replacement": false,
+    "response_reported_usd": "0.00299138",
+    "run_id": 34811259408,
+    "workflow_revision": "8d466829efe429f33a754529262907eeeb55cc63"
+  },
+  "prompt_sha256": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+  "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v2",
+  "proxy": {
+    "budget_policy": "Reserve a conservative full-request upper bound before forwarding; retain reservations after uncertain or failed requests. No paid replacements or additional repetitions.",
+    "cell_budget_usd": 2,
+    "global_budget_usd": 8,
+    "max_calls_per_cell": 60,
+    "max_generated_tokens_per_cell": 131072,
+    "max_tokens": 8192,
+    "reasoning": {
+      "enabled": false
+    },
+    "temperature": 0
+  },
+  "replacement_attempts_after_any_model_call": 0,
+  "source_freeze": "Exact workflow commit, manifest SHA256 and one GitHub run ID are recorded in eval/claims/pi-sep14-v2 before the credentialed step. A second run ID or run attempt is rejected.",
+  "split": "fast",
+  "status": "preregistered_before_outcome_calls",
+  "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+  "wall_seconds_per_cell": 1800
+}

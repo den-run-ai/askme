@@ -361,11 +361,13 @@ style: |
     font-size: 14px;
     margin-top: 9px;
   }
+  section.harness-backup h1 { font-size: 38px; margin-bottom: 12px; }
+  section.harness-backup .subtitle { font-size: 20px; margin-bottom: 12px; }
   .harness-grid {
     display: grid;
     gap: 5px;
-    grid-template-columns: 0.72fr repeat(3, 1fr);
-    margin-top: 12px;
+    grid-template-columns: 0.6fr repeat(2, 1fr);
+    margin-top: 4px;
   }
   .harness-cell {
     background: #fff;
@@ -373,8 +375,8 @@ style: |
     border-radius: 5px;
     font-size: 14px;
     line-height: 1.28;
-    min-height: 76px;
-    padding: 9px 10px;
+    min-height: 36px;
+    padding: 7px 10px;
   }
   .harness-cell.head {
     background: var(--terminal);
@@ -392,6 +394,11 @@ style: |
     font-weight: 900;
     text-transform: uppercase;
   }
+  .harness-results { display: table; table-layout: fixed; font-size: 18px; margin: 10px 0 8px; width: 100%; }
+  .harness-results th, .harness-results td { padding: 7px 12px; }
+  .harness-results th { background: var(--terminal); color: white; }
+  .harness-terminal { color: var(--muted); display: block; font-size: 13px; margin-top: 3px; }
+  .harness-results-label { color: var(--blue); font-size: 18px; font-weight: 800; margin: 12px 0 0; }
   .harness-caption {
     background: #e9f7f3;
     border-left: 6px solid var(--teal);
@@ -705,19 +712,28 @@ A causal harness benefit and the reliable plane version remain goals.
 
 ---
 
-<div class="eyebrow">Backup · harness boundaries</div>
+<!-- _class: harness-backup -->
 
-# A small model's workload depends on the harness
+<div class="eyebrow">Backup · harness comparison</div>
 
-<p class="subtitle">Three technical boundaries · documentation checked Sep 8, 2026.</p>
+# AskMe and pi
+
+<p class="subtitle">How the harness divides work between the model and controller.</p>
 
 <div class="harness-grid">
-  <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
-  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">8 native tools: 6 executable actions + <code>done</code>/<code>fail</code>; one call per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
-  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Conversation state + append-only event log; optional persistence and configurable condenser.</div>
-  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>. Held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> signals completion; benchmark evaluation remains a separate harness.</div>
+  <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div>
+  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">8 native tools: 6 executable actions + <code>done</code>/<code>fail</code>. One call per turn.</div><div class="harness-cell">4 default tools: read, write, edit, bash. Extensions can change the tool set.</div>
+  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded replanning.</div><div class="harness-cell">Model-led session tree with branching and compaction.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>.</div><div class="harness-cell">Loop ends when tool calls stop. Acceptance comes from an external check.</div>
 </div>
 
-<div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>
+<p class="harness-results-label">Frozen feature probe · September 14, 2026 · before schema repair</p>
+<table class="harness-results">
+  <tr><th>Dense model</th><th>AskMe snapshot</th><th>pi 0.83.0</th></tr>
+  <tr><td>Gemma 4 31B</td><td>8/13 · unresolved<span class="harness-terminal">Replans exhausted</span></td><td>11/13 · unresolved<span class="harness-terminal">Agent complete</span></td></tr>
+  <tr><td>Qwen3.6-27B</td><td>8/13 · unresolved<span class="harness-terminal">Replans exhausted</span></td><td>11/13 · unresolved<span class="harness-terminal">Reservation cap</span></td></tr>
+</table>
 
-<div class="source">Sources: AskMe architecture · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi coding-agent docs</a> · <a href="https://docs.openhands.dev/sdk/arch/tool-system">OpenHands tool system</a> and <a href="https://docs.openhands.dev/sdk/arch/conversation">conversation architecture</a></div>
+<div class="harness-caption">One known task; one attempt per cell. All patches applied and passed 387 preservation tests. AskMe’s read bounds were missing from its schema; audit polling inflated wall time. Prior infrastructure failure retained. No reliability, speed, or causal claim.</div>
+
+<div class="source">Sources: <a href="https://github.com/den-run-ai/askme/pull/121">September 14 protocol + receipts</a> · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi docs</a> · target-test counts shown; agent completion is separate.</div>

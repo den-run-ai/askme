@@ -27,18 +27,18 @@ The harness ties these trends together.
 A harness is not one fixed architecture. AskMe is an experimental coding-agent
 harness: it keeps an explicit plan, asks the model for one structured action per
 turn, executes it, and returns focused evidence. Its model-facing boundary is
-deliberately narrower than two prominent alternatives:
+explicit about what the controller handles. Pi offers a useful comparison:
 
-| Boundary | AskMe | [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) | [OpenHands](https://docs.openhands.dev/sdk/arch/tool-system) |
-|---|---|---|---|
-| Action surface | Six executable handlers plus `done`/`fail`; one native tool call per turn | Four default tools; extensions can add or replace tools | Typed, extensible `Action → Observation` tools |
-| State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode | Conversation state and append-only event log; optional persistence and configurable condenser |
-| Completion boundary | `done`; conditional validation with `complete_unverified` for an unavailable first verdict; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions | `finish` signals completion; benchmark evaluation remains a separate harness |
+| Boundary | AskMe | [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) |
+|---|---|---|
+| Action surface | Six executable handlers plus `done`/`fail`; one native tool call per turn | Four default tools; extensions can add or replace tools |
+| State and control | Explicit plan, curated slim state, bounded local or full replanning | Model-led JSONL session tree, branching, and lossy compaction; no built-in plan mode |
+| Completion boundary | `done`; conditional validation with `complete_unverified` for an unavailable first verdict; held-out acceptance remains external | The loop ends when tool calls stop; checks come from the workflow or extensions |
 
 This is a trade-off, not a ranking. AskMe spends more harness structure to reduce
 each turn's decision burden. Pi keeps a minimal, extensible, model-led core.
-OpenHands supplies a richer lifecycle runtime. All three still need independent
-behavioral acceptance. Other projects explore adjacent layers: [Oh My
+Both still need independent behavioral acceptance. OpenHands was not evaluated
+and is omitted from the comparison. Other projects explore adjacent layers: [Oh My
 Pi](https://github.com/can1357/oh-my-pi) packages more capabilities around pi,
 while [Omnigent](https://github.com/omnigent-ai/omnigent) composes agents behind
 shared policies and sessions. A separate [Databricks private-codebase
@@ -186,6 +186,21 @@ the historical revision-3 interface, not current-main performance. The pi
 figures remain exploratory, one-attempt archival comparisons whose runner is
 in unmerged [PR #14](https://github.com/den-run-ai/askme/pull/14); they are not
 a performance ceiling or a controlled harness comparison.
+
+*Follow-up (Sep 14, 2026).* A new frozen four-cell comparison used AskMe
+`3ec477f` and pi 0.83.0, with matched routes and external ceilings within each
+dense model. AskMe reached 8/13 target tests and pi reached 11/13 for both
+Gemma 4 31B and Qwen3.6-27B. All four patches applied and preserved 387 tests,
+but none resolved the task. Both AskMe agents exhausted their replans;
+Gemma/pi ended normally and Qwen/pi stopped at a conservative reservation cap.
+The frozen AskMe schema omitted runtime read bounds, and out-of-range reads
+occurred. That defect qualifies the result; its later repair is not a new
+evaluation. Audit polling also inflated wall time. One previously used task,
+one attempt per cell and different internal harness policies do not establish
+reliability, a causal component effect or a native speed advantage. The
+[receipt](../../tests/bench_records/2026-09-14-pi-comparison-v2/README.md) retains
+all outcomes and the earlier infrastructure failure separately. The historical
+August evidence above remains unchanged.
 
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.

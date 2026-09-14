@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-09-14",
+  "classification": "valid_one_task_four_cell_whole_scaffold_observation",
+  "source_claim": {
+    "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v2",
+    "protocol_sha256": "9a3e21467eec3f12e6ae1887442bba0a509ff7f0ea0714c5ef41e70de70eca5c",
+    "run_id": 34812520762,
+    "workflow_revision": "08f69e71db1713d347ef147578a331ee54455864"
+  },
+  "workflow_url": "https://github.com/den-run-ai/askme/actions/runs/34812520762",
+  "artifact_id": 10336372214,
+  "artifact_zip_sha256": "0e03e8664d660917e90facbb1b36c23a8453a2959af9f0a7f963941a423f2029",
+  "source_runtime_revision": "3ec477fc06cfd48bf6920c58974a60788847f5bb",
+  "cells": [
+    {
+      "cell": "gemma-askme",
+      "model": "google/gemma-4-31b-it",
+      "served_model": "google/gemma-4-31b-it-20260402",
+      "provider": "coreweave/fp4",
+      "harness": "askme",
+      "infrastructure_valid": true,
+      "evaluator_valid": true,
+      "route_audit_valid": true,
+      "resolved": false,
+      "patch_applied": true,
+      "patch_bytes": 9776,
+      "agent_completion": false,
+      "raw_summary_terminal_status": "incomplete",
+      "agent_process_exit_code": 1,
+      "terminal_interpretation": "exhausted",
+      "independent_acceptance": {
+        "FAIL_TO_PASS": {
+          "passed": 8,
+          "failed": 5
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      },
+      "visible_checks": "Two executed python -c bootstrap sanity probes; no pytest invocation.",
+      "executed_action_counts": {
+        "tree": 4,
+        "read": 6,
+        "write": 3,
+        "shell": 4
+      },
+      "upstream_calls": 29,
+      "all_upstream_calls_audited_complete": true,
+      "audited_cost_usd": "0.01618668",
+      "response_reported_cost_usd": "0.01618668",
+      "unreleased_reservation_usd": "0.11579220",
+      "native_reasoning_tokens": 0,
+      "reasoning_control_mismatches": 0,
+      "end_to_end_wall_seconds": 591.5142655249999,
+      "metadata_polling_seconds": 390.119,
+      "metadata_get_attempts": 112,
+      "metadata_http_statuses": [
+        200,
+        404
+      ]
+    },
+    {
+      "cell": "gemma-pi",
+      "model": "google/gemma-4-31b-it",
+      "served_model": "google/gemma-4-31b-it-20260402",
+      "provider": "coreweave/fp4",
+      "harness": "pi",
+      "infrastructure_valid": true,
+      "evaluator_valid": true,
+      "route_audit_valid": true,
+      "resolved": false,
+      "patch_applied": true,
+      "patch_bytes": 8159,
+      "agent_completion": true,
+      "raw_summary_terminal_status": "complete",
+      "agent_process_exit_code": 0,
+      "terminal_interpretation": "normal assistant stop",
+      "independent_acceptance": {
+        "FAIL_TO_PASS": {
+          "passed": 11,
+          "failed": 2
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      },
+      "visible_checks": "Visible statistics suite initially had 2 failed, 67 passed, and 3 skipped; after an import repair, the final result was 69 passed and 3 skipped.",
+      "executed_action_counts": null,
+      "upstream_calls": 10,
+      "all_upstream_calls_audited_complete": true,
+      "audited_cost_usd": "0.01463832",
+      "response_reported_cost_usd": "0.01463832",
+      "unreleased_reservation_usd": "0.09867450",
+      "native_reasoning_tokens": 0,
+      "reasoning_control_mismatches": 0,
+      "end_to_end_wall_seconds": 243.89805752799998,
+      "metadata_polling_seconds": 135.93,
+      "metadata_get_attempts": 39,
+      "metadata_http_statuses": [
+        200,
+        404
+      ]
+    },
+    {
+      "cell": "qwen-pi",
+      "model": "qwen/qwen3.6-27b",
+      "served_model": "qwen/qwen3.6-27b-20260422",
+      "provider": "siliconflow/fp8",
+      "harness": "pi",
+      "infrastructure_valid": true,
+      "evaluator_valid": true,
+      "route_audit_valid": true,
+      "resolved": false,
+      "patch_applied": true,
+      "patch_bytes": 8447,
+      "agent_completion": false,
+      "raw_summary_terminal_status": "incomplete",
+      "agent_process_exit_code": 0,
+      "terminal_interpretation": "next request rejected by conservative per-cell $2 reservation cap; assistant stopReason=error",
+      "independent_acceptance": {
+        "FAIL_TO_PASS": {
+          "passed": 11,
+          "failed": 2
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      },
+      "visible_checks": "Visible regression suite had 52 passed and 9 skipped; the final visible suite had 1,554 passed and 73 skipped. Tool exit/error flags alone are insufficient for piped pytest commands.",
+      "executed_action_counts": null,
+      "upstream_calls": 36,
+      "all_upstream_calls_audited_complete": true,
+      "audited_cost_usd": "0.1482500",
+      "response_reported_cost_usd": "0.1482500",
+      "unreleased_reservation_usd": "1.9533771",
+      "native_reasoning_tokens": 0,
+      "reasoning_control_mismatches": 0,
+      "end_to_end_wall_seconds": 1087.6847070430001,
+      "metadata_polling_seconds": 456.295,
+      "metadata_get_attempts": 134,
+      "metadata_http_statuses": [
+        200,
+        404
+      ]
+    },
+    {
+      "cell": "qwen-askme",
+      "model": "qwen/qwen3.6-27b",
+      "served_model": "qwen/qwen3.6-27b-20260422",
+      "provider": "siliconflow/fp8",
+      "harness": "askme",
+      "infrastructure_valid": true,
+      "evaluator_valid": true,
+      "route_audit_valid": true,
+      "resolved": false,
+      "patch_applied": true,
+      "patch_bytes": 8002,
+      "agent_completion": false,
+      "raw_summary_terminal_status": "incomplete",
+      "agent_process_exit_code": 1,
+      "terminal_interpretation": "exhausted",
+      "independent_acceptance": {
+        "FAIL_TO_PASS": {
+          "passed": 8,
+          "failed": 5
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      },
+      "visible_checks": "No executed shell or pytest command.",
+      "executed_action_counts": {
+        "tree": 5,
+        "read": 12,
+        "write": 1
+      },
+      "upstream_calls": 36,
+      "all_upstream_calls_audited_complete": true,
+      "audited_cost_usd": "0.0533630",
+      "response_reported_cost_usd": "0.0533630",
+      "unreleased_reservation_usd": "0.7210869",
+      "native_reasoning_tokens": 0,
+      "reasoning_control_mismatches": 0,
+      "end_to_end_wall_seconds": 650.8733760069999,
+      "metadata_polling_seconds": 498.43,
+      "metadata_get_attempts": 141,
+      "metadata_http_statuses": [
+        200,
+        404
+      ]
+    }
+  ],
+  "controls": {
+    "qualified": true,
+    "gold": {
+      "resolved": true,
+      "patch_applied": true,
+      "tests": {
+        "FAIL_TO_PASS": {
+          "passed": 13,
+          "failed": 0
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      }
+    },
+    "harmless_nonempty": {
+      "resolved": false,
+      "patch_applied": true,
+      "tests": {
+        "FAIL_TO_PASS": {
+          "passed": 0,
+          "failed": 13
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      }
+    }
+  },
+  "cost": {
+    "v2_audited_usd": "0.23243800",
+    "v2_response_reported_usd": "0.23243800",
+    "v2_reserved_usd": "2.88893070",
+    "prior_v1_response_reported_usd": "0.00299138",
+    "prior_v1_unreconciled_reservation_usd": "0.05043320",
+    "v1_plus_v2_mixed_provenance_reported_usd": "0.23542938",
+    "combined_conservative_reservations_usd": "2.93936390",
+    "original_user_budget_usd": "10",
+    "interpretation": "V2 generation-metadata audited charges agree exactly with response telemetry. V1 remains response-only/unreconciled. Reservations are conservative allowances, not charges."
+  },
+  "metadata_polling": {
+    "method": "For each call take max elapsed_ms across generation_fetch_diagnostics once; sum those per-call durations by cell. Never sum cumulative retry timestamps.",
+    "total_seconds": 1480.774,
+    "interpretation": "Included in instrumented episode timing and may overlap pi tool execution after streamed results. Do not subtract these totals to manufacture native latency or use end-to-end wall times as a harness speed comparison."
+  },
+  "evidence_integrity": {
+    "source_manifest_sha256": "9a3e21467eec3f12e6ae1887442bba0a509ff7f0ea0714c5ef41e70de70eca5c",
+    "source_manifest_matches_claim": true,
+    "source_manifest_url": "https://github.com/den-run-ai/askme/blob/08f69e71db1713d347ef147578a331ee54455864/tests/featurebench/pi-comparison-sep14-v2.json",
+    "staged_protocol_sha256": "bd685a63fe35f42e4fb0996941791da6b1e5f82c6b95c16b807ee45b2845b986",
+    "source_staged_protocol_json_equal": true,
+    "protocol_byte_difference": "Runner writes staged protocol.json with its standard JSON formatting; claim hashes original source-manifest bytes. JSON values are identical.",
+    "original_inventory_sha256": "c1682eaed9bc5e657e6be885df3ace26404eab3193b279acd35536c4bc57cdeb",
+    "original_inventory_files": 123,
+    "original_inventory_bytes": 4709713,
+    "inventory_mismatches": 0,
+    "prompt_sha256": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+    "prompt_matches_registration": true,
+    "all_six_runtime_module_hashes_match_frozen_askme_revision": true,
+    "masked_tree_all_cells": "3a4eb0648d8bdce1b910b4e1c5ec3c04fce0b90a",
+    "hidden_file": "tests/test_algorithms.py",
+    "source_file_sha256": {
+      "claim.json": "ae2a86403bd1ebed7285da6ab594af5ff2241ef2f6256f4d0c7c5de06e74f736",
+      "summary.json": "ea89fe047de07806e174f8e72b7397d4182a675ceb8208fd54076d610b3d4ba8",
+      "proxy/ledger.json": "774719aefc6cc662f9161ae644b48edb63fe73fa85fbe59794bd333fc099b331",
+      "controls.json": "f6af93a7c567e010995c7152cdcae06b55828000dfac8e145f5eae718eb55cf9",
+      "endpoint-preflight.json": "5e1c02a05e0868fba225661524d3b9b5e8a6eb766d029de69bdfe2c2be461cd1",
+      "setup.json": "bd5311d249f1c1822c334ede1b8763513f90ef54deeecd53d166837a8f07b8c6"
+    },
+    "secrets_scan": {
+      "tool": "gitleaks 8.30.1",
+      "findings": 0,
+      "exit_code": 0,
+      "scanned_bytes": 4661600,
+      "scope": "Downloaded original artifact directory; stock configuration, empty ignore directory, inline allows ignored, redacted output, archive depth3."
+    }
+  },
+  "limitations": [
+    "One previously used task, one attempt per model/harness; no reliability or broad performance estimate.",
+    "AskMe and pi retain different prompts, internal planning/step limits and per-call token requests. This is a whole-scaffold observation, not a component ablation.",
+    "Qwen/pi stopped on the conservative nonrefunding reservation budget despite lower actual charges.",
+    "Instrumented timing includes material metadata polling and differs between streaming/nonstreaming clients.",
+    "Agent completion, visible tests and independent acceptance remain distinct. Every patch remained unresolved.",
+    "Original Actions artifact has 90-day retention. This compact receipt preserves hashes and aggregate evidence, not the full raw archive.",
+    "V1 infrastructure failure is retained separately and is not reclassified by V2.",
+    "The frozen AskMe native tool schema omitted the read.limit range enforced at runtime; out-of-range reads occurred in these traces. This is an interface limitation, not evidence of pure model inability; no causal share is estimated."
+  ]
+}
