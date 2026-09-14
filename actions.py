@@ -67,11 +67,21 @@ PROCESS_TERMINATION_GRACE = 0.2  # bounded grace and output-drain periods
 # finite and deterministic rather than to constrain ordinary navigation.
 READ_POSITION_MAX = 2_147_483_647
 
+# Shared by semantic validation and the model-visible native tool schemas.
+# Field names are unique across the action registry; keep validation order stable.
+ACTION_INTEGER_BOUNDS = {
+    "timeout": (5, SHELL_TIMEOUT_MAX),
+    "offset": (1, READ_POSITION_MAX),
+    "limit": (1, READ_LIMIT_MAX),
+    "cursor": (0, READ_POSITION_MAX),
+}
+
 
 def _get_shell_timeout(cmd, hint=None):
     """Return timeout for a shell command. Uses longer timeout for install/build patterns."""
     if hint is not None:
-        return min(max(int(hint), 5), SHELL_TIMEOUT_MAX)
+        minimum, maximum = ACTION_INTEGER_BOUNDS["timeout"]
+        return min(max(int(hint), minimum), maximum)
     cmd_lower = cmd.lower()
     for pattern in _LONG_TIMEOUT_PATTERNS:
         if pattern in cmd_lower:
@@ -1073,22 +1083,11 @@ def parse_action_envelope(obj):
             return _action_error("field 'content' must be a string, object, or list", "content")
         if "append" in raw and not isinstance(raw["append"], bool):
             return _action_error("field 'append' must be a boolean", "append")
-    if "timeout" in raw:
-        error = _require_int(raw, "timeout", 5, SHELL_TIMEOUT_MAX)
-        if error is not None:
-            return error
-    if "offset" in raw:
-        error = _require_int(raw, "offset", 1, READ_POSITION_MAX)
-        if error is not None:
-            return error
-    if "limit" in raw:
-        error = _require_int(raw, "limit", 1, READ_LIMIT_MAX)
-        if error is not None:
-            return error
-    if "cursor" in raw:
-        error = _require_int(raw, "cursor", 0, READ_POSITION_MAX)
-        if error is not None:
-            return error
+    for field, (minimum, maximum) in ACTION_INTEGER_BOUNDS.items():
+        if field in raw:
+            error = _require_int(raw, field, minimum, maximum)
+            if error is not None:
+                return error
 
     if action_name == "read":
         has_cursor = "cursor" in raw

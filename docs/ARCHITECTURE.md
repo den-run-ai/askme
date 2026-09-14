@@ -278,6 +278,25 @@ enable a second current executor transport. See the
 | `done` | Mark current task complete | Terminal |
 | `fail` | Mark current task failed | Triggers replan |
 
+Native tool schemas publish the same inclusive numeric bounds enforced by
+`parse_action_envelope`, from `actions.ACTION_INTEGER_BOUNDS`:
+
+| Argument | Integer range | When omitted |
+|---|---:|---|
+| `shell.timeout` | 5–300 seconds | 30 seconds, or 120 for install/build commands |
+| `read.offset` | 1–2,147,483,647 lines | Start at line 1 |
+| `read.limit` | 1–200 lines | 60 lines on an initial read |
+| `read.cursor` | 0–2,147,483,647 Unicode code points | Use the initial line-based window |
+
+Send integer JSON tokens, such as `5`, rather than strings, booleans, or
+floating-point tokens such as `5.0`. The parser rejects invalid types and
+out-of-range values before filesystem or subprocess access. A continuation
+requires an explicit `limit` and `sha256`, and its cursor must still point to
+unread content in the unchanged source. Omitting `timeout` keeps command-aware
+defaults; there is no single schema default for it. These schema and prompt
+clarifications do not change the runtime bounds or rewrite historical evaluation
+protocols and receipts.
+
 `edit` exists because full-file `write` content frequently exceeded the legacy E4B profile's 256-token executor budget on multi-line files. Edit payloads fit in ~40-80 tokens; the 26B model on OpenRouter also spontaneously prefers `edit` for fixes. For new large files, chunked `append` writes cover what `edit` cannot.
 
 Observation actions (`read`/`search`/`tree`) carry their own budgets (issue #7): results are bounded by `READ_CHARS`/`SEARCH_MAX_CHARS`/`TREE_MAX_CHARS` and kept in executor step history up to `OBSERVE_STATE_CHARS` (vs 100 chars for mutating actions). Read pages are losslessly resumable. Search and tree remain intentionally lossy discovery summaries: bounded match/file/snippet/entry/depth/character omissions plus unreadable files and traversal errors are exposed in `truncation_reasons` — carried through the action result, the executor step history (inside the bracketed header), and the JSONL `step` record — only complete records are packed, total output including the header fits the history budget, and the model is directed to narrow the query/path or use `read`. On the model-output side, `ask_llm` records `finish_reason` in every `tokens` JSONL event; when a truncated `write`/`edit` payload fails to parse, the retry gets a payload-sized budget (`STEP_WRITE_TOKENS`) instead of more reasoning, and an unrecoverable parse failure surfaces as a typed `[malformed_action]` or `[response_truncated]` error (the latter when the final attempt hit the token budget) that the replanner sees.

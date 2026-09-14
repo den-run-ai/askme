@@ -1,6 +1,7 @@
 """Typed action-wire boundary regressions for issue #79."""
 
 import json
+import subprocess
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
@@ -136,6 +137,59 @@ def test_integer_fields_enforce_inclusive_bounds_and_exclude_bools(field, base, 
         parsed = parse_action_envelope({**base, field: rejected})
         assert isinstance(parsed, ActionProtocolError)
         assert parsed.field == field
+
+
+@pytest.mark.parametrize("limit,expected_lines", [(None, 60), (1, 1), (200, 200)])
+def test_read_numeric_defaults_and_endpoints_preserve_exact_page(tmp_path, limit, expected_lines):
+    (tmp_path / "lines.txt").write_text("x\n" * 250)
+    action = {"action": "read", "arg": "lines.txt"}
+    if limit is not None:
+        action["limit"] = limit
+
+    result = execute(action, str(tmp_path))
+
+    assert result["ok"] is True
+    assert result["content"] == "x\n" * expected_lines
+    assert result["continuation"]["limit"] == expected_lines
+    assert result["continuation"]["offset"] == expected_lines + 1
+
+
+def test_read_limit_201_fails_before_opening_the_file(tmp_path):
+    with patch("actions.Path.read_bytes") as read_bytes:
+        result = execute({"action": "read", "arg": "lines.txt", "limit": 201}, str(tmp_path))
+    read_bytes.assert_not_called()
+    assert result["ok"] is False
+    assert result["error_type"] == "invalid_read_limit"
+    assert "between 1 and 200" in result["output"]
+
+
+@pytest.mark.parametrize(
+    "command,timeout,expected",
+    [("echo ok", None, 30), ("make", None, 120), ("echo ok", 5, 5), ("make", 300, 300)],
+)
+def test_shell_numeric_defaults_and_endpoints_reach_execution(tmp_path, command, timeout, expected):
+    action = {"action": "shell", "arg": command}
+    if timeout is not None:
+        action["timeout"] = timeout
+    with patch(
+        "actions.CapturedProcess.run",
+        return_value=subprocess.CompletedProcess(command, 0, "ok", ""),
+    ) as run:
+        result = execute(action, str(tmp_path))
+    assert result["ok"] is True
+    assert result["output"] == "ok"
+    run.assert_called_once_with(command, shell=True, timeout=expected, cwd=str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "timeout", [4, 301, True, None, "5", 5.0, float("nan"), float("inf"), -float("inf")]
+)
+def test_invalid_shell_numeric_values_fail_before_execution(tmp_path, timeout):
+    with patch("actions.CapturedProcess.run") as run:
+        result = execute({"action": "shell", "arg": "echo ok", "timeout": timeout}, str(tmp_path))
+    run.assert_not_called()
+    assert result["ok"] is False
+    assert result["error_type"] == "invalid_timeout"
 
 
 @pytest.mark.parametrize("field,kind,value", INVALID_FIELD_VALUES)

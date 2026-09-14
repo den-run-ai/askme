@@ -15,6 +15,7 @@ from dataclasses import replace as _dataclass_replace
 import requests
 
 from actions import (
+    ACTION_INTEGER_BOUNDS,
     ACTION_SPECS,
     ActionEnvelope,
     ActionProtocolError,
@@ -321,13 +322,13 @@ _TOOL_FIELD_SCHEMAS = {
     "append": {"type": "boolean"},
     "find": {"type": "string"},
     "replace": {"type": "string"},
-    "offset": {"type": "integer"},
-    "limit": {"type": "integer"},
-    "cursor": {"type": "integer"},
     "sha256": {"type": "string"},
     "path": {"type": "string"},
-    "timeout": {"type": "integer"},
     "reasoning": {"type": "string"},
+    **{
+        field: {"type": "integer", "minimum": minimum, "maximum": maximum}
+        for field, (minimum, maximum) in ACTION_INTEGER_BOUNDS.items()
+    },
 }
 _TOOL_DESCRIPTIONS = {
     "shell": "Run a shell command in the working directory.",
