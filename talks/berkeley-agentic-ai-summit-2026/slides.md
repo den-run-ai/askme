@@ -373,7 +373,7 @@ style: |
     border-radius: 5px;
     font-size: 14px;
     line-height: 1.28;
-    min-height: 44px;
+    min-height: 36px;
     padding: 9px 10px;
   }
   .harness-cell.head {
@@ -729,6 +729,6 @@ A causal harness benefit and the reliable plane version remain goals.
   <tr><td>Qwen3.6-27B</td><td>7/13 · unresolved</td><td>10/13 · unresolved</td></tr>
 </table>
 
-<div class="harness-caption">One task, one attempt per cell. Unmatched providers and budgets; unqualified exploratory evidence, not a current performance ranking.</div>
+<div class="harness-caption">One task; one reported masked attempt per cell. Earlier invalid pi setup retained. Unmatched providers/budgets; unqualified exploratory evidence, not a current performance ranking.</div>
 
 <div class="source">Sources: AskMe architecture and frozen feature receipts · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi docs</a> · <a href="https://github.com/den-run-ai/askme/pull/14">archived pi experiment</a></div>

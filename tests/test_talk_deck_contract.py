@@ -121,7 +121,8 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     for dimension in ("Action surface", "State + control", "Completion boundary"):
         assert dimension in backup
     assert "OpenHands" not in backup
-    assert "One task, one attempt per cell" in backup
+    assert "one reported masked attempt per cell" in backup
+    assert "Earlier invalid pi setup retained" in backup
     assert "unqualified exploratory evidence" in backup
     assert "current performance ranking" in backup
     assert "8 native tools: 6 executable actions" in backup
