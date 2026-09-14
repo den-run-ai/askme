@@ -296,7 +296,7 @@ def prepare(p, records, fb_root, harness):
     stage_runtime(harness, records / "runtime")
 
 
-def inside_askme():
+def inside_askme(preflight=False):
     """Normal immutable composition path, fresh process, proxy-only credential."""
     from dataclasses import replace
 
@@ -328,6 +328,8 @@ def inside_askme():
         max_steps=cfg["max_steps"],
         goal_context_chars=cfg["goal_context_chars"],
     )
+    if preflight:
+        return 0
     result = askme.run_result(
         Path("/study/prompt.txt").read_text(), working_dir="/testbed", config=config
     )
@@ -397,10 +399,12 @@ def initialize_container(p, records, cell, image, network, harness):
         ["docker", "exec", name, "git", "-C", "/testbed", "rev-parse", "HEAD^{tree}"]
     ).stdout.strip()
     save(target / "workspace-preflight.json", {"masked_tree": tree, "hidden_files": hidden})
-    command(["docker", "exec", name, "mkdir", "-p", "/study"])
+    command(["docker", "exec", name, "mkdir", "-p", "/study/tests/featurebench"])
     for file in ("prompt.txt", "protocol.json"):
         command(["docker", "cp", str(records / file), name + ":/study/" + file])
-    command(["docker", "cp", str(Path(__file__)), name + ":/study/runner.py"])
+    command(
+        ["docker", "cp", str(Path(__file__)), name + ":/study/tests/featurebench/pi_comparison.py"]
+    )
     return name, target, tree
 
 
@@ -504,7 +508,7 @@ def run_cells(p, records, fb_root, harness, claim):
             # Environment names on Docker CLI avoid putting credentials in argv/logs.
             env_args = ["-e", "STUDY_CELL", "-e", "STUDY_PROXY_URL", "-e", "STUDY_PROXY_BEARER"]
             if cell["harness"] == "askme":
-                invocation = ["python3", "/study/runner.py", "inside"]
+                invocation = ["python3", "/study/tests/featurebench/pi_comparison.py", "inside"]
                 env_args += ["-e", "AGENT_RUN_LOG=/evidence/trajectory.jsonl"]
             else:
                 models = {
@@ -656,14 +660,14 @@ def run_cells(p, records, fb_root, harness, claim):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("prepare", "run", "inside"))
+    parser.add_argument("mode", choices=("prepare", "run", "inside", "inside-check"))
     parser.add_argument("--records", type=Path)
     parser.add_argument("--featurebench", type=Path)
     parser.add_argument("--harness", type=Path)
     parser.add_argument("--claim", type=Path)
     args = parser.parse_args(argv)
-    if args.mode == "inside":
-        return inside_askme()
+    if args.mode in {"inside", "inside-check"}:
+        return inside_askme(preflight=args.mode == "inside-check")
     p = read(PROTOCOL)
     if args.mode == "prepare":
         prepare(p, args.records.resolve(), args.featurebench.resolve(), args.harness.resolve())

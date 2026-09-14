@@ -89,6 +89,15 @@ jobs:
           subprocess.run(['docker', 'build', '-t', 'askme-pi-qualified:sep14', str(build)], check=True)
           image_id = subprocess.check_output(['docker', 'image', 'inspect', 'askme-pi-qualified:sep14', '--format', '{{.Id}}'], text=True).strip()
           (records / 'tooling.json').write_text(json.dumps({'image_id': image_id, 'node_sha256': actual, 'npm_lock_sha256': hashlib.sha256((build / 'package-lock.json').read_bytes()).hexdigest()}, indent=2))
+          # Exercise the actual image, staged import and immutable AskMe config
+          # without a proxy, API key or outcome-bearing model call.
+          subprocess.run(['docker', 'run', '--rm', '--network', 'none',
+              '--mount', f'type=bind,src={records / "runtime"},dst=/harness,readonly',
+              '--mount', f'type=bind,src={records / "protocol.json"},dst=/study/protocol.json,readonly',
+              '--mount', f'type=bind,src={Path("tests/featurebench/pi_comparison.py").resolve()},dst=/study/tests/featurebench/pi_comparison.py,readonly',
+              '-e', 'STUDY_CELL=gemma-askme', '-e', 'STUDY_PROXY_BEARER=offline-test-only',
+              '-e', 'STUDY_PROXY_URL=http://127.0.0.1:1/v1', image_id,
+              'python3', '/study/tests/featurebench/pi_comparison.py', 'inside-check'], check=True)
           (build / filename).unlink()
           PY
       - name: Read the durable claim for this exact Actions run
