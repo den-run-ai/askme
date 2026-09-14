@@ -19,12 +19,21 @@ jobs:
       github.event.label.name == 'pi-comparison' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
+    environment: Openrouter
     timeout-minutes: 160
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - name: Check intended environment credential exists without using it
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if test -z "$OPENROUTER_API_KEY"; then
+            echo "The existing Openrouter environment must provide OPENROUTER_API_KEY."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 3ec477fc06cfd48bf6920c58974a60788847f5bb
@@ -48,8 +57,8 @@ jobs:
           echo "RECORDS=$RUNNER_TEMP/pi-comparison-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
       - name: Offline safety and interpretation contracts
         run: |
-          uv run --locked pytest tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py -q
-          uv run --locked ruff check tests/featurebench/pi_comparison.py tests/featurebench/pi_comparison_proxy.py tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py
+          uv run --locked pytest tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py tests/test_pi_artifact_audit.py -q
+          uv run --locked ruff check tests/featurebench/pi_comparison.py tests/featurebench/pi_comparison_proxy.py tests/featurebench/pi_artifact_audit.py tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py tests/test_pi_artifact_audit.py
       - name: Qualify frozen task, exact routes, gold and harmless controls without API credentials
         run: |
           pinned-featurebench/.venv/bin/python tests/featurebench/pi_comparison.py prepare \
@@ -129,20 +138,16 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os
+          import json, os
           from pathlib import Path
+          from tests.featurebench.pi_artifact_audit import audit_artifacts
           root = Path(os.environ['RECORDS'])
           key = os.environ.get('OPENROUTER_API_KEY', '').encode()
           if not root.exists():
               root.mkdir(parents=True)
-          inventory = {}
-          for path in root.rglob('*'):
-              if path.is_file():
-                  data = path.read_bytes()
-                  if key and key in data:
-                      path.write_bytes(data.replace(key, b'[REDACTED]'))
-                      raise SystemExit('Credential found and redacted; artifact upload blocked')
-                  inventory[str(path.relative_to(root))] = hashlib.sha256(data).hexdigest()
+          # All inference containers have been destroyed. Reject links/special
+          # files before opening any content; never traverse outside artifacts.
+          inventory = audit_artifacts(root, key)
           (root / 'artifact-sha256.json').write_text(json.dumps(inventory, indent=2))
           summary = root / 'summary.json'
           if summary.exists():

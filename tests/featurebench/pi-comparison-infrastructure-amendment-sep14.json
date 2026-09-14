@@ -1,0 +1,29 @@
+{
+  "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
+  "registered_before_any_outcome_call": true,
+  "outcome_cells_consumed": 0,
+  "openrouter_spend_usd": 0,
+  "setup_runs": [
+    {
+      "run_id": 34810300000,
+      "workflow_revision": "5ca371d46c4be3f947a9f3261790ed8685f640e8",
+      "artifact_id": 10334393720,
+      "artifact_sha256": "446e0bc1585c042c0deeab205b41790c08e83a575b6664dc14e9f8d1342d5cba",
+      "disposition": "Gold, harmless control and tooling qualified; superseded before inference to fix shallow container launcher path. Exact-run claim rejected the superseded run before the credentialed step. No proxy directory or model calls."
+    },
+    {
+      "run_id": 34810416285,
+      "workflow_revision": "930854506879a62640a68bdf393a2413d881f98c",
+      "artifact_id": 10334847172,
+      "artifact_sha256": "bba028f8c43bf6e2d30aeb2dea8dc3b33bb6f6d3ecb61311a566cff714f0882d",
+      "disposition": "Gold, harmless control, tooling, actual container composition preflight and claim qualified. The credentialed shell stopped at its empty-key presence check before invoking the runner: job lacked the existing Openrouter deployment environment. No proxy directory or model calls."
+    }
+  ],
+  "changes_before_first_outcome_call": [
+    "Use the existing Openrouter environment exactly as llm.yml does; retain the same-repository explicit label guard and exact-run claim.",
+    "Check credential presence without using or printing it immediately after checkout, before expensive setup.",
+    "Reject symlinks and special files in a complete first pass before reading or uploading artifacts; keep inference containers destroyed before evaluation and audit.",
+    "Freeze a new exact workflow revision and one new run-id claim; the same four predeclared model cells, routes, budgets, controls, order and no-replacement rule remain unchanged."
+  ],
+  "next_setup": "Repeat fresh controls rather than reuse setup artifacts. Retain both zero-call setup artifacts and this amendment; neither is a model outcome."
+}

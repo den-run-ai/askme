@@ -37,6 +37,12 @@ separate durable claim on `eval/claims/pi-sep14-v1` binding the exact workflow
 commit, protocol hash and Actions run ID. A relabel or Actions rerun cannot reuse
 the claim. No replacements are allowed after any outcome-bearing call.
 
+Two initial setup runs made no model requests and spent no credits. The
+[infrastructure amendment](pi-comparison-infrastructure-amendment-sep14.json)
+retains their control evidence and records the launcher-path and environment
+fixes before the first outcome-bearing attempt. Artifact auditing rejects
+symlinks and special files before reading any content.
+
 Ordinary CI runs only deterministic contracts:
 
 ```sh
