@@ -114,18 +114,21 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     assert "larger, diagnostic budget" in conclusion
 
     backup = slides[7]
-    assert "Backup · harness boundaries" in backup
-    assert "A small model's workload depends on the harness" in backup
-    for harness in ("AskMe", "pi", "OpenHands"):
+    assert "Backup · harness comparison" in backup
+    assert "AskMe and pi" in backup
+    for harness in ("AskMe", "pi"):
         assert harness in backup
     for dimension in ("Action surface", "State + control", "Completion boundary"):
         assert dimension in backup
-    assert "Trade-off, not ranking" in backup
+    assert "OpenHands" not in backup
+    assert "One task, one attempt per cell" in backup
+    assert "unqualified exploratory evidence" in backup
+    assert "current performance ranking" in backup
     assert "8 native tools: 6 executable actions" in backup
     assert "complete_unverified" in backup
     assert "conditional fail-open validation" not in backup
-    assert "optional persistence" in backup
-    assert "finish</code> signals completion" in backup
+    assert "Historical feature probe" in backup
+    assert "11/13" in backup and "10/13" in backup and "7/13" in backup
     assert "Databricks" not in backup
 
     assert "NanAgent" not in text
@@ -183,7 +186,7 @@ def test_deck_contract_guards_notes_and_review_spec():
         "no PR or issue numbers on any slide",
         "presentation-first instruction removes the unfinished 24-run",
         "single registered model canary exhausted without emitting a patch",
-        "one backup slide comparing AskMe, pi, and OpenHands",
+        "Backup: AskMe and pi",
     ):
         assert requirement in spec
 
@@ -290,3 +293,41 @@ def test_local_repair_conclusion_keeps_historical_acceptance_and_completion_dist
     assert "The two clean finishes used a larger, diagnostic budget" in notes
     assert "not dependable autonomy or measured net time savings" in notes
     assert "local-repair-evidence.json" in notes
+
+
+def test_readme_readiness_preserves_frozen_four_model_results():
+    text = ROOT_README.read_text(encoding="utf-8")
+    intro = text.split("## Quick Start")[0]
+    assert "AskMe began with a simple dream" in intro
+    assert "on my MacBook" in intro and "on a plane without" in intro
+    assert "slides.pdf" in intro and "UC Berkeley" in intro
+    evidence = json.loads((TALK / "evals/draft-results.json").read_text())
+    models = {
+        "Gemma 4 26B A4B (MoE)": ("google/gemma-4-26b-a4b-it", None),
+        "Gemma 4 31B (dense)": ("google/gemma-4-31b-it", "gemma-4-31b"),
+        "Qwen3.6-27B (dense)": ("qwen/qwen3.6-27b", "qwen36-27b"),
+        "Qwen3.6-35B-A3B (MoE)": ("qwen/qwen3.6-35b-a3b", None),
+    }
+    for label, (model_id, feature_slug) in models.items():
+        row = next(line for line in intro.splitlines() if line.startswith(f"| {label} |"))
+        cells = [cell for cell in evidence["cells"] if cell["model_id"] == model_id]
+        accepted = sum(
+            cell["outcomes"]["deterministic_postcondition"]["status"] == "pass" for cell in cells
+        )
+        assert f"{accepted}/{len(cells)} accepted" in row
+        if feature_slug is None:
+            assert "Not evaluated" in row
+        else:
+            record = json.loads(
+                (
+                    ROOT
+                    / "tests/featurebench/results"
+                    / f"2026-08-01-{feature_slug}-canary-v6.json"
+                ).read_text()
+            )["official_acceptance"]
+            total = record["f2p_passed"] + record["f2p_failed"]
+            assert record["resolved"] is False
+            assert f"Unresolved; {record['f2p_passed']}/{total} target tests passed" in row
+    assert "wrong output path" in intro
+    assert "historical hosted observations" in intro
+    assert "do not measure current reliability" in intro

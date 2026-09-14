@@ -12,7 +12,7 @@
 - [`DECK_SPEC.md`](DECK_SPEC.md) — reviewer-facing narrative and evidence contract; read this before editing the deck.
 - [`slides.md`](slides.md) — corrected Marp source with synchronized notes across seven main slides, plus one backup slide.
 - [`SPEAKER_NOTES.md`](SPEAKER_NOTES.md) — canonical delivery script, synchronized with the inline notes in `slides.md`.
-- [`slides.pdf`](slides.pdf) — corrected publication deck, regenerated Sep 8, 2026.
+- [`slides.pdf`](slides.pdf) — corrected publication deck, updated for release preparation on Sep 14, 2026.
 - [Recording](https://www.youtube.com/watch?v=N1XoiJGyNpM) — published talk; read the errata below alongside it.
 - [`blog.md`](blog.md) — companion argument and citations.
 - [`evals/README.md`](evals/README.md) — reproducible protocol and complete measurements.
@@ -62,7 +62,7 @@ inference run or a claim that the historical recording included that result.
 5. Keep the two Gemma 4 and two Qwen3.6 variants visible as four descriptive hosted receipts, then separate the supported harness observation from unsupported family, architecture, size, speed, reasoning, and reliability claims.
 6. Show the FeatureBench observations: after bundled revision-3 changes and a changed serving stack, both attempts produced applying but unresolved patches; target-test execution and clean termination remained gaps in those cells.
 7. Answer with the separate local E4B repair pilot: four accepted repairs of one seeded health-check bug, but four exhausted agents. Narrow repairs are possible; dependable autonomy, net time savings and causal harness benefit remain unproven.
-8. Keep a backup comparison of AskMe, pi, and OpenHands technical boundaries for Q&A.
+8. Keep a backup comparison of AskMe and pi technical boundaries and their dated feature-task observations for Q&A. OpenHands was not evaluated and is omitted.
 
 ## Evidence Boundary
 

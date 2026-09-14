@@ -7,13 +7,36 @@
 A small Python coding agent for local models and OpenRouter. Give it a task;
 it makes a plan, edits files, runs commands, and checks its work.
 
-AskMe started with a simple goal: useful coding help from a small open model
-on a MacBook, even without Wi-Fi. It keeps the harness small, the context lean,
-and the actions explicit. The only runtime dependency is `requests`.
+AskMe began with a simple dream: a small open model on my MacBook, through
+`llama.cpp`, helping with real coding work anywhere—even on a plane without
+Wi-Fi. This repository is a progress report toward that fully local coding
+agent. It keeps the context lean and actions explicit, with `requests` as its
+only runtime dependency.
 
-**Experimental:** small models can still get stuck or claim success too early.
-Review changes and run your project's tests. See the
-[dated results and limitations](docs/PERFORMANCE.md).
+I shared the motivation and early results in
+[*Are Small LLMs Ready for Coding Agents?*](talks/berkeley-agentic-ai-summit-2026/README.md),
+my five-minute talk at the 2026 Agentic AI Summit at UC Berkeley
+([slides](talks/berkeley-agentic-ai-summit-2026/slides.pdf),
+[recording](https://www.youtube.com/watch?v=N1XoiJGyNpM)).
+
+## How Ready Is It?
+
+**Useful for experiments and small supervised repairs. Dependable autonomous
+coding is still unproven.** The Berkeley results make the gap visible:
+
+| Hosted model | Simple build + repair | Complex feature task |
+|---|---|---|
+| Gemma 4 26B A4B (MoE) | 2/2 accepted | Not evaluated |
+| Gemma 4 31B (dense) | 2/2 accepted | Unresolved; 11/13 target tests passed |
+| Qwen3.6-27B (dense) | 2/2 accepted | Unresolved; 7/13 target tests passed |
+| Qwen3.6-35B-A3B (MoE) | 1/2 accepted; build used the wrong output path | Not evaluated |
+
+These are historical hosted observations: [two simple checks on July 10](talks/berkeley-agentic-ai-summit-2026/evals/README.md)
+and [one FeatureBench task on August 1](talks/berkeley-agentic-ai-summit-2026/README.md#evidence-boundary),
+one attempt per model/task. All eight simple runs reported completion, but only
+seven artifacts passed independent checks. Both feature attempts exhausted.
+They used earlier harness revisions and do not measure current reliability or
+local performance. Review changes and run your project's tests.
 
 ## Quick Start
 
@@ -105,9 +128,3 @@ on `main`.
 - [Workflow evaluation protocol](tests/workflows/PROTOCOL.md) and
   [FeatureBench runbook](tests/featurebench/README.md)
 - [Contributor and coding-agent guidance](CLAUDE.md)
-
-For the motivation, early evidence, and open questions, see
-[*Are Small LLMs Ready for Coding Agents?*](talks/berkeley-agentic-ai-summit-2026/README.md),
-my five-minute talk at the 2026 Agentic AI Summit at UC Berkeley
-([slides](talks/berkeley-agentic-ai-summit-2026/slides.pdf),
-[recording](https://www.youtube.com/watch?v=N1XoiJGyNpM)).

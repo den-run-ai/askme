@@ -2,7 +2,7 @@
 
 **Status:** reviewer-facing source of truth for seven main slides plus one backup
 
-**Last updated:** 2026-09-08 (corrected publication edition)
+**Last updated:** 2026-09-14 (public-release comparison update)
 
 **Purpose:** prevent narrative and evidence drift between slide revisions
 
@@ -121,9 +121,9 @@ Do not collapse these evidence levels into a single "the smoke validates" claim.
   adapter but must not become model evidence; any result-bearing subset needs a
   separate preregistration. The full ProgramBench is out of scope. This
   shortlist is not a commitment to run all three.
-- Project and vendor landscapes may remain cited in the companion blog. A backup
-  slide may compare the technical model-facing boundaries of AskMe, pi, and
-  OpenHands without ranking products or discussing vendor positioning.
+- Project and vendor landscapes may remain cited in the companion blog. The
+  backup slide compares AskMe and pi, the two harnesses with retained attempts.
+  Remove OpenHands from that comparison because it was not evaluated.
 - The 2026-08-01 revision-3 requalification (v6) may appear on slide 6 as the
   canary's continuation: under the bundled interface changes and a changed
   serving stack, both cells moved from empty patches to applied but unresolved
@@ -241,13 +241,15 @@ transport-only causal benefit or settle general model readiness. The September
 serving-only probes are not coding attempts and must not become this positive
 example.
 
-### 8. Backup: AskMe, pi, and OpenHands
+### 8. Backup: AskMe and pi
 
-Compare only three technical dimensions: model-facing action surface,
-state/control, and completion/acceptance boundary. The purpose is to show how a
-harness changes the work left to the model. State that this is a trade-off, not
-a ranking. Use primary project documentation checked on the publication date and keep
-company, cloud, and enterprise positioning off the slide. AskMe has eight native
+Compare three technical dimensions: model-facing action surface,
+state/control, and completion/acceptance boundary. Add a compact Gemma/Qwen
+results table with exact task acceptance and target-test counts. Historical
+revision-3 AskMe and archived pi results must be visibly dated and qualified as
+unmatched exploratory observations, never a current harness ranking. Fresh
+results require a separate frozen matched protocol and recomputable receipts.
+Keep company, cloud, and enterprise positioning off the slide. AskMe has eight native
 tools (six executable actions plus `done` and `fail`). A requested but unavailable
 final validator produces `complete_unverified`, not a passing validation.
 External acceptance stays separate.
@@ -272,6 +274,12 @@ External acceptance stays separate.
 - Keep audit mechanics in sources or the companion documents.
 
 ## Feedback ledger and precedence
+
+- The 2026-09-14 public-release request restores the personal README opening,
+  makes the four-model simple/complex evidence visible, and replaces the
+  unevaluated OpenHands column with a focused AskMe/pi comparison. This
+  supersedes the older three-harness backup requirement. Preserve historical
+  Qwen3.6 receipts even if a newer model is evaluated separately.
 
 - The later 2026-09-08 instruction explicitly expands the conclusion beyond
   hyperlink-only hygiene: add the verified local E89 positive while retaining
@@ -384,6 +392,7 @@ External acceptance stays separate.
 - [ ] No PR or issue numbers appear on any slide; later implementation status
       stays distinct from historical outcome evidence.
 - [ ] Main slides have no source footers and at most one short caveat line.
-- [ ] Backup slide 8 compares AskMe, pi, and OpenHands without a product ranking.
+- [ ] Backup slide 8 compares AskMe and pi, with dated, qualified results and no
+      unevaluated OpenHands column or product ranking.
 - [ ] Eight slides render without clipping; the seven inline spoken-note
       blocks match the canonical script and total 450–650 words, excluding sources.

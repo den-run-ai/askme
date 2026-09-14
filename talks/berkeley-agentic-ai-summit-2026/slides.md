@@ -364,7 +364,7 @@ style: |
   .harness-grid {
     display: grid;
     gap: 5px;
-    grid-template-columns: 0.72fr repeat(3, 1fr);
+    grid-template-columns: 0.6fr repeat(2, 1fr);
     margin-top: 12px;
   }
   .harness-cell {
@@ -373,7 +373,7 @@ style: |
     border-radius: 5px;
     font-size: 14px;
     line-height: 1.28;
-    min-height: 76px;
+    min-height: 44px;
     padding: 9px 10px;
   }
   .harness-cell.head {
@@ -392,6 +392,10 @@ style: |
     font-weight: 900;
     text-transform: uppercase;
   }
+  .harness-results { display: table; table-layout: fixed; font-size: 18px; margin: 16px 0 8px; width: 100%; }
+  .harness-results th, .harness-results td { padding: 7px 12px; }
+  .harness-results th { background: var(--terminal); color: white; }
+  .harness-results-label { color: var(--blue); font-size: 18px; font-weight: 800; margin: 17px 0 0; }
   .harness-caption {
     background: #e9f7f3;
     border-left: 6px solid var(--teal);
@@ -705,19 +709,26 @@ A causal harness benefit and the reliable plane version remain goals.
 
 ---
 
-<div class="eyebrow">Backup · harness boundaries</div>
+<div class="eyebrow">Backup · harness comparison</div>
 
-# A small model's workload depends on the harness
+# AskMe and pi
 
-<p class="subtitle">Three technical boundaries · documentation checked Sep 8, 2026.</p>
+<p class="subtitle">How the harness divides work between the model and controller.</p>
 
 <div class="harness-grid">
-  <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div><div class="harness-cell head">OpenHands</div>
-  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">8 native tools: 6 executable actions + <code>done</code>/<code>fail</code>; one call per turn.</div><div class="harness-cell">4 default tools; extensions can add or replace tools.</div><div class="harness-cell">Typed, extensible <code>Action → Observation</code> tools.</div>
-  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded local or full replanning.</div><div class="harness-cell">Model-led session tree with branching and lossy compaction; no built-in plan mode.</div><div class="harness-cell">Conversation state + append-only event log; optional persistence and configurable condenser.</div>
-  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>. Held-out acceptance external.</div><div class="harness-cell">Loop ends when tool calls stop; checks come from the workflow or extensions.</div><div class="harness-cell"><code>finish</code> signals completion; benchmark evaluation remains a separate harness.</div>
+  <div class="harness-cell head"></div><div class="harness-cell head">AskMe</div><div class="harness-cell head">pi</div>
+  <div class="harness-cell row-head">Action surface</div><div class="harness-cell">8 native tools: 6 executable actions + <code>done</code>/<code>fail</code>. One call per turn.</div><div class="harness-cell">4 default tools: read, write, edit, bash. Extensions can change the tool set.</div>
+  <div class="harness-cell row-head">State + control</div><div class="harness-cell">Explicit plan, curated slim state, bounded replanning.</div><div class="harness-cell">Model-led session tree with branching and compaction.</div>
+  <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>.</div><div class="harness-cell">Loop ends when tool calls stop. Acceptance comes from an external check.</div>
 </div>
 
-<div class="harness-caption"><strong>Trade-off, not ranking:</strong> AskMe spends more structure to reduce each turn's decision burden; pi keeps a minimal model-led core; OpenHands supplies a richer lifecycle runtime. All still need independent behavioral acceptance.</div>
+<p class="harness-results-label">Historical feature probe · August 1, 2026 · target tests passed</p>
+<table class="harness-results">
+  <tr><th>Dense model</th><th>AskMe revision 3</th><th>pi archival attempt</th></tr>
+  <tr><td>Gemma 4 31B</td><td>11/13 · unresolved</td><td>11/13 · unresolved</td></tr>
+  <tr><td>Qwen3.6-27B</td><td>7/13 · unresolved</td><td>10/13 · unresolved</td></tr>
+</table>
 
-<div class="source">Sources: AskMe architecture · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi coding-agent docs</a> · <a href="https://docs.openhands.dev/sdk/arch/tool-system">OpenHands tool system</a> and <a href="https://docs.openhands.dev/sdk/arch/conversation">conversation architecture</a></div>
+<div class="harness-caption">One task, one attempt per cell. Unmatched providers and budgets; unqualified exploratory evidence, not a current performance ranking.</div>
+
+<div class="source">Sources: AskMe architecture and frozen feature receipts · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi docs</a> · <a href="https://github.com/den-run-ai/askme/pull/14">archived pi experiment</a></div>
