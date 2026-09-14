@@ -1,2 +1,0 @@
-version: 1 (c34b922)
-built with AppleClang 21.0.0.21000101 for Darwin arm64
