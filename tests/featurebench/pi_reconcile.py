@@ -11,6 +11,10 @@ GENERATIONS = {
     "qwen-pi": "gen-1789365621-SZqnhNiEe7yFj6bvC1w7",
     "qwen-askme": "gen-1789365657-nbv4pOcqy7jTsFYO2PQ2",
 }
+EXPECTED = {
+    "gemma": ("google/gemma-4-31b-it", "google/gemma-4-31b-it-20260402", "CoreWeave"),
+    "qwen": ("qwen/qwen3.6-27b", "qwen/qwen3.6-27b-20260422", "SiliconFlow"),
+}
 
 
 def main():
@@ -35,6 +39,12 @@ def main():
                 row["metadata_object_present"] = isinstance(parsed, dict) and isinstance(
                     parsed.get("data"), dict
                 )
+                if row["metadata_object_present"]:
+                    data = parsed["data"]
+                    alias, dated, provider = EXPECTED[cell.split("-")[0]]
+                    row["model_matches_dated"] = data.get("model") == dated
+                    row["model_matches_requested_alias"] = data.get("model") == alias
+                    row["provider_matches_expected"] = data.get("provider_name") == provider
         except urllib.error.HTTPError as exc:
             row["http_status"] = exc.code
         except Exception as exc:
