@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import ci_llm_gate
+import conftest
 import pytest
 
 # --- fixtures ---
@@ -97,8 +98,12 @@ def _write(tmp_path, name, payload):
 
 
 class _Resp:
-    def __init__(self, status_code):
+    def __init__(self, status_code, payload=None):
         self.status_code = status_code
+        self.payload = {"data": {"label": "private-key-label"}} if payload is None else payload
+
+    def json(self):
+        return self.payload
 
 
 # --- preflight ---
@@ -110,6 +115,8 @@ class TestPreflight:
         assert not ok
         assert "OPENROUTER_API_KEY" in message
         assert "Openrouter" in message  # points at the deployment environment
+        assert "secret" in message
+        assert "variable" not in message
 
     def test_blank_key_is_treated_as_missing(self):
         ok, _ = ci_llm_gate.check_openrouter_key(
@@ -129,9 +136,21 @@ class TestPreflight:
             env={"OPENROUTER_API_KEY": "sk-or-v1-test"}, get=fake_get
         )
         assert ok
-        assert calls["url"] == ci_llm_gate.OPENROUTER_MODELS_URL
+        assert calls["url"] == "https://openrouter.ai/api/v1/key"
         assert calls["auth"] == "Bearer sk-or-v1-test"
         assert "sk-or-v1-test" not in message
+        assert "private-key-label" not in message
+        assert "/key" in message
+
+    def test_public_models_response_does_not_validate_a_rejected_key(self):
+        def fake_get(url, **kwargs):
+            return _Resp(200 if url.endswith("/models") else 401)
+
+        ok, message = ci_llm_gate.check_openrouter_key(
+            env={"OPENROUTER_API_KEY": "sk-rejected"}, get=fake_get
+        )
+        assert not ok
+        assert "401" in message
 
     def test_rejected_key_fails_with_status(self):
         ok, message = ci_llm_gate.check_openrouter_key(
@@ -141,21 +160,74 @@ class TestPreflight:
         assert "401" in message
         assert "sk-bad" not in message
 
-    def test_network_error_fails_instead_of_skipping(self):
+    def test_network_error_fails_without_echoing_request_details(self):
         def broken_get(*args, **kwargs):
-            raise OSError("connection reset")
+            raise OSError("connection reset; Authorization: Bearer sk-private")
 
         ok, message = ci_llm_gate.check_openrouter_key(
-            env={"OPENROUTER_API_KEY": "sk-x"}, get=broken_get
+            env={"OPENROUTER_API_KEY": "sk-private"}, get=broken_get
         )
         assert not ok
-        assert "connection reset" in message
+        assert "request failed" in message
+        assert "OSError" in message
+        assert "sk-private" not in message
+        assert "Authorization" not in message
+
+    @pytest.mark.parametrize("status", [402, 429, 500, 503])
+    def test_service_error_does_not_claim_key_was_rejected(self, status):
+        ok, message = ci_llm_gate.check_openrouter_key(
+            env={"OPENROUTER_API_KEY": "sk-private"},
+            get=lambda *a, **k: _Resp(status, {"error": "sk-private"}),
+        )
+        assert not ok
+        assert str(status) in message
+        assert "rejected the key" not in message
+        assert "sk-private" not in message
+
+    @pytest.mark.parametrize(
+        "payload", [{}, [], {"data": []}, {"error": "sk-private"}, {"data": {}, "error": {}}]
+    )
+    def test_unexpected_success_payload_fails_without_echoing_body(self, payload):
+        ok, message = ci_llm_gate.check_openrouter_key(
+            env={"OPENROUTER_API_KEY": "sk-private"}, get=lambda *a, **k: _Resp(200, payload)
+        )
+        assert not ok
+        assert "response" in message
+        assert "sk-private" not in message
+
+    def test_invalid_json_fails_without_echoing_body(self):
+        class InvalidJSON(_Resp):
+            def json(self):
+                raise ValueError("private response body")
+
+        ok, message = ci_llm_gate.check_openrouter_key(
+            env={"OPENROUTER_API_KEY": "sk-private"}, get=lambda *a, **k: InvalidJSON(200)
+        )
+        assert not ok
+        assert "response" in message
+        assert "private response body" not in message
 
     def test_main_preflight_fails_without_key(self, monkeypatch, capsys):
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         rc = ci_llm_gate.main(["preflight"])
         assert rc == 1
         assert "PREFLIGHT FAILED" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("key_status, available", [(200, True), (401, False)])
+    def test_collection_probe_checks_authentication(
+        self, monkeypatch, tmp_path, key_status, available
+    ):
+        import requests
+
+        # Keep the probe away from any developer's .env file.
+        monkeypatch.setattr(conftest, "__file__", str(tmp_path / "tests" / "conftest.py"))
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-synthetic")
+
+        def fake_get(url, **kwargs):
+            return _Resp(200 if url.endswith("/models") else key_status)
+
+        monkeypatch.setattr(requests, "get", fake_get)
+        assert conftest._openrouter_available() is available
 
 
 # --- report gate ---
@@ -512,10 +584,7 @@ def test_workflow_pins_each_berkeley_cell_contract():
     berkeley_run = workflow.split("- name: Run Berkeley protocol cells", 1)[1].split(
         "- name: Gate on protocol pass rule", 1
     )[0]
-    matrix = (
-        "google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,"
-        "qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422"
-    )
+    matrix = "qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422"
     assert workflow.count(matrix) == 3
     assert "requested=expected-served model cells" in workflow
     assert berkeley_run.count("--capability-profile generic-feature-scale-v1") == 2

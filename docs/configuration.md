@@ -1,8 +1,88 @@
 # Configuration
 
-Full environment-variable and CLI reference for `askme.py`. The everyday knobs
-are summarized in the [README](../README.md#configuration); for what these
-settings do inside the loop, see [ARCHITECTURE.md](ARCHITECTURE.md).
+Backend setup, environment variables, and the CLI/Python API for `askme.py`.
+Start with the [quick start](../README.md#quick-start); for the loop internals,
+see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Backend setup
+
+Run the commands below from the cloned AskMe repository. Settings can be
+exported in your shell or placed in a `.env` file next to `askme.py`. Existing
+shell variables take precedence. Use plain `NAME=value` lines in `.env`, without
+`export` or surrounding quotes. The file is ignored by Git; never commit keys.
+
+### OpenRouter
+
+Create or edit `.env` in the AskMe repository:
+
+```dotenv
+LLM_BACKEND=openrouter
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_PROVIDER=
+```
+
+Replace the key placeholder with your own key. The empty provider setting
+chooses automatic routing; omitting it uses the default preferred provider
+shown below. The default model is `google/gemma-4-26b-a4b-it`; set
+`OPENROUTER_MODEL` to choose another hosted model.
+
+```bash
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
+```
+
+For a one-off model override:
+
+```bash
+OPENROUTER_MODEL=openai/gpt-oss-20b OPENROUTER_REASONING_EFFORT=low \
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
+```
+
+Hosted calls spend credits. Keep the key out of prompts, logs, and committed
+files. CI uses a GitHub environment secret instead of `.env`; see
+[LLM tests in CI](testing.md#llm-tests-in-ci).
+
+### Local models
+
+The default backend is a local `llama-server` with a Chat Completions endpoint
+at `http://localhost:8080/v1/chat/completions`. The model and its chat template
+must support native tool calls. Start the server separately, then run:
+
+```bash
+LLM_BACKEND=local LLM_MODEL=your-server-alias \
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
+```
+
+Set `LLM_API_URL` for another local endpoint. The default capability profile
+is `generic-feature-scale-v1`; it does not depend on the model name.
+
+#### Gemma 4 E4B reference deployment
+
+The dated 16 GB M1 reference uses **Gemma 4 E4B QAT Q4_0** (official
+post-refresh weights, about 5.15 GB), llama.cpp build 9618+, and the explicit
+`legacy-e4b-m1-16k-v1` profile. From your llama.cpp directory:
+
+```bash
+./build/bin/llama-server \
+  -m models/gemma4-e4b-qat/gemma-4-E4B_q4_0-it.gguf \
+  -ngl 99 --ctx-size 16384 --flash-attn on \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  --swa-full --cache-reuse 256 --reasoning off \
+  -np 1 --alias gemma-4-e4b --port 8080
+```
+
+Then, from the AskMe repository:
+
+```bash
+LLM_BACKEND=local LLM_MODEL=gemma-4-e4b \
+LLM_CAPABILITY_PROFILE=legacy-e4b-m1-16k-v1 \
+uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failing tests"
+```
+
+`llama-server --reasoning off` controls server-side template parsing and is
+required for this deployment; it is separate from AskMe's
+`AGENT_REASONING_POLICY`, whose default is `gated`. MTP speculative decoding
+stays off in this reference. See [gemma4-setup.md](gemma4-setup.md) for the
+model/build/flag rationale and [PERFORMANCE.md](PERFORMANCE.md) for dated results.
 
 ## Environment variables
 
@@ -165,7 +245,8 @@ The same structured result is available in-process from
 `askme.run_result(prompt, working_dir=None, config=None, dependencies=None)`,
 with `askme.RunConfig` pinning per-run settings and `askme.RunDependencies`
 injecting the LLM client, action executor, clock, and log/event sinks;
-`run(...) -> bool` remains the compatibility wrapper. See
+`run(...) -> bool` remains the compatibility wrapper, and `ask_llm(...)` and
+`execute(...)` remain compatibility surfaces. See
 `python3 askme.py --help` for the full flag list, and
 [tests/workflows/PROTOCOL.md](../tests/workflows/PROTOCOL.md) for the frozen
 evaluation contract that consumes this interface.

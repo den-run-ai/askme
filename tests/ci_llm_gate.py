@@ -30,7 +30,7 @@ import statistics
 import sys
 from typing import Any
 
-OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 BERKELEY_CAPABILITY_PROFILE = "generic-feature-scale-v1"
 
 
@@ -45,21 +45,35 @@ def check_openrouter_key(env=None, get=None):
         return False, (
             "OPENROUTER_API_KEY is empty. In GitHub Actions this usually means "
             "the job is missing `environment: Openrouter`, or that environment "
-            "does not define OPENROUTER_API_KEY as a variable or secret "
-            "(fork pull requests cannot read either)."
+            "does not define the OPENROUTER_API_KEY secret "
+            "(fork pull requests cannot read it)."
         )
     if get is None:
         import requests
 
         get = requests.get
     try:
-        resp = get(OPENROUTER_MODELS_URL, headers={"Authorization": "Bearer " + key}, timeout=30)
+        # /models is public and can return 200 even when the key is invalid.
+        resp = get(OPENROUTER_KEY_URL, headers={"Authorization": "Bearer " + key}, timeout=30)
     except Exception as exc:
-        return False, "OpenRouter preflight request failed: {!r}".format(exc)
+        # Exceptions may include request headers; never echo their text.
+        return False, "OpenRouter preflight request failed ({}).".format(type(exc).__name__)
     status = getattr(resp, "status_code", None)
-    if status != 200:
+    if status in (401, 403):
         return False, "OpenRouter rejected the key: HTTP {}".format(status)
-    return True, "OpenRouter key accepted (HTTP 200 from /models)."
+    if status != 200:
+        return False, "OpenRouter preflight request failed: HTTP {}".format(status)
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False, "OpenRouter preflight received an invalid JSON response."
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("data"), dict)
+        or "error" in payload
+    ):
+        return False, "OpenRouter preflight received an unexpected key response."
+    return True, "OpenRouter key accepted (HTTP 200 from /key)."
 
 
 # --- report ---
