@@ -187,6 +187,21 @@ figures remain exploratory, one-attempt archival comparisons whose runner is
 in unmerged [PR #14](https://github.com/den-run-ai/askme/pull/14); they are not
 a performance ceiling or a controlled harness comparison.
 
+*Follow-up (Sep 14, 2026).* A new frozen four-cell comparison used AskMe
+`3ec477f` and pi 0.83.0, with matched routes and external ceilings within each
+dense model. AskMe reached 8/13 target tests and pi reached 11/13 for both
+Gemma 4 31B and Qwen3.6-27B. All four patches applied and preserved 387 tests,
+but none resolved the task. Both AskMe agents exhausted their replans;
+Gemma/pi ended normally and Qwen/pi stopped at a conservative reservation cap.
+The frozen AskMe schema omitted runtime read bounds, and out-of-range reads
+occurred. That defect qualifies the result; its later repair is not a new
+evaluation. Audit polling also inflated wall time. One previously used task,
+one attempt per cell and different internal harness policies do not establish
+reliability, a causal component effect or a native speed advantage. The
+[receipt](../../tests/bench_records/2026-09-14-pi-comparison-v2/README.md) retains
+all outcomes and the earlier infrastructure failure separately. The historical
+August evidence above remains unchanged.
+
 [Vals Vibe Code Bench](https://www.vals.ai/benchmarks/vibe-code) remains a useful
 full-web-application reference if task and evaluator access becomes available.
 [ProgramBench](https://github.com/facebookresearch/programbench) remains only a

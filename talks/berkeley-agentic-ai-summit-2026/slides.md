@@ -361,11 +361,13 @@ style: |
     font-size: 14px;
     margin-top: 9px;
   }
+  section.harness-backup h1 { font-size: 38px; margin-bottom: 12px; }
+  section.harness-backup .subtitle { font-size: 20px; margin-bottom: 12px; }
   .harness-grid {
     display: grid;
     gap: 5px;
     grid-template-columns: 0.6fr repeat(2, 1fr);
-    margin-top: 12px;
+    margin-top: 4px;
   }
   .harness-cell {
     background: #fff;
@@ -374,7 +376,7 @@ style: |
     font-size: 14px;
     line-height: 1.28;
     min-height: 36px;
-    padding: 9px 10px;
+    padding: 7px 10px;
   }
   .harness-cell.head {
     background: var(--terminal);
@@ -392,10 +394,11 @@ style: |
     font-weight: 900;
     text-transform: uppercase;
   }
-  .harness-results { display: table; table-layout: fixed; font-size: 18px; margin: 16px 0 8px; width: 100%; }
+  .harness-results { display: table; table-layout: fixed; font-size: 18px; margin: 10px 0 8px; width: 100%; }
   .harness-results th, .harness-results td { padding: 7px 12px; }
   .harness-results th { background: var(--terminal); color: white; }
-  .harness-results-label { color: var(--blue); font-size: 18px; font-weight: 800; margin: 17px 0 0; }
+  .harness-terminal { color: var(--muted); display: block; font-size: 13px; margin-top: 3px; }
+  .harness-results-label { color: var(--blue); font-size: 18px; font-weight: 800; margin: 12px 0 0; }
   .harness-caption {
     background: #e9f7f3;
     border-left: 6px solid var(--teal);
@@ -709,6 +712,8 @@ A causal harness benefit and the reliable plane version remain goals.
 
 ---
 
+<!-- _class: harness-backup -->
+
 <div class="eyebrow">Backup · harness comparison</div>
 
 # AskMe and pi
@@ -722,13 +727,13 @@ A causal harness benefit and the reliable plane version remain goals.
   <div class="harness-cell row-head">Completion boundary</div><div class="harness-cell"><code>done</code> + conditional validation. Unavailable check: <code>complete_unverified</code>.</div><div class="harness-cell">Loop ends when tool calls stop. Acceptance comes from an external check.</div>
 </div>
 
-<p class="harness-results-label">Historical feature probe · August 1, 2026 · target tests passed</p>
+<p class="harness-results-label">Frozen feature probe · September 14, 2026 · before schema repair</p>
 <table class="harness-results">
-  <tr><th>Dense model</th><th>AskMe revision 3</th><th>pi archival attempt</th></tr>
-  <tr><td>Gemma 4 31B</td><td>11/13 · unresolved</td><td>11/13 · unresolved</td></tr>
-  <tr><td>Qwen3.6-27B</td><td>7/13 · unresolved</td><td>10/13 · unresolved</td></tr>
+  <tr><th>Dense model</th><th>AskMe snapshot</th><th>pi 0.83.0</th></tr>
+  <tr><td>Gemma 4 31B</td><td>8/13 · unresolved<span class="harness-terminal">Replans exhausted</span></td><td>11/13 · unresolved<span class="harness-terminal">Agent complete</span></td></tr>
+  <tr><td>Qwen3.6-27B</td><td>8/13 · unresolved<span class="harness-terminal">Replans exhausted</span></td><td>11/13 · unresolved<span class="harness-terminal">Reservation cap</span></td></tr>
 </table>
 
-<div class="harness-caption">One task; one reported masked attempt per cell. Earlier invalid pi setup retained. Unmatched providers/budgets; unqualified exploratory evidence, not a current performance ranking.</div>
+<div class="harness-caption">One known task; one attempt per cell. All patches applied and passed 387 preservation tests. AskMe’s read bounds were missing from its schema; audit polling inflated wall time. Prior infrastructure failure retained. No reliability, speed, or causal claim.</div>
 
-<div class="source">Sources: AskMe architecture and frozen feature receipts · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi docs</a> · <a href="https://github.com/den-run-ai/askme/pull/14">archived pi experiment</a></div>
+<div class="source">Sources: <a href="https://github.com/den-run-ai/askme/pull/121">September 14 protocol + receipts</a> · <a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md">pi docs</a> · target-test counts shown; agent completion is separate.</div>

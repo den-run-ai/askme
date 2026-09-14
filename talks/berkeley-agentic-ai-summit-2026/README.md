@@ -49,7 +49,7 @@ inference run or a claim that the historical recording included that result.
   Neither agent ran the target tests; both exhausted their planning attempts. Bundled changes and a
   different serving stack prevent attributing this to one interface change;
   the results do not establish general feature readiness or validate the three
-  design bets. Quantitative pi comparisons below remain exploratory archival
+  design bets. The August 1 pi comparisons remain exploratory archival
   evidence from unmerged [PR #14](https://github.com/den-run-ai/askme/pull/14),
   not a performance ceiling.
 
@@ -120,6 +120,38 @@ tool calls. A new frozen protocol and requalified controls are needed before
 citing the v6 outcomes as current-main behavior.
 
 Provider routing, endpoint metadata, test-runner mechanics, token accounting, costs, and per-cell timings remain in the eval appendix. They are intentionally omitted from the five-minute narrative.
+
+### September 14 AskMe/pi follow-up
+
+The final backup slide now includes a fresh, predeclared four-cell comparison
+using AskMe snapshot `3ec477f` and pi 0.83.0. It completes the whole-harness
+comparison begun in draft PR #14 without replacing the August records above.
+
+| Dense model | AskMe target tests | pi target tests |
+|---|---|---|
+| Gemma 4 31B | 8/13; replans exhausted | 11/13; agent complete |
+| Qwen3.6-27B | 8/13; replans exhausted | 11/13; reservation cap |
+
+**All four patches applied, passed 387/387 preservation tests, and remained
+unresolved.** Gemma/pi's normal ending is distinct from independent acceptance.
+Qwen/pi stopped because its next request would exceed the conservative $2
+reservation ceiling; its actual audited API cost was $0.14825.
+
+There was one attempt per cell on one previously used Seaborn task. Within
+each model, routes and external ceilings matched; prompts, planning, tools,
+internal step limits and per-call allowances differed. The frozen AskMe schema
+omitted runtime read bounds, and out-of-range reads occurred. These are
+pre-repair observations, not an estimate of the defect's causal effect or
+post-repair performance. Metadata polling added substantial wall time, so the
+recorded durations do not establish a native speed advantage.
+
+The [compact receipt](../../tests/bench_records/2026-09-14-pi-comparison-v2/README.md)
+preserves scores, terminal states, source hashes, controls, costs and the
+original artifact link. V2's 111 audited calls cost $0.232438. The earlier
+[v1 infrastructure failure](../../tests/bench_records/2026-09-14-pi-comparison-v1/README.md)
+has no usable task scores and stays separate; including its response-only
+telemetry brings reported API cost to $0.23542938. This is a whole-harness
+observation, not a reliability estimate or causal component comparison.
 
 ### Local repair evidence on slide 7
 

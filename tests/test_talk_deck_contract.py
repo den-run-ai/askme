@@ -121,16 +121,45 @@ def test_deck_contract_guards_identity_arc_and_model_rows():
     for dimension in ("Action surface", "State + control", "Completion boundary"):
         assert dimension in backup
     assert "OpenHands" not in backup
-    assert "one reported masked attempt per cell" in backup
-    assert "Earlier invalid pi setup retained" in backup
-    assert "unqualified exploratory evidence" in backup
-    assert "current performance ranking" in backup
+    assert "One known task; one attempt per cell" in backup
+    assert "Prior infrastructure failure retained" in backup
+    assert "No reliability, speed, or causal claim" in backup
+    assert "audit polling inflated wall time" in backup
+    assert "read bounds were missing from its schema" in backup
     assert "8 native tools: 6 executable actions" in backup
     assert "complete_unverified" in backup
     assert "conditional fail-open validation" not in backup
-    assert "Historical feature probe" in backup
-    assert "11/13" in backup and "10/13" in backup and "7/13" in backup
+    assert "September 14, 2026 · before schema repair" in backup
+    assert backup.count("8/13 · unresolved") == 2
+    assert backup.count("11/13 · unresolved") == 2
+    assert backup.count("Replans exhausted") == 2
+    assert "Agent complete" in backup and "Reservation cap" in backup
     assert "Databricks" not in backup
+
+    receipt = json.loads(
+        (ROOT / "tests/bench_records/2026-09-14-pi-comparison-v2/audit.json").read_text()
+    )
+    cells = {cell["cell"]: cell for cell in receipt["cells"]}
+    rows = re.findall(r"<tr><td>(.*?)</tr>", backup)
+    terminal_labels = {
+        "gemma-askme": "Replans exhausted",
+        "gemma-pi": "Agent complete",
+        "qwen-askme": "Replans exhausted",
+        "qwen-pi": "Reservation cap",
+    }
+    for model, display_name in (("gemma", "Gemma 4 31B"), ("qwen", "Qwen3.6-27B")):
+        row = next(row for row in rows if row.startswith(display_name + "</td>"))
+        for harness, rendered in zip(("askme", "pi"), row.split("<td>")[1:]):
+            cell = cells[f"{model}-{harness}"]
+            target = cell["independent_acceptance"]["FAIL_TO_PASS"]
+            assert f"{target['passed']}/{sum(target.values())} · unresolved" in rendered
+            assert terminal_labels[cell["cell"]] in rendered
+            assert cell["resolved"] is False and cell["patch_applied"] is True
+            assert cell["agent_completion"] == (cell["cell"] == "gemma-pi")
+            assert cell["independent_acceptance"]["PASS_TO_PASS"] == {
+                "passed": 387,
+                "failed": 0,
+            }
 
     assert "NanAgent" not in text
     # 2026-08-01 simplification: stage slides carry no PR/issue numbers and

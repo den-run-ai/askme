@@ -245,10 +245,18 @@ example.
 
 Compare three technical dimensions: model-facing action surface,
 state/control, and completion/acceptance boundary. Add a compact Gemma/Qwen
-results table with exact task acceptance and target-test counts. Historical
-revision-3 AskMe and archived pi results must be visibly dated and qualified as
-unmatched exploratory observations, never a current harness ranking. Fresh
-results require a separate frozen matched protocol and recomputable receipts.
+results table with exact task acceptance and target-test counts. The September
+14 v2 study replaces the archival table on this backup slide: AskMe reached
+8/13 target tests with both dense models; pi reached 11/13 with both. All four
+patches applied, passed all 387 preservation tests, and remained unresolved.
+Show replans exhausted for both AskMe cells, agent complete for Gemma/pi, and
+reservation cap for Qwen/pi. Keep the frozen pre-repair source boundary visible:
+AskMe omitted read bounds from its native schema, and substantial metadata
+polling overhead prevents a native-speed claim. One known development task and
+one attempt per cell cannot support reliability or causal claims. Retain the
+first infrastructure-invalid study separately. Historical revision-3 AskMe and
+archived pi observations remain dated in the companion documents. Their
+unmatched configurations must not become contemporary controls.
 Keep company, cloud, and enterprise positioning off the slide. AskMe has eight native
 tools (six executable actions plus `done` and `fail`). A requested but unavailable
 final validator produces `complete_unverified`, not a passing validation.

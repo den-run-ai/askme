@@ -38,6 +38,11 @@ seven artifacts passed independent checks. Both feature attempts exhausted.
 They used earlier harness revisions and do not measure current reliability or
 local performance. Review changes and run your project's tests.
 
+A separately dated [September 14 AskMe/pi comparison](talks/berkeley-agentic-ai-summit-2026/README.md#september-14-askmepi-follow-up)
+reached 8/13 target tests with the frozen AskMe snapshot and 11/13 with pi for
+both dense models. All four patches remained unresolved; the receipt records
+the tool-schema defect and budget limit that qualify those observations.
+
 ## Quick Start
 
 Requires Python 3.10+ with pip. Clone and run from source:
@@ -125,6 +130,7 @@ on `main`.
 - [Local Gemma 4 setup](docs/gemma4-setup.md)
 - [Architecture and source map](docs/ARCHITECTURE.md)
 - [Benchmark results](docs/PERFORMANCE.md) and [experiments](docs/EXPERIMENTS.md)
+- [Public release readiness](docs/public-release-readiness.md)
 - [Workflow evaluation protocol](tests/workflows/PROTOCOL.md) and
   [FeatureBench runbook](tests/featurebench/README.md)
 - [Contributor and coding-agent guidance](CLAUDE.md)

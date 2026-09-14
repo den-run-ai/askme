@@ -60,6 +60,20 @@
       "exit_code": 0
     }
   },
+  "runtime_dependency_advisories": {
+    "checked_date": "2026-09-14",
+    "method": "Exact locked PyPI package/version queries against OSV and PyPI release advisory data; maintained project advisories inspected. No dependency changes.",
+    "sources": ["https://api.osv.dev/v1/query", "https://pypi.org/pypi/"],
+    "checked_pins": {
+      "requests": "2.34.2",
+      "urllib3": "2.7.0",
+      "certifi": "2026.7.22",
+      "charset-normalizer": "3.4.9",
+      "idna": "3.18"
+    },
+    "known_vulnerabilities_returned": 0,
+    "scope": "Known advisory data for the five locked runtime packages at the check date; not proof of absence of vulnerabilities."
+  },
   "repository_metadata": {
     "public": true,
     "archived": false,

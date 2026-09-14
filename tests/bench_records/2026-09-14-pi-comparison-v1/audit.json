@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-09-14",
+  "classification": "failed_protocol_infrastructure_qualification",
+  "source_claim": {
+    "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
+    "protocol_sha256": "380f6cac286e4ff24f794990bf34f0139c4379fbe49af534a3bc9bcaa58cd730",
+    "run_id": 34811259408,
+    "workflow_revision": "8d466829efe429f33a754529262907eeeb55cc63"
+  },
+  "source_workflow_url": "https://github.com/den-run-ai/askme/actions/runs/34811259408",
+  "source_runtime_revision": "3ec477fc06cfd48bf6920c58974a60788847f5bb",
+  "cells": [
+    {
+      "cell": "gemma-askme",
+      "model": "google/gemma-4-31b-it",
+      "harness": "askme",
+      "infrastructure_valid": false,
+      "route_audit_valid": false,
+      "http_status": 200,
+      "upstream_completions": 1,
+      "generation_id": "gen-1789365565-06396776OGdFArYlvRet",
+      "generation_metadata_audit": "unavailable_in_v1_receipt",
+      "proxy_error_type": "ValueError",
+      "agent_completion": false,
+      "agent_process_exit_code": 1,
+      "patch_bytes": 0,
+      "model_task_score": null,
+      "model_task_score_reason": "Protocol infrastructure invalid; evaluator short-circuited on empty patch and ran no target tests.",
+      "response_usage": {
+        "completion_tokens": 39,
+        "cost": "0.00029866",
+        "prompt_tokens": 2854,
+        "total_tokens": 2893
+      },
+      "reservation_usd": "0.00218312",
+      "wall_seconds": 3.471637820000012,
+      "observed_work_before_halt": "plan received; no executable action"
+    },
+    {
+      "cell": "gemma-pi",
+      "model": "google/gemma-4-31b-it",
+      "harness": "pi",
+      "infrastructure_valid": false,
+      "route_audit_valid": false,
+      "http_status": 200,
+      "upstream_completions": 1,
+      "generation_id": "gen-1789365586-pkLVnOIW6MB8Q36GLjSD",
+      "generation_metadata_audit": "unavailable_in_v1_receipt",
+      "proxy_error_type": "ValueError",
+      "agent_completion": false,
+      "agent_process_exit_code": 0,
+      "patch_bytes": 0,
+      "model_task_score": null,
+      "model_task_score_reason": "Protocol infrastructure invalid; evaluator short-circuited on empty patch and ran no target tests.",
+      "response_usage": {
+        "completion_tokens": 18,
+        "cost": "0.00038492",
+        "prompt_tokens": 3788,
+        "total_tokens": 3806
+      },
+      "reservation_usd": "0.00554228",
+      "wall_seconds": 19.162026517000015,
+      "observed_work_before_halt": "read-only bash listing"
+    },
+    {
+      "cell": "qwen-pi",
+      "model": "qwen/qwen3.6-27b",
+      "harness": "pi",
+      "infrastructure_valid": false,
+      "route_audit_valid": false,
+      "http_status": 200,
+      "upstream_completions": 1,
+      "generation_id": "gen-1789365621-SZqnhNiEe7yFj6bvC1w7",
+      "generation_metadata_audit": "unavailable_in_v1_receipt",
+      "proxy_error_type": "ValueError",
+      "agent_completion": false,
+      "agent_process_exit_code": 0,
+      "patch_bytes": 0,
+      "model_task_score": null,
+      "model_task_score_reason": "Protocol infrastructure invalid; evaluator short-circuited on empty patch and ran no target tests.",
+      "response_usage": {
+        "completion_tokens": 63,
+        "cost": "0.0013881",
+        "prompt_tokens": 3955,
+        "total_tokens": 4018
+      },
+      "reservation_usd": "0.0344848",
+      "wall_seconds": 21.213571433000027,
+      "observed_work_before_halt": "read-only bash listing"
+    },
+    {
+      "cell": "qwen-askme",
+      "model": "qwen/qwen3.6-27b",
+      "harness": "askme",
+      "infrastructure_valid": false,
+      "route_audit_valid": false,
+      "http_status": 200,
+      "upstream_completions": 1,
+      "generation_id": "gen-1789365657-nbv4pOcqy7jTsFYO2PQ2",
+      "generation_metadata_audit": "unavailable_in_v1_receipt",
+      "proxy_error_type": "ValueError",
+      "agent_completion": false,
+      "agent_process_exit_code": 1,
+      "patch_bytes": 0,
+      "model_task_score": null,
+      "model_task_score_reason": "Protocol infrastructure invalid; evaluator short-circuited on empty patch and ran no target tests.",
+      "response_usage": {
+        "completion_tokens": 28,
+        "cost": "0.0009197",
+        "prompt_tokens": 2767,
+        "total_tokens": 2795
+      },
+      "reservation_usd": "0.008223",
+      "wall_seconds": 4.224732666999955,
+      "observed_work_before_halt": "plan received; no executable action"
+    }
+  ],
+  "controls": {
+    "qualified": true,
+    "gold": {
+      "resolved": true,
+      "patch_applied": true,
+      "tests": {
+        "FAIL_TO_PASS": {
+          "passed": 13,
+          "failed": 0
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      }
+    },
+    "harmless_nonempty": {
+      "resolved": false,
+      "patch_applied": true,
+      "tests": {
+        "FAIL_TO_PASS": {
+          "passed": 0,
+          "failed": 13
+        },
+        "PASS_TO_PASS": {
+          "passed": 387,
+          "failed": 0
+        }
+      }
+    }
+  },
+  "failure_analysis": {
+    "established": "Each first completion returned HTTP200 and valid completion telemetry; ValueError occurred before generation_audit was retained. Each cell then halted and blocked further paid forwards.",
+    "not_established": "Original metadata HTTP status and parse failure detail were discarded. Indexing delay, API error or schema failure cannot be distinguished from the original artifact alone; dated-model mismatch is not established as the cause.",
+    "read_only_activity": "Both pi agents executed their first read-only listing; AskMe received its first plan. No cell changed the task workspace.",
+    "task_result_interpretation": "All task scores are unavailable; no 0/13 or four-model-failures conclusion is supported."
+  },
+  "cost": {
+    "response_reported_usd": "0.00299138",
+    "response_prompt_tokens": 13364,
+    "response_completion_tokens": 148,
+    "authoritative_reconciled_usd": null,
+    "original_ledger_actual_usd": "0",
+    "original_ledger_actual_interpretation": "No authoritative generation record settled; zero is not a zero-cost claim.",
+    "unreleased_reservation_usd": "0.05043320",
+    "reservation_interpretation": "Conservative request ceilings retained after uncertainty; not an incurred charge. Carry this amount against the original $10 budget until reconciliation."
+  },
+  "evidence_integrity": {
+    "original_inventory_sha256": "3f18c90ce2a1a59ac745c9d0ea3a756648621d14bced697394db2d1197356a46",
+    "original_inventory_files": 99,
+    "original_inventory_bytes": 988988,
+    "inventory_mismatches": 0,
+    "source_file_sha256": {
+      "claim.json": "06bf245482b0f5dfad3612872140641a44a72e9ad228fa44a1b39c5af16cb38b",
+      "protocol.json": "56fab0d6a95eceb7d6adefc5db7008275b3d9909ca28031084cb4b9ada2f79b6",
+      "summary.json": "1457b2d0ed644e61248744572795e96d666f06fcfccb4b24c05140cf5db8c6e8",
+      "proxy/ledger.json": "2ac52e6b36bc2a347c2b4a76b432f783b1127a0a9b18a7247625fb7019cf1728",
+      "controls.json": "c74c485b8406986c50ae2c17b1bef4f38fae7218feceaf0b544eca5a5289ad36",
+      "endpoint-preflight.json": "9b4c62cbd05cd4d42a37386ddc24a813c30346754cfdf4c1ae89844fe01732fc",
+      "prompt.txt": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+      "setup.json": "bd5311d249f1c1822c334ede1b8763513f90ef54deeecd53d166837a8f07b8c6"
+    },
+    "prompt_hash_matches_registration": true,
+    "masked_tree_all_cells": "3a4eb0648d8bdce1b910b4e1c5ec3c04fce0b90a",
+    "hidden_file": "tests/test_algorithms.py",
+    "transcript_observation": "No held-out test content or gold/reference patch appears in observed model-visible outputs. Pi only listed files; its directory listing omits the hidden test.",
+    "observation_limit": "Proxy retains request hashes and structured telemetry, not complete wire payloads; this is not an independent replay of all model-visible request bytes.",
+    "secrets_scan": {
+      "tool": "gitleaks 8.30.1",
+      "findings": 0,
+      "exit_code": 0,
+      "scanned_bytes": 934397,
+      "scope": "Complete downloaded original artifact directory; max archive depth3; stock configuration; empty ignore directory; inline allows ignored; redacted output."
+    }
+  },
+  "subsequent_studies": {
+    "v1_immutable": true,
+    "repeat_v1_cells": false,
+    "new_v2_eligible": "After a deterministic infrastructure fix and new preregistration, run all four cells with new run/revision claims and the remaining original budget. Retain every v1 and v2 outcome; no favorable-cell selection or model/harness performance claim from v1."
+  }
+}
