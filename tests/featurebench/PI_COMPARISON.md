@@ -5,6 +5,19 @@ for the Berkeley presentation. It is a one-task instrumentation check, with one
 attempt for each AskMe/pi × Gemma 4 31B/Qwen3.6 27B cell. Pi changes the whole
 scaffold; this cannot isolate a planner, tool, transport or budget effect.
 
+The [completed v2 receipt](../bench_records/2026-09-14-pi-comparison-v2/README.md)
+reports 8/13 held-out target tests for both AskMe cells and 11/13 for both pi
+cells. Every patch applied and all 387 preservation tests passed; no cell
+resolved the complete task. Gemma pi reached agent completion, both AskMe
+episodes exhausted replans, and Qwen pi reached the conservative reservation
+cap. These are four single attempts on one known task, not a model ranking.
+
+The 111 requests cost $0.232438 in generation-audited charges. Metadata polling
+recorded 1,480.774 seconds across calls; episode wall times include this study's
+instrumentation and do not measure native model or harness latency. The receipt
+also records a missing read-limit bound in AskMe's advertised tool schema;
+the observed failures cannot be attributed solely to model capability.
+
 The [v2 manifest](pi-comparison-sep14-v2.json) declares the task, order, model
 routes, limits, controls and decision rule. The known Seaborn task remains
 development evidence and is excluded from future untouched confirmation panels.
