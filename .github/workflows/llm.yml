@@ -14,6 +14,9 @@ name: LLM Tests
 #
 # The credential comes from the repository's "Openrouter" deployment
 # environment, stored as an environment *secret* named OPENROUTER_API_KEY.
+# Qwen is the default CI model. Gemma remains selectable for explicit model
+# evaluation; its native-tool repeat-write failures and the default change
+# are documented in docs/llm-ci-investigation.md.
 
 on:
   workflow_dispatch:
@@ -30,7 +33,7 @@ on:
           '@high' to pin a baseline reasoning effort for always-on reasoners
           (e.g. openai/gpt-oss-20b@low).
         type: string
-        default: google/gemma-4-26b-a4b-it
+        default: qwen/qwen3.6-27b
       models:
         description: >-
           Comma-separated requested=expected-served model cells for the
@@ -38,7 +41,7 @@ on:
           baseline reasoning effort (for example
           openai/gpt-oss-20b=openai/gpt-oss-20b@low).
         type: string
-        default: google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422
+        default: qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422
       provider:
         description: OpenRouter provider slug ('auto' = automatic routing)
         type: string
@@ -123,7 +126,7 @@ jobs:
           OPENROUTER_PROVIDER: ""
           ASKME_RUN_LIVE_LLM_TESTS: "1"
           SUITE: ${{ inputs.suite || 'easy' }}
-          SMOKE_MODELS: ${{ inputs.smoke_models || 'google/gemma-4-26b-a4b-it' }}
+          SMOKE_MODELS: ${{ inputs.smoke_models || 'qwen/qwen3.6-27b' }}
         run: |
           set -u
           mkdir -p llm-logs
@@ -215,7 +218,7 @@ jobs:
       - name: Run Berkeley protocol cells
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          MODELS: ${{ inputs.models || 'google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422' }}
+          MODELS: ${{ inputs.models || 'qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422' }}
           PROVIDER: ${{ inputs.provider || 'auto' }}
           TRIALS: ${{ inputs.trials || '1' }}
           BENCH_ROOT: ${{ runner.temp }}/askme-bench-logs
@@ -322,7 +325,7 @@ jobs:
       - name: Run web-suite trial matrix
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          WEB_MODELS: ${{ inputs.web_models || inputs.models || 'google/gemma-4-26b-a4b-it=google/gemma-4-26b-a4b-it-20260403,qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422' }}
+          WEB_MODELS: ${{ inputs.web_models || inputs.models || 'qwen/qwen3.6-27b=qwen/qwen3.6-27b-20260422' }}
           WEB_TRIALS: ${{ inputs.web_trials }}
           PROVIDER: ${{ inputs.provider || 'auto' }}
           BENCH_ROOT: ${{ runner.temp }}/askme-web-bench-logs

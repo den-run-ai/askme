@@ -183,7 +183,7 @@ def test_llm_workflow_smoke_supports_model_matrix():
     fails the job at the end when any model failed."""
     text = LLM_WORKFLOW.read_text(encoding="utf-8")
     smoke, _, _ = _paid_job_sections(text)
-    assert "SMOKE_MODELS: ${{ inputs.smoke_models || 'google/gemma-4-26b-a4b-it' }}" in smoke
+    assert "SMOKE_MODELS: ${{ inputs.smoke_models || 'qwen/qwen3.6-27b' }}" in smoke
     assert 'OPENROUTER_MODEL="$MODEL"' in smoke
     assert 'OPENROUTER_REASONING_EFFORT="$EFFORT"' in smoke
     assert 'AGENT_RUN_LOG="$GITHUB_WORKSPACE/llm-logs/smoke-$SLUG.jsonl"' in smoke

@@ -66,7 +66,7 @@ def _llm_available():
 def _openrouter_available():
     """Check if OpenRouter API is accessible with a valid key."""
     try:
-        import requests
+        from ci_llm_gate import check_openrouter_key
 
         env_path = Path(__file__).parent.parent / ".env"
         if env_path.exists():
@@ -75,15 +75,8 @@ def _openrouter_available():
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
                     os.environ.setdefault(k.strip(), v.strip())
-        key = os.environ.get("OPENROUTER_API_KEY", "")
-        if not key:
-            return False
-        r = requests.get(
-            "https://openrouter.ai/api/v1/models",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=10,
-        )
-        return r.status_code == 200
+        ok, _ = check_openrouter_key()
+        return ok
     except Exception:
         return False
 

@@ -261,7 +261,8 @@ def test_companion_benchmark_shortlist_stays_bounded():
     assert "complete_unverified" in root_readme
     assert "up to three planning attempts" in root_readme
     assert "Up to 3 replans" not in root_readme
-    assert "Prompt-visible install policy; does not enforce host isolation" in root_readme
+    configuration = (ROOT / "docs/configuration.md").read_text(encoding="utf-8")
+    assert "Prompt-visible install policy; does not enforce host isolation" in configuration
     assert "AskMe is experimental automation, **not a sandbox**" in root_readme
     assert "not an operating-system sandbox" in security
     assert "ALLOW_NETWORK" in security and "does not block network access" in security
