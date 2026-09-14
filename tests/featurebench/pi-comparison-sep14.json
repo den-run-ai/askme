@@ -1,0 +1,57 @@
+{
+  "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
+  "status": "preregistered_before_outcome_calls",
+  "label": "one-task, four-cell whole-scaffold qualification",
+  "askme_revision": "3ec477fc06cfd48bf6920c58974a60788847f5bb",
+  "featurebench_revision": "445dcbaec0b2e136061b0acb54e753c0a9f1888e",
+  "dataset_repository": "LiberCoders/FeatureBench",
+  "dataset_revision": "e99d6efdfe511ea832c1b5735c536129561ec96a",
+  "split": "fast",
+  "task_id": "mwaskom__seaborn.7001ebe7.test_algorithms.1f0181c2.lv1",
+  "prompt_sha256": "9992981bba2e840bd1cadae55b30040f1ea7a7966e6d5f89ff8f2b194a65ade0",
+  "image": "docker.io/libercoders/featurebench-specs_seaborn-instance_52738fbb",
+  "image_digest": "sha256:fe27a1a5205fa0939453e79d0f40c74cb402bad8ea1d42fff7de5e2106e77ce1",
+  "pi_package": "@earendil-works/pi-coding-agent",
+  "pi_version": "0.83.0",
+  "node_version": "v22.23.2",
+  "wall_seconds_per_cell": 1800,
+  "attempts_per_cell": 1,
+  "replacement_attempts_after_any_model_call": 0,
+  "askme_config": {
+    "reasoning_policy": "off",
+    "max_replans": 3,
+    "max_tasks": 10,
+    "max_steps": 10,
+    "goal_context_chars": 11144,
+    "capability_profile": "generic-feature-scale-v1",
+    "max_transport_retries": 0
+  },
+  "proxy": {
+    "global_budget_usd": 8,
+    "cell_budget_usd": 2,
+    "max_calls_per_cell": 60,
+    "max_generated_tokens_per_cell": 131072,
+    "max_tokens": 8192,
+    "temperature": 0,
+    "reasoning": {"enabled": false},
+    "budget_policy": "Reserve a conservative full-request upper bound before forwarding; retain reservations after uncertain or failed requests. No paid replacements or additional repetitions."
+  },
+  "cells": [
+    {"id":"gemma-askme","harness":"askme","model":"google/gemma-4-31b-it","served_model":"google/gemma-4-31b-it-20260402","provider":"coreweave/fp4","served_provider":"CoreWeave","quantization":"fp4","input_price_per_million":0.10,"output_price_per_million":0.34},
+    {"id":"gemma-pi","harness":"pi","model":"google/gemma-4-31b-it","served_model":"google/gemma-4-31b-it-20260402","provider":"coreweave/fp4","served_provider":"CoreWeave","quantization":"fp4","input_price_per_million":0.10,"output_price_per_million":0.34},
+    {"id":"qwen-pi","harness":"pi","model":"qwen/qwen3.6-27b","served_model":"qwen/qwen3.6-27b-20260422","provider":"siliconflow/fp8","served_provider":"SiliconFlow","quantization":"fp8","input_price_per_million":0.30,"output_price_per_million":3.20},
+    {"id":"qwen-askme","harness":"askme","model":"qwen/qwen3.6-27b","served_model":"qwen/qwen3.6-27b-20260422","provider":"siliconflow/fp8","served_provider":"SiliconFlow","quantization":"fp8","input_price_per_million":0.30,"output_price_per_million":3.20}
+  ],
+  "controls": "Fresh official gold must resolve; harmless nonempty add-file patch must apply and remain unresolved. Both must finish without evaluator errors before the proxy can start.",
+  "network": "Inference containers use one internal Docker network with host-proxy access only; package setup finishes before inference. No hidden tests or reference patch remain inside containers.",
+  "dependency_freeze": "Pinned AskMe and FeatureBench uv.lock; exact pi package and generated transitive npm lock, Node checksum and derived image ID retained before inference. All cells share that derived image.",
+  "source_freeze": "Exact workflow commit, manifest SHA256 and one GitHub run ID are recorded in eval/claims/pi-sep14-v1 before the credentialed step. A second run ID or run attempt is rejected.",
+  "differences": [
+    "Pi is an external whole-scaffold reference: prompts, planner, tools, requested per-call output allowance and completion semantics differ. This is not a causal component ablation.",
+    "Total external call/generated-token/wall/spend ceilings and within-model routes are equal; AskMe retains its native smaller planner/step token requests and internal step limits.",
+    "Gemma uses currently available CoreWeave fp4; Qwen uses SiliconFlow fp8. These differ from historical v6 routes/precision; historical results are not contemporary controls.",
+    "The known Seaborn task was already used in development and is excluded from future confirmation panels. It is episode-hidden, not contamination-free."
+  ],
+  "outcomes": ["infrastructure_validity", "agent_completion", "terminal_status", "patch_bytes", "patch_applied", "resolved", "f2p", "p2p", "visible_test_commands", "calls", "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost", "reserved_cost", "wall_seconds", "finish_reasons", "route_audit"],
+  "decision_rule": "Retain and report all four cells including budget exhaustion, timeouts, malformed sessions and evaluator failures. Do not retry after any model call. Stop after this instrumentation check; expansion requires a new protocol. No benchmark score, reliability, readiness, model-family/size, ceiling or component-effect claim."
+}
