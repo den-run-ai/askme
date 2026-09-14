@@ -1,0 +1,27 @@
+name: Reconcile existing AskMe-pi generation records
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    if: >-
+      github.run_attempt == 1 &&
+      github.event.label.name == 'pi-reconcile' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    environment: Openrouter
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check existing record availability without retaining response metadata
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python3 tests/featurebench/pi_reconcile.py

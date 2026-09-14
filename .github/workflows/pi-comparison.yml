@@ -1,0 +1,163 @@
+name: Berkeley AskMe-pi qualification v2
+
+# Explicit same-repository opt-in; the durable run-id claim is a second gate.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: berkeley-pi-qualification-v2
+  cancel-in-progress: false
+
+jobs:
+  four-cell-canary:
+    if: >-
+      github.run_attempt == 1 &&
+      github.event.label.name == 'pi-comparison-v2' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    environment: Openrouter
+    timeout-minutes: 160
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check intended environment credential exists without using it
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if test -z "$OPENROUTER_API_KEY"; then
+            echo "The existing Openrouter environment must provide OPENROUTER_API_KEY."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 3ec477fc06cfd48bf6920c58974a60788847f5bb
+          path: pinned-harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: LiberCoders/FeatureBench
+          ref: 445dcbaec0b2e136061b0acb54e753c0a9f1888e
+          path: pinned-featurebench
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install locked test and evaluator environments
+        run: |
+          uv sync --locked
+          uv sync --locked --project pinned-featurebench
+          echo "RECORDS=$RUNNER_TEMP/pi-comparison-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+      - name: Offline safety and interpretation contracts
+        run: |
+          uv run --locked pytest tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py tests/test_pi_artifact_audit.py -q
+          uv run --locked ruff check tests/featurebench/pi_comparison.py tests/featurebench/pi_comparison_proxy.py tests/featurebench/pi_artifact_audit.py tests/test_pi_comparison.py tests/test_pi_comparison_proxy.py tests/test_pi_artifact_audit.py
+      - name: Qualify frozen task, exact routes, gold and harmless controls without API credentials
+        run: |
+          pinned-featurebench/.venv/bin/python tests/featurebench/pi_comparison.py prepare \
+            --records "$RECORDS" --featurebench pinned-featurebench --harness pinned-harness
+      - name: Build and hash shared inference tooling before outcome-bearing calls
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, urllib.request
+          from pathlib import Path
+          p = json.loads(Path('tests/featurebench/pi-comparison-sep14-v2.json').read_text())
+          records = Path(os.environ['RECORDS'])
+          build = records / 'tooling-build'
+          build.mkdir()
+          filename = f"node-{p['node_version']}-linux-x64.tar.gz"
+          base = f"https://nodejs.org/dist/{p['node_version']}/"
+          urllib.request.urlretrieve(base + filename, build / filename)
+          with urllib.request.urlopen(base + 'SHASUMS256.txt', timeout=30) as response:
+              checksums = response.read().decode()
+          expected = next(line.split()[0] for line in checksums.splitlines() if line.split()[-1] == filename)
+          actual = hashlib.sha256((build / filename).read_bytes()).hexdigest()
+          assert actual == expected, 'Node archive integrity failed'
+          (build / 'package.json').write_text(json.dumps({'private': True, 'dependencies': {p['pi_package']: p['pi_version']}}))
+          subprocess.run(['npm', 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], cwd=build, check=True)
+          subprocess.run(['uv', 'export', '--project', 'pinned-harness', '--locked', '--no-dev', '--no-emit-project', '--format', 'requirements-txt', '--output-file', str(build / 'requirements.txt')], check=True)
+          dockerfile = f'''FROM {p['image']}@{p['image_digest']}
+          COPY {filename} /tmp/node.tar.gz
+          RUN tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && rm /tmp/node.tar.gz
+          COPY package.json package-lock.json /opt/pi/
+          RUN cd /opt/pi && npm ci --ignore-scripts --no-audit --no-fund
+          RUN /opt/miniconda3/bin/conda run -n testbed python -c "import sys; assert sys.version_info >= (3,10)"
+          ENV PATH=/opt/miniconda3/envs/testbed/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          COPY requirements.txt /tmp/requirements.txt
+          RUN python3 -m pip install --disable-pip-version-check --require-hashes -r /tmp/requirements.txt
+          RUN /opt/pi/node_modules/.bin/pi --version && python3 -c "import requests"
+          '''
+          (build / 'Dockerfile').write_text(dockerfile)
+          subprocess.run(['docker', 'build', '-t', 'askme-pi-qualified:sep14', str(build)], check=True)
+          image_id = subprocess.check_output(['docker', 'image', 'inspect', 'askme-pi-qualified:sep14', '--format', '{{.Id}}'], text=True).strip()
+          (records / 'tooling.json').write_text(json.dumps({'image_id': image_id, 'node_sha256': actual, 'npm_lock_sha256': hashlib.sha256((build / 'package-lock.json').read_bytes()).hexdigest()}, indent=2))
+          # Exercise the actual image, staged import and immutable AskMe config
+          # without a proxy, API key or outcome-bearing model call.
+          subprocess.run(['docker', 'run', '--rm', '--network', 'none',
+              '--mount', f'type=bind,src={records / "runtime"},dst=/harness,readonly',
+              '--mount', f'type=bind,src={records / "protocol.json"},dst=/study/protocol.json,readonly',
+              '--mount', f'type=bind,src={Path("tests/featurebench/pi_comparison.py").resolve()},dst=/study/tests/featurebench/pi_comparison.py,readonly',
+              '-e', 'STUDY_CELL=gemma-askme', '-e', 'STUDY_PROXY_BEARER=offline-test-only',
+              '-e', 'STUDY_PROXY_URL=http://127.0.0.1:1/v1', image_id,
+              'python3', '/study/tests/featurebench/pi_comparison.py', 'inside-check'], check=True)
+          (build / filename).unlink()
+          PY
+      - name: Read the durable claim for this exact Actions run
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: eval/claims/pi-sep14-v2
+          path: paid-claim
+          persist-credentials: false
+      - name: Validate one-shot claim before credential enters scope
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from tests.featurebench.pi_comparison import PROTOCOL, validate_claim
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          validate_claim(json.load(open('paid-claim/claim.json')), PROTOCOL, os.environ, revision)
+          PY
+      - name: Run four predeclared cells through the strict shared budget proxy
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          test -n "$OPENROUTER_API_KEY"
+          pinned-featurebench/.venv/bin/python tests/featurebench/pi_comparison.py run \
+            --records "$RECORDS" --featurebench pinned-featurebench \
+            --harness pinned-harness --claim paid-claim/claim.json
+      - name: Sanitize and retain evidence
+        id: sanitize
+        if: always()
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from tests.featurebench.pi_artifact_audit import audit_artifacts
+          root = Path(os.environ['RECORDS'])
+          key = os.environ.get('OPENROUTER_API_KEY', '').encode()
+          if not root.exists():
+              root.mkdir(parents=True)
+          # All inference containers have been destroyed. Reject links/special
+          # files before opening any content; never traverse outside artifacts.
+          inventory = audit_artifacts(root, key)
+          (root / 'artifact-sha256.json').write_text(json.dumps(inventory, indent=2))
+          summary = root / 'summary.json'
+          if summary.exists():
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+                  out.write('One known task; four cells; experimental whole-scaffold qualification.\n\n```json\n' + summary.read_text() + '\n```\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && steps.sanitize.outcome == 'success' }}
+        with:
+          name: pi-comparison-${{ github.run_id }}
+          path: ${{ env.RECORDS }}/
+          retention-days: 90
+          if-no-files-found: error
