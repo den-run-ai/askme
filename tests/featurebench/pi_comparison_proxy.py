@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
-from http.client import HTTPSConnection
+from http.client import HTTPException, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Iterable
@@ -31,6 +31,60 @@ from urllib.parse import quote
 
 MILLION = Decimal(1_000_000)
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+METADATA_BODY_BYTES = 1_000_000
+METADATA_POLL_SECONDS = 60
+METADATA_MAX_ATTEMPTS = 12
+METADATA_RETRY_STATUSES = {404, 408, 425, 429, 500, 502, 503, 504, 524, 529}
+METADATA_STAGES = {
+    "complete",
+    "http_status",
+    "body_limit",
+    "json_parse",
+    "data_shape",
+    "transport",
+    "deadline",
+    "poll_limit",
+}
+
+
+class MetadataAuditError(ValueError):
+    """Fixed diagnostics only: never carry a response body or exception text."""
+
+    def __init__(self, stage: str, http_status: int | None = None, *, retryable=False):
+        super().__init__("generation metadata audit failed")
+        self.stage = stage if stage in METADATA_STAGES else "transport"
+        self.http_status = http_status
+        self.retryable = retryable
+
+
+def safe_fetch_diagnostics(records: object) -> list[dict]:
+    """Copy only the tiny fixed telemetry schema into a retained ledger."""
+    result = []
+    if not isinstance(records, list):
+        return result
+    for record in records[: METADATA_MAX_ATTEMPTS + 1]:
+        if not isinstance(record, dict) or record.get("stage") not in METADATA_STAGES:
+            continue
+        attempt, elapsed, status = (
+            record.get("attempt"),
+            record.get("elapsed_ms"),
+            record.get("http_status"),
+        )
+        if type(attempt) is not int or not 0 <= attempt <= METADATA_MAX_ATTEMPTS:
+            continue
+        if type(elapsed) is not int or elapsed < 0:
+            continue
+        if status is not None and (type(status) is not int or not 100 <= status <= 599):
+            continue
+        result.append(
+            {
+                "attempt": attempt,
+                "stage": record["stage"],
+                "http_status": status,
+                "elapsed_ms": elapsed,
+            }
+        )
+    return result
 
 
 class Rejected(Exception):
@@ -226,6 +280,7 @@ class Response:
 class OpenRouter:
     def __init__(self, key: str):
         self.key = key
+        self.last_generation_diagnostics: list[dict] = []
 
     def completion(self, payload: bytes) -> Response:
         conn = HTTPSConnection("openrouter.ai", timeout=900)
@@ -253,39 +308,96 @@ class OpenRouter:
         )
 
     def generation(self, generation_id: str) -> dict:
-        # Generation metadata is eventually consistent. These are read-only
-        # audits, never completion retries, with a ten-second total deadline.
-        deadline = time.monotonic() + 10
-        for attempt in range(3):
+        # Metadata indexing can lag successful inference. Poll read-only GETs
+        # over a real sixty-second budget, rather than exhausting three quick
+        # 404s in 1.5 seconds. No completion is retried or reservation released.
+        started = time.monotonic()
+        deadline = started + METADATA_POLL_SECONDS
+        self.last_generation_diagnostics = []
+        last_status = None
+        attempt = 0
+
+        def record(stage, status):
+            self.last_generation_diagnostics.append(
+                {
+                    "attempt": attempt,
+                    "stage": stage,
+                    "http_status": status,
+                    "elapsed_ms": max(0, int((time.monotonic() - started) * 1000)),
+                }
+            )
+
+        while attempt < METADATA_MAX_ATTEMPTS:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
+            attempt += 1
             try:
-                return self._generation_once(generation_id, min(3, remaining))
-            except (OSError, ValueError, KeyError):
-                if attempt == 2:
+                data = self._generation_once(generation_id, min(10, remaining))
+            except MetadataAuditError as exc:
+                last_status = exc.http_status
+                record(exc.stage, exc.http_status)
+                if not exc.retryable:
                     raise
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
-                    time.sleep(min(0.5 * (2**attempt), remaining))
-        raise ValueError("generation audit deadline exceeded")
+                    time.sleep(min(2 ** min(attempt, 3), remaining))
+            else:
+                record("complete", 200)
+                return data
+        stage = "deadline" if time.monotonic() >= deadline else "poll_limit"
+        record(stage, last_status)
+        raise MetadataAuditError(stage, last_status)
 
     def _generation_once(self, generation_id: str, timeout: float) -> dict:
         conn = HTTPSConnection("openrouter.ai", timeout=timeout)
+        deadline = time.monotonic() + timeout
+        status = None
+
+        def remaining_timeout():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+            if conn.sock is not None:
+                conn.sock.settimeout(remaining)
+
         try:
             conn.request(
                 "GET",
                 "/api/v1/generation?id=" + quote(generation_id, safe=""),
-                headers={"Authorization": f"Bearer {self.key}"},
+                headers={
+                    "Authorization": f"Bearer {self.key}",
+                    "Accept": "application/json",
+                    "User-Agent": "askme-pi-comparison/2 (metadata-audit)",
+                },
             )
+            remaining_timeout()
             response = conn.getresponse()
-            body = response.read(1_000_001)
-            if response.status != 200 or len(body) > 1_000_000:
-                raise ValueError("generation audit unavailable")
-            data = json.loads(body)["data"]
-            if not isinstance(data, dict):
-                raise ValueError("generation audit malformed")
-            return data
+            status = response.status
+            if status != 200:
+                raise MetadataAuditError(
+                    "http_status",
+                    status,
+                    retryable=status in METADATA_RETRY_STATUSES,
+                )
+            body = bytearray()
+            while True:
+                remaining_timeout()
+                chunk = response.read1(min(65536, METADATA_BODY_BYTES + 1 - len(body)))
+                if not chunk:
+                    break
+                body.extend(chunk)
+                if len(body) > METADATA_BODY_BYTES:
+                    raise MetadataAuditError("body_limit", status)
+            try:
+                envelope = json.loads(body)
+            except (ValueError, UnicodeError):
+                raise MetadataAuditError("json_parse", status) from None
+            if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), dict):
+                raise MetadataAuditError("data_shape", status)
+            return envelope["data"]
+        except (OSError, HTTPException):
+            raise MetadataAuditError("transport", status, retryable=True) from None
         finally:
             conn.close()
 
@@ -514,7 +626,12 @@ class BudgetProxy:
                     raise ValueError("invalid completion response")
                 if len(call["generation_ids"]) != 1 or not call["finish_reasons"]:
                     raise ValueError("missing unambiguous generation/finish metadata")
-                audit = self.upstream.generation(call["generation_ids"][0])
+                try:
+                    audit = self.upstream.generation(call["generation_ids"][0])
+                finally:
+                    call["generation_fetch_diagnostics"] = safe_fetch_diagnostics(
+                        getattr(self.upstream, "last_generation_diagnostics", [])
+                    )
                 allowed_models = {cell.model, cell.served_model} - {""}
                 expected_provider = cell.provider_display or cell.provider
                 provider = audit.get("provider_name")

@@ -1,4 +1,4 @@
-name: Berkeley AskMe-pi qualification
+name: Berkeley AskMe-pi qualification v2
 
 # Explicit same-repository opt-in; the durable run-id claim is a second gate.
 on:
@@ -9,14 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: berkeley-pi-qualification-v1
+  group: berkeley-pi-qualification-v2
   cancel-in-progress: false
 
 jobs:
   four-cell-canary:
     if: >-
       github.run_attempt == 1 &&
-      github.event.label.name == 'pi-comparison' &&
+      github.event.label.name == 'pi-comparison-v2' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     environment: Openrouter
@@ -68,7 +68,7 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, subprocess, urllib.request
           from pathlib import Path
-          p = json.loads(Path('tests/featurebench/pi-comparison-sep14.json').read_text())
+          p = json.loads(Path('tests/featurebench/pi-comparison-sep14-v2.json').read_text())
           records = Path(os.environ['RECORDS'])
           build = records / 'tooling-build'
           build.mkdir()
@@ -112,7 +112,7 @@ jobs:
       - name: Read the durable claim for this exact Actions run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: eval/claims/pi-sep14-v1
+          ref: eval/claims/pi-sep14-v2
           path: paid-claim
           persist-credentials: false
       - name: Validate one-shot claim before credential enters scope

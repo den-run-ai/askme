@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PROTOCOL = Path(__file__).with_name("pi-comparison-sep14.json")
+PROTOCOL = Path(__file__).with_name("pi-comparison-sep14-v2.json")
 RUNTIME = ("askme.py", "loop.py", "state.py", "policies.py", "actions.py", "llm.py")
 
 

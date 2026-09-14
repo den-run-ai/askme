@@ -351,33 +351,150 @@ def test_manifest_cannot_raise_authorized_caps(overrides):
         configuration(**overrides).validate()
 
 
-def test_generation_metadata_retries_are_bounded_and_read_only(monkeypatch):
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class MetadataResponse:
+    def __init__(self, status=200, body=None):
+        self.status = status
+        self.body = b'{"data":{}}' if body is None else body
+        self.read_calls = 0
+
+    def read1(self, size):
+        self.read_calls += 1
+        chunk, self.body = self.body[:size], self.body[size:]
+        return chunk
+
+
+def metadata_transport(monkeypatch, responses):
     from tests.featurebench import pi_comparison_proxy as module
 
+    clock = FakeClock()
+    requests = []
+    connections = []
+
+    class Connection:
+        sock = None
+
+        def __init__(self, host, timeout):
+            assert host == "openrouter.ai"
+            assert 0 < timeout <= 10
+            self.response = responses.pop(0) if len(responses) > 1 else responses[0]
+            self.closed = False
+            connections.append(self)
+
+        def request(self, method, path, headers):
+            requests.append({"method": method, "path": path, "headers": headers})
+
+        def getresponse(self):
+            return self.response
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(module, "HTTPSConnection", Connection)
+    monkeypatch.setattr(module.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(module.time, "sleep", clock.sleep)
+    return module, clock, requests, connections
+
+
+def test_generation_metadata_polls_past_three_immediate_404s_then_succeeds(monkeypatch):
+    responses = [MetadataResponse(404) for _ in range(3)]
+    responses.append(MetadataResponse(body=json.dumps({"data": {"model": SERVED}}).encode()))
+    module, clock, requests, connections = metadata_transport(monkeypatch, responses)
     upstream = module.OpenRouter("not-a-real-key")
-    attempts = []
+    assert upstream.generation("gen-later") == {"model": SERVED}
+    assert clock.now == 14
+    assert len(requests) == 4
+    assert all(r["method"] == "GET" and r["path"].endswith("id=gen-later") for r in requests)
+    assert all(
+        r["headers"]["User-Agent"] == "askme-pi-comparison/2 (metadata-audit)" for r in requests
+    )
+    assert all(connection.closed for connection in connections)
+    assert [d["http_status"] for d in upstream.last_generation_diagnostics] == [404, 404, 404, 200]
+    assert upstream.last_generation_diagnostics[-1] == {
+        "attempt": 4,
+        "stage": "complete",
+        "http_status": 200,
+        "elapsed_ms": 14000,
+    }
 
-    def eventual_metadata(generation_id, timeout):
-        attempts.append((generation_id, timeout))
-        if len(attempts) < 3:
-            raise ValueError("not indexed yet")
-        return {"model": MODEL}
 
-    monkeypatch.setattr(upstream, "_generation_once", eventual_metadata)
-    monkeypatch.setattr(module.time, "sleep", lambda _: None)
-    assert upstream.generation("gen-later") == {"model": MODEL}
-    assert len(attempts) == 3
-    assert all(generation == "gen-later" and 0 < timeout <= 3 for generation, timeout in attempts)
-    attempts.clear()
+def test_permanent_missing_metadata_stops_at_sixty_seconds_without_completion_retry(monkeypatch):
+    module, clock, requests, connections = metadata_transport(monkeypatch, [MetadataResponse(404)])
+    upstream = module.OpenRouter("not-a-real-key")
+    with pytest.raises(module.MetadataAuditError) as caught:
+        upstream.generation("gen-unavailable")
+    assert caught.value.stage == "deadline"
+    assert clock.now == 60
+    assert len(requests) == 9
+    assert {request["method"] for request in requests} == {"GET"}
+    assert all(connection.closed for connection in connections)
+    assert upstream.last_generation_diagnostics[-1]["elapsed_ms"] == 60000
+    assert upstream.last_generation_diagnostics[-1]["http_status"] == 404
 
-    def unavailable(_generation_id, _timeout):
-        attempts.append(None)
-        raise ValueError("not indexed")
 
-    monkeypatch.setattr(upstream, "_generation_once", unavailable)
-    with pytest.raises(ValueError, match="not indexed"):
-        upstream.generation("gen-missing")
-    assert len(attempts) == 3
+@pytest.mark.parametrize("status", [401, 403])
+def test_metadata_auth_failure_is_permanent_and_never_reads_error_body(monkeypatch, status):
+    response = MetadataResponse(status, body=SECRET.encode())
+    module, clock, requests, _ = metadata_transport(monkeypatch, [response])
+    upstream = module.OpenRouter("not-a-real-key")
+    with pytest.raises(module.MetadataAuditError) as caught:
+        upstream.generation("gen-protected")
+    assert len(requests) == 1
+    assert clock.sleeps == []
+    assert response.read_calls == 0
+    assert caught.value.stage == "http_status"
+    assert caught.value.http_status == status
+    assert SECRET not in str(caught.value)
+    assert upstream.last_generation_diagnostics == [
+        {"attempt": 1, "stage": "http_status", "http_status": status, "elapsed_ms": 0}
+    ]
+
+
+@pytest.mark.parametrize(
+    "body,stage",
+    [
+        (b"not-json " + SECRET.encode(), "json_parse"),
+        (b'{"data":[]}', "data_shape"),
+        (b"[1,2]", "data_shape"),
+    ],
+)
+def test_malformed_metadata_fails_once_with_only_safe_stage(monkeypatch, body, stage):
+    module, clock, requests, _ = metadata_transport(monkeypatch, [MetadataResponse(body=body)])
+    upstream = module.OpenRouter("not-a-real-key")
+    with pytest.raises(module.MetadataAuditError) as caught:
+        upstream.generation("gen-malformed")
+    assert caught.value.stage == stage
+    assert len(requests) == 1
+    assert clock.sleeps == []
+    assert SECRET not in str(caught.value)
+    assert SECRET not in json.dumps(upstream.last_generation_diagnostics)
+    assert upstream.last_generation_diagnostics[0]["http_status"] == 200
+
+
+def test_oversized_metadata_is_not_retained_or_retried(monkeypatch):
+    module, clock, requests, _ = metadata_transport(monkeypatch, [MetadataResponse(body=b"x" * 9)])
+    monkeypatch.setattr(module, "METADATA_BODY_BYTES", 8)
+    upstream = module.OpenRouter("not-a-real-key")
+    with pytest.raises(module.MetadataAuditError) as caught:
+        upstream.generation("gen-large")
+    assert caught.value.stage == "body_limit"
+    assert len(requests) == 1
+    assert clock.sleeps == []
+    assert upstream.last_generation_diagnostics == [
+        {"attempt": 1, "stage": "body_limit", "http_status": 200, "elapsed_ms": 0}
+    ]
 
 
 def test_retained_metadata_redacts_both_credentials_even_if_upstream_echoes_them(tmp_path):
@@ -504,3 +621,55 @@ def test_concurrent_requests_share_one_budget_decision(tmp_path):
     assert outcomes.count("complete") == 1
     assert outcomes.count("rejected") == 3
     assert len(upstream.requests) == 1
+
+
+def test_metadata_fetch_diagnostics_persist_on_failure_without_releasing_reservations(
+    tmp_path, monkeypatch
+):
+    module, _clock, requests, _ = metadata_transport(monkeypatch, [MetadataResponse(401)])
+    upstream = module.OpenRouter("not-a-real-key")
+    completion = FakeUpstream()
+    monkeypatch.setattr(upstream, "completion", completion.completion)
+    proxy = BudgetProxy(configuration(), SECRET, tmp_path, upstream)
+    call = execute(proxy)
+    assert call["state"] == "uncertain_or_invalid"
+    assert call["generation_fetch_diagnostics"] == [
+        {"attempt": 1, "stage": "http_status", "http_status": 401, "elapsed_ms": 0}
+    ]
+    assert len(completion.requests) == 1
+    assert len(requests) == 1
+    assert proxy.ledger["reserved_usd"] == call["reserved_usd"]
+    assert proxy.ledger["cells"]["askme"]["reserved_generated_tokens"] == call["max_tokens"]
+    assert proxy.ledger["cells"]["askme"]["released_generated_tokens"] == 0
+    saved = json.loads((tmp_path / "ledger.json").read_text())
+    assert saved["calls"][0]["generation_fetch_diagnostics"] == call["generation_fetch_diagnostics"]
+
+
+def test_successful_metadata_poll_diagnostics_persist_without_dollar_refund(tmp_path, monkeypatch):
+    completion = FakeUpstream()
+    responses = [
+        MetadataResponse(404),
+        MetadataResponse(body=json.dumps({"data": completion.audit}).encode()),
+    ]
+    module, _clock, requests, _ = metadata_transport(monkeypatch, responses)
+    upstream = module.OpenRouter("not-a-real-key")
+    monkeypatch.setattr(upstream, "completion", completion.completion)
+    proxy = BudgetProxy(configuration(), SECRET, tmp_path, upstream)
+    call = execute(proxy)
+    assert call["state"] == "complete"
+    assert [d["http_status"] for d in call["generation_fetch_diagnostics"]] == [404, 200]
+    assert len(completion.requests) == 1
+    assert len(requests) == 2
+    assert proxy.ledger["reserved_usd"] == call["reserved_usd"]
+    saved = json.loads((tmp_path / "ledger.json").read_text())
+    assert saved["calls"][0]["generation_fetch_diagnostics"] == call["generation_fetch_diagnostics"]
+
+
+def test_metadata_diagnostic_allowlist_never_copies_extra_response_fields():
+    from tests.featurebench.pi_comparison_proxy import safe_fetch_diagnostics
+
+    diagnostic = {"stage": "http_status", "http_status": 404, "attempt": 1, "elapsed_ms": 5}
+    assert safe_fetch_diagnostics([{**diagnostic, "error_body": SECRET, "headers": SECRET}]) == [
+        diagnostic
+    ]
+    assert safe_fetch_diagnostics([{**diagnostic, "stage": SECRET}]) == []

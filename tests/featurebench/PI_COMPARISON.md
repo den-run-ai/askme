@@ -1,15 +1,28 @@
 # Berkeley AskMe–pi qualification
 
-This fresh four-cell experiment completes the operational comparison requested
+This four-cell experiment investigates the operational comparison requested
 for the Berkeley presentation. It is a one-task instrumentation check, with one
 attempt for each AskMe/pi × Gemma 4 31B/Qwen3.6 27B cell. Pi changes the whole
 scaffold; this cannot isolate a planner, tool, transport or budget effect.
 
-The [frozen manifest](pi-comparison-sep14.json) declares the task, order, model
+The [v2 manifest](pi-comparison-sep14-v2.json) declares the task, order, model
 routes, limits, controls and decision rule. The known Seaborn task remains
 development evidence and is excluded from future untouched confirmation panels.
 The archived [PR #14](https://github.com/den-run-ai/askme/pull/14) remains unchanged
 and unqualified. Its historical results are not contemporary controls.
+
+The [v1 receipt](../bench_records/2026-09-14-pi-comparison-v1/README.md) retains
+all four infrastructure-invalid attempts. Each stopped after its first model
+response because generation metadata was unavailable to the proxy; no usable
+task score was produced. Response telemetry reported $0.00299138, while the
+conservative reservation remained $0.05043320 and settled billing is unknown.
+The original [v1 manifest](pi-comparison-sep14.json) remains immutable.
+
+V2 is a separately registered follow-up across all four cells. It repairs
+metadata polling with a bounded 60-second window, explicit User-Agent and safe
+stage/status diagnostics. It preserves the task, model routes, native harness
+settings, cell order and limits. V1's full reservation plus v2's $8 cap totals
+$8.05043320 against the user's original $10 budget. No v1 attempt is replaced.
 
 The runner addresses the archived runner defects: it derives the checkout root,
 counts one terminal finish reason per response choice, and requires a valid pi
@@ -32,8 +45,8 @@ route metadata, cost reservations, trajectories, patches, official acceptance
 and failures are retained. The generated npm dependency lock, Node checksum,
 derived image ID and source hashes are recorded before the first model request.
 
-Execution requires the `pi-comparison` label on a same-repository draft PR and a
-separate durable claim on `eval/claims/pi-sep14-v1` binding the exact workflow
+V2 execution requires the `pi-comparison-v2` label on a same-repository draft PR and a
+separate durable claim on `eval/claims/pi-sep14-v2` binding the exact workflow
 commit, protocol hash and Actions run ID. A relabel or Actions rerun cannot reuse
 the claim. No replacements are allowed after any outcome-bearing call.
 
