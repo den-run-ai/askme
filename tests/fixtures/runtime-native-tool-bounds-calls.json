@@ -1,0 +1,16 @@
+{
+  "baseline_source_revision": "6a212cf711afe7a327fecf4b7f4d7bf866e11d16",
+  "calls": {
+    "accepted_fail": "57ecd48ef3697a3aabb31440766dce3aef96069e9f9e19af2bf4dd746ed3acff",
+    "duplicate_write": "0825b7799f27e169bcaf337098072024c42e94554066e2cd9c0f3ccf5c00e7ab",
+    "empty_write": "51b712041958bb3347d175d5415fdd5c9231eb8220c66f05d939c252fcab7206",
+    "lifecycle_rewrite": "2d6317eb833d094d418f5e61f0d07b715624e6db241ab24a5c06d0f4b91728bb",
+    "observation_stall": "3f077661c40f1be281effa48ed5bae5a06c355c347c3ac169bf5447f9d503359",
+    "partial_write": "7809ef2933d10e72e1b2eea088263ec80b20f6a98c0cb3d2d6d74f83613537d8",
+    "validation_recheck": "c60778411b1ba899ad0d0f277630474f812dc47b15d85c501bd958fa409c400c",
+    "validator_unavailable": "2d60a958e13b6040fe177166d6990ee4e0bf3f9c80a0befbc238893f8af84bc0",
+    "write_edit_verify": "849619ffc73281fb62c15b052c12719aa4c50deafb4da9e90596514565cba7e6"
+  },
+  "description": "Reviewed offline request-transcript revision for the native numeric-bounds prompt addition. The original runtime-module-baseline.json remains unchanged. Only complete call transcript hashes differ; execution, events, logs, outcomes, signatures, CLI help and full workspaces still match that frozen baseline. No model or host shell calls. Regenerate only for an explicitly reviewed prompt change.",
+  "system_step_sha256": "cec2c800db788bf8197151402caa95c835136215ead2ee5904dded012ebbd1c4"
+}

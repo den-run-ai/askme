@@ -18,6 +18,7 @@ from typing import Any, Callable, NamedTuple
 
 import llm as _llm
 from actions import (
+    ACTION_INTEGER_BOUNDS,
     OBSERVE_ACTIONS,
     OBSERVE_STATE_CHARS,
     ActionEnvelope,
@@ -98,7 +99,11 @@ Rules:
 Output ONLY valid JSON. No markdown, no explanation.
 Format: {{"tasks":["task1","task2"]}}"""
 
-SYSTEM_STEP = """Executor. Call exactly ONE tool per turn. No text outside the tool call.
+_ACTION_INTEGER_RANGES = "; ".join(
+    f"{field} {minimum}..{maximum}" for field, (minimum, maximum) in ACTION_INTEGER_BOUNDS.items()
+)
+
+SYSTEM_STEP = f"""Executor. Call exactly ONE tool per turn. No text outside the tool call.
 Rules:
 - done only when the FULL task description is satisfied
 - fail if same error appears 2+ times
@@ -109,6 +114,7 @@ Rules:
 - If missing_tools required and allow_system_installs=false: fail; do NOT install
 - Prefer edit over write for existing files
 - Prefer search/tree over shell grep/find/ls
+- Integer bounds (inclusive): {_ACTION_INTEGER_RANGES}. Use integer JSON tokens.
 - read: initial pages take offset/limit (1-based lines); continuation pages must
   echo the output's cursor, limit, and sha256. Cursors count Unicode code points.
 - write: whole file in content; set append=true to append the next chunk"""
@@ -173,9 +179,18 @@ _RECOVERY_HINTS = {
     "edit_failed": "Read the file first, then retry edit with exact text from the file.",
     "missing_file": "Check the filename. Use shell ls to list directory contents.",
     "invalid_read_cursor": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
-    "invalid_read_limit": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
-    "invalid_read_offset": "Use a positive integer offset within the supported range.",
-    "invalid_timeout": "Use an integer timeout from 5 to 300 seconds.",
+    "invalid_read_limit": (
+        f"Use an integer limit from {ACTION_INTEGER_BOUNDS['limit'][0]} to "
+        f"{ACTION_INTEGER_BOUNDS['limit'][1]}; for continuation, echo cursor, limit, and sha256."
+    ),
+    "invalid_read_offset": (
+        f"Use an integer offset from {ACTION_INTEGER_BOUNDS['offset'][0]} to "
+        f"{ACTION_INTEGER_BOUNDS['offset'][1]}."
+    ),
+    "invalid_timeout": (
+        f"Use an integer timeout from {ACTION_INTEGER_BOUNDS['timeout'][0]} to "
+        f"{ACTION_INTEGER_BOUNDS['timeout'][1]} seconds."
+    ),
     "read_cursor_hash_required": "Use cursor, limit, and sha256 exactly from the latest read continuation.",
     "stale_read_cursor": "The file changed. Restart read with offset and limit; do not reuse the old cursor.",
 }

@@ -114,6 +114,43 @@ class TestToolDefinitions:
 
 
 class TestRequestShaping:
+    @pytest.mark.parametrize("backend", ["local", "openrouter"])
+    @pytest.mark.parametrize(
+        "name,field,extra,minimum,maximum",
+        [
+            ("shell", "timeout", {}, 5, 300),
+            ("read", "offset", {}, 1, 2_147_483_647),
+            ("read", "limit", {}, 1, 200),
+            ("read", "cursor", {"limit": 10, "sha256": "abc123"}, 0, 2_147_483_647),
+        ],
+    )
+    def test_published_numeric_bounds_match_native_decode(
+        self, backend, name, field, extra, minimum, maximum
+    ):
+        bodies = []
+        values = (minimum, maximum, minimum - 1, maximum + 1)
+        client = _client(
+            [_tool_reply(name, json.dumps({"arg": "target", **extra, field: n})) for n in values],
+            bodies,
+            backend=backend,
+        )
+        for accepted in values[:2]:
+            assert _ask_action(client)[field] == accepted
+        for _rejected in values[2:]:
+            with pytest.raises(json.JSONDecodeError) as exc_info:
+                _ask_action(client)
+            assert exc_info.value.action_protocol_error.field == field
+
+        for body in bodies:
+            tool = next(t["function"] for t in body["tools"] if t["function"]["name"] == name)
+            parameters = tool["parameters"]
+            schema = parameters["properties"][field]
+            assert schema["type"] == "integer"
+            assert schema.get("minimum") == minimum
+            assert schema.get("maximum") == maximum
+            assert "default" not in schema
+            assert field not in parameters.get("required", [])
+
     def test_action_requests_carry_tools_with_auto_choice(self):
         bodies = []
         client = _client([_tool_reply("done", "{}")], bodies)
@@ -167,6 +204,13 @@ class TestRequestShaping:
         assert bodies[0]["messages"][0]["content"] == SYSTEM_STEP
         assert "tool" in SYSTEM_STEP
         assert "<<<CONTENT" not in SYSTEM_STEP
+        for bound in (
+            "timeout 5..300",
+            "offset 1..2147483647",
+            "limit 1..200",
+            "cursor 0..2147483647",
+        ):
+            assert bound in bodies[0]["messages"][0]["content"]
 
 
 class TestToolDecode:

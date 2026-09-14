@@ -1,5 +1,6 @@
-"""Frozen pre-extraction API and whole-run transcript parity, without inference."""
+"""Frozen API/execution parity with separately reviewed prompt changes, without inference."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -12,6 +13,7 @@ from tests.runtime_characterization import capture, cases
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests" / "fixtures" / "runtime-module-baseline.json"
+PROMPT_REVISION = ROOT / "tests" / "fixtures" / "runtime-native-tool-bounds-calls.json"
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +45,18 @@ def baseline():
     return json.loads(BASELINE.read_text(encoding="utf-8"))["capture"]
 
 
+@pytest.fixture(scope="module")
+def prompt_revision():
+    import askme
+
+    revision = json.loads(PROMPT_REVISION.read_text(encoding="utf-8"))
+    frozen = json.loads(BASELINE.read_text(encoding="utf-8"))
+    assert revision["baseline_source_revision"] == frozen["source_revision"]
+    assert revision["system_step_sha256"] == hashlib.sha256(askme.SYSTEM_STEP.encode()).hexdigest()
+    assert set(revision["calls"]) == set(frozen["capture"]["cases"])
+    return revision
+
+
 def test_public_namespace_signatures_and_cli_help_unchanged(captured, baseline):
     assert captured["contract"] == baseline["contract"]
 
@@ -61,8 +75,21 @@ def test_public_namespace_signatures_and_cli_help_unchanged(captured, baseline):
         "validator_unavailable",
     ],
 )
-def test_complete_scripted_transcripts_and_workspace_unchanged(name, captured, baseline):
-    assert captured["cases"][name] == baseline["cases"][name]
+def test_complete_scripted_transcripts_match_reviewed_prompt(
+    name, captured, baseline, prompt_revision
+):
+    # Preserve the original extraction fixture. Only the reviewed complete
+    # request hashes change for the new numeric-bounds instruction; every
+    # execution transcript, outcome and workspace stays pinned to that source.
+    original = baseline["cases"][name]
+    expected = {
+        **original,
+        "transcript_sha256": {
+            **original["transcript_sha256"],
+            "calls": prompt_revision["calls"][name],
+        },
+    }
+    assert captured["cases"][name] == expected
 
 
 @pytest.mark.parametrize("name", list(cases()))
