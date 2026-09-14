@@ -1,12 +1,19 @@
 {
-  "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
-  "protocol_sha256": "380f6cac286e4ff24f794990bf34f0139c4379fbe49af534a3bc9bcaa58cd730",
-  "run_id": 34811259408,
-  "workflow_revision": "8d466829efe429f33a754529262907eeeb55cc63",
-  "supersedes": {
-    "run_id": 34810416285,
-    "workflow_revision": "930854506879a62640a68bdf393a2413d881f98c",
-    "reason": "Environment-scoped OpenRouter credential was absent; verified no proxy ledger and zero model calls. Fix environment and artifact audit before the same four outcome cells.",
-    "model_calls": 0
+  "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v2",
+  "protocol_sha256": "9a3e21467eec3f12e6ae1887442bba0a509ff7f0ea0714c5ef41e70de70eca5c",
+  "run_id": 34812520762,
+  "workflow_revision": "08f69e71db1713d347ef147578a331ee54455864",
+  "prior_study": {
+    "protocol": "berkeley-seaborn-whole-scaffold-2026-09-14-v1",
+    "run_id": 34811259408,
+    "workflow_revision": "8d466829efe429f33a754529262907eeeb55cc63",
+    "classification": "All four cells retained as infrastructure-invalid after first paid completion; no usable task scores.",
+    "conservative_exposure_usd": "0.05043320",
+    "replaced": false
+  },
+  "authorization_budget": {
+    "user_maximum_usd": "10",
+    "this_protocol_maximum_usd": "8",
+    "remaining_unallocated_usd": "1.94956680"
   }
 }
