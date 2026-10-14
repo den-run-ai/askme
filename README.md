@@ -98,6 +98,8 @@ on `main`.
 
 ## More
 
+- [Typed native-agent prototype](examples/native_agent/README.md) — an opt-in
+  small loop that also compiles with Pystachy
 - [Configuration and Python API](docs/configuration.md)
 - [Local Gemma 4 setup](docs/gemma4-setup.md)
 - [Architecture and source map](docs/ARCHITECTURE.md)
