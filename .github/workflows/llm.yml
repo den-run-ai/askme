@@ -175,7 +175,7 @@ jobs:
           for f in llm-logs/smoke-*.jsonl; do test -s "$f"; done
       - name: Upload agent run logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: openrouter-smoke-logs
           path: llm-logs/
@@ -286,7 +286,7 @@ jobs:
             "${ADVISORY_ARGS[@]}"
       - name: Upload bench logs and summaries
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: berkeley-protocol-logs
           path: ${{ runner.temp }}/askme-bench-logs/
@@ -377,7 +377,7 @@ jobs:
             --expect-cells "$EXPECTED_WEB_CELLS" --markdown-out "$GITHUB_STEP_SUMMARY"
       - name: Upload web bench logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-bench-trial-logs
           path: ${{ runner.temp }}/askme-web-bench-logs/
