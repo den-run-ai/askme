@@ -20,10 +20,12 @@ import json
 import os
 import shlex
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -46,6 +48,7 @@ sys.path.insert(0, str(NATIVE_DIR))
 
 import native_actions  # noqa: E402
 import native_host  # noqa: E402
+import native_http  # noqa: E402
 import native_json  # noqa: E402
 
 # The port's process and HTTP adapters are POSIX code validated on Linux.
@@ -92,11 +95,14 @@ def port_prefix(tmp_path_factory):
                 argv = [str(executable)]
             else:
                 build = tmp_path_factory.mktemp("native_mypyc")
-                modules = sorted(path.name for path in NATIVE_DIR.glob("*.py"))
-                for name in modules:
+                sources = sorted(path.name for path in NATIVE_DIR.glob("*.py"))
+                for name in sources:
                     shutil.copy(NATIVE_DIR / name, build / name)
+                # The native_ffi modules bind C libraries through Pystachy's FFI:
+                # mypyc reads them for their types and compiles the others.
+                modules = [name for name in sources if not name.startswith("native_ffi_")]
                 subprocess.run([*tool, *modules], cwd=build, check=True, capture_output=True)
-                for name in modules:
+                for name in sources:
                     (build / name).unlink()  # only the extension modules remain importable
                 (build / "run.py").write_text(
                     "import sys\nimport askme_native\n"
@@ -351,6 +357,7 @@ ACTION_SCRIPT = [
     {"action": "shell", "arg": "definitely-not-a-command-xyz"},
     {"action": "shell", "arg": "printf 'a\\r\\nb\\rc'"},
     {"action": "shell", "arg": "true"},
+    {"action": "shell", "arg": "yes | head -1; echo $?"},
     {"action": "shell", "arg": "ls /nonexistent-dir-xyz"},
     {"action": "done"},
     {"action": "bogus", "arg": "x"},
@@ -486,44 +493,133 @@ def test_shell_deadline_and_capture(tmp_path, monkeypatch, tool):
 
 
 class _Recorder(BaseHTTPRequestHandler):
+    """Replays recorded replies; the last path segment selects the framing."""
+
+    protocol_version = "HTTP/1.1"
     replies = []
     seen = []
 
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode("utf-8")
-        type(self).seen.append({"path": self.path, "headers": dict(self.headers), "body": body})
+        type(self).seen.append(
+            {
+                "path": self.path,
+                "headers": dict(self.headers),
+                "body": body,
+                "peer": self.client_address[1],
+            }
+        )
         status, text = type(self).replies.pop(0)
         payload = text.encode("utf-8")
+        framing = self.path.rsplit("/", 1)[-1]
+        if framing == "slow":
+            time.sleep(2.5)
+        if framing == "interim":
+            self.wfile.write(b"HTTP/1.1 100 Continue\r\n\r\n")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
+        if framing == "chunked":
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for start in range(0, len(payload), 5):
+                piece = payload[start : start + 5]
+                self.wfile.write(b"%x;note=1\r\n" % len(piece) + piece + b"\r\n")
+            self.wfile.write(b"0\r\nX-Trailer: yes\r\n\r\n")
+            return
+        if framing == "unframed":
+            self.end_headers()  # no length: the body ends when the connection does
+            self.wfile.write(payload)
+            self.close_connection = True
+            return
+        if framing == "close":
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        if framing == "drop":
+            self.close_connection = True  # closes without announcing it
+        self.send_header("Content-Length", str(len(payload) + (9 if framing == "short" else 0)))
         self.end_headers()
         self.wfile.write(payload)
+        if framing == "short":
+            self.close_connection = True
 
     def log_message(self, *_args):
         pass
 
 
-@pytest.fixture
-def recorded_server():
-    if shutil.which("curl") is None:
-        pytest.skip("curl is not installed")
-    _Recorder.replies = []
-    _Recorder.seen = []
-    server = HTTPServer(("127.0.0.1", 0), _Recorder)
+def _serve(certificate=None):
+    """A loopback server on its own thread: (port, recorder class, stop)."""
+    recorder = type("Recorder", (_Recorder,), {"replies": [], "seen": []})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), recorder)
+    server.daemon_threads = True
+    if certificate is not None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(*certificate)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions", _Recorder
-    finally:
+
+    def stop():
         server.shutdown()
         thread.join()
         server.server_close()
 
+    return server.server_address[1], recorder, stop
+
+
+@pytest.fixture
+def recorded_server():
+    port, recorder, stop = _serve()
+    try:
+        yield f"http://127.0.0.1:{port}/v1/chat/completions", recorder
+    finally:
+        stop()
+
+
+@pytest.fixture(scope="module")
+def tls_material(tmp_path_factory):
+    """A private CA and two server certificates: for localhost with and without 127.0.0.1."""
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is not installed")
+    root = tmp_path_factory.mktemp("native_tls")
+
+    def openssl(*args):
+        done = subprocess.run(["openssl", *args], cwd=root, capture_output=True, text=True)
+        if done.returncode != 0:
+            pytest.skip(f"openssl cannot make the test certificates: {done.stderr.strip()[-200:]}")
+
+    openssl(
+        "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+        "-keyout", "ca.key", "-out", "ca.pem", "-subj", "/CN=AskMe test CA",
+        "-addext", "basicConstraints=critical,CA:TRUE",
+        "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+    )  # fmt: skip
+    for name, names in (("both", "DNS:localhost,IP:127.0.0.1"), ("named", "DNS:localhost")):
+        (root / f"{name}.ext").write_text(
+            f"subjectAltName={names}\nbasicConstraints=critical,CA:FALSE\n"
+            "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
+            "authorityKeyIdentifier=keyid\nsubjectKeyIdentifier=hash\n"
+        )
+        openssl(
+            "req", "-newkey", "rsa:2048", "-nodes", "-keyout", f"{name}.key",
+            "-out", f"{name}.csr", "-subj", "/CN=localhost",
+        )  # fmt: skip
+        openssl(
+            "x509", "-req", "-in", f"{name}.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
+            "-CAcreateserial", "-days", "2", "-extfile", f"{name}.ext", "-out", f"{name}.pem",
+        )  # fmt: skip
+    return {
+        "ca": str(root / "ca.pem"),
+        "both": (str(root / "both.pem"), str(root / "both.key")),
+        "named": (str(root / "named.pem"), str(root / "named.key")),
+    }
+
 
 @linux_only
-def test_curl_transport_sends_body_and_private_headers(recorded_server):
+def test_curl_transport_sends_body_and_private_headers(recorded_server, monkeypatch):
+    if shutil.which("curl") is None:
+        pytest.skip("curl is not installed")
+    monkeypatch.setenv("ASKME_NATIVE_HTTP", "curl")
     url, recorder = recorded_server
     recorder.replies = [(200, '{"ok": "é"}'), (404, "missing"), (503, "busy")]
     host = native_host.Host()
@@ -535,6 +631,7 @@ def test_curl_transport_sends_body_and_private_headers(recorded_server):
         assert (reply.status, reply.text, reply.error) == (200, '{"ok": "é"}', "")
         assert recorder.seen[0]["body"] == body
         assert recorder.seen[0]["headers"]["Authorization"] == "Bearer k"
+        assert recorder.seen[0]["headers"]["User-Agent"].startswith("curl/")
         assert host.http_post(url, "{}", [], 10).status == 404
         assert host.http_post(url, "{}", [], 10).text == "busy"
         refused = host.http_post("http://127.0.0.1:9/none", "{}", [], 5)
@@ -549,31 +646,216 @@ def test_curl_transport_sends_body_and_private_headers(recorded_server):
         host.cleanup()
 
 
-@linux_only
-@pytest.mark.parametrize("name", ["hello", "navigate_and_edit"])
-def test_live_http_matches_replay(name, tmp_path, recorded_server):
-    """The curl transport and the replay transport drive identical runs."""
+def _inprocess_host(monkeypatch):
+    for name in (
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ASKME_NATIVE_HTTP", "inprocess")
+    return native_host.Host()
+
+
+def test_inprocess_transport_keeps_connections_and_reads_every_framing(
+    recorded_server, monkeypatch
+):
     url, recorder = recorded_server
-    scenario = dict(SCENARIOS[name])
-    scenario["env"] = {**scenario["env"], "LLM_API_URL": url}
-    recorder.replies = [(200, json.dumps(entry)) for entry in scenario["replay"]]
-    replayed = run_scenario(scenario, tmp_path / "rep", CPYTHON_PORT)
-    live = run_scenario(
-        scenario,
-        tmp_path / "liv",
-        lambda _replay, request_log: [
-            sys.executable,
-            str(PORT_MAIN),
-            "--request-log",
-            str(request_log),
-        ],
-    )
-    assert_same_transcript(replayed, live)
-    assert not recorder.replies, "the live run must consume every recorded reply"
-    received = [
-        normalize_json(json.loads(seen["body"]), tmp_path / "liv" / "ws") for seen in recorder.seen
+    base = url.rsplit("/", 1)[0]
+    large = json.dumps({"text": "é" * 200_000})
+    script = [
+        ("completions", 200, '{"ok": "é"}'),
+        ("completions", 404, "missing"),
+        ("chunked", 200, large),
+        ("interim", 200, "after an interim reply"),
+        ("completions", 503, ""),
+        ("close", 200, "then closed"),
+        ("completions", 200, "on a new connection"),
+        ("unframed", 200, "until the close"),
+        ("completions", 200, "again"),
     ]
-    assert received == [request["body"] for request in live.requests]
+    recorder.replies = [(status, text) for _framing, status, text in script]
+    host = _inprocess_host(monkeypatch)
+    try:
+        body = json.dumps({"text": "naïve ✓", "pad": "x" * 100_000})
+        headers = ["Content-Type: application/json", "Authorization: Bearer k"]
+        for framing, status, text in script:
+            reply = host.http_post(f"{base}/{framing}", body, headers, 10)
+            assert (reply.status, reply.text, reply.error) == (status, text, ""), framing
+        assert [seen["body"] for seen in recorder.seen] == [body] * len(script)
+        assert recorder.seen[0]["headers"]["Authorization"] == "Bearer k"
+        assert recorder.seen[0]["headers"]["User-Agent"] == "askme-native"
+        assert recorder.seen[0]["headers"]["Host"] == url.split("/")[2]
+        peers = [seen["peer"] for seen in recorder.seen]
+        # One connection serves replies until a reply ends it.
+        assert len(set(peers[:6])) == 1
+        assert peers[6] != peers[5] and peers[7] == peers[6] and peers[8] != peers[7]
+        assert not Path(host.scratch()).exists() or not list(Path(host.scratch()).iterdir())
+    finally:
+        host.cleanup()
+
+
+def test_inprocess_transport_reports_broken_replies_and_recovers(recorded_server, monkeypatch):
+    url, recorder = recorded_server
+    base = url.rsplit("/", 1)[0]
+    recorder.replies = [(200, "cut"), (200, "kept"), (200, "dropped"), (200, "resent"), (200, "x")]
+    host = _inprocess_host(monkeypatch)
+    try:
+        short = host.http_post(f"{base}/short", "{}", [], 10)
+        assert (short.status, short.error) == (
+            0,
+            "connection closed before the response body was complete",
+        )
+        assert host.http_post(f"{base}/completions", "{}", [], 10).text == "kept"
+        # The server closes this kept connection without saying so; the next
+        # request notices, or is resent once, and reaches a new connection.
+        assert host.http_post(f"{base}/drop", "{}", [], 10).text == "dropped"
+        assert host.http_post(f"{base}/completions", "{}", [], 10).text == "resent"
+        assert len(recorder.seen) == 4
+        slow = host.http_post(f"{base}/slow", "{}", [], 1)
+        assert (slow.status, slow.error) == (0, "receive: timed out")
+        assert len(recorder.seen) == 5, "a request that timed out is never sent twice"
+        refused = host.http_post("http://127.0.0.1:9/none", "{}", [], 5)
+        assert refused.status == 0 and refused.error.startswith("connect to 127.0.0.1:9: ")
+        assert (
+            host.http_post(url, "{}", ["X-Bad: a\r\nInjected: b"], 5).error
+            == "invalid header value"
+        )
+        assert host.http_post("file:///etc/passwd", "{}", [], 5).error.startswith("Invalid URL")
+    finally:
+        host.cleanup()
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("http://example.test/v1", (False, "example.test", 80, "/v1", "example.test")),
+        ("https://example.test", (True, "example.test", 443, "/", "example.test")),
+        ("https://example.test:8443/a?b=c#frag", (True, "example.test", 8443, "/a?b=c", "example.test:8443")),
+        ("http://example.test?q=1", (False, "example.test", 80, "/?q=1", "example.test")),
+        ("http://[::1]:8080/x", (False, "::1", 8080, "/x", "[::1]:8080")),
+        ("http://[::1]/x", (False, "::1", 80, "/x", "[::1]")),
+        ("http://user:secret@example.test/", None),
+        ("http://example.test:port/", None),
+        ("http://example.test:0/", None),
+        ("http://example.test:65536/", None),
+        ("http://exa mple.test/", None),
+        ("http://example.test/a b", None),
+        ("http://[::1/x", None),
+        ("http:///x", None),
+        ("ftp://example.test/", None),
+    ],
+)  # fmt: skip
+def test_url_parsing(url, expected):
+    parsed = native_http.parse_url(url)
+    if expected is None:
+        assert parsed is None
+    else:
+        assert (parsed.tls, parsed.host, parsed.port, parsed.target, parsed.authority) == expected
+
+
+@pytest.mark.parametrize(
+    "environment,tls,host,expected",
+    [
+        ({}, True, "api.example.test", False),
+        ({"HTTPS_PROXY": "http://proxy:3128"}, True, "api.example.test", True),
+        ({"HTTPS_PROXY": "http://proxy:3128"}, False, "api.example.test", False),
+        ({"http_proxy": "http://proxy:3128"}, False, "api.example.test", True),
+        ({"ALL_PROXY": "socks5://proxy:1080"}, False, "api.example.test", True),
+        ({"HTTPS_PROXY": "http://p", "NO_PROXY": "localhost,.example.test"}, True, "api.example.test", False),
+        ({"HTTPS_PROXY": "http://p", "no_proxy": "example.test"}, True, "API.Example.test", False),
+        ({"HTTPS_PROXY": "http://p", "NO_PROXY": "other.test"}, True, "api.example.test", True),
+        ({"HTTPS_PROXY": "http://p", "NO_PROXY": "ample.test"}, True, "api.example.test", True),
+        ({"HTTPS_PROXY": "http://p", "NO_PROXY": "*"}, True, "api.example.test", False),
+    ],
+)  # fmt: skip
+def test_proxy_environment_selects_curl(environment, tls, host, expected, monkeypatch):
+    for name in (
+        "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
+        "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
+    ):  # fmt: skip
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    assert native_http.proxied(tls, host) is expected
+    monkeypatch.delenv("ASKME_NATIVE_HTTP", raising=False)
+    client = native_http.HttpClient()
+    reply = client.post(("https" if tls else "http") + f"://{host}:9/x", "{}", [], 1)
+    # Behind a proxy the request is curl's; otherwise it is attempted here.
+    assert (reply is None) is expected
+
+
+LIVE_TRANSPORTS = [("inprocess", "http"), ("curl", "http"), ("inprocess", "https")]
+
+
+def _live_command(runtime, port_prefix):
+    prefix = port_prefix(runtime)
+    return lambda _replay, request_log: [*prefix, "--request-log", str(request_log)]
+
+
+@linux_only
+@pytest.mark.parametrize("runtime", RUNTIMES)
+@pytest.mark.parametrize("transport,scheme", LIVE_TRANSPORTS)
+@pytest.mark.parametrize("name", ["hello", "navigate_and_edit"])
+def test_live_http_matches_replay(name, transport, scheme, runtime, run_root, port_prefix, request):
+    """Every transport drives the same run as the recorded replies do."""
+    command = _live_command(runtime, port_prefix)
+    environment = {"ASKME_NATIVE_HTTP": transport}
+    if transport == "curl" and shutil.which("curl") is None:
+        pytest.skip("curl is not installed")
+    certificate = None
+    if scheme == "https":
+        material = request.getfixturevalue("tls_material")
+        certificate = material["both"]
+        environment["SSL_CERT_FILE"] = material["ca"]
+    port, recorder, stop = _serve(certificate)
+    try:
+        scenario = dict(SCENARIOS[name])
+        url = f"{scheme}://localhost:{port}/v1/chat/completions"
+        scenario["env"] = {**scenario["env"], **environment, "LLM_API_URL": url}
+        recorder.replies = [(200, json.dumps(entry)) for entry in scenario["replay"]]
+        code = f"{transport[0]}{scheme[4:] or 'p'}"
+        replayed = run_scenario(scenario, run_root(f"{name}-{code}-rep", runtime), CPYTHON_PORT)
+        live_root = run_root(f"{name}-{code}-liv", runtime)
+        live = run_scenario(scenario, live_root, command)
+        assert_same_transcript(replayed, live)
+        assert not recorder.replies, "the live run must consume every recorded reply"
+        received = [
+            normalize_json(json.loads(seen["body"]), live_root / "ws") for seen in recorder.seen
+        ]
+        assert received == [request_["body"] for request_ in live.requests]
+        if transport == "inprocess":
+            assert len({seen["peer"] for seen in recorder.seen}) == 1, "one kept connection"
+    finally:
+        stop()
+
+
+@linux_only
+@pytest.mark.parametrize("runtime", RUNTIMES)
+@pytest.mark.parametrize("case", ["untrusted", "wrong_host"])
+def test_tls_rejects_unverified_servers(case, runtime, tmp_path, port_prefix, tls_material):
+    """No request leaves for a server whose certificate chain or name does not verify."""
+    port, recorder, stop = _serve(tls_material["named" if case == "wrong_host" else "both"])
+    try:
+        recorder.replies = [(200, "{}")] * 8
+        host = "127.0.0.1" if case == "wrong_host" else "localhost"
+        environment = {
+            "ASKME_NATIVE_HTTP": "inprocess",
+            "LLM_API_URL": f"https://{host}:{port}/v1/chat/completions",
+        }
+        if case == "wrong_host":
+            environment["SSL_CERT_FILE"] = tls_material["ca"]
+        done = _run_port(
+            ["--max-steps", "2", "say hi"], tmp_path, environment, port_prefix(runtime)
+        )
+        assert done.returncode != 0
+        assert "certificate verify failed" in done.stdout + done.stderr
+        assert recorder.seen == [], "nothing may be sent over an unverified connection"
+    finally:
+        stop()
 
 
 def _run_port(args, tmp_path, env=None, prefix=None):
@@ -604,6 +886,7 @@ def _run_port(args, tmp_path, env=None, prefix=None):
         (["x"], {"AGENT_STEP_POLICY": "chaos"}, "AGENT_STEP_POLICY must be one of"),
         (["x"], {"OPENROUTER_REASONING_EFFORT": "max"}, "OPENROUTER_REASONING_EFFORT must be"),
         (["x"], {"LLM_CAPABILITY_PROFILE": "nope"}, "LLM_CAPABILITY_PROFILE must be one of"),
+        (["x"], {"ASKME_NATIVE_HTTP": "pigeon"}, "ASKME_NATIVE_HTTP must be auto, inprocess"),
     ],
 )
 def test_configuration_errors_exit_two_without_a_run(

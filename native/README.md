@@ -44,8 +44,11 @@ export LLM_BACKEND=openrouter OPENROUTER_API_KEY=...
   "Fix the failing tests"
 ```
 
-The executable needs `curl` for HTTP, `/bin/sh` for shell actions, and
-`timeout` (`gtimeout` on macOS) for their deadlines. AskMe is **not a
+The executable needs `/bin/sh` for shell actions and `timeout` (`gtimeout` on
+macOS) for their deadlines. It sends model requests itself, over connections
+it keeps open; for `https://` it loads the system's OpenSSL 3 (`libssl.so.3`)
+when the first request leaves. Behind a proxy, or where that library is
+missing, it runs `curl` for each request instead. AskMe is **not a
 sandbox**: model-generated commands run with your permissions, exactly as in
 `askme.py`. See the [security guide](../docs/SECURITY.md).
 
@@ -92,8 +95,9 @@ A compiled program has no `subprocess`, `requests`, `hashlib` or `pathlib`.
 
 | Area | `askme.py` | Native port |
 |---|---|---|
-| HTTP | `requests`, per-read timeout | `curl --max-time`; headers pass in a private file, never in arguments |
+| HTTP | `requests`, a new connection per request | One HTTP/1.1 client (`native_http.py`) on every runtime, over a connection kept per endpoint; see [HTTP transport](#http-transport) |
 | Shell actions | `subprocess` in a new session | `/bin/sh` under `timeout`, which signals the command's process group; without `timeout` a plain watchdog signals the command's shell only |
+| SIGPIPE in commands | Default, restored by `subprocess` | Default, restored through GNU `env` or `perl`; with neither, `producer \| head` reports "Broken pipe" |
 | Non-UTF-8 command output | Raises | Replaced with U+FFFD |
 | Child locale | CPython exports `LC_CTYPE=C.UTF-8` under the C locale | A compiled binary passes the environment through unchanged |
 | `.env` | Loaded from the script's directory | Only with `--env-file PATH` |
@@ -109,6 +113,41 @@ only, never values), and `--env-file FILE` loads settings that are not already
 set. A replay entry may mark a write as a trusted partial payload; that is the
 port's equivalent of the `ActionTransport` metadata an injected client
 supplies, and it is how the truncated-write recovery is exercised.
+
+## HTTP transport
+
+`native_http.py` implements the one request AskMe makes: a POST with a JSON
+body, answered with a `Content-Length`, chunked or close-delimited reply. The
+byte stream beneath it is the only part that differs between runtimes:
+
+| Runtime | Stream | TLS |
+|---|---|---|
+| Pystachy executable or JIT | libc sockets through Pystachy's FFI (`native_ffi_net.py`) | OpenSSL 3 through the FFI (`native_ffi_tls.py`), loaded at the first `https://` request |
+| CPython, PyPy, mypyc | `socket` (`native_std_net.py`) | `ssl` |
+
+Both verify the certificate chain and the host name, and neither has a switch
+that turns verification off. Trust comes from the system store, from
+`SSL_CERT_FILE`/`SSL_CERT_DIR`, and from the bundle `CURL_CA_BUNDLE` or
+`REQUESTS_CA_BUNDLE` names. The timeout bounds the connection attempt and each
+read, as with `requests`; a request that timed out is never sent again by the
+transport.
+
+A reply ends its connection when it says `Connection: close`, has no length,
+or is cut short. Before a kept connection is reused it is checked for a close;
+a request that still meets one, with no byte of a reply received, is sent once
+more on a new connection.
+
+`ASKME_NATIVE_HTTP` selects the transport:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | In-process; `curl` when a proxy variable applies to the host (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, minus `NO_PROXY`) or the stream libraries cannot load |
+| `inprocess` | In-process only, directly, with an error where the libraries cannot load |
+| `curl` | One `curl --max-time` process per request; headers pass in a private file, never in arguments |
+
+The FFI stream assumes 64-bit Linux with glibc. Elsewhere a Pystachy build
+finds no `libc.so.6` and stays on `curl`. `ASKME_NATIVE_PRELOAD=1` loads the
+libraries at startup instead of at the first request.
 
 ## Measurements
 
@@ -144,7 +183,10 @@ the code, a runtime or the machine changes.
 | `native_llm.py` | `llm.py` | Settings, request building, reply decoding, retry policy |
 | `native_actions.py` | `actions.py` | Action registry, envelope parser, handlers, receipts |
 | `native_state.py` | `state.py` | Run state, the step recorder, attempt and step records |
-| `native_host.py` | — | Paths, files, SHA-256, processes, HTTP |
+| `native_host.py` | — | Paths, files, SHA-256, processes, the `curl` fallback |
+| `native_http.py` | — | The HTTP/1.1 client and its kept connections |
+| `native_std_net.py` | — | Streams from `socket` and `ssl`, for the interpreters |
+| `native_ffi_net.py`, `native_ffi_tls.py` | — | Streams from libc and OpenSSL through Pystachy's FFI; imported by a Pystachy build only |
 | `native_json.py` | — | The JSON value type and helpers |
 
 Run state and step records stay plain JSON values, as in `askme.py`, typed by
@@ -160,6 +202,10 @@ that none covers.
 - Validated on Linux. The adapters are POSIX code and should run on macOS,
   but the parity suite does not run there. Windows process handling is not
   ported.
+- The in-process client speaks HTTP/1.1 only, sends one request at a time
+  and, like the `curl` path, does not follow redirects; a proxy is `curl`'s to
+  handle. A compiled build's TLS needs OpenSSL 3 by its Linux name,
+  `libssl.so.3`.
 - Live model behaviour, provider compatibility and task success rates are
   unchanged from `askme.py` and are not re-qualified here. The scenarios
   replay recorded replies; they measure the harness, not a model.
