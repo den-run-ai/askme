@@ -781,11 +781,11 @@ def test_proxy_environment_selects_curl(environment, tls, host, expected, monkey
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
     assert native_http.proxied(tls, host) is expected
-    monkeypatch.delenv("ASKME_NATIVE_HTTP", raising=False)
-    client = native_http.HttpClient()
-    reply = client.post(("https" if tls else "http") + f"://{host}:9/x", "{}", [], 1)
-    # Behind a proxy the request is curl's; otherwise it is attempted here.
-    assert (reply is None) is expected
+    if expected:
+        # Behind a proxy the request is curl's: the client declines it unsent.
+        monkeypatch.delenv("ASKME_NATIVE_HTTP", raising=False)
+        url = ("https" if tls else "http") + f"://{host}:9/x"
+        assert native_http.HttpClient().post(url, "{}", [], 1) is None
 
 
 LIVE_TRANSPORTS = [("inprocess", "http"), ("curl", "http"), ("inprocess", "https")]

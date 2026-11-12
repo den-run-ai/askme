@@ -151,27 +151,34 @@ libraries at startup instead of at the first request.
 
 ## Measurements
 
-With model replies recorded, the harness alone is timed. Medians from one
-shared 4-core x86-64 Linux virtual machine on 2026-11-12, each runtime first
-reproducing CPython's transcript
-([method and full results](https://github.com/den-run-ai/pystachy/blob/32e8337ad275c8247ecbdf7b0463675e6ebdd3f4/bench/askme/results/2026-11-12-runtimes.md)):
+With model replies recorded, the harness alone is timed; the request column
+then adds a loopback server. Medians from one shared 4-core x86-64 Linux
+virtual machine on 2026-11-12, each runtime first reproducing CPython's
+transcript
+([method and full results](https://github.com/den-run-ai/pystachy/blob/ed0860477483223ca56634f25c26935d0eba7b25/bench/askme/results/2026-11-12-kept-connections.md)):
 
-| Runtime | `--help` | 17 scenarios | 2,001-request run | Peak memory, short run |
-|---|---:|---:|---:|---:|
-| Pystachy executable | 2.3 ms | 0.20 s | 1.7 to 2.0 s | 5 MB |
-| Pystachy JIT, cached | 54 ms | 1.09 s | 1.7 to 2.4 s | 13 MB |
-| mypyc + CPython 3.13 | 43 ms | 0.94 s | 1.3 to 1.7 s | 19 MB |
-| CPython 3.13 | 45 ms | 0.98 s | 1.9 to 2.1 s | 17 MB |
-| PyPy 7.3 | 106 ms | 2.70 s | 2.7 to 3.4 s | 123 MB |
-| `askme.py` on CPython 3.13 | 158 ms | 2.85 s | 2.4 to 2.5 s | 29 MB |
+| Runtime | `--help` | 17 scenarios | 2,001-request run | Request over HTTP, HTTPS | Peak memory, short run |
+|---|---:|---:|---:|---:|---:|
+| Pystachy executable | 2.4 ms | 0.24 s | 1.4 to 1.7 s | 0.8 ms, 1.5 ms | 5 MB |
+| mypyc + CPython 3.13 | 46 ms | 1.00 s | 1.7 to 1.8 s | 1.5 ms, 2.0 ms | 19 MB |
+| CPython 3.13 | 47 ms | 1.04 s | 2.0 to 2.2 s | 1.5 ms, 2.1 ms | 17 MB |
+| PyPy 7.3 | 117 ms | 2.93 s | 3.2 to 3.4 s | 4.1 ms, 4.7 ms | 124 MB |
+| `askme.py` on CPython 3.13 | 165 ms | 2.95 s | 2.7 to 2.8 s | 4.1 ms, 28 ms | 29 MB |
 
-The executable wins where startup dominates. On long runs it is at CPython's
-level and mypyc is fastest. Over real HTTP the port's `curl` process costs
-about 7 ms per request on every runtime, against about 1 ms for `requests`,
-so `askme.py` finishes first after about 26 requests. No model was called:
-with a hosted model, where a request takes hundreds of milliseconds, these
-differences are a few percent of a run. Re-run before citing a number after
-the code, a runtime or the machine changes.
+The executable starts fastest and, built by a Pystachy that includes
+[pystachy#1307](https://github.com/den-run-ai/pystachy/pull/1307), leads the
+long runs as well. A request includes the harness's own work: the port keeps
+its connection, where `askme.py` opens one, and over TLS handshakes, for every
+request. Through the `curl` fallback a request costs about 8 ms, and 56 ms
+over TLS. `pystachy run` compiles the port at each launch, 4.4 s, until
+Pystachy's program cache accepts programs that declare C libraries
+([pystachy#1320](https://github.com/den-run-ai/pystachy/issues/1320)).
+
+No model was called. With a hosted model, where a request takes hundreds of
+milliseconds, the runtime's share is under one percent; the kept connection
+saves a TLS handshake and its network round trips on every request after the
+first. Re-run before citing a number after the code, a runtime or the machine
+changes.
 
 ## Layout
 
