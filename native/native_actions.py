@@ -21,6 +21,7 @@ from typing import Callable
 from native_host import (
     Host,
     append_text,
+    byte_length,
     list_dir,
     path_is_absolute,
     path_join,
@@ -737,7 +738,7 @@ class ActionExecutor:
             sha = sha256_hex(raw)[:12]
             meta: dict[str, JSONValue] = {
                 "total_lines": total,
-                "total_bytes": len(raw),
+                "total_bytes": byte_length(raw),
                 "total_chars": len(text),
                 "sha256": sha,
             }

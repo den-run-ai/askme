@@ -105,6 +105,15 @@ def read_bytes(path: str) -> bytes:
         return stream.read()
 
 
+def byte_length(data: bytes) -> int:
+    """``len(data)`` as a plain ``int`` result.
+
+    Pystachy's IR check does not yet accept a bytes length stored directly
+    as a JSON value; it accepts the result of a call.
+    """
+    return len(data)
+
+
 def _universal_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
