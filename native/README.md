@@ -1,0 +1,143 @@
+# AskMe native
+
+The complete AskMe harness as typed Python that also compiles to a standalone
+executable. One source tree runs on CPython and PyPy, type-checks under mypy,
+compiles with mypyc, and builds with [Pystachy](https://github.com/den-run-ai/pystachy)
+into a binary that needs no Python at run time.
+
+`askme.py` remains the reference implementation and the supported entry point.
+This directory is an opt-in second implementation of the same contract:
+planner, executor, task-local and full replans, all eight actions, both step
+policies, write obligations, completion and validation, the OpenRouter and
+local request shapes, and the command line.
+
+## Try it without a model
+
+A scenario file holds a prompt's recorded model replies:
+
+```sh
+workdir=$(mktemp -d)
+python3 native/askme_native.py --working-dir "$workdir" \
+  --replay native/scenarios/hello.json 'Create hello.txt containing hello'
+cat "$workdir/hello.txt"
+```
+
+Build the same files into an executable with an installed Pystachy, then run
+it the same way:
+
+```sh
+pystachy build native/askme_native.py -o askme
+./askme --working-dir "$workdir" \
+  --replay native/scenarios/hello.json 'Create hello.txt containing hello'
+```
+
+`pystachy run native/askme_native.py ...` compiles and runs in one step.
+
+## Run against a model
+
+The options and environment variables are those of `askme.py`
+([configuration](../docs/configuration.md)):
+
+```sh
+export LLM_BACKEND=openrouter OPENROUTER_API_KEY=...
+./askme --working-dir /path/to/project --result-json result.json \
+  "Fix the failing tests"
+```
+
+The executable needs `curl` for HTTP, `/bin/sh` for shell actions, and
+`timeout` (`gtimeout` on macOS) for their deadlines. AskMe is **not a
+sandbox**: model-generated commands run with your permissions, exactly as in
+`askme.py`. See the [security guide](../docs/SECURITY.md).
+
+## How the two implementations stay equal
+
+`tests/test_native_port.py` runs every scenario in `native/scenarios/` through
+`askme.py` and through this port, then compares the complete transcript:
+
+| Compared | Source |
+|---|---|
+| Every model request: endpoint, timeout, header names, JSON body | request log |
+| Every JSONL event, in order | `AGENT_RUN_LOG` |
+| Every console line | stdout |
+| The structured result, including key order | `--result-json` |
+| The final workspace and the exit code | file system |
+
+Only wall times and the workspace location are normalized. The scenarios cover
+all eight actions, read continuations, duplicate and stuck-loop guards, write
+pressure, rewrite damping, the lifecycle policy, truncated-write recovery,
+compile repair, task-local and full replans, validator verdicts, transport and
+decode retries, OpenRouter request shaping, and exhaustion. A second test
+drives both action layers through 55 actions, including rejected envelopes and
+file-system errors, and requires equal results with no normalization.
+
+The same comparison runs against the Pystachy JIT and a native executable
+when a compiler is available:
+
+```sh
+ASKME_NATIVE_PYSTACHY=/path/to/pystachy uv run --locked pytest tests/test_native_port.py -q
+```
+
+`ASKME_NATIVE_MYPYC` and `ASKME_NATIVE_PYPY` add a mypyc build and a PyPy
+interpreter the same way. A runtime without its variable skips, and a skipped
+case is not evidence that the port works there.
+
+`tests/native_scenarios.py` is the source of the scenario files; run
+`python3 tests/native_scenarios.py` after editing it.
+
+## Differences from `askme.py`
+
+A compiled program has no `subprocess`, `requests`, `hashlib` or `pathlib`.
+`native_host.py` supplies those operations from `os`, `open()` and
+`os.system()`, and every runtime uses the same adapters.
+
+| Area | `askme.py` | Native port |
+|---|---|---|
+| HTTP | `requests`, per-read timeout | `curl --max-time`; headers pass in a private file, never in arguments |
+| Shell actions | `subprocess` in a new session | `/bin/sh` under `timeout`, which signals the command's process group; without `timeout` a plain watchdog signals the command's shell only |
+| Non-UTF-8 command output | Raises | Replaced with U+FFFD |
+| Child locale | CPython exports `LC_CTYPE=C.UTF-8` under the C locale | A compiled binary passes the environment through unchanged |
+| `.env` | Loaded from the script's directory | Only with `--env-file PATH` |
+| Console timestamps | Local time | UTC |
+| Configuration errors | Traceback, exit 1 | `askme: error: ...`, exit 2 |
+| Malformed provider bodies | Some raise (`IndexError`, `AttributeError`) | Typed transport or parse failures |
+| Integers beyond 64 bits in a reply | Accepted, then range-checked | A decode failure under Pystachy |
+| Python API | `run_result()`, `RunDependencies`, patchable module globals | None: the command line is the interface |
+
+Three options exist only here: `--replay FILE` answers model requests from
+recorded replies, `--request-log FILE` appends every request (header names
+only, never values), and `--env-file FILE` loads settings that are not already
+set. A replay entry may mark a write as a trusted partial payload; that is the
+port's equivalent of the `ActionTransport` metadata an injected client
+supplies, and it is how the truncated-write recovery is exercised.
+
+## Layout
+
+| File | Mirrors | Contents |
+|---|---|---|
+| `askme_native.py` | `askme.py` | Command line, environment configuration, replay transport |
+| `native_loop.py` | `loop.py` | Prompts, planner/executor/replanner calls, run controller |
+| `native_policies.py` | `policies.py` | Step policies, write obligations, completion and validation |
+| `native_llm.py` | `llm.py` | Settings, request building, reply decoding, retry policy |
+| `native_actions.py` | `actions.py` | Action registry, envelope parser, handlers, receipts |
+| `native_state.py` | `state.py` | Run state, the step recorder, attempt and step records |
+| `native_host.py` | — | Paths, files, SHA-256, processes, HTTP |
+| `native_json.py` | — | The JSON value type and helpers |
+
+Run state and step records stay plain JSON values, as in `askme.py`, typed by
+one recursive alias. The compatibility facades of `askme.py` have no
+counterpart: nothing here is monkeypatched.
+
+A change to the harness must land in both implementations. The parity tests
+fail when they diverge on a recorded scenario; add a scenario for behaviour
+that none covers.
+
+## Limits
+
+- Validated on Linux. The adapters are POSIX code and should run on macOS,
+  but the parity suite does not run there. Windows process handling is not
+  ported.
+- Live model behaviour, provider compatibility and task success rates are
+  unchanged from `askme.py` and are not re-qualified here. The scenarios
+  replay recorded replies; they measure the harness, not a model.
+- Pystachy is an experimental compiler. Its 64-bit integers and bounded JSON
+  nesting apply to the compiled program.

@@ -70,6 +70,12 @@ Start with:
   validation and legacy call-time timeout defaults enter through callbacks;
   this module imports shared state access and actions, neither the CLI facade
   nor the provider client.
+- `native/` — an opt-in typed port of the six modules above that also compiles
+  to a standalone executable with Pystachy ([native/README.md](native/README.md)).
+  `askme.py` stays the reference: a harness change lands there first, and the
+  port follows. `tests/test_native_port.py` replays `native/scenarios/` through
+  both and fails on any transcript difference; `tests/native_scenarios.py`
+  generates the scenario files
 - `tests/test_agent_*.py` — deterministic unit and action/controller regression tests
 - `tests/test_agent_integration.py` — local and OpenRouter integration suites
 - `tests/workflow_eval.py`, `tests/test_workflow_*.py`, `tests/workflows/` — native
@@ -99,8 +105,8 @@ uv run --locked --no-dev askme.py --working-dir /path/to/project "Fix the failin
 uv sync --locked
 
 # Static checks and deterministic handoff gate; live-model tests skip by default
-uv run --locked ruff check *.py tests
-uv run --locked ruff format --check *.py tests
+uv run --locked ruff check *.py native tests
+uv run --locked ruff format --check *.py native tests
 uv run --locked ty check
 uv run --locked pytest tests/ -q
 

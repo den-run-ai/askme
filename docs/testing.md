@@ -7,8 +7,8 @@ Run these commands from the repository root after following the
 
 ```bash
 uv sync --locked
-uv run --locked ruff check *.py tests
-uv run --locked ruff format --check *.py tests
+uv run --locked ruff check *.py native tests
+uv run --locked ruff format --check *.py native tests
 uv run --locked ty check
 uv run --locked pytest tests/ -q
 ```
@@ -27,6 +27,23 @@ uv run --locked pytest \
 uv run --locked python tests/workflow_eval.py \
   tests/workflows/config_precedence/manifest.json --agent noop
 ```
+
+The typed port in [`native/`](../native/README.md) is checked against this
+harness without a model. `tests/test_native_port.py` replays every scenario in
+`native/scenarios/` through `askme.py` and through the port, and requires equal
+model requests, events, console lines, results, exit codes and workspaces. It
+runs on Linux with CPython by default; name other tools to add runtimes:
+
+```bash
+ASKME_NATIVE_PYSTACHY=/path/to/pystachy \
+ASKME_NATIVE_MYPYC=/path/to/mypyc \
+ASKME_NATIVE_PYPY=/path/to/pypy3 \
+  uv run --locked pytest tests/test_native_port.py -q
+```
+
+A runtime without its variable skips; a skip is not evidence that the port
+works there. After editing `tests/native_scenarios.py`, regenerate the
+committed scenario files with `python3 tests/native_scenarios.py`.
 
 ## Live integration tests
 

@@ -101,6 +101,7 @@ on `main`.
 - [Configuration and Python API](docs/configuration.md)
 - [Local Gemma 4 setup](docs/gemma4-setup.md)
 - [Architecture and source map](docs/ARCHITECTURE.md)
+- [Typed port that compiles to a standalone executable](native/README.md)
 - [Benchmark results](docs/PERFORMANCE.md) and [experiments](docs/EXPERIMENTS.md)
 - [Workflow evaluation protocol](tests/workflows/PROTOCOL.md) and
   [FeatureBench runbook](tests/featurebench/README.md)
