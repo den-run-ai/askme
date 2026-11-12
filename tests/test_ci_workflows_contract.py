@@ -33,8 +33,8 @@ def test_unit_workflow_stays_hermetic():
 
 def test_unit_workflow_gates_quality_compatibility_and_coverage():
     text = UNIT_WORKFLOW.read_text(encoding="utf-8")
-    assert "uv run --locked ruff check *.py tests" in text
-    assert "uv run --locked ruff format --check *.py tests" in text
+    assert "uv run --locked ruff check *.py native tests" in text
+    assert "uv run --locked ruff format --check *.py native tests" in text
     assert "uv run --locked ty check" in text
     assert "mypy" not in text
     assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in text
