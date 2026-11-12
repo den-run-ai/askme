@@ -209,6 +209,10 @@ that none covers.
 - Validated on Linux. The adapters are POSIX code and should run on macOS,
   but the parity suite does not run there. Windows process handling is not
   ported.
+- Cleanup after a timeout relies on GNU `timeout` (`gtimeout` on macOS), which
+  leads a process group. Other implementations, BusyBox's included, were not
+  tested; where one leads no group, the cleanup reaches only what that tool
+  signals, as the `sh` watchdog does.
 - The in-process client speaks HTTP/1.1 only, sends one request at a time
   and, like the `curl` path, does not follow redirects; a proxy is `curl`'s to
   handle. A compiled build's TLS needs OpenSSL 3 by its Linux name,
