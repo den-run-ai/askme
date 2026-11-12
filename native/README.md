@@ -96,8 +96,8 @@ A compiled program has no `subprocess`, `requests`, `hashlib` or `pathlib`.
 | Area | `askme.py` | Native port |
 |---|---|---|
 | HTTP | `requests`, a new connection per request | One HTTP/1.1 client (`native_http.py`) on every runtime, over a connection kept per endpoint; see [HTTP transport](#http-transport) |
-| Shell actions | `subprocess` in a new session | `/bin/sh` under `timeout`, which signals the command's process group; without `timeout` a plain watchdog signals the command's shell only |
-| SIGPIPE in commands | Default, restored by `subprocess` | Default, restored through GNU `env` or `perl`; with neither, `producer \| head` reports "Broken pipe" |
+| Shell actions | `subprocess` in a new session; the group gets TERM, then KILL | `/bin/sh` under `timeout`, which leads a process group: TERM at the deadline, then KILL for whatever is left of the group. Without `timeout` a plain watchdog signals the command's shell only |
+| Signals in commands | Default actions | Default actions for SIGPIPE, SIGINT and SIGQUIT, restored through GNU `env` or `perl`; with neither they stay ignored, and `producer \| head` reports "Broken pipe" |
 | Non-UTF-8 command output | Raises | Replaced with U+FFFD |
 | Child locale | CPython exports `LC_CTYPE=C.UTF-8` under the C locale | A compiled binary passes the environment through unchanged |
 | `.env` | Loaded from the script's directory | Only with `--env-file PATH` |

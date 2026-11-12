@@ -492,6 +492,32 @@ def test_shell_deadline_and_capture(tmp_path, monkeypatch, tool):
         host.cleanup()
 
 
+@linux_only
+def test_shell_timeout_kills_descendants_that_ignore_term(tmp_path):
+    """A timed-out command cannot keep changing the workspace through a child.
+
+    The command's shell dies on TERM at once; its child ignores TERM and would
+    write two seconds later. ``askme.py`` kills the process group regardless,
+    and so must the port, although ``timeout`` stops signalling once the shell
+    it started is gone.
+    """
+    if shutil.which("timeout") is None:
+        pytest.skip("timeout is not installed")
+    command = "(trap '' TERM; sleep 2; echo late > late.txt) & wait"
+    host = native_host.Host()
+    try:
+        done = host.run_shell(command, 1, str(tmp_path))
+        assert done.timed_out and done.returncode == 124
+        time.sleep(2.5)
+        assert not (tmp_path / "late.txt").exists()
+    finally:
+        host.cleanup()
+    with pytest.raises(subprocess.TimeoutExpired):
+        reference_actions.CapturedProcess.run(command, timeout=1, cwd=tmp_path, shell=True)
+    time.sleep(2.5)
+    assert not (tmp_path / "late.txt").exists(), "the reference kills the group as well"
+
+
 class _Recorder(BaseHTTPRequestHandler):
     """Replays recorded replies; the last path segment selects the framing."""
 
